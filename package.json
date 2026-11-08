@@ -3,12 +3,18 @@
   "private": true,
   "version": "0.1.0",
   "type": "module",
-  "workspaces": ["packages/*", "apps/*"],
+  "workspaces": [
+    "packages/*",
+    "apps/*"
+  ],
   "scripts": {
     "test": "npm run test -w @pos/core && npm run test -w @pos/server",
     "dev:server": "npm run dev -w @pos/server",
     "dev:web": "npm run dev -w @pos/web",
     "build:web": "npm run build -w @pos/web",
-    "typecheck": "npm run typecheck -w @pos/core && npm run typecheck -w @pos/server && npm run typecheck -w @pos/web"
+    "typecheck": "npm run typecheck -w @pos/core && npm run typecheck -w @pos/server && npm run typecheck -w @pos/web",
+    "dev:db": "npm run db -w @pos/server",
+    "dev:server:pg": "npm run dev:pg -w @pos/server",
+    "cli": "npm run cli:pg -w @pos/server --"
   }
 }

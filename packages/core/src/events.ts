@@ -22,7 +22,12 @@ export type OrderEventBody =
       channelId?: string;
       channelName?: string;
       serviceCharge?: boolean;
+      /** "online" = placed by a customer in the ordering app; the shop must accept it before the kitchen sees it. */
+      source?: "pos" | "online";
+      customerName?: string;
+      customerPhone?: string;
     }
+  | { type: "OrderAccepted" }
   | { type: "ItemAdded"; lineId: string; productId: string; name: string; unitCents: Cents; qty: number; bcrs?: boolean; pointsExempt?: boolean }
   | { type: "ItemQtySet"; lineId: string; qty: number }
   | { type: "PaymentRecorded"; paymentId: string; method: PaymentMethod; amountCents: Cents; /** false = awaiting gateway confirmation */ confirmed: boolean }
@@ -52,6 +57,11 @@ export interface OrderState {
   channelName?: string;
   /** Whether the channel charged service. Undefined on older orders: fall back to dine-in. */
   serviceCharge?: boolean;
+  source: "pos" | "online";
+  customerName?: string;
+  customerPhone?: string;
+  /** When staff accepted an online order. Always unset for POS orders, which need no acceptance. */
+  acceptedAt?: number;
   spot?: string;
   queueNumber?: string;
   openedAt: number;
@@ -84,7 +94,7 @@ export function reduceOrder(orderId: string, events: readonly OrderEvent[]): Ord
   for (const e of mine) {
     if (e.type === "OrderOpened") {
       if (state) continue; // first open wins
-      state = { orderId, fulfilment: e.fulfilment, channelId: e.channelId, channelName: e.channelName, serviceCharge: e.serviceCharge, spot: e.spot, queueNumber: e.queueNumber, openedAt: e.ts, lines: [], payments: [], stage: "open" };
+      state = { orderId, fulfilment: e.fulfilment, channelId: e.channelId, channelName: e.channelName, serviceCharge: e.serviceCharge, source: e.source ?? "pos", customerName: e.customerName, customerPhone: e.customerPhone, spot: e.spot, queueNumber: e.queueNumber, openedAt: e.ts, lines: [], payments: [], stage: "open" };
       continue;
     }
     if (!state) continue; // events that arrived before the open are applied once it exists on the next replay
@@ -109,6 +119,9 @@ export function reduceOrder(orderId: string, events: readonly OrderEvent[]): Ord
         if (p) p.confirmed = true;
         break;
       }
+      case "OrderAccepted":
+        state.acceptedAt ??= e.ts;
+        break;
       case "StageSet":
         state.stage = e.stage;
         break;
@@ -147,6 +160,8 @@ export function isFullyPaid(state: OrderState, config: BusinessConfig | undefine
 export function visibleToKitchen(state: OrderState, config: BusinessConfig): boolean {
   if (!config.modules.kitchen) return false;
   if (state.stage === "cancelled" || state.lines.length === 0) return false;
+  // A customer's own order is held until staff accept it, so a stranger cannot send tickets to the kitchen.
+  if (state.source === "online" && !state.acceptedAt) return false;
   if (config.paymentTiming === "prepay") return isFullyPaid(state, config);
   return true;
 }

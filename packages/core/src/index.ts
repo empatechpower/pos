@@ -11,3 +11,4 @@ export * from "./print/zpl.js";
 export * from "./print/epl.js";
 export * from "./print/templates.js";
 export * from "./print/plain.js";
+export * from "./shop.js";

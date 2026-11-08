@@ -6,7 +6,9 @@ import type { CatalogStore, ChangeResult, PgCatalogStore } from "./catalog.js";
 import type { Db } from "./db/pool.js";
 import { balanceOf, refund, spend, topUp } from "./ledger.js";
 import { authenticateDevice, createEnrollmentCode, enroll, issueStreamTicket, listDevices, redeemStreamTicket, revokeDevice, type Device } from "./devices.js";
+import { BrandStore } from "./brand.js";
 import { PrintStore, validatePrinter, type Printer } from "./print.js";
+import { registerShop } from "./shop.js";
 import { FailureLimiter } from "./rateLimit.js";
 import type { EventStore, StoredEvent } from "./store.js";
 
@@ -28,6 +30,8 @@ interface Deps {
   /** Wallet, login and audit routes exist only when a database is configured. */
   db: Db | null;
   logger?: boolean;
+  /** Set when behind a reverse proxy, so per-address limits see the customer and not the proxy. */
+  trustProxy?: boolean;
 }
 
 const bearer = (req: FastifyRequest) => req.headers.authorization?.replace(/^Bearer\s+/i, "");
@@ -36,8 +40,10 @@ const deviceToken = (req: FastifyRequest) => {
   return Array.isArray(h) ? h[0] : h;
 };
 
-export async function buildApp({ config, store, db, catalog, catalogAdmin, print, logger = true }: Deps) {
-  const app = Fastify({ logger });
+export async function buildApp({ config, store, db, catalog, catalogAdmin, print, logger = true, trustProxy = false }: Deps) {
+  const app = Fastify({ logger, trustProxy });
+  // Logo uploads arrive as raw image bytes.
+  app.addContentTypeParser(["image/png", "image/jpeg", "image/webp"], { parseAs: "buffer", bodyLimit: 300 * 1024 + 1 }, (_req, body, done) => done(null, body));
   await app.register(cors, { origin: true });
   const merchantId = config.businessId;
 
@@ -93,6 +99,14 @@ export async function buildApp({ config, store, db, catalog, catalogAdmin, print
     }
   }
 
+  /** Store events, tell live screens, queue whatever now needs printing. Used for tills and for customers' orders alike. */
+  async function ingest(events: OrderEvent[]): Promise<StoredEvent[]> {
+    const added = await store.append(events);
+    if (added.length) for (const push of streams) push(added);
+    if (added.length && print) await queuePrints([...new Set(added.map((a) => a.event.orderId))]);
+    return added;
+  }
+
   /** Devices push events they created (possibly hours ago, while offline). */
   app.post<{ Body: { events: OrderEvent[] } }>("/api/sync/push", { preHandler: needsDevice }, async (req, reply) => {
     const events = req.body?.events;
@@ -102,9 +116,7 @@ export async function buildApp({ config, store, db, catalog, catalogAdmin, print
       // A device may only speak for itself: it cannot plant events that claim to come from another.
       if (req.device && e.deviceId !== req.device.id) return reply.code(403).send({ error: "device_mismatch" });
     }
-    const added = await store.append(events);
-    if (added.length) for (const push of streams) push(added);
-    if (added.length && print) await queuePrints([...new Set(added.map((a) => a.event.orderId))]);
+    const added = await ingest(events);
     return { accepted: events.length, stored: added.length, latestSeq: await store.latestSeq() };
   });
 
@@ -192,6 +204,10 @@ export async function buildApp({ config, store, db, catalog, catalogAdmin, print
   });
 
   app.get("/api/audit", { preHandler: needs("audit.read") }, async () => ({ entries: await recentAudit(db, merchantId) }));
+
+  // ---- customer ordering and shop look ------------------------------------------------------
+
+  registerShop(app, { db, config, store, catalog, brand: new BrandStore(db, merchantId), ingest, needs });
 
   // ---- devices ----------------------------------------------------------------------------
 

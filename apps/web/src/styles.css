@@ -142,3 +142,59 @@ main { flex: 1; padding: 14px 16px; }
 .job.leased .badge { background: var(--selected); color: var(--orange); }
 .job .err { grid-column: 2 / -1; color: var(--red); font-size: 12px; }
 .dot { display: inline-block; margin-left: 6px; min-width: 18px; padding: 0 5px; border-radius: 999px; background: var(--red); color: #fff; font-size: 11px; line-height: 18px; text-align: center; }
+
+.prices.wide { max-width: 900px; }
+.credit-id { width: 110px; padding: 6px 8px; border-radius: 10px; border: 1px solid var(--line); }
+.logo-preview { height: 40px; width: auto; border: 1px solid var(--line); border-radius: 8px; background: #fff; }
+.filebtn { cursor: pointer; }
+
+/* ---- Customer ordering page: themed by the merchant's colours ---- */
+.shop { --brand: #ea7016; --brand-ink: #fff; --brand-soft: #fdeee0; min-height: 100dvh; background: var(--page); color: var(--text); max-width: 760px; margin: 0 auto; padding-bottom: 90px; }
+.shop-head { display: flex; flex-direction: column; align-items: center; gap: 4px; padding: 14px 16px; background: #fff; border-bottom: 1px solid var(--line); }
+.shop-head img { height: 54px; width: auto; max-width: 80%; object-fit: contain; }
+.shop-head .shop-name { font-size: 22px; }
+.shop-head span { font-size: 13px; color: var(--text-2); }
+.shop-msg { padding: 60px 20px; text-align: center; color: var(--text-2); }
+.shop-last { display: block; text-align: center; padding: 10px; font-size: 14px; color: var(--brand); }
+.shop-seg { display: flex; gap: 6px; padding: 12px 16px 4px; overflow-x: auto; }
+.shop-seg button { flex: 1; min-width: max-content; padding: 10px 14px; border-radius: 999px; border: 1.5px solid var(--brand); background: #fff; color: var(--text); font-weight: 600; }
+.shop-seg button.on { background: var(--brand); color: var(--brand-ink); }
+.shop-chips { display: flex; gap: 8px; padding: 8px 16px; overflow-x: auto; position: sticky; top: 0; background: var(--page); z-index: 2; }
+.shop-chips button { padding: 7px 14px; border-radius: 999px; border: 1px solid var(--line); background: #fff; white-space: nowrap; }
+.shop-chips button.on { background: var(--brand-soft); border-color: var(--brand); color: var(--text); font-weight: 600; }
+.shop-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(160px, 1fr)); gap: 10px; padding: 8px 16px; }
+.shop-card { display: flex; flex-direction: column; gap: 6px; padding: 12px; border-radius: var(--radius); border: 1.5px solid var(--line); background: #fff; min-height: 120px; }
+.shop-card.in { border-color: var(--brand); background: var(--brand-soft); }
+.shop-card.out { opacity: .5; }
+.shop-card .n { font-weight: 500; font-size: 14px; line-height: 1.25; flex: 1; }
+.shop-card .p { font-weight: 700; }
+.shop-card .add { border: 1.5px solid var(--brand); background: #fff; color: var(--text); border-radius: 10px; padding: 8px; font-weight: 600; }
+.shop .step { display: inline-flex; align-items: center; gap: 10px; }
+.shop .step button { width: 34px; height: 34px; border-radius: 50%; border: 1.5px solid var(--brand); background: #fff; font-size: 18px; line-height: 1; }
+.shop-bar { position: fixed; left: 50%; transform: translateX(-50%); bottom: 14px; width: min(728px, calc(100% - 24px)); display: flex; justify-content: space-between; align-items: center; padding: 16px 18px; border-radius: 16px; border: 0; background: var(--brand); color: var(--brand-ink); font-size: 16px; font-weight: 600; box-shadow: 0 6px 20px rgba(0,0,0,.22); z-index: 5; }
+.shop-sheet { position: fixed; inset: 0; background: rgba(0,0,0,.4); display: flex; align-items: flex-end; justify-content: center; z-index: 10; }
+.shop-sheet-in { background: #fff; width: min(760px, 100%); max-height: 92dvh; overflow: auto; border-radius: 20px 20px 0 0; padding: 16px; display: flex; flex-direction: column; gap: 10px; }
+.shop-sheet-head { display: flex; justify-content: space-between; align-items: center; }
+.shop-sheet-head h2 { margin: 0; }
+.shop-sheet-head button { border: 0; background: var(--beige); width: 36px; height: 36px; border-radius: 50%; }
+.shop-line { display: grid; grid-template-columns: 1fr auto 70px; gap: 8px; align-items: center; }
+.shop-line span:last-child { text-align: right; font-weight: 500; }
+.shop-totals { margin: 0; display: flex; flex-direction: column; gap: 4px; border-top: 1px dashed var(--line); padding-top: 10px; font-size: 14px; }
+.shop-totals div { display: flex; justify-content: space-between; }
+.shop-totals dt { color: var(--text-2); } .shop-totals dd { margin: 0; }
+.shop-totals .grand { font-size: 18px; font-weight: 700; padding-top: 6px; } .shop-totals .grand dt { color: var(--text); }
+.shop-sheet label { display: flex; flex-direction: column; gap: 4px; font-size: 13px; color: var(--text-2); }
+.shop-sheet input { padding: 12px; border-radius: 12px; border: 1px solid var(--line); font: inherit; color: var(--text); }
+.shop-primary { display: block; text-align: center; text-decoration: none; padding: 16px; border-radius: 14px; border: 0; background: var(--brand); color: var(--brand-ink); font-weight: 700; font-size: 16px; }
+.shop-primary:disabled { opacity: .5; }
+.shop-primary.link { margin: 16px; }
+.shop-note { margin: 8px 16px; padding: 10px 12px; border-radius: 12px; background: var(--brand-soft); font-size: 14px; }
+.shop-sheet .shop-note { margin: 0; }
+.shop-status { padding: 24px 16px; text-align: center; display: flex; flex-direction: column; gap: 8px; align-items: center; }
+.shop-number { font-size: 64px; font-weight: 800; letter-spacing: .04em; color: var(--brand); line-height: 1; }
+.shop-status h2 { margin: 0; } .shop-status h2.s-ready { color: var(--ok); } .shop-status h2.s-cancelled { color: var(--red); }
+.shop-steps { list-style: none; display: flex; gap: 6px; padding: 0; margin: 8px 0; font-size: 12px; flex-wrap: wrap; justify-content: center; }
+.shop-steps li { padding: 4px 10px; border-radius: 999px; background: var(--beige); color: var(--text-2); }
+.shop-steps li.done { background: var(--brand); color: var(--brand-ink); }
+.shop-receipt { width: min(420px, 100%); text-align: left; border: 1px solid var(--line); border-radius: 14px; padding: 12px; background: #fff; display: flex; flex-direction: column; gap: 4px; }
+.shop-receipt div { display: flex; justify-content: space-between; } .shop-receipt .grand { font-weight: 700; border-top: 1px dashed var(--line); padding-top: 6px; margin-top: 4px; }

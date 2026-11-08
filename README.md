@@ -33,6 +33,22 @@ device-generated ids, so replays are idempotent and two offline tablets merge cl
 Queue numbers are per device (`A001`, `B001`) so they can never collide offline.
 Online payments are recorded as *unconfirmed* and only count once the gateway confirms.
 
+## Try everything locally (full mode, with a real database)
+Four terminals, no Docker or Postgres install needed:
+
+    npm install
+    npm run dev:db                                              # 1. PostgreSQL (data kept in apps/server/data/pg)
+    npm run cli -- create-staff OWN "Your Name" owner 123456    # 2. once: the first owner (staff code OWN, PIN 123456)
+    npm run cli -- enrollment-code                              #    prints a one-time code for your first device
+    npm run dev:server:pg                                       # 3. the server on :8787
+    npm run dev:web                                             # 4. the app on :5173
+
+Open http://localhost:5173/#/pos in Chrome, enter the code, then sign in (top right). More devices (kitchen, queue
+display) enrol with codes from **Devices**; use a private window per device, because each keeps its own storage.
+The customer page is http://localhost:5173/#/shop (works in any window, no enrolment). To start fresh, stop
+everything and delete `apps/server/data/pg`. `npm run dev:server` + `npm run dev:web` without a database still runs
+the till, kitchen and queue offline-first, but without sign-in, credit, catalog editing, printing or the shop.
+
 ## Staff accounts (needs `DATABASE_URL`)
 Credit routes require a staff sign-in (code + PIN, locks for 5 min after 5 wrong PINs, 12 h sessions).
 Create the first owner from the terminal, then add others through `POST /api/staff`:
@@ -87,7 +103,19 @@ Screens: **Printers** (managers/owners) adds and edits printers, sends a test pa
 failed ones, with a red count on the nav link when something failed for good. **Orders** (any signed-in staff)
 lists recent orders with Receipt / Kitchen ticket reprint buttons.
 
+## Customer ordering (needs `DATABASE_URL`)
+Public page at `/#/shop` (add `?table=Table%205` for a table QR code, `?channel=grab` to preselect a channel): no
+sign-in, no device enrolment. It uses the catalog, so each channel shows its own prices, and it dresses itself in the
+merchant's colours and logo (set under **Prices → Shop look**; PNG/JPEG/WebP up to 300 KB, SVG refused).
+The customer's device sends only product ids and quantities; **the server prices the order** (`quoteOrder`, shared
+with the page's live total), and tells the customer if prices moved before placing anything. Orders get a number
+`W001…` (daily), and are **held until staff accept them** on the **Online** screen, so a stranger cannot send tickets
+to the kitchen; in fast serve the kitchen then waits for payment as usual. Payment is at the counter (cash or the
+customer's credit); there is no online payment. The customer's status page polls every 4 s: sent → accepted/please
+pay → in the queue → being prepared → ready → collected (or cancelled). Limits per address: 10 orders / 10 min.
+Set `TRUST_PROXY=1` behind a reverse proxy, or every customer looks like one address.
+
 ## Not built yet
 YeahPay integration (the "PayNow / Card" button uses a **mock** gateway), split/combine bills,
 delivery workflow, USB and Bluetooth printers (hub app only), auth/roles, admin & menu management, reports, LAN hub, wallet/credit screens in the POS,
-customer ordering app (needs a public, non-enrolled path), per-outlet routing for multiple outlets (the data model and price resolution already support outlets; only assigning a pricebook to an outlet is API-only for now), Redis-backed rate limits and stream tickets (both are in memory, one server only), night-club allocation module (see `docs/open-questions.md`).
+customer accounts and online payment (see docs/open-questions.md), the 8 languages and coupons/points in the customer page, table QR code generation, per-outlet routing for multiple outlets (the data model and price resolution already support outlets; only assigning a pricebook to an outlet is API-only for now), Redis-backed rate limits and stream tickets (both are in memory, one server only), night-club allocation module (see `docs/open-questions.md`).

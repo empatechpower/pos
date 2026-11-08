@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { formatMoney, type Catalog, type ChannelKind } from "@pos/core";
-import { authHeader, useStaff } from "../auth";
+import { authHeader, staffFetch, useStaff } from "../auth";
 import { markDeviceRejected } from "../device";
 
 const KINDS: Array<[ChannelKind, string]> = [
@@ -25,6 +25,10 @@ export function Prices({ catalog, outletId }: { catalog: Catalog; outletId: stri
   const [newItem, setNewItem] = useState({ name: "", category: "", price: "" });
   const [newBook, setNewBook] = useState("");
   const [newKind, setNewKind] = useState<ChannelKind>("delivery");
+  const [brand, setBrand] = useState<{ primary: string; accent: string; logoUrl: string | null } | null>(null);
+  useEffect(() => {
+    void fetch("/api/brand").then(async (r) => r.ok && setBrand((await r.json()) as { primary: string; accent: string; logoUrl: string | null }));
+  }, []);
 
   if (!staff || staff.role === "cashier")
     return (
@@ -155,6 +159,34 @@ export function Prices({ catalog, outletId }: { catalog: Catalog; outletId: stri
           if (name?.trim()) void send("POST", "channels", { name, kind: newKind, serviceCharge: newKind === "dine_in", active: true }, `${name} added.`);
         }}>Add a channel</button>
       </div>
+
+      <h3>Shop look</h3>
+      <p className="muted">Colours and logo on the page customers order from. Share <b>{location.origin}/#/shop</b>, or add <b>?table=Table%205</b> for a table's QR code.</p>
+      {brand && (
+        <div className="row brand">
+          {brand.logoUrl ? <img className="logo-preview" src={brand.logoUrl} alt="Current logo" /> : <span className="muted">No logo yet</span>}
+          <label className="inline">Main colour <input type="color" value={brand.primary} onChange={(e) => setBrand({ ...brand, primary: e.target.value })} aria-label="Main colour" /></label>
+          <label className="inline">Soft colour <input type="color" value={brand.accent} onChange={(e) => setBrand({ ...brand, accent: e.target.value })} aria-label="Soft colour" /></label>
+          <button className="primary sm" onClick={async () => {
+            const r = await staffFetch("/api/brand", { method: "PUT", body: { primary: brand.primary, accent: brand.accent } });
+            setMsg("problem" in r ? r.problem : r.res.ok ? "Shop colours saved." : "Colours were not saved.");
+          }}>Save colours</button>
+          <label className="secondary sm filebtn">
+            Upload logo
+            <input type="file" accept="image/png,image/jpeg,image/webp" hidden aria-label="Upload logo" onChange={async (e) => {
+              const f = e.target.files?.[0];
+              e.target.value = "";
+              if (!f) return;
+              if (f.size > 300 * 1024) return setMsg("That logo is too big. Use a PNG, JPEG or WebP under 300 KB.");
+              const res = await fetch("/api/brand/logo", { method: "PUT", headers: { "content-type": f.type, ...authHeader() }, body: f }).catch(() => null);
+              if (res?.ok) {
+                setBrand((await res.json()) as { primary: string; accent: string; logoUrl: string | null });
+                setMsg("Logo saved.");
+              } else setMsg((await res?.json().catch(() => ({})) as { error?: string } | undefined)?.error ?? "The logo was not saved.");
+            }} />
+          </label>
+        </div>
+      )}
 
       <h3>New pricebook</h3>
       <div className="row">

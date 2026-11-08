@@ -22,5 +22,5 @@ const store: EventStore = db ? new PgEventStore(db, config.businessId, config.ou
 const pgCatalog = db ? new PgCatalogStore(db, config.businessId) : null;
 await pgCatalog?.ensureSeeded(seedCatalog());
 
-const app = await buildApp({ config, store, db, catalog: pgCatalog ?? new StaticCatalogStore(seedCatalog()), catalogAdmin: pgCatalog ?? undefined, print: db ? new PrintStore(db, config.businessId) : undefined });
+const app = await buildApp({ config, store, db, catalog: pgCatalog ?? new StaticCatalogStore(seedCatalog()), catalogAdmin: pgCatalog ?? undefined, print: db ? new PrintStore(db, config.businessId) : undefined, trustProxy: process.env.TRUST_PROXY === "1" });
 await app.listen({ port: Number(process.env.PORT ?? 8787), host: "0.0.0.0" });

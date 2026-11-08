@@ -26,3 +26,18 @@ See the full lists in the project discussion. The ones that gate code:
 - **Cashier top-up cap:** S$200 per top-up. Managers and owners are uncapped.
 - **Pricebook precedence:** outlet+channel, then channel, then outlet, then default. Confirm this matches how they think about it, especially "channel beats outlet".
 - **Catalog is public** (`GET /api/catalog`): it holds menu and prices only, so the customer ordering app can read it.
+
+
+## Assumptions made while building customer ordering (confirm with the client)
+- **How do customers pay online?** The client said prepaid credit only. Spending credit from a phone needs the
+  customer to prove who they are. A phone number alone is not proof (anyone could spend someone else's credit), so
+  v1 has no online payment: the customer orders, and pays at the counter in cash or credit. Options for later:
+  SMS one-time codes (needs an SMS provider and cost), or a member PIN set up in the shop. Which does the client want?
+- **Staff must accept every online order** before the kitchen sees it (stops spam and mistaken orders). Is that too
+  slow for busy periods? An alternative is auto-accept for customers who have ordered before.
+- **Customer details:** name and mobile are optional. Is a phone number required (to call about a problem)? What does
+  their privacy policy / PDPA notice need to say?
+- **Online order numbers** are `W001`, `W002`... restarting daily, so they never clash with till letters.
+- **Languages:** the prototype has 8; the customer page is English only for now.
+- **Coupons, points and the rewards screens** from the prototype are not in the customer page yet.
+- **Tables:** the QR code carries the table name (`?table=Table%205`). Who prints and places the codes?

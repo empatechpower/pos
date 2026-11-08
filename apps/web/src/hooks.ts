@@ -87,3 +87,8 @@ export function useFailedPrintJobs(): number {
   }, [staff]);
   return n;
 }
+
+/** How many customer orders are waiting for staff to accept them, for the red count on the Online link. */
+export function useNewOnlineOrders(): number {
+  return useOrders().filter((o) => o.source === "online" && !o.acceptedAt && o.stage !== "cancelled").length;
+}

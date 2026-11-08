@@ -6,7 +6,10 @@
     "dev": "tsx watch src/index.ts",
     "start": "tsx src/index.ts",
     "test": "vitest run",
-    "typecheck": "tsc -p tsconfig.json"
+    "typecheck": "tsc -p tsconfig.json",
+    "db": "tsx src/devDb.ts",
+    "dev:pg": "DATABASE_URL=postgres://pos:pos@localhost:54329/pos tsx watch src/index.ts",
+    "cli:pg": "DATABASE_URL=postgres://pos:pos@localhost:54329/pos tsx src/cli.ts"
   },
   "dependencies": {
     "@fastify/cors": "^10.0.0",
