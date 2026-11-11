@@ -134,8 +134,8 @@ Set `TRUST_PROXY=1` behind a reverse proxy, or every customer looks like one add
 
 ## Customer accounts and points (needs `DATABASE_URL`)
 Customers sign in on the shop page with an emailed 6-digit code (single use, 10 minutes, 5 tries); a new email becomes
-a member and gets the welcome points once (500, a merchant setting). **No email service is connected yet**: the code is
-written to the server log and, outside `NODE_ENV=production`, returned to the page so it can be tested. Google,
+a member and gets the welcome points once (500, a merchant setting). With email set up (below) the code is emailed and
+never returned to the page. Without it the code is written to the server log and, outside `NODE_ENV=production`, returned to the page so it can be tested. **Set `NODE_ENV=production` on a live deployment.** Google,
 Microsoft and phone sign-in, and card / PayNow payment, are built but switched on by settings (next section). Guests can still order; they just cannot use points.
 Points are an append-only ledger (`points_entries`, with the balance kept in the same transaction, same idempotent
 pattern as credit). Rates are settings in `config.rewards` (`earnPointsPerDollar` default 1, `welcomePoints` 500,
@@ -162,6 +162,7 @@ people back there.
 |---|---|---|
 | Google sign-in | `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET` | OAuth client (web). Redirect URI: `$PUBLIC_URL/api/shop/auth/oauth/google/callback` |
 | Microsoft sign-in | `MICROSOFT_CLIENT_ID`, `MICROSOFT_CLIENT_SECRET` | Entra app, "personal + work accounts". Redirect URI: `$PUBLIC_URL/api/shop/auth/oauth/microsoft/callback` |
+| Email (sign-in codes, order-ready notices) | `RESEND_API_KEY`, `MAIL_FROM` (e.g. `Bailey & Patch <orders@yourshop.com>`) | A Resend account with the sending domain verified. Uses Resend's web API over HTTPS, so it works where SMTP ports are blocked. A member gets one "your order is ready" email per order, unless they turned order updates off in Account > Preferences |
 | Phone sign-in (reverse SMS) | `SMS_RECEIVE_NUMBER` (the number customers text, shown to them), `SMS_WEBHOOK_SECRET` | Point the number's "incoming message" webhook (Twilio style: form fields `From`, `Body`) at `$PUBLIC_URL/api/shop/auth/phone/inbound?secret=<SMS_WEBHOOK_SECRET>` |
 | Card and PayNow | `STRIPE_SECRET_KEY`, `STRIPE_WEBHOOK_SECRET` | Stripe account in Singapore with PayNow enabled. Webhook to `$PUBLIC_URL/api/shop/stripe/webhook` for `checkout.session.completed` and `checkout.session.async_payment_succeeded` |
 
@@ -175,7 +176,8 @@ the text arrived" button let you try the whole flow. **Card / PayNow**: `POST /a
 Stripe-hosted payment page for exactly what is still owed (SGD); the webhook is checked against Stripe's signature
 (5-minute window) and only records a payment whose amount matches what is due on a non-cancelled order, once per Stripe
 session. A payment recorded this way earns points and stamps like one taken at the till. A payment that does not fit
-(wrong amount, order already cancelled) is logged for a person to look at and **not** refunded automatically.
+(wrong amount, order already cancelled, already paid) is not recorded and is **refunded in full automatically** (the refund uses a fixed
+key per payment, so Stripe's repeat messages refund once). If the refund call fails, an error line saying `REFUND FAILED` is logged: refund it by hand in Stripe.
 **Cancelling**: `POST /api/shop/orders/:id/cancel` works for an online order nothing has been paid on and the kitchen
 has not started; spent points and a used coupon come back. **History**: `GET /api/shop/me/orders`.
 
@@ -193,7 +195,7 @@ chip, by-round, waiter release/merge and the page-waiter bell. Each of those nee
 ## Not built yet
 YeahPay integration (the "PayNow / Card" button uses a **mock** gateway), combine bills and the customer-facing tab,
 delivery workflow, USB and Bluetooth printers (hub app only), auth/roles, admin & menu management, reports, LAN hub, wallet/credit screens in the POS,
-a way for managers to issue coupons, automatic refunds for online payments, the 8 languages, notifications and the swipe-to-remove gesture in the customer page, a screen for editing item options, table QR code generation, per-outlet routing for multiple outlets (the data model and price resolution already support outlets; only assigning a pricebook to an outlet is API-only for now), Redis-backed rate limits and stream tickets (both are in memory, one server only), night-club allocation module (see `docs/open-questions.md`).
+a way for managers to issue coupons, a screen for editing item options, Tab and Split bill in the customer page, translating menu item names and descriptions (the shop's own wording is shown as entered), table QR code generation, per-outlet routing for multiple outlets (the data model and price resolution already support outlets; only assigning a pricebook to an outlet is API-only for now), Redis-backed rate limits and stream tickets (both are in memory, one server only), night-club allocation module (see `docs/open-questions.md`).
 
 ## Deploying on Render
 

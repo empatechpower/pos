@@ -17,6 +17,8 @@ let app: Awaited<ReturnType<typeof buildApp>>;
 let bare: Awaited<ReturnType<typeof buildApp>>;
 let base = "";
 let baseBare = "";
+let mailed: Awaited<ReturnType<typeof buildApp>>;
+let baseMailed = "";
 let store: PgEventStore;
 let till = { token: "", id: "" };
 let ip = 0;
@@ -26,6 +28,8 @@ const fake = {
   profile: { sub: "g-1", email: "gina@example.com", email_verified: true, name: "Gina" } as Record<string, unknown>,
   tokenOk: true,
   stripeBodies: [] as string[],
+  refunds: [] as { body: string; key: string | null }[],
+  mails: [] as any[],
 };
 const fakeFetch = (async (url: string | URL, init?: RequestInit) => {
   const u = String(url);
@@ -34,6 +38,14 @@ const fakeFetch = (async (url: string | URL, init?: RequestInit) => {
   if (u.startsWith("https://api.stripe.com/v1/checkout/sessions")) {
     fake.stripeBodies.push(String(init?.body));
     return new Response(JSON.stringify({ id: `cs_${fake.stripeBodies.length}`, url: `https://pay.example/cs_${fake.stripeBodies.length}` }));
+  }
+  if (u === "https://api.stripe.com/v1/refunds") {
+    fake.refunds.push({ body: String(init?.body), key: new Headers(init?.headers).get("idempotency-key") });
+    return new Response(JSON.stringify({ id: "re_1" }));
+  }
+  if (u === "https://api.resend.com/emails") {
+    fake.mails.push({ auth: new Headers(init?.headers).get("authorization"), ...JSON.parse(String(init?.body)) });
+    return new Response(JSON.stringify({ id: "m_1" }));
   }
   return new Response("?", { status: 500 });
 }) as typeof fetch;
@@ -68,6 +80,9 @@ beforeAll(async () => {
   const common = { config, db, logger: false, store, catalog: cat, catalogAdmin: cat, trustProxy: true };
   app = await buildApp({ ...common, integrations });
   bare = await buildApp({ ...common, integrations: { publicUrl: "https://shop.example" } });
+  mailed = await buildApp({ ...common, integrations: { publicUrl: "https://shop.example", mail: { apiKey: "re_key", from: "Bailey & Patch <orders@shop.example>" }, fetch: fakeFetch } });
+  await mailed.listen({ port: 0, host: "127.0.0.1" });
+  baseMailed = `http://127.0.0.1:${(mailed.server.address() as { port: number }).port}`;
   await app.listen({ port: 0, host: "127.0.0.1" });
   await bare.listen({ port: 0, host: "127.0.0.1" });
   base = `http://127.0.0.1:${(app.server.address() as { port: number }).port}`;
@@ -79,6 +94,7 @@ beforeAll(async () => {
 afterAll(async () => {
   await app?.close();
   await bare?.close();
+  await mailed?.close();
   await stop?.();
 });
 
@@ -88,7 +104,7 @@ const emailSignIn = async (email: string) => {
 };
 const place = (body: object = {}, bearer?: string) => call("/api/shop/orders", { bearer, body: { channelId: "take-away", items: [{ productId: "kaya-toast", qty: 5 }], customerPhone: "9123 4567", ...body } });
 let n = 0;
-const tillPush = (orderId: string, extra: object) => call("/api/sync/push", { device: till.token, body: { events: [{ id: `ti${++n}`, orderId, deviceId: till.id, ts: Date.now() + n, seq: 1000 + n, ...extra }] } });
+const tillPush = (orderId: string, extra: object, root?: string) => call("/api/sync/push", { root, device: till.token, body: { events: [{ id: `ti${++n}`, orderId, deviceId: till.id, ts: Date.now() + n, seq: 1000 + n, ...extra }] } });
 const orderState = async (id: string) => reduceOrder(id, await store.eventsForOrder(id))!;
 
 describe("what the shop says it can do", () => {
@@ -277,10 +293,67 @@ describe("cancelling and order history", () => {
     expect((await call("/api/shop/me/orders")).status).toBe(401);
   });
 
+  it("keeps notification choices, off for promos until the member says yes", async () => {
+    const m = await emailSignIn("prefs@example.com");
+    expect(m.member.prefs).toEqual({ orderUpdates: true, promos: false });
+    const p = await call("/api/shop/me", { method: "PATCH", bearer: m.token, body: { orderUpdates: false, promos: true } });
+    expect(p.json.member.prefs).toEqual({ orderUpdates: false, promos: true });
+    expect((await call("/api/shop/me", { bearer: m.token })).json.member.prefs).toEqual({ orderUpdates: false, promos: true });
+    // A name change alone leaves the choices alone.
+    expect((await call("/api/shop/me", { method: "PATCH", bearer: m.token, body: { name: "Pru" } })).json.member.prefs).toEqual({ orderUpdates: false, promos: true });
+  });
+
   it("keeps a profile change", async () => {
     const m = await emailSignIn("profile@example.com");
     const p = await call("/api/shop/me", { method: "PATCH", bearer: m.token, body: { name: "Pat", phone: "+65 9000 1111" } });
     expect(p.json.member).toMatchObject({ name: "Pat", phone: "+65 9000 1111" });
+  });
+});
+
+describe("emailed sign-in codes", () => {
+  it("emails the code and never hands it back to the page", async () => {
+    const r = await call("/api/shop/auth/email/start", { body: { email: "mia@example.com" }, root: baseMailed });
+    expect(r.json).toEqual({ sent: true });
+    const m = fake.mails.at(-1);
+    expect(m).toMatchObject({ auth: "Bearer re_key", from: "Bailey & Patch <orders@shop.example>", to: ["mia@example.com"] });
+    const code = /\b(\d{6})\b/.exec(m.text)![1];
+    expect(m.subject).toContain(code);
+    const v = await call("/api/shop/auth/email/verify", { body: { email: "mia@example.com", code }, root: baseMailed });
+    expect(v.json.token).toBeTruthy();
+  });
+
+  it("emails a member once when the order is ready, unless they turned updates off", async () => {
+    const signIn = async (email: string) => {
+      await call("/api/shop/auth/email/start", { body: { email }, root: baseMailed });
+      const code = /\b(\d{6})\b/.exec(fake.mails.at(-1).text)![1];
+      return (await call("/api/shop/auth/email/verify", { body: { email, code }, root: baseMailed })).json;
+    };
+    const ready = async (token: string) => {
+      const o = await call("/api/shop/orders", { bearer: token, root: baseMailed, body: { channelId: "take-away", items: [{ productId: "kaya-toast", qty: 5 }], customerPhone: "9123 4567" } });
+      await tillPush(o.json.orderId, { type: "OrderAccepted" }, baseMailed);
+      await tillPush(o.json.orderId, { type: "PaymentRecorded", paymentId: `c${++n}`, method: "cash", amountCents: o.json.totalCents, confirmed: true }, baseMailed);
+      await tillPush(o.json.orderId, { type: "StageSet", stage: "ready" }, baseMailed);
+      await tillPush(o.json.orderId, { type: "StageSet", stage: "ready" }, baseMailed); // the same news twice
+      return o.json;
+    };
+    const a = await signIn("ready@example.com");
+    const before = fake.mails.length;
+    const oa = await ready(a.token);
+    const sent = fake.mails.slice(before);
+    expect(sent).toHaveLength(1);
+    expect(sent[0]).toMatchObject({ to: ["ready@example.com"] });
+    expect(sent[0].subject).toContain(String(oa.queueNumber));
+
+    const b = await signIn("quiet@example.com");
+    await call("/api/shop/me", { method: "PATCH", bearer: b.token, body: { orderUpdates: false }, root: baseMailed });
+    const mid = fake.mails.length;
+    await ready(b.token);
+    expect(fake.mails.length).toBe(mid);
+  });
+
+  it("without mail set up the code still comes back for development", async () => {
+    const r = await call("/api/shop/auth/email/start", { body: { email: "dev@example.com" } });
+    expect(r.json.devCode).toMatch(/^\d{6}$/);
   });
 });
 
@@ -338,11 +411,28 @@ describe("paying online", () => {
     expect((await orderState(o.json.orderId)).payments).toEqual([]);
   });
 
-  it("does not take a payment for an order that was cancelled", async () => {
+  it("does not take a payment for an order that was cancelled, and gives it back", async () => {
     const o = await place();
     await call(`/api/shop/orders/${o.json.orderId}/cancel`, { method: "POST" });
-    await hook(paid(o.json.orderId, "cs_late", o.json.totalCents));
+    const before = fake.refunds.length;
+    await hook(paid(o.json.orderId, "cs_late", o.json.totalCents, { payment_intent: "pi_late" }));
+    await hook(paid(o.json.orderId, "cs_late", o.json.totalCents, { payment_intent: "pi_late" })); // Stripe repeats itself
     expect((await orderState(o.json.orderId)).payments).toEqual([]);
+    expect(fake.refunds.length).toBe(before + 2);
+    const r = fake.refunds.at(-1)!;
+    expect(new URLSearchParams(r.body).get("payment_intent")).toBe("pi_late");
+    expect(r.key).toBe("refund-cs_late"); // the same key both times, so Stripe refunds once
+  });
+
+  it("gives back a payment whose amount does not fit, but not one that was recorded", async () => {
+    const o = await place();
+    const before = fake.refunds.length;
+    await hook(paid(o.json.orderId, "cs_short", o.json.totalCents - 1, { payment_intent: "pi_short" }));
+    expect(fake.refunds.length).toBe(before + 1);
+    await hook(paid(o.json.orderId, "cs_ok", o.json.totalCents, { payment_intent: "pi_ok" }));
+    await hook(paid(o.json.orderId, "cs_ok", o.json.totalCents, { payment_intent: "pi_ok" }));
+    expect(fake.refunds.length).toBe(before + 1);
+    expect((await orderState(o.json.orderId)).payments).toHaveLength(1);
   });
 
   it("verifies signatures the way Stripe signs them", () => {

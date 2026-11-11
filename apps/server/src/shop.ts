@@ -6,7 +6,7 @@ import type { CatalogStore, PgCatalogStore } from "./catalog.js";
 import type { Db } from "./db/pool.js";
 import { FailureLimiter } from "./rateLimit.js";
 import { normaliseEmail, type MemberStore } from "./members.js";
-import { authorizeUrl, createStripeCheckout, fetchProfile, newState, newVerifier, sameSecret, verifyStripeSignature, type Integrations, type OAuthProvider } from "./integrations.js";
+import { authorizeUrl, createStripeCheckout, createStripeRefund, fetchProfile, sendMail, newState, newVerifier, sameSecret, verifyStripeSignature, type Integrations, type OAuthProvider } from "./integrations.js";
 import type { EventStore } from "./store.js";
 
 /** The server's own device id on events it creates for customers. */
@@ -197,9 +197,11 @@ export function registerShop(app: FastifyInstance, d: ShopDeps) {
       const email = normaliseEmail(req.body?.email);
       if (!email) return reply.code(400).send({ error: "email looks wrong" });
       const code = await members.startEmail(email);
-      // No mail service is connected yet: the code goes to the server log, and to the caller outside production.
-      console.log(`[sign-in code] ${email}: ${code}`);
-      return { sent: true, ...(showCodes ? { devCode: code } : {}) };
+      // With mail set up the code is emailed. Without it the code goes to the server log (and to the caller outside production).
+      const mailed = await sendMail(integ, { to: email, subject: `${code} is your ${d.config.name} sign-in code`, text: `Your sign-in code is ${code}.\n\nIt works for 10 minutes. If you did not ask for it, you can ignore this email.\n\n${d.config.name}` });
+      if (!mailed) console.log(`[sign-in code] ${email}: ${code}`);
+      // Once real mail is set up the code is never handed back to the page, even outside production.
+      return { sent: true, ...(showCodes && !integ.mail ? { devCode: code } : {}) };
     });
 
     /** Step 2: trade the code for a session. A new email becomes a new member and gets the welcome points once. */
@@ -225,10 +227,10 @@ export function registerShop(app: FastifyInstance, d: ShopDeps) {
       return { ok: true };
     });
 
-    app.patch<{ Body: { name?: string; phone?: string } }>("/api/shop/me", async (req, reply) => {
+    app.patch<{ Body: { name?: string; phone?: string; orderUpdates?: boolean; promos?: boolean } }>("/api/shop/me", async (req, reply) => {
       const m = await members.fromToken(bearer(req));
       if (!m) return reply.code(401).send({ error: "not_signed_in" });
-      await members.updateProfile(m.id, { name: clean(req.body?.name, 40), phone: clean(req.body?.phone, 20) });
+      await members.updateProfile(m.id, { name: clean(req.body?.name, 40), phone: clean(req.body?.phone, 20), orderUpdates: req.body?.orderUpdates, promos: req.body?.promos });
       return { member: await members.byId(m.id) };
     });
   }
@@ -487,7 +489,7 @@ export function registerShop(app: FastifyInstance, d: ShopDeps) {
       if (!integ.stripe) return reply.code(404).send({ error: "online_payment_not_available" });
       const raw = req.body as Buffer;
       if (!Buffer.isBuffer(raw) || !verifyStripeSignature(raw, req.headers["stripe-signature"] as string | undefined, integ.stripe.webhookSecret)) return reply.code(400).send({ error: "bad_signature" });
-      let ev: { type?: string; data?: { object?: { id?: string; payment_status?: string; amount_total?: number; currency?: string; client_reference_id?: string; metadata?: { method?: string } } } };
+      let ev: { type?: string; data?: { object?: { id?: string; payment_intent?: string; payment_status?: string; amount_total?: number; currency?: string; client_reference_id?: string; metadata?: { method?: string } } } };
       try { ev = JSON.parse(raw.toString("utf8")); } catch { return reply.code(400).send({ error: "bad_body" }); }
       const obj = ev.data?.object;
       if ((ev.type === "checkout.session.completed" || ev.type === "checkout.session.async_payment_succeeded") && obj?.id && obj.payment_status === "paid" && obj.client_reference_id) {
@@ -496,8 +498,10 @@ export function registerShop(app: FastifyInstance, d: ShopDeps) {
         const method = obj.metadata?.method === "paynow" ? "paynow" : "card";
         if (order?.payments.some((p) => p.paymentId === `stripe:${obj.id}`)) return { received: true }; // already recorded; Stripe repeats itself
         if (!order || order.source !== "online" || order.stage === "cancelled" || obj.currency !== "sgd" || obj.amount_total !== due) {
-          // Money moved but it does not fit the order: nothing is recorded, a person must look (and refund if needed).
-          console.error(`[stripe] payment ${obj.id} for order ${obj.client_reference_id} not applied (amount ${obj.amount_total} ${obj.currency}, due ${due})`);
+          // Money moved but it does not fit the order (cancelled, already paid, or the amount changed): nothing is
+          // recorded and the payment is given back in full. If that fails, a person has to look.
+          const back = obj.payment_intent ? await createStripeRefund(integ, { paymentIntent: obj.payment_intent, key: `refund-${obj.id}` }) : false;
+          console.error(`[stripe] payment ${obj.id} for order ${obj.client_reference_id} not applied (amount ${obj.amount_total} ${obj.currency}, due ${due}); ${back ? "refunded" : "REFUND FAILED - refund it by hand in Stripe"}`);
         } else {
           // A fixed id per payment: Stripe may send the same message more than once.
           await d.ingest([{ id: `stripe-${obj.id}`, orderId: order.orderId, deviceId: SHOP_DEVICE, ts: Date.now(), seq: Date.now(), type: "PaymentRecorded", paymentId: `stripe:${obj.id}`, method, amountCents: obj.amount_total!, confirmed: true } as unknown as OrderEvent]);

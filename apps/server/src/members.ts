@@ -15,6 +15,7 @@ export interface Member {
   name: string | null;
   phone: string | null;
   pointsBalance: number;
+  prefs: { orderUpdates: boolean; promos: boolean };
 }
 
 export interface Coupon {
@@ -30,7 +31,7 @@ const toCoupon = (r: Record<string, any>): Coupon => ({ id: r.id, title: r.title
 
 export type PointsKind = "welcome" | "earn" | "redeem" | "refund" | "adjust";
 
-const toMember = (r: Record<string, any>): Member => ({ id: r.id, email: r.email, name: r.name, phone: r.phone, pointsBalance: Number(r.points_balance) });
+const toMember = (r: Record<string, any>): Member => ({ id: r.id, email: r.email, name: r.name, phone: r.phone, pointsBalance: Number(r.points_balance), prefs: { orderUpdates: r.pref_order_updates !== false, promos: r.pref_promos === true } });
 
 export const normaliseEmail = (s: unknown): string | null => {
   if (typeof s !== "string") return null;
@@ -211,8 +212,14 @@ export class MemberStore {
     return r.rows[0] ? toMember(r.rows[0]) : null;
   }
 
-  async updateProfile(id: string, p: { name?: string; phone?: string }): Promise<void> {
-    await this.db.query("UPDATE members SET name=COALESCE($3,name), phone=COALESCE($4,phone) WHERE id=$1 AND merchant_id=$2", [id, this.merchantId, p.name?.trim().slice(0, 40) || null, p.phone?.trim().slice(0, 20) || null]);
+  async updateProfile(id: string, p: { name?: string; phone?: string; orderUpdates?: boolean; promos?: boolean }): Promise<void> {
+    await this.db.query("UPDATE members SET name=COALESCE($3,name), phone=COALESCE($4,phone), pref_order_updates=COALESCE($5,pref_order_updates), pref_promos=COALESCE($6,pref_promos) WHERE id=$1 AND merchant_id=$2", [id, this.merchantId, p.name?.trim().slice(0, 40) || null, p.phone?.trim().slice(0, 20) || null, typeof p.orderUpdates === "boolean" ? p.orderUpdates : null, typeof p.promos === "boolean" ? p.promos : null]);
+  }
+
+  /** True the first time this notice is claimed for the order, so an email goes out once however often the order changes. */
+  async claimNotice(orderId: string, kind: string): Promise<boolean> {
+    const r = await this.db.query("INSERT INTO member_notices (order_id, kind) VALUES ($1,$2) ON CONFLICT DO NOTHING", [orderId, kind]);
+    return r.rowCount === 1;
   }
 
   /**

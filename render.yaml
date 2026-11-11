@@ -26,6 +26,12 @@ services:
         value: "1"
       - key: PUBLIC_URL          # e.g. https://order.yourshop.com (no trailing slash)
         sync: false
+      - key: NODE_ENV            # set to production before real customers use it (until then sign-in codes may be shown on the page)
+        sync: false
+      - key: RESEND_API_KEY
+        sync: false
+      - key: MAIL_FROM           # e.g. Bailey & Patch <orders@yourshop.com>
+        sync: false
       - key: GOOGLE_CLIENT_ID
         sync: false
       - key: GOOGLE_CLIENT_SECRET

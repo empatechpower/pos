@@ -1,8 +1,8 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { defaultSelection, formatMoney, menuFor, optionLines, priceRange, quoteOrder, readableOn, resolveOptions, type BusinessConfig, type Catalog, type ChosenOptionInput, type MenuEntry, type ShopStatus } from "@pos/core";
 import { OptionSheet } from "./OptionSheet";
 import "../shopProto.css";
-import { LANGS, detectedLang, greeting, lang, langMode, setLangMode, shortLabel, t, useLang } from "../shopI18n";
+import { LANGS, detectedLang, greeting, lang, langMode, setLangMode, shortLabel, t, tx, useLang } from "../shopI18n";
 
 interface Info {
   name: string;
@@ -63,6 +63,7 @@ interface MemberView {
   name: string | null;
   phone: string | null;
   pointsBalance: number;
+  prefs?: { orderUpdates: boolean; promos: boolean };
 }
 const params = () => new URLSearchParams(location.hash.split("?")[1] ?? "");
 const orderIdFromHash = () => /^#\/shop\/order\/([\w-]+)/.exec(location.hash)?.[1] ?? null;
@@ -74,13 +75,13 @@ const tint = (hex: string, amount = 0.88) => {
 };
 
 const STATUS_TEXT: Record<ShopStatus, { title: string; body: (o: OrderView) => string }> = {
-  received: { title: "Order sent", body: () => "Waiting for the shop to accept your order. This page updates by itself." },
-  awaiting_payment: { title: "Accepted: please pay", body: (o) => `Pay ${formatMoney(o.totalCents - o.paidCents)} at the counter and quote your number. We start your order once it is paid.` },
-  queued: { title: "In the queue", body: () => "Your order is paid and waiting to be made." },
-  preparing: { title: "Being prepared", body: () => "Your order is being made right now." },
-  ready: { title: "Ready!", body: () => "Please collect your order at the counter." },
-  completed: { title: "Collected", body: () => "Enjoy! Thank you for ordering." },
-  cancelled: { title: "Order cancelled", body: () => "The shop could not take this order. Please ask at the counter, or order again." },
+  received: { get title() { return tx("Order sent"); }, body: () => tx("Waiting for the shop to accept your order. This page updates by itself.") },
+  awaiting_payment: { get title() { return tx("Accepted: please pay"); }, body: (o) => tx("Pay {amt} at the counter and quote your number. We start your order once it is paid.", { amt: formatMoney(o.totalCents - o.paidCents) }) },
+  queued: { get title() { return tx("In the queue"); }, body: () => tx("Your order is paid and waiting to be made.") },
+  preparing: { get title() { return tx("Being prepared"); }, body: () => tx("Your order is being made right now.") },
+  ready: { get title() { return tx("Ready!"); }, body: () => tx("Please collect your order at the counter.") },
+  completed: { get title() { return tx("Collected"); }, body: () => tx("Enjoy! Thank you for ordering.") },
+  cancelled: { get title() { return tx("Order cancelled"); }, body: () => tx("The shop could not take this order. Please ask at the counter, or order again.") },
 };
 const STEPS: ShopStatus[] = ["received", "awaiting_payment", "queued", "preparing", "ready"];
 
@@ -106,9 +107,64 @@ const ICONS: Record<string, string> = {
   stack: '<ellipse cx="12" cy="5.8" rx="7" ry="2.8"/><path d="M5 5.8v6.2c0 1.6 3.1 2.8 7 2.8s7-1.2 7-2.8V5.8"/><path d="M5 12v6.2c0 1.6 3.1 2.8 7 2.8s7-1.2 7-2.8V12"/>',
   card: '<rect x="3.5" y="6" width="17" height="12.5" rx="2"/><path d="M3.5 10h17"/>',
   help: '<circle cx="12" cy="12" r="8.6"/><path d="M9.6 9.4A2.5 2.5 0 1 1 12 12.4V14"/><circle cx="12" cy="17" r=".4" fill="currentColor"/>',
+  bell: '<path d="M6 9.5a6 6 0 1 1 12 0c0 4 1.2 5.4 2 6.5H4c.8-1.1 2-2.5 2-6.5"/><path d="M10 20a2.2 2.2 0 0 0 4 0"/>',
+  sliders: '<path d="M4 7h9M17 7h3M4 17h3M11 17h9"/><circle cx="15" cy="7" r="2"/><circle cx="9" cy="17" r="2"/>',
+  trash: '<path d="M4.5 6.5h15M9.5 6V4.5A1.5 1.5 0 0 1 11 3h2a1.5 1.5 0 0 1 1.5 1.5V6M6.5 6.5l.8 13a1.5 1.5 0 0 0 1.5 1.4h6.4a1.5 1.5 0 0 0 1.5-1.4l.8-13"/><path d="M10 10.5v6M14 10.5v6"/>',
   can: '<rect x="7" y="3.5" width="10" height="17" rx="1.5"/><path d="M7 7.2h10M7 16.8h10"/>',
   basket: '<path d="M4.8 9.8h14.4l-1.2 8.4a2 2 0 0 1-2 1.8H8a2 2 0 0 1-2-1.8L4.8 9.8Z"/><path d="M8.3 9.8 12 4.2l3.7 5.6"/><path d="M9.4 13.2v3.4M12 13.2v3.4M14.6 13.2v3.4"/>',
 };
+/** A bag row that slides left to show a bin button, like the prototype. A slight slide is enough to open it. */
+function SwipeRow({ children, onRemove, label }: { children: ReactNode; onRemove: () => void; label: string }) {
+  const OPEN = 84;
+  const [open, setOpen] = useState(false);
+  const [x, setX] = useState<number | null>(null); // live offset while a finger or mouse is dragging
+  const g = useRef<{ id: number; x0: number; y0: number; wasOpen: boolean; mode: "?" | "h" | "v" } | null>(null);
+  const moved = useRef(false);
+  const down = (e: React.PointerEvent) => {
+    if ((e.target as HTMLElement).closest(".swipe-bin")) return;
+    g.current = { id: e.pointerId, x0: e.clientX, y0: e.clientY, wasOpen: open, mode: "?" };
+    moved.current = false;
+  };
+  const move = (e: React.PointerEvent) => {
+    const s = g.current;
+    if (!s || s.id !== e.pointerId) return;
+    const dx = e.clientX - s.x0;
+    const dy = e.clientY - s.y0;
+    if (s.mode === "?") {
+      if (Math.max(Math.abs(dx), Math.abs(dy)) < 6) return;
+      s.mode = Math.abs(dx) > Math.abs(dy) ? "h" : "v";
+      if (s.mode === "h") (e.currentTarget as HTMLElement).setPointerCapture(e.pointerId);
+    }
+    if (s.mode !== "h") return;
+    moved.current = true;
+    setX(Math.max(-OPEN, Math.min(0, (s.wasOpen ? -OPEN : 0) + dx)));
+  };
+  const up = (e: React.PointerEvent) => {
+    const s = g.current;
+    if (!s || s.id !== e.pointerId) return;
+    g.current = null;
+    if (s.mode === "h") {
+      const dx = e.clientX - s.x0;
+      setOpen(s.wasOpen ? !(dx > 6) : dx < -6); // almost no distance needed: a slight slide is the intent
+      setX(null);
+    }
+  };
+  return (
+    <div
+      className={`swipe-shell ${open ? "is-swiped" : ""} ${x !== null ? "is-dragging has-x" : ""}`}
+      style={x !== null ? ({ "--sx": `${x}px` } as React.CSSProperties) : undefined}
+      onPointerDown={down}
+      onPointerMove={move}
+      onPointerUp={up}
+      onPointerCancel={() => { g.current = null; setX(null); }}
+      onClickCapture={(e) => { if (moved.current) { e.stopPropagation(); e.preventDefault(); moved.current = false; } }}
+    >
+      <button className="swipe-bin" tabIndex={open ? 0 : -1} aria-label={`${t("removeW", "Remove")} ${label}`} onClick={onRemove}><Icon name="trash" size={22} /><span>{t("bin", "Bin")}</span></button>
+      {children}
+      <span className="swipe-hint" aria-hidden="true"><Icon name="chevL" size={12} /></span>
+    </div>
+  );
+}
 function Icon({ name, size = 20 }: { name: keyof typeof ICONS; size?: number }) {
   return <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true" dangerouslySetInnerHTML={{ __html: ICONS[name]! }} />;
 }
@@ -145,7 +201,7 @@ export function Shop() {
           sessionStorage.setItem(LS_ENTERED, "1");
         } else setLoginError("That sign-in link has expired. Please try again.");
       })
-      .catch(() => setLoginError("No connection. Please try again."))
+      .catch(() => setLoginError(tx("No connection. Please try again.")))
       .finally(() => setSigning(false));
   }, []);
 
@@ -166,8 +222,8 @@ export function Shop() {
       .catch(() => setFailed(true));
   }, []);
 
-  if (failed) return <div className="shop"><div className="shop-msg"><h2>Ordering isn't available right now</h2><p>Please order at the counter, or try again in a moment.</p></div></div>;
-  if (!info || !catalog || !config || signing) return <div className="shop"><div className="shop-msg"><p>{signing ? "Signing you in…" : "Loading…"}</p></div></div>;
+  if (failed) return <div className="shop"><div className="shop-msg"><h2>{tx("Ordering isn't available right now")}</h2><p>{tx("Please order at the counter, or try again in a moment.")}</p></div></div>;
+  if (!info || !catalog || !config || signing) return <div className="shop"><div className="shop-msg"><p>{signing ? "Signing you in…" : tx("Loading…")}</p></div></div>;
 
   const b = info.brand;
   const theme = {
@@ -215,6 +271,9 @@ function Menu({ info, catalog, config, loginError }: { info: Info; catalog: Cata
   const [agreed, setAgreed] = useState<number | null>(null);
   const [member, setMember] = useState<MemberView | null>(null);
   const [usePoints, setUsePoints] = useState(false);
+  const [pointsPts, setPointsPts] = useState<number | null>(null); // a chosen amount; null = use all that can be used
+  const [pEdit, setPEdit] = useState(false);
+  const [pEditAmt, setPEditAmt] = useState(false);
   const [coupons, setCoupons] = useState<CouponView[]>([]);
   const [couponId, setCouponId] = useState<string | null>(null);
   const [stamps, setStamps] = useState<StampView | null>(null);
@@ -222,7 +281,7 @@ function Menu({ info, catalog, config, loginError }: { info: Info; catalog: Cata
   const [wallet, setWallet] = useState(false);
   const [guestOk, setGuestOk] = useState(false);
   const [guestForm, setGuestForm] = useState(false);
-  const [acctPanel, setAcctPanel] = useState<null | "profile" | "help">(null);
+  const [acctPanel, setAcctPanel] = useState<null | "profile" | "help" | "notif" | "prefs">(null);
   const [langOpen, setLangOpen] = useState(false);
   const [payMethod, setPayMethod] = useState<"counter" | "card" | "paynow">("counter");
   const [history, setHistory] = useState<PastOrder[] | null>(null);
@@ -277,10 +336,17 @@ function Menu({ info, catalog, config, loginError }: { info: Info; catalog: Cata
   async function saveProfile() {
     const r = await fetch("/api/shop/me", { method: "PATCH", headers: { "content-type": "application/json", authorization: `Bearer ${localStorage.getItem(LS_MEMBER) ?? ""}` }, body: JSON.stringify({ name: editName, phone: editPhone }) }).catch(() => null);
     if (r?.ok) {
-      setProfileMsg("Saved.");
+      setProfileMsg(tx("Saved."));
       if (editPhone) setPhone(editPhone);
       await loadMember();
-    } else setProfileMsg("Couldn't save. Please try again.");
+    } else setProfileMsg(tx("Couldn't save. Please try again."));
+  }
+  /** Turn a notification choice on or off. It is saved on the account, so it follows the member to other devices. */
+  async function savePref(key: "orderUpdates" | "promos", on: boolean) {
+    if (!member) return;
+    setMember({ ...member, prefs: { orderUpdates: member.prefs?.orderUpdates ?? true, promos: member.prefs?.promos ?? false, [key]: on } });
+    const r = await fetch("/api/shop/me", { method: "PATCH", headers: { "content-type": "application/json", authorization: `Bearer ${localStorage.getItem(LS_MEMBER) ?? ""}` }, body: JSON.stringify({ [key]: on }) }).catch(() => null);
+    if (!r?.ok) await loadMember(); // could not save: show what the account really has
   }
   const signOut = async () => {
     const t = localStorage.getItem(LS_MEMBER);
@@ -314,15 +380,22 @@ function Menu({ info, catalog, config, loginError }: { info: Info; catalog: Cata
     });
   }, [byId]);
 
+  useEffect(() => { if (!usePoints) { setPointsPts(null); setPEdit(false); setPEditAmt(false); } }, [usePoints]);
   const items = bag.map((l) => ({ productId: l.productId, qty: l.qty, options: l.selection }));
   const count = bag.reduce((n, l) => n + l.qty, 0);
   const canUsePoints = !!member && config.rewards.pointsEnabled && member.pointsBalance >= config.pricing.minPointsRedeem;
-  const pointsAsk = usePoints && canUsePoints ? { balance: member!.pointsBalance, requested: null } : null;
   const chosen = coupons.find((c) => c.id === couponId) ?? null;
   const preview = items.length ? quoteOrder(catalog, config, ctx, items, null, null) : null;
   const itemsSubtotal = preview?.ok ? preview.priced.subtotal : 0;
   // A coupon only counts once the items alone reach its minimum spend.
   const chosenOk = !!chosen && itemsSubtotal >= chosen.minSpendCents;
+  // The most points this order can take, then what the customer chose (all of it unless they used Edit).
+  const couponAsk = chosen && chosenOk ? { amountCents: chosen.amountCents, minSpendCents: chosen.minSpendCents } : null;
+  const maxQuote = items.length && usePoints && canUsePoints ? quoteOrder(catalog, config, ctx, items, { balance: member!.pointsBalance, requested: null }, couponAsk) : null;
+  const maxPts = maxQuote?.ok ? maxQuote.priced.pointsUsed : 0;
+  const minPts = Math.min(config.pricing.minPointsRedeem, maxPts);
+  const reqPts = pointsPts !== null && pointsPts < maxPts ? Math.max(minPts, pointsPts) : null;
+  const pointsAsk = usePoints && canUsePoints ? { balance: member!.pointsBalance, requested: reqPts } : null;
   const quote = items.length ? quoteOrder(catalog, config, ctx, items, pointsAsk, chosen && chosenOk ? { amountCents: chosen.amountCents, minSpendCents: chosen.minSpendCents } : null) : null;
   const total = quote?.ok ? quote.priced.total : 0;
   const shownTotal = agreed ?? total;
@@ -356,7 +429,7 @@ function Menu({ info, catalog, config, loginError }: { info: Info; catalog: Cata
       const res = await fetch("/api/shop/orders", {
         method: "POST",
         headers: { "content-type": "application/json", ...(member ? { authorization: `Bearer ${localStorage.getItem(LS_MEMBER) ?? ""}` } : {}) },
-        body: JSON.stringify({ channelId, items, customerName: name, customerPhone: phone, spot, expectedTotalCents: agreed ?? total, ...(pointsAsk ? { usePoints: "max" } : {}), ...(chosen && chosenOk ? { couponId: chosen.id } : {}) }),
+        body: JSON.stringify({ channelId, items, customerName: name, customerPhone: phone, spot, expectedTotalCents: agreed ?? total, ...(pointsAsk ? { usePoints: reqPts ?? "max" } : {}), ...(chosen && chosenOk ? { couponId: chosen.id } : {}) }),
       });
       const j = (await res.json().catch(() => ({}))) as { orderId?: string; error?: string; totalCents?: number };
       if (res.ok && j.orderId) {
@@ -377,22 +450,22 @@ function Menu({ info, catalog, config, loginError }: { info: Info; catalog: Cata
         setAgreed(j.totalCents ?? null);
         setNote(`Prices changed while you were ordering. The new total is ${formatMoney(j.totalCents ?? 0)}. Tap Pay again to confirm.`);
       } else if (res.status === 429) {
-        setNote("Too many orders from this device. Please wait a few minutes or order at the counter.");
+        setNote(tx("Too many orders from this device. Please wait a few minutes or order at the counter."));
       } else if (j.error === "coupon_not_available" || j.error === "coupon_not_eligible") {
         setCouponId(null);
         void loadMember();
-        setNote("That coupon can't be used on this order. Please check your total and try again.");
+        setNote(tx("That coupon can't be used on this order. Please check your total and try again."));
       } else if (j.error === "not_enough_points") {
         setUsePoints(false);
         void loadMember();
-        setNote("Your points balance changed. Please check your total and try again.");
+        setNote(tx("Your points balance changed. Please check your total and try again."));
       } else if (j.error === "unavailable" || j.error === "option_sold_out") {
-        setNote("One of your items just sold out. Please check your bag.");
+        setNote(tx("One of your items just sold out. Please check your bag."));
       } else {
-        setNote("We couldn't place your order. Please try again, or order at the counter.");
+        setNote(tx("We couldn't place your order. Please try again, or order at the counter."));
       }
     } catch {
-      setNote("No connection. Your order was not sent. Please try again.");
+      setNote(tx("No connection. Your order was not sent. Please try again."));
     } finally {
       setBusy(false);
     }
@@ -403,7 +476,7 @@ function Menu({ info, catalog, config, loginError }: { info: Info; catalog: Cata
   const needle = (search ?? "").trim().toLowerCase();
   const shown = menu.filter((m) => (category === "All" || m.category === category) && (!needle || m.name.toLowerCase().includes(needle) || (m.altName ?? "").toLowerCase().includes(needle)));
   const dine = channel?.kind === "dine_in";
-  const spotText = dine ? spot || "Add table" : "Pickup counter";
+  const spotText = dine ? spot || tx("Add table") : tx("Pickup counter");
   const who = member ? member.name || (member.email ?? member.phone ?? "Member").split("@")[0] : t("guestW", "Guest");
   const canOrder = !!quote?.ok && (!!member || guestOk) && phoneOk;
   const navActive = screen === "rewards" ? "rewards" : screen === "account" ? "account" : "order";
@@ -420,7 +493,7 @@ function Menu({ info, catalog, config, loginError }: { info: Info; catalog: Cata
       <div className="shop-meta">
         {dine && !noSpot && (
           <button className={`shop-table ${spot ? "on" : ""}`} onClick={() => setTableEdit((v) => !v)} aria-label="Change table">
-            <Icon name="table" size={16} />{spot || "Add table"}
+            <Icon name="table" size={16} />{spot || tx("Add table")}
           </button>
         )}
         {member ? (
@@ -480,7 +553,7 @@ function Menu({ info, catalog, config, loginError }: { info: Info; catalog: Cata
     <div className="e2e-card">
       <h3>{t("detailsW", "Details")}</h3>
       <div className="sum-row"><span className="k">{t("outletW", "Outlet")}</span><span className="v">{info.outletName}</span></div>
-      <div className="sum-row"><span className="k">{t("modeW", "Mode")}</span><span className="v">{channel?.name}{dine ? ` · ${spot || "no table yet"}` : " · Pickup counter"}</span></div>
+      <div className="sum-row"><span className="k">{t("modeW", "Mode")}</span><span className="v">{channel?.name}{dine ? ` · ${spot || tx("no table yet")}` : ` · ${tx("Pickup counter")}`}</span></div>
       <div className="sum-row"><span className="k">{t("memberW", "Member")}</span><span className="v">{member ? `${who} · ${member.pointsBalance.toLocaleString()} points` : "Guest"}</span></div>
       {phone && <div className="sum-row"><span className="k">{t("phoneW", "Phone")}</span><span className="v">{phone}</span></div>}
     </div>
@@ -488,7 +561,7 @@ function Menu({ info, catalog, config, loginError }: { info: Info; catalog: Cata
 
   const nav = (
     <nav className="shop-nav" aria-label="Sections">
-      {([["order", "basket", screen !== "order" && count > 0 && navActive === "order" ? t("addMore", "Add More") : t("order", "Order")], ["rewards", "gift", t("rewards", "Rewards")], ["account", "user", t("account", "Account")]] as const).map(([id, ic, label]) => (
+      {([["order", "basket", screen !== "order" && count > 0 && navActive === "order" ? tx("Add More") : t("order", "Order")], ["rewards", "gift", t("rewards", "Rewards")], ["account", "user", t("account", "Account")]] as const).map(([id, ic, label]) => (
         <button key={id} aria-current={navActive === id ? "page" : undefined} onClick={() => setScreen(id)}><Icon name={ic} size={20} /><span>{label}</span></button>
       ))}
     </nav>
@@ -516,20 +589,20 @@ function Menu({ info, catalog, config, loginError }: { info: Info; catalog: Cata
     </div>
   );
   const walletSheet = wallet && (
-    <div className="shop-sheet" role="dialog" aria-label="Coupons and vouchers">
+    <div className="shop-sheet" role="dialog" aria-label={tx("Coupons and vouchers")}>
       <div className="shop-sheet-in">
-        <div className="shop-sheet-head"><h2>Coupons &amp; vouchers</h2><button onClick={() => setWallet(false)} aria-label="Close">✕</button></div>
-        {!member && <button className="shop-link" onClick={() => { setWallet(false); setScreen("login"); }}>Sign in to use your coupons &amp; vouchers</button>}
-        {member && coupons.length === 0 && <p className="muted">You have no coupons right now.</p>}
+        <div className="shop-sheet-head"><h2>{tx("Coupons & vouchers")}</h2><button onClick={() => setWallet(false)} aria-label="Close">✕</button></div>
+        {!member && <button className="shop-link" onClick={() => { setWallet(false); setScreen("login"); }}>{tx("Sign in to use your coupons & vouchers")}</button>}
+        {member && coupons.length === 0 && <p className="muted">{tx("You have no coupons right now.")}</p>}
         {coupons.map((c) => {
           const ok = itemsSubtotal >= c.minSpendCents;
           return (
-            <label key={c.id} className={`shop-coupon ${ok ? "" : "off"}`}>
+            <label key={c.id} className={`shop-coupon ${ok ? "" : tx("off")}`}>
               <input type="radio" name="coupon" disabled={!ok} checked={couponId === c.id} onChange={() => { setCouponId(c.id); setAgreed(null); }} onClick={() => couponId === c.id && setCouponId(null)} />
               <span>
                 {c.title}
                 <small className="muted">
-                  {c.minSpendCents > 0 ? `Min. spend ${formatMoney(c.minSpendCents)} on items only (before service charge, tax and deposits)` : "No minimum spend"}
+                  {c.minSpendCents > 0 ? tx("Min. spend {amt} on items only (before service charge, tax and deposits)", { amt: formatMoney(c.minSpendCents) }) : tx("No minimum spend")}
                   {!ok && ` · Add ${formatMoney(c.minSpendCents - itemsSubtotal)} more in items`}
                 </small>
               </span>
@@ -560,11 +633,11 @@ function Menu({ info, catalog, config, loginError }: { info: Info; catalog: Cata
       <div className="shop-fixedhead" ref={headRef}>
         {header(false)}
         {tableEdit && dine && (
-          <div className="shop-tableedit"><input autoFocus value={spot} maxLength={30} placeholder="e.g. Table 12" onChange={(e) => setSpot(e.target.value)} onKeyDown={(e) => e.key === "Enter" && setTableEdit(false)} /><button onClick={() => setTableEdit(false)}>{t("done", "Done")}</button></div>
+          <div className="shop-tableedit"><input autoFocus value={spot} maxLength={30} placeholder={tx("e.g. Table 12")} onChange={(e) => setSpot(e.target.value)} onKeyDown={(e) => e.key === "Enter" && setTableEdit(false)} /><button onClick={() => setTableEdit(false)}>{t("done", "Done")}</button></div>
         )}
         {seg}
       </div>
-      {last && <a className="shop-last" href={`#/shop/order/${last}`}>View my last order →</a>}
+      {last && <a className="shop-last" href={`#/shop/order/${last}`}>{tx("View my last order →")}</a>}
       {b.heroUrl && (
         <div className="shop-hero">
           <img src={b.heroUrl} alt="" />
@@ -582,13 +655,13 @@ function Menu({ info, catalog, config, loginError }: { info: Info; catalog: Cata
           </>
         )}
         <div className="shop-chips">
-          <button className={`search ${search !== null ? "on" : ""}`} aria-label="Search the menu" aria-expanded={search !== null} onClick={() => setSearch((s) => (s === null ? "" : null))}><Icon name="search" size={18} /></button>
-          {categories.map((c) => <button key={c} className={c === category ? "on" : ""} onClick={() => setCategory(c)}>{c}</button>)}
+          <button className={`search ${search !== null ? "on" : ""}`} aria-label={tx("Search the menu")} aria-expanded={search !== null} onClick={() => setSearch((s) => (s === null ? "" : null))}><Icon name="search" size={18} /></button>
+          {categories.map((c) => <button key={c} className={c === category ? "on" : ""} onClick={() => setCategory(c)}>{c === "All" ? t("all", "All") : tx(c)}</button>)}
         </div>
-        {search !== null && <input className="shop-search" autoFocus placeholder="Search the menu" value={search} onChange={(e) => setSearch(e.target.value)} />}
+        {search !== null && <input className="shop-search" autoFocus placeholder={tx("Search the menu")} value={search} onChange={(e) => setSearch(e.target.value)} />}
         {noteEl}
         <div className="shop-list">
-          {shown.length === 0 && <p className="shop-msg">Nothing matches.</p>}
+          {shown.length === 0 && <p className="shop-msg">{tx("Nothing matches.")}</p>}
           {shown.map((m) => {
             const n = inBag(m.id);
             const img = photo(m);
@@ -620,7 +693,7 @@ function Menu({ info, catalog, config, loginError }: { info: Info; catalog: Cata
       </div>
       {count > 0 && (
         <button className="shop-bar" onClick={() => setScreen("bag")}>
-          <Icon name="bag" size={20} /><span>{t("viewBag", "View bag")} · {count} item{count > 1 ? "s" : ""}</span>
+          <Icon name="bag" size={20} /><span>{tx(count > 1 ? "View bag · {n} items" : "View bag · {n} item", { n: count })}</span>
           <span className="amt"><i className="div" /><b>{formatMoney(total)}</b><Icon name="arrowR" size={18} /></span>
         </button>
       )}
@@ -630,13 +703,13 @@ function Menu({ info, catalog, config, loginError }: { info: Info; catalog: Cata
   /* ================= Rewards ================= */
   const rewardsScreen = (
     <>
-      {pageHead("Your rewards")}
+      {pageHead(tx("Your rewards"))}
       <div className="scroll-body shop-body">
         {!member ? (
           <div className="e2e-card">
             <h3>{t("guestRewardsT", "Rewards are for members")}</h3>
-            <p className="e2e-sub" style={{ textAlign: "left", margin: 0 }}>Members earn points on every order and redeem them for money off. Sign up free to start earning.</p>
-            {earnPts > 0 && <div className="ready-banner" role="status">Sign up to earn {earnPts.toLocaleString()} points on this order</div>}
+            <p className="e2e-sub" style={{ textAlign: "left", margin: 0 }}>{tx("Members earn points on every order and redeem them for money off. Sign up free to start earning.")}</p>
+            {earnPts > 0 && <div className="ready-banner" role="status">{tx("Sign up to earn {n} points on this order", { n: earnPts.toLocaleString() })}</div>}
             <button className="e2e-cta" onClick={() => setScreen("login")}><span>{t("signUpBtn", "Sign up")}</span><Icon name="arrowR" size={19} /></button>
             <button className="e2e-cta queue-btn" onClick={() => setScreen("order")}><span>{t("backToOrder", "Back to Order")}</span><Icon name="arrowR" size={19} /></button>
           </div>
@@ -647,20 +720,20 @@ function Menu({ info, catalog, config, loginError }: { info: Info; catalog: Cata
                 <span className="avatar">{b.logoUrl ? <img src={b.logoUrl} alt="" /> : <Icon name="user" size={26} />}</span>
                 <div className="member-main">
                   <div className="name">{who}</div>
-                  {config.rewards.pointsEnabled && <div className="pts-stack"><span className="pts-line"><b>{member.pointsBalance.toLocaleString()}</b><span>{t("points", "points")}</span></span><span className="pts-worth">{formatMoney(member.pointsBalance)} worth</span></div>}
+                  {config.rewards.pointsEnabled && <div className="pts-stack"><span className="pts-line"><b>{member.pointsBalance.toLocaleString()}</b><span>{t("points", "points")}</span></span><span className="pts-worth">{tx("{amt} worth", { amt: formatMoney(member.pointsBalance) })}</span></div>}
                 </div>
               </div>
             </div>
             {stamps && (
               <div className="stamp-panel">
-                <div className="panel-head"><h3>Your stamp card</h3></div>
+                <div className="panel-head"><h3>{tx("Your stamp card")}</h3></div>
                 <div className="stamp-type-name">{stamps.rewardTitle}</div>
                 <div className="shop-stamps" aria-label={`Stamp card ${stamps.count} of ${stamps.target}`}><span>{Array.from({ length: stamps.target }, (_, i) => <i key={i} className={i < stamps.count ? "on" : ""} />)}</span></div>
                 <div className="stamp-progress"><div className="big">{stamps.count} / {stamps.target} stamps</div>
-                  <div className="sub">{stamps.target - stamps.count > 0 ? `${stamps.target - stamps.count} more to unlock ${stamps.rewardTitle}` : `Ready — ${stamps.rewardTitle}`}{stamps.minPaidCents > 0 ? ` · orders of ${formatMoney(stamps.minPaidCents)}+` : ""}</div></div>
+                  <div className="sub">{stamps.target - stamps.count > 0 ? tx("{n} more to unlock {title}", { n: stamps.target - stamps.count, title: stamps.rewardTitle }) : tx("Ready — {title}", { title: stamps.rewardTitle })}{stamps.minPaidCents > 0 ? tx(" · orders of {amt}+", { amt: formatMoney(stamps.minPaidCents) }) : ""}</div></div>
               </div>
             )}
-            <div className="coupon-head"><h3>Coupons &amp; points</h3></div>
+            <div className="coupon-head"><h3>{tx("Coupons & points")}</h3></div>
             <div className="reward-slots">
               {rewardSlots(false)}
             </div>
@@ -676,22 +749,25 @@ function Menu({ info, catalog, config, loginError }: { info: Info; catalog: Cata
       <>
         <div className="reward-slot">
           <span className="ric" style={{ color: "var(--red)" }}><Icon name="ticket" size={26} /></span>
-          <span className="reward-copy slot-scroll"><span className="t">{t("walletEntryT", "Coupon(s) / voucher(s)")}</span><span className="d">{chosen && chosenOk ? `${chosen.title} applied · ` : ""}{n} in your wallet</span></span>
+          <span className="reward-copy slot-scroll"><span className="t">{t("walletEntryT", "Coupon(s) / voucher(s)")}</span><span className="d">{chosen && chosenOk ? tx("{title} applied · ", { title: chosen.title }) : ""}{tx("{n} in your wallet", { n })}</span></span>
           <span className="slot-actions">
             {chosen && chosenOk && <button className="slot-act remove" onClick={() => { setCouponId(null); setAgreed(null); }}>{t("removeW", "Remove")}</button>}
-            <button className="slot-act" onClick={() => setWallet(true)}>{n > 0 ? "View" : "Details"}</button>
+            <button className="slot-act" onClick={() => setWallet(true)}>{n > 0 ? tx("View") : tx("Details")}</button>
           </span>
         </div>
         {config.rewards.pointsEnabled && (
           <div className={`reward-slot ${usePoints && canUsePoints ? "is-on" : ""}`}>
             <span className="ric" style={{ color: "var(--orange-dark)" }}><Icon name="stack" size={26} /></span>
             <span className="reward-copy slot-scroll">
-              <span className="t">{pointsAsk && quote?.ok ? `${quote.priced.pointsUsed.toLocaleString()} points = ${formatMoney(quote.priced.pointsDiscount)} off` : "Points — 100 points = S$1 off"}</span>
-              <span className="d">{canUsePoints ? `You have ${member!.pointsBalance.toLocaleString()} points. Using points redeems all you can use on this order.` : `You have ${(member?.pointsBalance ?? 0).toLocaleString()} points (${config.pricing.minPointsRedeem} needed to use them).`}</span>
+              <span className="t">{pointsAsk && quote?.ok ? tx("{pts} points = {amt} off", { pts: quote.priced.pointsUsed.toLocaleString(), amt: formatMoney(quote.priced.pointsDiscount) }) : tx("Points — 100 points = S$1 off")}</span>
+              <span className="d">{canUsePoints ? (reqPts !== null ? tx("You chose {a} of the {b} points this order can use.", { a: reqPts.toLocaleString(), b: maxPts.toLocaleString() }) : tx("You have {n} points. Using points redeems all you can use on this order.", { n: member!.pointsBalance.toLocaleString() })) : tx("You have {n} points ({min} needed to use them).", { n: (member?.pointsBalance ?? 0).toLocaleString(), min: config.pricing.minPointsRedeem })}</span>
             </span>
             <span className="slot-actions">
               {pointsAsk ? (
-                <button className="slot-act remove" onClick={() => { setUsePoints(false); setAgreed(null); }}>{t("removeW", "Remove")}</button>
+                <>
+                  {inBagScreen && maxPts > minPts && <button className="slot-act" onClick={() => setPEdit(true)}>{t("editW", "Edit")}</button>}
+                  <button className="slot-act remove" onClick={() => { setUsePoints(false); setAgreed(null); }}>{t("removeW", "Remove")}</button>
+                </>
               ) : (
                 <button className={`slot-act ${canUsePoints && inBagScreen ? "" : "is-disabled"}`} disabled={!canUsePoints || !inBagScreen} onClick={() => { setUsePoints(true); setAgreed(null); }}>{t("usePointsBtn", "Use points")}</button>
               )}
@@ -704,15 +780,15 @@ function Menu({ info, catalog, config, loginError }: { info: Info; catalog: Cata
 
   /* ================= Account ================= */
   const acctRow = (ic: keyof typeof ICONS, title: string, desc: string, onClick: () => void) => (
-    <button className="acct-row" onClick={onClick}><span className="aic"><Icon name={ic} size={21} /></span><span className="at">{title}{desc && <span className="ad">{desc}</span>}</span><span className="chev"><Icon name="chevR" size={16} /></span></button>
+    <button className="acct-row" onClick={onClick}><span className="aic"><Icon name={ic} size={21} /></span><span className="at">{tx(title)}{desc && <span className="ad">{tx(desc)}</span>}</span><span className="chev"><Icon name="chevR" size={16} /></span></button>
   );
   const accountScreen = (
     <>
-      {pageHead("Account")}
+      {pageHead(t("account", "Account"))}
       <div className="scroll-body shop-body">
         {acctPanel === "profile" ? (
           <>
-            <button className="e2e-back" onClick={() => setAcctPanel(null)}><Icon name="chevL" size={16} /> Back to Account</button>
+            <button className="e2e-back" onClick={() => setAcctPanel(null)}><Icon name="chevL" size={16} /> {tx("Back to Account")}</button>
             <div className="e2e-card">
               <h3>{t("profile", "Profile details")}</h3>
               {member ? (
@@ -721,7 +797,7 @@ function Menu({ info, catalog, config, loginError }: { info: Info; catalog: Cata
                   <div className="e2e-field"><label htmlFor="pf-name">{t("displayNameL", "Display name")}</label><input className="e2e-input" id="pf-name" value={editName} maxLength={40} onChange={(e) => { setEditName(e.target.value); setProfileMsg(null); }} /></div>
                   <div className="e2e-field"><label htmlFor="pf-phone">{t("phoneW", "Phone")}</label><input className="e2e-input" id="pf-phone" type="tel" value={editPhone} maxLength={20} onChange={(e) => { setEditPhone(e.target.value); setProfileMsg(null); }} /></div>
                   {profileMsg && <p className="e2e-note" role="status">{profileMsg}</p>}
-                  <button className="e2e-cta" onClick={() => void saveProfile()}><span>Save changes</span><Icon name="check" size={19} /></button>
+                  <button className="e2e-cta" onClick={() => void saveProfile()}><span>{tx("Save changes")}</span><Icon name="check" size={19} /></button>
                 </>
               ) : (
                 <>
@@ -731,15 +807,56 @@ function Menu({ info, catalog, config, loginError }: { info: Info; catalog: Cata
               )}
             </div>
           </>
+        ) : acctPanel === "notif" ? (
+          <>
+            <button className="e2e-back" onClick={() => setAcctPanel(null)}><Icon name="chevL" size={16} /> {t("backToAccount", "Back to Account")}</button>
+            <div className="acct-sec" style={{ marginLeft: 4 }}>{t("notifications", "Notifications")}</div>
+            <div className="acct-list" style={{ marginLeft: 0, marginRight: 0 }}>
+              {!member ? (
+                <p className="e2e-sub" style={{ textAlign: "left", padding: "10px 14px" }}>{t("notifGuest", "Sign in to see updates about your orders.")}</p>
+              ) : history === null ? (
+                <p className="e2e-sub" style={{ textAlign: "left", padding: "10px 14px" }}>{t("loadingW", "Loading…")}</p>
+              ) : history.length === 0 ? (
+                <p className="e2e-sub" style={{ textAlign: "left", padding: "10px 14px" }}>{t("notifNone", "No updates yet. Updates about your orders will show here.")}</p>
+              ) : (
+                history.slice(0, 15).map((o) => (
+                  <a key={o.orderId} className="acct-row" href={`#/shop/order/${o.orderId}`}>
+                    <span className="aic"><Icon name="bell" size={21} /></span>
+                    <span className="at">{o.queueNumber} — {STATUS_TEXT[o.status].title.split(":")[0]}<span className="ad">{o.channelName ?? tx("Order")} · {tx(o.itemCount === 1 ? "{n} item" : "{n} items", { n: o.itemCount })}</span></span>
+                    <span className="ad" style={{ flex: "none" }}>{new Date(o.at).toLocaleDateString()}</span>
+                  </a>
+                ))
+              )}
+            </div>
+          </>
+        ) : acctPanel === "prefs" ? (
+          <>
+            <button className="e2e-back" onClick={() => setAcctPanel(null)}><Icon name="chevL" size={16} /> {t("backToAccount", "Back to Account")}</button>
+            <div className="e2e-card">
+              <h3>{t("preferences", "Preferences")}</h3>
+              <button className="sum-link-row" onClick={() => setLangOpen(true)}><span className="sl-ic"><Icon name="globe" size={21} /></span><span className="sl-t">{t("language", "Language")}<span className="sl-d">{t("langLeadShort", "Auto-selects from your phone settings.")}</span></span><span className="sl-v">{LANGS.find((l) => l.code === lang())!.native}</span><span className="chev"><Icon name="chevR" size={16} /></span></button>
+              {([["orderUpdates", "prefNotifT", "Order updates", "prefNotifD", "Email me when my order is ready."], ["promos", "prefPromoT", "Offers and news", "prefPromoD", "Email me about new items and offers."]] as const).map(([k, tk, tt, dk, dd]) => {
+                const on = member ? (member.prefs?.[k] ?? k === "orderUpdates") : false;
+                return (
+                  <button key={k} className="set-opt" aria-pressed={on} disabled={!member} style={{ marginTop: 10, opacity: member ? 1 : 0.6 }} onClick={() => void savePref(k, !on)}>
+                    <span className="so-main"><span className="so-t">{t(tk, tt)}</span><span className="so-d">{t(dk, dd)}</span></span>
+                    <span className={`set-switch${on ? " is-on" : ""}`}><span className="sw-word">{on ? t("onW", "On") : t("offW", "Off")}</span><span className="sw-track"><span className="sw-knob" /></span></span>
+                  </button>
+                );
+              })}
+              {!member && <p className="e2e-note">{t("prefsGuest", "Sign in to choose which emails you get.")}</p>}
+              {member && !member.email && <p className="e2e-note">{t("prefsNoEmail", "Add an email address in Profile details to receive these.")}</p>}
+            </div>
+          </>
         ) : acctPanel === "help" ? (
           <>
-            <button className="e2e-back" onClick={() => setAcctPanel(null)}><Icon name="chevL" size={16} /> Back to Account</button>
+            <button className="e2e-back" onClick={() => setAcctPanel(null)}><Icon name="chevL" size={16} /> {tx("Back to Account")}</button>
             <div className="e2e-card">
-              <h3>Help &amp; support</h3>
+              <h3>{tx("Help & support")}</h3>
               <div className="sum-row"><span className="k">{t("outletW", "Outlet")}</span><span className="v">{info.name} · {info.outletName}</span></div>
-              <div className="sum-row" style={{ display: "block" }}><span className="k" style={{ fontWeight: 700, color: "var(--ink)" }}>How do I collect my order?</span><span className="ad" style={{ display: "block", marginTop: 2, fontSize: 12 }}>Your collection number is the last 5 digits of the phone number you ordered with. Watch for it on the counter screen.</span></div>
-              <div className="sum-row" style={{ display: "block" }}><span className="k" style={{ fontWeight: 700, color: "var(--ink)" }}>{t("helpQ2", "How do points work?")}</span><span className="ad" style={{ display: "block", marginTop: 2, fontSize: 12 }}>Members earn points on every order. 100 points = S$1 off a later order — apply points in the Bag before you check out.</span></div>
-              <p className="e2e-note">Still need help? Please ask at the counter and we will sort it out.</p>
+              <div className="sum-row" style={{ display: "block" }}><span className="k" style={{ fontWeight: 700, color: "var(--ink)" }}>{tx("How do I collect my order?")}</span><span className="ad" style={{ display: "block", marginTop: 2, fontSize: 12 }}>{tx("Your collection number is the last 5 digits of the phone number you ordered with. Watch for it on the counter screen.")}</span></div>
+              <div className="sum-row" style={{ display: "block" }}><span className="k" style={{ fontWeight: 700, color: "var(--ink)" }}>{t("helpQ2", "How do points work?")}</span><span className="ad" style={{ display: "block", marginTop: 2, fontSize: 12 }}>{tx("Members earn points on every order. 100 points = S$1 off a later order — apply points in the Bag before you check out.")}</span></div>
+              <p className="e2e-note">{tx("Still need help? Please ask at the counter and we will sort it out.")}</p>
             </div>
           </>
         ) : (
@@ -751,36 +868,38 @@ function Menu({ info, catalog, config, loginError }: { info: Info; catalog: Cata
                   <div className="member-main">
                     <div className="name">{who}</div>
                     {member.phone && <div className="acct-phone">{member.phone}</div>}
-                    {config.rewards.pointsEnabled && <div className="pts-stack"><span className="pts-line"><b>{member.pointsBalance.toLocaleString()}</b><span>{t("points", "points")}</span></span><span className="pts-worth">{formatMoney(member.pointsBalance)} worth</span></div>}
+                    {config.rewards.pointsEnabled && <div className="pts-stack"><span className="pts-line"><b>{member.pointsBalance.toLocaleString()}</b><span>{t("points", "points")}</span></span><span className="pts-worth">{tx("{amt} worth", { amt: formatMoney(member.pointsBalance) })}</span></div>}
                   </div>
                 ) : (
                   <div className="member-main">
                     <div className="name">{t("guestW", "Guest")}</div>
-                    <div className="pts-stack"><span className="pts-line" style={{ fontSize: 14, lineHeight: "18px", fontWeight: 600 }}>{earnPts > 0 ? `Sign up to earn ${earnPts.toLocaleString()} points on this order` : "Sign up to earn points on this order"}</span></div>
-                    <button className="history" onClick={() => setScreen("login")}>Sign up <Icon name="chevR" size={14} /></button>
+                    <div className="pts-stack"><span className="pts-line" style={{ fontSize: 14, lineHeight: "18px", fontWeight: 600 }}>{earnPts > 0 ? tx("Sign up to earn {n} points on this order", { n: earnPts.toLocaleString() }) : tx("Sign up to earn points on this order")}</span></div>
+                    <button className="history" onClick={() => setScreen("login")}>{t("signUpBtn", "Sign up")} <Icon name="chevR" size={14} /></button>
                   </div>
                 )}
               </div>
             </div>
             <div className="acct-sec">{t("myAccount", "My account")}</div>
             <div className="acct-list">
-              {acctRow("user", "Profile details", "Name, phone and email on this account", () => { setEditName(member?.name ?? ""); setEditPhone(member?.phone ?? ""); setProfileMsg(null); setAcctPanel("profile"); })}
+              {acctRow("user", t("profile", "Profile details"), "Name, phone and email on this account", () => { setEditName(member?.name ?? ""); setEditPhone(member?.phone ?? ""); setProfileMsg(null); setAcctPanel("profile"); })}
               {acctRow("globe", t("language", "Language"), LANGS.find((l) => l.code === lang())!.native + (langMode() === "auto" ? " · " + t("autoShort", "Auto") : ""), () => setLangOpen(true))}
+              {acctRow("bell", t("notifications", "Notifications"), t("notificationsD", "Updates about your orders"), () => { setAcctPanel("notif"); })}
+              {acctRow("sliders", t("preferences", "Preferences"), t("preferencesD", "Language and email choices"), () => setAcctPanel("prefs"))}
               {acctRow("help", "Help & support", "FAQs and contacting the outlet", () => setAcctPanel("help"))}
             </div>
             <div className="acct-sec">{t("orderHistory", "Order history")}</div>
             <div className="order-hist">
               {!member ? (
-                last ? <a className="acct-row" href={`#/shop/order/${last}`}><span className="aic"><Icon name="ticket" size={21} /></span><span className="at">View my last order<span className="ad">See its status and items</span></span><span className="chev"><Icon name="chevR" size={16} /></span></a> : <p className="e2e-sub" style={{ textAlign: "left" }}>Sign in to see your past orders.</p>
+                last ? <a className="acct-row" href={`#/shop/order/${last}`}><span className="aic"><Icon name="ticket" size={21} /></span><span className="at">{tx("View my last order")}<span className="ad">{tx("See its status and items")}</span></span><span className="chev"><Icon name="chevR" size={16} /></span></a> : <p className="e2e-sub" style={{ textAlign: "left" }}>{tx("Sign in to see your past orders.")}</p>
               ) : history === null ? (
-                <p className="e2e-sub" style={{ textAlign: "left" }}>Loading…</p>
+                <p className="e2e-sub" style={{ textAlign: "left" }}>{tx("Loading…")}</p>
               ) : history.length === 0 ? (
-                <p className="e2e-sub" style={{ textAlign: "left" }}>No orders yet.</p>
+                <p className="e2e-sub" style={{ textAlign: "left" }}>{tx("No orders yet.")}</p>
               ) : (
                 history.map((o) => (
                   <a key={o.orderId} className="acct-row" href={`#/shop/order/${o.orderId}`}>
                     <span className="aic"><Icon name="ticket" size={21} /></span>
-                    <span className="at">{o.queueNumber} — {o.channelName ?? "Order"}<span className="ad">{STATUS_TEXT[o.status].title.split(":")[0]} · {new Date(o.at).toLocaleDateString()} · {o.itemCount} item{o.itemCount === 1 ? "" : "s"}</span></span>
+                    <span className="at">{o.queueNumber} — {o.channelName ?? tx("Order")}<span className="ad">{STATUS_TEXT[o.status].title.split(":")[0]} · {new Date(o.at).toLocaleDateString()} · {tx(o.itemCount === 1 ? "{n} item" : "{n} items", { n: o.itemCount })}</span></span>
                     <span className="v" style={{ fontWeight: 700 }}>{formatMoney(o.totalCents)}</span>
                   </a>
                 ))
@@ -797,6 +916,40 @@ function Menu({ info, catalog, config, loginError }: { info: Info; catalog: Cata
     </>
   );
 
+  /* ================= Points editor ================= */
+  const pVal = Math.max(minPts, Math.min(reqPts ?? maxPts, maxPts));
+  const pPct = maxPts > minPts ? Math.round(((pVal - minPts) / (maxPts - minPts)) * 100) : 100;
+  const choosePts = (n: number) => {
+    if (!Number.isFinite(n)) return;
+    const v = Math.max(minPts, Math.min(Math.round(n), maxPts));
+    setPointsPts(v >= maxPts ? null : v);
+    setAgreed(null);
+  };
+  const pointsEditor = pEdit && pointsAsk && maxPts > 0 && (
+    <div className="popup-back" onClick={(e) => { if (e.target === e.currentTarget) setPEdit(false); }}>
+      <div className="popup-wrap">
+        <div className="popup-card" role="dialog" aria-modal="true">
+          <h3>{t("redeemTitle", "Redeem points")}</h3>
+          <p className="lead">{t("redeemLead2", "Slide to choose how many points to use on this order.")}</p>
+          <div className="popup-rows">
+            <div className="popup-row"><span className="k">{t("yourBalance", "Your balance")}</span><span className="v">{member!.pointsBalance.toLocaleString()} {t("points", "points")}</span></div>
+            <div className="popup-row"><span className="k">{t("maxClaim", "Most this order can use")}</span><span className="v">{maxPts.toLocaleString()} {t("points", "points")}</span></div>
+          </div>
+          <p className="hist-note" style={{ margin: "6px 0 8px" }}>{t("redeemNote2", "100 points = S$1 off. Any points you don't use stay in your balance.")}</p>
+          <div className="pedit-slider-box">
+            <span className="pedit-val"><span className="n">{pVal.toLocaleString()} {t("points", "points")}</span><br /><span className="d">= {formatMoney(pVal)} {t("offOrder", "off this order")}</span></span>
+            <input type="range" className="pedit-slider" min={minPts} max={maxPts} step={1} value={pVal} onChange={(e) => choosePts(Number(e.target.value))} style={{ background: `linear-gradient(90deg,var(--orange) ${pPct}%,#e9dec9 ${pPct}%)` }} aria-label={t("redeemSliderAria", "Points to redeem")} />
+            <div className="pedit-scale"><span>{minPts.toLocaleString()}</span><span>{t("maxW", "Max")} {maxPts.toLocaleString()}</span></div>
+          </div>
+          <button className="pedit-all" aria-expanded={pEditAmt} onClick={() => setPEditAmt(!pEditAmt)}>{t("editAmount", "Type an exact amount")}</button>
+          {pEditAmt && <div className="pedit-amt-row"><input className="qty-input" type="number" inputMode="numeric" min={minPts} max={maxPts} step={1} value={pVal} onChange={(e) => choosePts(Number(e.target.value))} aria-label={t("redeemExactAria", "Exact points to redeem")} /><span className="pedit-amt-unit">{t("points", "points")} · = {formatMoney(pVal)} {t("offShort", "off")}</span></div>}
+          <button className="pedit-all" onClick={() => { setPointsPts(null); setAgreed(null); }}>{t("redeemMax", "Use the most")} · {maxPts.toLocaleString()} {t("points", "points")}</button>
+          <button className="popup-close" onClick={() => setPEdit(false)}>{t("done", "Done")}</button>
+        </div>
+      </div>
+    </div>
+  );
+
   /* ================= Bag ================= */
   const bagScreen = (
     <>
@@ -804,7 +957,7 @@ function Menu({ info, catalog, config, loginError }: { info: Info; catalog: Cata
         {header(true)}
         {seg}
         <div className="title-row">
-          <button className="back-btn" onClick={() => setScreen("order")} aria-label="Back"><Icon name="chevL" size={20} /></button>
+          <button className="back-btn" onClick={() => setScreen("order")} aria-label={tx("Back")}><Icon name="chevL" size={20} /></button>
           <h2 className="page-title">{t("yourBag", "Your bag")}</h2>
           <span className="table-tag tag-with-icon"><Icon name={dine ? "table" : "bag"} size={15} />{spotText}</span>
           {confirmClear ? (
@@ -822,7 +975,8 @@ function Menu({ info, catalog, config, loginError }: { info: Info; catalog: Cata
           if (!v) return null;
           const img = photo(v.m);
           return (
-            <div className="bag-card" key={l.key}>
+            <SwipeRow key={l.key} label={v.m.name} onRemove={() => setBag(bag.filter((x) => x.key !== l.key))}>
+            <div className="bag-card">
               {img ? <img className="bag-photo" src={img} alt={v.m.name} /> : <span className="bag-photo-ph"><Icon name="paw" size={26} /></span>}
               <div className="bag-copy2">
                 <h3 className="bag-name">{v.m.name}</h3>
@@ -831,6 +985,7 @@ function Menu({ info, catalog, config, loginError }: { info: Info; catalog: Cata
               </div>
               <div className="sc-act"><span className="sc-step"><button className="minus" aria-label={`Fewer ${v.m.name}`} onClick={() => bump(l, -1)}>−</button><b>{l.qty}</b><button className="plus" aria-label={`More ${v.m.name}`} onClick={() => bump(l, 1)}>+</button></span></div>
             </div>
+            </SwipeRow>
           );
         })}
         {quote?.ok && bag.length > 0 && (
@@ -842,7 +997,7 @@ function Menu({ info, catalog, config, loginError }: { info: Info; catalog: Cata
               <div className="reward-slots">
                 <div className="reward-slot">
                   <span className="ric" style={{ color: "var(--orange-dark)" }}><Icon name="stack" size={26} /></span>
-                  <span className="reward-copy slot-scroll"><span className="t">{earnPts > 0 ? `Sign up to earn ${earnPts.toLocaleString()} points on this order` : "Sign up to earn points on this order"}</span><span className="d">Members earn points on every order and redeem them for money off. Sign up free to start earning.</span></span>
+                  <span className="reward-copy slot-scroll"><span className="t">{earnPts > 0 ? tx("Sign up to earn {n} points on this order", { n: earnPts.toLocaleString() }) : tx("Sign up to earn points on this order")}</span><span className="d">{tx("Members earn points on every order and redeem them for money off. Sign up free to start earning.")}</span></span>
                   <span className="slot-actions"><button className="slot-act" onClick={() => setScreen("login")}>{t("signUpBtn", "Sign up")}</button></span>
                 </div>
               </div>
@@ -856,20 +1011,21 @@ function Menu({ info, catalog, config, loginError }: { info: Info; catalog: Cata
               {quote.priced.bcrs > 0 && <div className="row"><span>{t("bcrsDeposit", "BCRS Deposit")}</span><span className="v">{formatMoney(quote.priced.bcrs)}</span></div>}
               <div className="row grand"><span>{t("total", "Total")}</span><span className="v">{formatMoney(shownTotal)}</span></div>
             </div>
-            <div className="stamp-note"><span style={{ display: "flex", color: "var(--ink)" }}><Icon name="gift" size={27} /></span><span><span className="t">{t("stampNoteT", "1 stamp after confirmed payment")}</span><br /><span className="d">You'll earn 1 stamp for this order.</span></span></div>
+            <div className="stamp-note"><span style={{ display: "flex", color: "var(--ink)" }}><Icon name="gift" size={27} /></span><span><span className="t">{t("stampNoteT", "1 stamp after confirmed payment")}</span><br /><span className="d">{tx("You'll earn 1 stamp for this order.")}</span></span></div>
           </>
         )}
-        <button className={`review-cta ${bag.length === 0 ? "off" : ""}`} disabled={bag.length === 0 || !quote?.ok} onClick={() => setScreen("summary")}>
-          <Icon name="bag" size={19} /><span>Review order · {count} item{count === 1 ? "" : "s"}</span><span className="div" /><span>{formatMoney(shownTotal)}</span><Icon name="arrowR" size={19} />
+        <button className={`review-cta ${bag.length === 0 ? tx("off") : ""}`} disabled={bag.length === 0 || !quote?.ok} onClick={() => setScreen("summary")}>
+          <Icon name="bag" size={19} /><span>{tx(count === 1 ? "Review order · {n} item" : "Review order · {n} items", { n: count })}</span><span className="div" /><span>{formatMoney(shownTotal)}</span><Icon name="arrowR" size={19} />
         </button>
       </div>
+      {pointsEditor}
     </>
   );
 
   /* ================= Order summary ================= */
   const summaryScreen = quote?.ok ? (
     <>
-      {pageHead("Order Summary")}
+      {pageHead(tx("Order Summary"))}
       <div className="e2e-scroll shop-body">
         {back("Back to bag", "bag")}
         {noteEl}
@@ -879,17 +1035,17 @@ function Menu({ info, catalog, config, loginError }: { info: Info; catalog: Cata
           {totalsRows(quote)}
         </div>
         <div className="e2e-card">
-          <h3>Voucher &amp; payment</h3>
-          <button className="sum-link-row" onClick={() => setWallet(true)}><span className="sl-ic"><Icon name="ticket" size={21} /></span><span className="sl-t">{t("voucher", "Voucher")}<span className="sl-d">Coupons &amp; vouchers from your wallet</span></span><span className="sl-v">{chosen && chosenOk ? chosen.title : "None applied"}</span><span className="chev"><Icon name="chevR" size={16} /></span></button>
-          <button className="sum-link-row" onClick={() => setScreen("payment")}><span className="sl-ic"><Icon name="card" size={21} /></span><span className="sl-t">{t("payMethodW", "Payment method")}<span className="sl-d">Chosen at the payment step</span></span><span className="sl-v">{t("chooseLater", "Choose later")}</span><span className="chev"><Icon name="chevR" size={16} /></span></button>
-          <div className="sum-link-row" style={{ cursor: "default" }}><span className="sl-ic"><Icon name="pin" size={21} /></span><span className="sl-t">{dine ? `${channel?.name} · ${spot || "no table yet"}` : `${channel?.name} · Pickup counter`}<span className="sl-d">{info.outletName}</span></span></div>
+          <h3>{tx("Voucher & payment")}</h3>
+          <button className="sum-link-row" onClick={() => setWallet(true)}><span className="sl-ic"><Icon name="ticket" size={21} /></span><span className="sl-t">{t("voucher", "Voucher")}<span className="sl-d">{tx("Coupons & vouchers from your wallet")}</span></span><span className="sl-v">{chosen && chosenOk ? chosen.title : "None applied"}</span><span className="chev"><Icon name="chevR" size={16} /></span></button>
+          <button className="sum-link-row" onClick={() => setScreen("payment")}><span className="sl-ic"><Icon name="card" size={21} /></span><span className="sl-t">{t("payMethodW", "Payment method")}<span className="sl-d">{tx("Chosen at the payment step")}</span></span><span className="sl-v">{t("chooseLater", "Choose later")}</span><span className="chev"><Icon name="chevR" size={16} /></span></button>
+          <div className="sum-link-row" style={{ cursor: "default" }}><span className="sl-ic"><Icon name="pin" size={21} /></span><span className="sl-t">{dine ? `${channel?.name} · ${spot || tx("no table yet")}` : `${channel?.name} · Pickup counter`}<span className="sl-d">{info.outletName}</span></span></div>
         </div>
         {detailsCard}
         {dine && !spot && (
-          <div className="e2e-card"><h3>{t("typeTableW", "Table")}</h3><div className="e2e-field"><label htmlFor="sum-table">Table number</label><input className="e2e-input" id="sum-table" value={spot} maxLength={30} placeholder="e.g. Table 12" onChange={(e) => setSpot(e.target.value)} /></div></div>
+          <div className="e2e-card"><h3>{t("typeTableW", "Table")}</h3><div className="e2e-field"><label htmlFor="sum-table">{tx("Table number")}</label><input className="e2e-input" id="sum-table" value={spot} maxLength={30} placeholder={tx("e.g. Table 12")} onChange={(e) => setSpot(e.target.value)} /></div></div>
         )}
         {!member && (
-          <div className="summary-guest-row" role="group" aria-label="Sign up or check out as guest">
+          <div className="summary-guest-row" role="group" aria-label={tx("Sign up or check out as guest")}>
             <button className="summary-signup-btn" onClick={() => setScreen("login")}><span>{t("signUpBtn", "Sign up")}</span></button>
             <button className="summary-guest-btn" aria-pressed={guestOk} onClick={() => setGuestForm(true)}><span>{t("checkoutGuest", "Check out as guest")}</span></button>
           </div>
@@ -897,16 +1053,16 @@ function Menu({ info, catalog, config, loginError }: { info: Info; catalog: Cata
         {(member ? !phoneOk : guestForm) && (
           <div className="e2e-card guest-inline">
             <h3>{t("beforeOrder", "Before you order")}</h3>
-            <p className="e2e-sub" style={{ textAlign: "left", margin: 0 }}>Enter your phone number to place this order. For takeaway, your <b>collection number comes from this number</b> — watch for it on the counter screen.</p>
-            <div className="e2e-field"><label htmlFor="g-name">Name (optional)</label><input className="e2e-input" id="g-name" value={name} maxLength={40} autoComplete="name" onChange={(e) => setName(e.target.value)} /></div>
-            <div className="e2e-field"><label htmlFor="g-phone">{t("phoneReq", "Phone number (required)")}</label><input className="e2e-input" id="g-phone" type="tel" inputMode="tel" value={phone} maxLength={20} placeholder="e.g. +65 9123 4567" autoComplete="tel" onChange={(e) => setPhone(e.target.value)} /></div>
-            {phone !== "" && !phoneOk && <p className="login-err" role="alert">That number doesn't look right.</p>}
+            <p className="e2e-sub" style={{ textAlign: "left", margin: 0 }}>{tx("Enter your phone number to place this order. For takeaway, your")} <b>{tx("collection number comes from this number")}</b> {tx("— watch for it on the counter screen.")}</p>
+            <div className="e2e-field"><label htmlFor="g-name">{tx("Name (optional)")}</label><input className="e2e-input" id="g-name" value={name} maxLength={40} autoComplete="name" onChange={(e) => setName(e.target.value)} /></div>
+            <div className="e2e-field"><label htmlFor="g-phone">{t("phoneReq", "Phone number (required)")}</label><input className="e2e-input" id="g-phone" type="tel" inputMode="tel" value={phone} maxLength={20} placeholder={tx("e.g. +65 9123 4567")} autoComplete="tel" onChange={(e) => setPhone(e.target.value)} /></div>
+            {phone !== "" && !phoneOk && <p className="login-err" role="alert">{tx("That number doesn't look right.")}</p>}
             {!member && <button className="e2e-cta" disabled={!phoneOk} onClick={() => { setGuestOk(true); setGuestForm(false); }}><span>{t("continueW", "Continue")}</span><Icon name="arrowR" size={19} /></button>}
           </div>
         )}
         {!member && guestOk && <p className="e2e-note">{t("guestNoPoints", "Continuing as guest — no points will be earned on this order.")}</p>}
-        <button className={`e2e-cta ${canOrder && (!dine || !!spot) ? "" : "off"}`} disabled={!canOrder || (dine && !spot)} onClick={() => setScreen("checkout")}>
-          <span>Order Now · {count} item{count === 1 ? "" : "s"}</span><span>{formatMoney(shownTotal)}</span>
+        <button className={`e2e-cta ${canOrder && (!dine || !!spot) ? "" : tx("off")}`} disabled={!canOrder || (dine && !spot)} onClick={() => setScreen("checkout")}>
+          <span>{tx(count === 1 ? "Order Now · {n} item" : "Order Now · {n} items", { n: count })}</span><span>{formatMoney(shownTotal)}</span>
         </button>
         {!canOrder && <p className="e2e-sub">{member ? "Add your phone number to place this order." : "Tap Sign up, or Check out as guest, to place this order."}</p>}
       </div>
@@ -916,11 +1072,11 @@ function Menu({ info, catalog, config, loginError }: { info: Info; catalog: Cata
   /* ================= Checkout ================= */
   const checkoutScreen = quote?.ok ? (
     <>
-      {pageHead("Checkout")}
+      {pageHead(tx("Checkout"))}
       <div className="e2e-scroll shop-body">
         {back("Back to order summary", "summary")}
         <div className="e2e-card"><h3>{t("orderSummaryCard", "Order summary")}</h3>{itemRows(false)}</div>
-        <div className="e2e-card"><h3>Charges &amp; rewards</h3>{totalsRows(quote)}</div>
+        <div className="e2e-card"><h3>{tx("Charges & rewards")}</h3>{totalsRows(quote)}</div>
         {detailsCard}
         <button className="e2e-cta" onClick={() => setScreen("payment")}><span>{t("jumpPay", "Proceed to payment")}</span><span>{formatMoney(shownTotal)}</span></button>
       </div>
@@ -930,12 +1086,12 @@ function Menu({ info, catalog, config, loginError }: { info: Info; catalog: Cata
   /* ================= Payment ================= */
   const paymentScreen = quote?.ok ? (
     <>
-      {pageHead("Payment")}
+      {pageHead(tx("Payment"))}
       <div className="e2e-scroll shop-body">
         {busy ? (
           <>
             <div className="spinner" aria-hidden="true" />
-            <h2 className="e2e-title" style={{ fontSize: 21 }}>Placing your order…</h2>
+            <h2 className="e2e-title" style={{ fontSize: 21 }}>{tx("Placing your order…")}</h2>
             <p className="e2e-sub">{t("processingD", "Please wait — do not close this screen.")}</p>
           </>
         ) : (
@@ -1018,7 +1174,7 @@ function Login({ info, welcome, loginError, onGuest, onDone }: { info: Info; wel
   };
   const { google, microsoft, phone: phoneOn } = info.auth;
   const provider = (p: "google" | "microsoft", on: boolean, label: string) => {
-    if (!on) return setErr(`${label} sign-in isn't set up for this shop yet. Please use Email, or continue as guest.`);
+    if (!on) return setErr(tx("{label} sign-in isn't set up for this shop yet. Please use Email, or continue as guest.", { label }));
     location.href = `/api/shop/auth/oauth/${p}/start`;
   };
 
@@ -1034,7 +1190,7 @@ function Login({ info, welcome, loginError, onGuest, onDone }: { info: Info; wel
         if (j.devCode) setCode(j.devCode); // only outside production, where no email is sent yet
       }
     } catch {
-      setErr("No connection. Please try again.");
+      setErr(tx("No connection. Please try again."));
     } finally {
       setBusy(false);
     }
@@ -1046,9 +1202,9 @@ function Login({ info, welcome, loginError, onGuest, onDone }: { info: Info; wel
       const r = await post("/api/shop/auth/email/verify", { email, code, name: mode === "signup" ? name : "" });
       const j = (await r.json().catch(() => ({}))) as { token?: string };
       if (r.ok && j.token) finish(j.token);
-      else setErr("That code didn't work. Check it and try again, or ask for a new one.");
+      else setErr(tx("That code didn't work. Check it and try again, or ask for a new one."));
     } catch {
-      setErr("No connection. Please try again.");
+      setErr(tx("No connection. Please try again."));
     } finally {
       setBusy(false);
     }
@@ -1064,9 +1220,9 @@ function Login({ info, welcome, loginError, onGuest, onDone }: { info: Info; wel
       if (r.ok && j.id) {
         setSms({ id: j.id, code: j.code!, to: j.to!, left: j.expiresInSeconds ?? 300 });
         setView("sms");
-      } else setErr(r.status === 429 ? "Too many tries. Please wait a few minutes." : "That number doesn't look right.");
+      } else setErr(r.status === 429 ? "Too many tries. Please wait a few minutes." : tx("That number doesn't look right."));
     } catch {
-      setErr("No connection. Please try again.");
+      setErr(tx("No connection. Please try again."));
     } finally {
       setBusy(false);
     }
@@ -1092,7 +1248,7 @@ function Login({ info, welcome, loginError, onGuest, onDone }: { info: Info; wel
     };
   }, [view, sms?.id]);
 
-  const back = <button className="e2e-back" onClick={() => { setView("home"); setErr(null); }}><Icon name="chevL" size={16} /> All sign-in options</button>;
+  const back = <button className="e2e-back" onClick={() => { setView("home"); setErr(null); }}><Icon name="chevL" size={16} /> {tx("All sign-in options")}</button>;
   const clock = (s: number) => `${Math.floor(s / 60)}:${String(s % 60).padStart(2, "0")}`;
 
   return (
@@ -1102,7 +1258,7 @@ function Login({ info, welcome, loginError, onGuest, onDone }: { info: Info; wel
         <>
           <div className="login-done"><Icon name="check" size={30} /></div>
           <h3 className="login-done-t">{mode === "signup" && view !== "sms" ? "Account created" : "Signed in"}</h3>
-          <p className="e2e-sub">Taking you in…</p>
+          <p className="e2e-sub">{tx("Taking you in…")}</p>
         </>
       ) : (
         <>
@@ -1110,14 +1266,14 @@ function Login({ info, welcome, loginError, onGuest, onDone }: { info: Info; wel
           <p className="e2e-sub">Sign in to order at {info.name} · {info.outletName}</p>
           {view === "home" && (
             <>
-              <div className="login-icons" role="group" aria-label="Sign-in options">
-                <button className="login-icon-btn" onClick={() => provider("google", google, "Google")} aria-label="Continue with Google"><span className="g-mark">G</span><span className="li-cap">Google</span></button>
-                <button className="login-icon-btn" onClick={() => provider("microsoft", microsoft, "Microsoft")} aria-label="Continue with Microsoft"><span className="ms-grid"><i style={{ background: "#f25022" }} /><i style={{ background: "#7fba00" }} /><i style={{ background: "#00a4ef" }} /><i style={{ background: "#ffb900" }} /></span><span className="li-cap">Microsoft</span></button>
-                <button className="login-icon-btn" onClick={() => { setErr(null); setView("email"); }} aria-label="Continue with email"><span className="li-mail"><Icon name="mail" size={26} /></span><span className="li-cap">{t("emailW", "Email")}</span></button>
+              <div className="login-icons" role="group" aria-label={tx("Sign-in options")}>
+                <button className="login-icon-btn" onClick={() => provider("google", google, "Google")} aria-label={tx("Continue with Google")}><span className="g-mark">G</span><span className="li-cap">Google</span></button>
+                <button className="login-icon-btn" onClick={() => provider("microsoft", microsoft, "Microsoft")} aria-label={tx("Continue with Microsoft")}><span className="ms-grid"><i style={{ background: "#f25022" }} /><i style={{ background: "#7fba00" }} /><i style={{ background: "#00a4ef" }} /><i style={{ background: "#ffb900" }} /></span><span className="li-cap">Microsoft</span></button>
+                <button className="login-icon-btn" onClick={() => { setErr(null); setView("email"); }} aria-label={tx("Continue with email")}><span className="li-mail"><Icon name="mail" size={26} /></span><span className="li-cap">{t("emailW", "Email")}</span></button>
               </div>
-              <button className="login-btn" style={{ marginTop: 12 }} onClick={() => (phoneOn ? (setErr(null), setView("phone")) : setErr("Phone sign-in isn't set up for this shop yet. Please use Email, or continue as guest."))}><span className="lb-ic" style={{ color: "var(--orange-dark)" }}><Icon name="phone" size={24} /></span><span>{t("phoneNumT", "Phone number")}<span className="lb-sub">{t("phoneSub", "Verify by sending an SMS from your phone")}</span></span></button>
+              <button className="login-btn" style={{ marginTop: 12 }} onClick={() => (phoneOn ? (setErr(null), setView("phone")) : setErr(tx("Phone sign-in isn't set up for this shop yet. Please use Email, or continue as guest.")))}><span className="lb-ic" style={{ color: "var(--orange-dark)" }}><Icon name="phone" size={24} /></span><span>{t("phoneNumT", "Phone number")}<span className="lb-sub">{t("phoneSub", "Verify by sending an SMS from your phone")}</span></span></button>
               {err && <p className="login-err" role="alert">{err}</p>}
-              <button className="login-btn" style={{ marginTop: 12 }} onClick={onGuest}><span className="lb-ic" style={{ color: "var(--orange-dark)" }}><Icon name="bag" size={24} /></span><span>{t("guestCta", "Continue as guest")}<span className="lb-sub">Browse &amp; order as guest — sign-up (or guest checkout) is asked at Order Summary</span></span></button>
+              <button className="login-btn" style={{ marginTop: 12 }} onClick={onGuest}><span className="lb-ic" style={{ color: "var(--orange-dark)" }}><Icon name="bag" size={24} /></span><span>{t("guestCta", "Continue as guest")}<span className="lb-sub">{tx("Browse & order as guest — sign-up (or guest checkout) is asked at Order Summary")}</span></span></button>
             </>
           )}
           {view === "email" && (
@@ -1125,7 +1281,7 @@ function Login({ info, welcome, loginError, onGuest, onDone }: { info: Info; wel
               {back}
               <div className="e2e-card" style={{ marginTop: 2 }}>
                 <h3>{mode === "signup" ? "Sign up with email" : "Login with email"}</h3>
-                <div className="login-seg" role="group" aria-label="Email login or sign up">
+                <div className="login-seg" role="group" aria-label={tx("Email login or sign up")}>
                   <button aria-pressed={mode === "login"} onClick={() => setMode("login")}>{t("signInW", "Sign in")}</button>
                   <button aria-pressed={mode === "signup"} onClick={() => setMode("signup")}>{t("signUpBtn", "Sign up")}</button>
                 </div>
@@ -1133,7 +1289,7 @@ function Login({ info, welcome, loginError, onGuest, onDone }: { info: Info; wel
                 <div className="e2e-field"><label htmlFor="em-email">{t("emailW", "Email")}</label><input className="e2e-input" id="em-email" type="email" inputMode="email" value={email} maxLength={120} placeholder="you@example.com" autoComplete="email" onChange={(e) => setEmail(e.target.value)} /></div>
                 {err && <p className="login-err" role="alert">{err}</p>}
                 <button className="e2e-cta" disabled={busy || !email.includes("@")} onClick={() => void start()}><span>{busy ? "Sending…" : "Send OTP"}</span><Icon name="arrowR" size={19} /></button>
-                <p className="e2e-note">We'll send a one-time code to your email so you can enter it back here.{mode === "signup" ? ` New members get ${welcome} points.` : ""}</p>
+                <p className="e2e-note">{tx("We'll send a one-time code to your email so you can enter it back here.")}{mode === "signup" ? tx(" New members get {n} points.", { n: welcome }) : ""}</p>
               </div>
             </>
           )}
@@ -1154,7 +1310,7 @@ function Login({ info, welcome, loginError, onGuest, onDone }: { info: Info; wel
               {back}
               <div className="e2e-card" style={{ marginTop: 2 }}>
                 <h3>{t("phoneNumT", "Phone number")}</h3>
-                <p className="e2e-sub" style={{ textAlign: "left", margin: 0 }}>We verify your number by having you send us a short text from it. No code is sent to you.</p>
+                <p className="e2e-sub" style={{ textAlign: "left", margin: 0 }}>{tx("We verify your number by having you send us a short text from it. No code is sent to you.")}</p>
                 <div className="e2e-field"><label htmlFor="ph-num">{t("mobileNum", "Mobile number")}</label>
                   <div className="phone-row">
                     <select className="cc-select" id="ph-cc" value={cc} aria-label="Country code" onChange={(e) => setCc(e.target.value)}>{COUNTRIES.map(([d, , n]) => <option key={n} value={d}>+{d} {n}</option>)}</select>
@@ -1170,21 +1326,21 @@ function Login({ info, welcome, loginError, onGuest, onDone }: { info: Info; wel
             <>
               {back}
               <div className="e2e-card" style={{ marginTop: 2 }}>
-                <h3 style={{ textAlign: "center" }}>Verify by SMS</h3>
-                <p className="sms-step">1. Using the number <b>+{fullPhone}</b></p>
-                <p className="sms-step">2. Send the message <span className="sms-code">{sms.code}</span> to <b>{sms.to}</b></p>
+                <h3 style={{ textAlign: "center" }}>{tx("Verify by SMS")}</h3>
+                <p className="sms-step">{tx("1. Using the number")} <b>+{fullPhone}</b></p>
+                <p className="sms-step">{tx("2. Send the message")} <span className="sms-code">{sms.code}</span> to <b>{sms.to}</b></p>
                 {sms.left > 0 ? (
                   <>
-                    <p className="sms-exp">This code will expire in <span className="sms-count">{clock(sms.left)}</span></p>
-                    <a className="e2e-cta" style={{ textDecoration: "none" }} href={`sms:${sms.to.replace(/\s/g, "")}?&body=${sms.code}`}><span>Send from this device</span></a>
-                    <p className="e2e-note">Waiting for your text… this page signs you in the moment it arrives.</p>
+                    <p className="sms-exp">{tx("This code will expire in")} <span className="sms-count">{clock(sms.left)}</span></p>
+                    <a className="e2e-cta" style={{ textDecoration: "none" }} href={`sms:${sms.to.replace(/\s/g, "")}?&body=${sms.code}`}><span>{tx("Send from this device")}</span></a>
+                    <p className="e2e-note">{tx("Waiting for your text… this page signs you in the moment it arrives.")}</p>
                     {info.auth.phone?.simulated && (
                       <button className="login-btn" style={{ justifyContent: "center", marginTop: 10 }} onClick={() => void post("/api/shop/auth/phone/simulate", { phone: fullPhone, code: sms.code })}><span>Developer: pretend the text arrived</span></button>
                     )}
                   </>
                 ) : (
                   <>
-                    <p className="login-err" role="alert">That code has expired.</p>
+                    <p className="login-err" role="alert">{tx("That code has expired.")}</p>
                     <button className="e2e-cta" onClick={() => void startSms()}><span>{t("genNewCode", "Generate a new code")}</span><Icon name="arrowR" size={19} /></button>
                   </>
                 )}
@@ -1207,12 +1363,12 @@ function Status({ orderId, info }: { orderId: string; info: Info }) {
   const load = async () => {
     try {
       const res = await fetch(`/api/shop/orders/${orderId}`);
-      if (res.status === 404) return setProblem("We can't find that order.");
-      if (!res.ok) return setProblem("Couldn't refresh. Retrying…");
+      if (res.status === 404) return setProblem(tx("We can't find that order."));
+      if (!res.ok) return setProblem(tx("Couldn't refresh. Retrying…"));
       setO((await res.json()) as OrderView);
       setProblem(null);
     } catch {
-      setProblem("No connection. Retrying…");
+      setProblem(tx("No connection. Retrying…"));
     }
   };
   useEffect(() => {
@@ -1232,7 +1388,7 @@ function Status({ orderId, info }: { orderId: string; info: Info }) {
     setConfirmCancel(false);
     setWorking(false);
     if (r?.ok) await load();
-    else setProblem("This order can no longer be cancelled.");
+    else setProblem(tx("This order can no longer be cancelled."));
   }
   async function pay(method: "card" | "paynow") {
     setWorking(true);
@@ -1241,12 +1397,12 @@ function Status({ orderId, info }: { orderId: string; info: Info }) {
       .catch(() => ({}) as { url?: string });
     setWorking(false);
     if (j.url) location.href = j.url;
-    else setProblem("Online payment isn't available right now. You can pay at the counter.");
+    else setProblem(tx("Online payment isn't available right now. You can pay at the counter."));
   }
 
   const goBack = () => { location.hash = "#/shop"; };
   const head = <div className="shop-headwrap"><h2 className="page-title" style={{ padding: "14px 16px 10px" }}>{t("orderStatusW", "Order status")}</h2></div>;
-  if (!o) return <>{head}<div className="e2e-scroll shop-body"><button className="e2e-back" onClick={goBack}><Icon name="chevL" size={16} /> Back</button><p className="e2e-sub">{problem ?? "Loading your order…"}</p></div></>;
+  if (!o) return <>{head}<div className="e2e-scroll shop-body"><button className="e2e-back" onClick={goBack}><Icon name="chevL" size={16} /> {tx("Back")}</button><p className="e2e-sub">{problem ?? "Loading your order…"}</p></div></>;
   const text = STATUS_TEXT[o.status];
   const step = STEPS.indexOf(o.status);
   const cancelled = o.status === "cancelled";
@@ -1255,13 +1411,13 @@ function Status({ orderId, info }: { orderId: string; info: Info }) {
     <>
       {head}
       <div className="e2e-scroll shop-body">
-        <button className="e2e-back" onClick={goBack}><Icon name="chevL" size={16} /> Back</button>
-        <p className="e2e-sub" style={{ marginTop: 2 }}>{cancelled ? "Order cancelled" : paid ? "Payment successful" : "Order sent"}</p>
+        <button className="e2e-back" onClick={goBack}><Icon name="chevL" size={16} /> {tx("Back")}</button>
+        <p className="e2e-sub" style={{ marginTop: 2 }}>{cancelled ? tx("Order cancelled") : paid ? "Payment successful" : tx("Order sent")}</p>
         <div className="status-coll-label">{t("collectionNo", "Collection number")}</div>
-        <div className="status-headline" aria-label={`Your number is ${o.queueNumber}`}>{o.queueNumber}</div>
+        <div className="status-headline" aria-label={tx("Your number is {n}", { n: o.queueNumber })}>{o.queueNumber}</div>
         <p className="status-coll-hint">Your collection number is {o.queueNumber} — watch for it on the counter screen</p>
         <div className="status-order-row">
-          <span className="status-order-line">Order <span className="status-id">{o.orderId}</span></span>
+          <span className="status-order-line">{tx("Order")} <span className="status-id">{o.orderId}</span></span>
           <button className="copy-id-btn" onClick={() => { void navigator.clipboard?.writeText(o.orderId).then(() => setCopied(true)).catch(() => undefined); }}><Icon name="ticket" size={15} />{copied ? "ORDER ID copied" : "Copy ORDER ID"}</button>
         </div>
         {o.channelName && <p className="e2e-sub">{o.channelName}</p>}
@@ -1275,20 +1431,20 @@ function Status({ orderId, info }: { orderId: string; info: Info }) {
                 return (
                   <div key={s} className={`status-step ${cls}`}>
                     <span className="dot">{idx < step ? "✓" : idx + 1}</span>
-                    <span><span className="st-t">{STATUS_TEXT[s].title.split(":")[0]}</span><br /><span className="st-d">{idx === step ? text.body(o) : idx < step ? "Done" : "—"}</span></span>
+                    <span><span className="st-t">{STATUS_TEXT[s].title.split(":")[0]}</span><br /><span className="st-d">{idx === step ? text.body(o) : idx < step ? t("done", "Done") : "—"}</span></span>
                   </div>
                 );
               })}
             </div>
-            <p className="e2e-note" style={{ marginTop: 2 }}>Status updates automatically.</p>
+            <p className="e2e-note" style={{ marginTop: 2 }}>{tx("Status updates automatically.")}</p>
           </div>
         )}
         {!cancelled && o.canPayOnline && info.payments.online && (
           <div className="e2e-card">
-            <h3>Pay now</h3>
+            <h3>{tx("Pay now")}</h3>
             <p className="e2e-sub" style={{ textAlign: "left", margin: 0 }}>{formatMoney(o.totalCents - o.paidCents)} to pay. Or pay at the counter.</p>
-            <button className="e2e-cta" disabled={working} onClick={() => void pay("card")}><span>Pay by card</span><Icon name="card" size={19} /></button>
-            <button className="e2e-cta queue-btn" disabled={working} onClick={() => void pay("paynow")}><span>Pay with PayNow</span><Icon name="stack" size={19} /></button>
+            <button className="e2e-cta" disabled={working} onClick={() => void pay("card")}><span>{tx("Pay by card")}</span><Icon name="card" size={19} /></button>
+            <button className="e2e-cta queue-btn" disabled={working} onClick={() => void pay("paynow")}><span>{tx("Pay with PayNow")}</span><Icon name="stack" size={19} /></button>
           </div>
         )}
         <div className="e2e-card">
@@ -1300,16 +1456,16 @@ function Status({ orderId, info }: { orderId: string; info: Info }) {
         </div>
         {o.canCancel && (confirmCancel ? (
           <div className="e2e-card" style={{ borderColor: "#f2c4b8" }}>
-            <h3>Cancel this order?</h3>
-            <p className="e2e-sub" style={{ textAlign: "left", margin: 0 }}>Points or a coupon you used will be returned.</p>
-            <button className="login-btn" disabled={working} style={{ justifyContent: "center", color: "#b03a26", borderColor: "#f2c4b8" }} onClick={() => void cancel()}><span>Yes, cancel my order</span></button>
-            <button className="login-btn" style={{ justifyContent: "center", marginTop: 8 }} onClick={() => setConfirmCancel(false)}><span>Keep my order</span></button>
+            <h3>{tx("Cancel this order?")}</h3>
+            <p className="e2e-sub" style={{ textAlign: "left", margin: 0 }}>{tx("Points or a coupon you used will be returned.")}</p>
+            <button className="login-btn" disabled={working} style={{ justifyContent: "center", color: "#b03a26", borderColor: "#f2c4b8" }} onClick={() => void cancel()}><span>{tx("Yes, cancel my order")}</span></button>
+            <button className="login-btn" style={{ justifyContent: "center", marginTop: 8 }} onClick={() => setConfirmCancel(false)}><span>{tx("Keep my order")}</span></button>
           </div>
         ) : (
           <button className="login-btn" style={{ justifyContent: "center", color: "#b03a26", borderColor: "#f2c4b8", marginTop: 10 }} onClick={() => setConfirmCancel(true)}><span>{t("cancelOrder", "Cancel order")}</span></button>
         ))}
         {problem && <div className="shop-note">{problem}</div>}
-        <a className="login-btn" style={{ justifyContent: "center", marginTop: 10, textDecoration: "none" }} href="#/shop?tab=account">View in Account</a>
+        <a className="login-btn" style={{ justifyContent: "center", marginTop: 10, textDecoration: "none" }} href="#/shop?tab=account">{tx("View in Account")}</a>
         <a className="e2e-cta" style={{ textDecoration: "none" }} href="#/shop" onClick={() => localStorage.removeItem(LS_LAST)}><span>{t("backToOrder", "Back to Order")}</span><Icon name="arrowR" size={19} /></a>
       </div>
     </>

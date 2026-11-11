@@ -1,6 +1,6 @@
 import cors from "@fastify/cors";
 import Fastify, { type FastifyReply, type FastifyRequest } from "fastify";
-import { confirmedPaid, isFullyPaid, menuFor, newId, reduceOrder, type BusinessConfig, type ChannelKind, type OptionGroup, type OrderEvent } from "@pos/core";
+import { confirmedPaid, isFullyPaid, menuFor, newId, reduceOrder, shopStatus, type BusinessConfig, type ChannelKind, type OptionGroup, type OrderEvent } from "@pos/core";
 import { CASHIER_TOPUP_LIMIT_CENTS, audit, authenticate, can, createStaff, login, logout, recentAudit, type Permission, type Role, type Staff } from "./auth.js";
 import type { CatalogStore, ChangeResult, PgCatalogStore } from "./catalog.js";
 import type { Db } from "./db/pool.js";
@@ -9,7 +9,7 @@ import { authenticateDevice, createEnrollmentCode, enroll, issueStreamTicket, li
 import { BrandStore } from "./brand.js";
 import { PrintStore, validatePrinter, type Printer } from "./print.js";
 import { registerShop } from "./shop.js";
-import type { Integrations } from "./integrations.js";
+import { sendMail, type Integrations } from "./integrations.js";
 import { MemberStore } from "./members.js";
 import { FailureLimiter } from "./rateLimit.js";
 import type { EventStore, StoredEvent } from "./store.js";
@@ -105,11 +105,22 @@ export async function buildApp({ config, store, db, catalog, catalogAdmin, print
 
   const members = db ? new MemberStore(db, merchantId, config.rewards.pointsEnabled ? config.rewards.welcomePoints : 0, config.rewards.welcomeVoucherCents) : undefined;
 
+  /** Email a member once when their order is ready, if they have an email and want order updates. */
+  async function tellReady(o: NonNullable<ReturnType<typeof reduceOrder>>) {
+    if (!integrations?.mail || o.source !== "online") return;
+    const m = await members!.byId(o.memberId!);
+    if (!m?.email || !m.prefs.orderUpdates) return;
+    if (!(await members!.claimNotice(o.orderId, "ready"))) return;
+    const ok = await sendMail(integrations, { to: m.email, subject: `Your order ${o.queueNumber ?? ""} is ready`.replace("  ", " "), text: `Hi${m.name ? ` ${m.name}` : ""},\n\nYour order ${o.queueNumber ?? ""} at ${config.name} is ready to collect.\n\nYou can turn these emails off in Account > Preferences.` });
+    if (!ok) console.error(`[mail] could not send the ready notice for order ${o.orderId}`);
+  }
+
   /** Points follow the order: earned once when it is paid, spent points returned if it is cancelled. */
   async function settleMemberOrders(orderIds: string[]) {
     for (const id of orderIds) {
       const o = reduceOrder(id, await store.eventsForOrder(id));
       if (!o?.memberId) continue;
+      if (shopStatus(o, config) === "ready") await tellReady(o);
       if (o.stage === "cancelled") await members!.reverseForOrder(id);
       else if (isFullyPaid(o, config)) {
         if (config.rewards.pointsEnabled) await members!.earnForOrder(id, confirmedPaid(o), config.rewards.earnPointsPerDollar);

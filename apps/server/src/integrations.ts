@@ -13,6 +13,8 @@ export interface Integrations {
   /** Reverse-SMS sign-in: the number customers text, and the secret the SMS provider's webhook must present. */
   sms?: { number: string; webhookSecret: string };
   stripe?: { secretKey: string; webhookSecret: string };
+  /** Email through Resend's web API (HTTPS, so it works where SMTP ports are blocked). */
+  mail?: { apiKey: string; from: string };
   /** Replaceable in tests. */
   fetch?: typeof fetch;
 }
@@ -24,6 +26,7 @@ export function loadIntegrations(env: NodeJS.ProcessEnv): Integrations {
     google: pair(env.GOOGLE_CLIENT_ID, env.GOOGLE_CLIENT_SECRET),
     microsoft: pair(env.MICROSOFT_CLIENT_ID, env.MICROSOFT_CLIENT_SECRET),
     sms: env.SMS_RECEIVE_NUMBER && env.SMS_WEBHOOK_SECRET ? { number: env.SMS_RECEIVE_NUMBER, webhookSecret: env.SMS_WEBHOOK_SECRET } : undefined,
+    mail: env.RESEND_API_KEY && env.MAIL_FROM ? { apiKey: env.RESEND_API_KEY, from: env.MAIL_FROM } : undefined,
     stripe: env.STRIPE_SECRET_KEY && env.STRIPE_WEBHOOK_SECRET ? { secretKey: env.STRIPE_SECRET_KEY, webhookSecret: env.STRIPE_WEBHOOK_SECRET } : undefined,
   };
 }
@@ -119,6 +122,41 @@ export async function createStripeCheckout(
   if (!res.ok) return null;
   const j = (await res.json()) as { url?: string; id?: string };
   return j.url && j.id ? { url: j.url, sessionId: j.id } : null;
+}
+
+/** Give a payment back in full. Stripe remembers the key, so asking twice refunds once. True when Stripe accepted it. */
+export async function createStripeRefund(i: Integrations, o: { paymentIntent: string; key: string }): Promise<boolean> {
+  const s = i.stripe;
+  if (!s) return false;
+  const f = i.fetch ?? fetch;
+  try {
+    const res = await f("https://api.stripe.com/v1/refunds", {
+      method: "POST",
+      headers: { authorization: `Bearer ${s.secretKey}`, "content-type": "application/x-www-form-urlencoded", "idempotency-key": o.key },
+      body: new URLSearchParams({ payment_intent: o.paymentIntent, "metadata[reason]": "payment_did_not_match_order" }),
+    });
+    return res.ok;
+  } catch {
+    return false;
+  }
+}
+
+// ---- Email (Resend) ---------------------------------------------------------------------------------
+
+/** Send a plain-text email. False when mail is not set up or the provider refuses; callers never show that to the customer. */
+export async function sendMail(i: Integrations, m: { to: string; subject: string; text: string }): Promise<boolean> {
+  if (!i.mail) return false;
+  const f = i.fetch ?? fetch;
+  try {
+    const res = await f("https://api.resend.com/emails", {
+      method: "POST",
+      headers: { authorization: `Bearer ${i.mail.apiKey}`, "content-type": "application/json" },
+      body: JSON.stringify({ from: i.mail.from, to: [m.to], subject: m.subject, text: m.text }),
+    });
+    return res.ok;
+  } catch {
+    return false;
+  }
 }
 
 /** Check a Stripe webhook's signature (HMAC-SHA256 over "timestamp.body", within five minutes). */

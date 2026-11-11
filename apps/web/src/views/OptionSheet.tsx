@@ -1,4 +1,5 @@
 import { useMemo, useState } from "react";
+import { tx } from "../shopI18n";
 import { defaultSelection, formatMoney, resolveOptions, type ChosenOptionInput, type OptionGroup } from "@pos/core";
 
 interface Props {
@@ -40,11 +41,11 @@ export function OptionSheet({ name, description, photoUrl, baseCents, groups, in
   const used = (g: OptionGroup) => sel.filter((s) => s.groupId === g.id).reduce((n, s) => n + (s.qty ?? 1), 0);
 
   return (
-    <div className="opt-back" role="dialog" aria-label={`Customise ${name}`}>
+    <div className="opt-back" role="dialog" aria-label={`${tx("Customise")} ${name}`}>
       <div className="opt-sheet">
         <div className="opt-head">
           <button className="opt-x" onClick={onClose} aria-label="Back">‹</button>
-          <b>Customise</b>
+          <b>{tx("Customise")}</b>
         </div>
         <div className="opt-body">
           {photoUrl && <img className="opt-photo" src={photoUrl} alt="" />}
@@ -57,7 +58,7 @@ export function OptionSheet({ name, description, photoUrl, baseCents, groups, in
               <section key={g.id} className="opt-group">
                 <div className="opt-gh">
                   <b>{g.name}</b>
-                  <span className="muted">{g.kind === "single" ? (g.required ? "Choose 1" : "Choose up to 1") : g.kind === "multi" ? "Choose any" : `Up to ${max}`}</span>
+                  <span className="muted">{g.kind === "single" ? (g.required ? tx("Choose 1") : tx("Choose up to 1")) : g.kind === "multi" ? tx("Choose any") : tx("Up to {n}", { n: max })}</span>
                 </div>
                 {g.kind === "single" || g.kind === "multi" ? (
                   <div className="opt-pills">
@@ -72,7 +73,7 @@ export function OptionSheet({ name, description, photoUrl, baseCents, groups, in
                           onClick={() => (g.kind === "single" ? pickOne(g, c.id) : toggle(g, c.id))}
                         >
                           <span>{c.name}</span>
-                          {c.soldOut ? <small>Sold out</small> : c.priceCents > 0 ? <small>+{formatMoney(c.priceCents)}</small> : null}
+                          {c.soldOut ? <small>{tx("Sold out")}</small> : c.priceCents > 0 ? <small>+{formatMoney(c.priceCents)}</small> : null}
                         </button>
                       );
                     })}
@@ -82,7 +83,7 @@ export function OptionSheet({ name, description, photoUrl, baseCents, groups, in
                     <div className="opt-row" key={c.id}>
                       <div>
                         <b>{c.name}</b>
-                        <div className="muted">{c.soldOut ? "Sold out" : `+ ${formatMoney(c.priceCents)} each`}</div>
+                        <div className="muted">{c.soldOut ? tx("Sold out") : tx("+ {amt} each", { amt: formatMoney(c.priceCents) })}</div>
                       </div>
                       <span className="opt-step">
                         <button disabled={!countOf(sel, g.id, c.id)} onClick={() => step(g, c.id, -1)} aria-label={`Fewer ${c.name}`}>−</button>
@@ -98,11 +99,11 @@ export function OptionSheet({ name, description, photoUrl, baseCents, groups, in
         </div>
         <div className="opt-foot">
           <div>
-            <small className="muted">Total</small>
+            <small className="muted">{tx("Total")}</small>
             <div className="opt-total">{formatMoney(total)}</div>
           </div>
-          <button className="opt-cta" disabled={!r.ok} title={missing ? `Choose ${missing}` : ""} onClick={() => r.ok && onAdd(sel)}>
-            {missing ? `Choose ${missing}` : cta}
+          <button className="opt-cta" disabled={!r.ok} title={missing ? tx("Choose {x}", { x: missing }) : ""} onClick={() => r.ok && onAdd(sel)}>
+            {missing ? tx("Choose {x}", { x: missing }) : tx(cta)}
           </button>
         </div>
       </div>

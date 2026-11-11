@@ -1,5 +1,6 @@
 /** Interface language for the customer shop: the prototype's eight languages, remembered on this device. */
 import { useEffect, useState } from "react";
+import { PHRASES } from "./shopPhrases";
 
 export const LANGS = [
   { code: "en", native: "English", en: "English" },
@@ -56,8 +57,16 @@ export function useLang() {
   }, []);
   return current;
 }
-/** A phrase in the current language; anything not translated stays in English. */
-export const t = (key: string, english: string): string => DICT[current]?.[key] ?? english;
+const PHRASE_AT: Partial<Record<LangCode, number>> = { ms: 0, id: 1, zh: 2, ja: 3, fr: 4, de: 5, ta: 6 };
+/** An English sentence in the current language, with {name} blanks filled in. Anything not translated stays in English. */
+export function tx(english: string, vars?: Record<string, string | number>): string {
+  const at = PHRASE_AT[current];
+  let out = (at !== undefined ? PHRASES[english]?.[at] : undefined) ?? english;
+  if (vars) for (const [k, v] of Object.entries(vars)) out = out.split(`{${k}}`).join(String(v));
+  return out;
+}
+/** A phrase in the current language: the prototype's wording when it has one, otherwise our own translation, otherwise English. */
+export const t = (key: string, english: string): string => DICT[current]?.[key] ?? tx(english);
 export const greeting = (h = new Date().getHours()): string => {
   const g = GREETING[h >= 5 && h < 12 ? "m" : h >= 12 && h < 18 ? "a" : "e"];
   return g[current] ?? g.en!;
