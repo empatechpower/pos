@@ -1,7 +1,8 @@
 import type { BusinessConfig } from "./config.js";
 import { channelById, menuFor, fulfilmentOf, type Catalog, type Channel, type PriceContext } from "./catalog.js";
 import { isFullyPaid, type OrderState } from "./events.js";
-import { priceOrder, type PriceResult } from "./pricing.js";
+import { resolveOptions, type ChosenOption, type ChosenOptionInput, type OptionError } from "./options.js";
+import { priceOrder, type CouponInput, type PointsInput, type PriceResult } from "./pricing.js";
 
 /**
  * Customer ordering. The customer's device proposes (channel, items, quantities); the SERVER decides
@@ -15,21 +16,32 @@ export const MAX_QTY = 20;
 export interface QuoteItem {
   productId: string;
   qty: number;
+  options?: ChosenOptionInput[];
 }
 
-export type QuoteError = "unknown_channel" | "channel_off" | "empty" | "too_many_items" | "bad_quantity" | "unavailable";
+export type QuoteError = "unknown_channel" | "channel_off" | "empty" | "too_many_items" | "bad_quantity" | "unavailable" | OptionError;
+
+export interface QuoteLine {
+  productId: string;
+  name: string;
+  /** Price of one, including options. */
+  unitCents: number;
+  qty: number;
+  pointsExempt?: boolean;
+  options: ChosenOption[];
+}
 
 export type Quote =
   | {
       ok: true;
       channel: Channel;
       fulfilment: ReturnType<typeof fulfilmentOf>;
-      lines: Array<{ productId: string; name: string; unitCents: number; qty: number; pointsExempt?: boolean }>;
+      lines: QuoteLine[];
       priced: PriceResult;
     }
   | { ok: false; error: QuoteError; productId?: string };
 
-export function quoteOrder(catalog: Catalog, config: BusinessConfig, ctx: PriceContext, items: readonly QuoteItem[]): Quote {
+export function quoteOrder(catalog: Catalog, config: BusinessConfig, ctx: PriceContext, items: readonly QuoteItem[], points?: PointsInput | null, coupon?: CouponInput | null): Quote {
   const channel = channelById(catalog, ctx.channelId);
   if (!channel) return { ok: false, error: "unknown_channel" };
   if (!channel.active) return { ok: false, error: "channel_off" };
@@ -37,20 +49,24 @@ export function quoteOrder(catalog: Catalog, config: BusinessConfig, ctx: PriceC
   if (items.length > MAX_LINES) return { ok: false, error: "too_many_items" };
 
   const menu = new Map(menuFor(catalog, ctx).map((m) => [m.id, m]));
-  const merged = new Map<string, number>();
+  // The same product with different options is a different line; the same product and options merge.
+  const merged = new Map<string, QuoteLine>();
   for (const it of items) {
     if (!Number.isInteger(it.qty) || it.qty < 1 || it.qty > MAX_QTY) return { ok: false, error: "bad_quantity", productId: it.productId };
-    merged.set(it.productId, (merged.get(it.productId) ?? 0) + it.qty);
+    const m = menu.get(it.productId);
+    if (!m || m.soldOut) return { ok: false, error: "unavailable", productId: it.productId };
+    const r = resolveOptions(m.options, it.options);
+    if (!r.ok) return { ok: false, error: r.error, productId: it.productId };
+    const key = `${it.productId}#${r.key}`;
+    const have = merged.get(key);
+    const qty = (have?.qty ?? 0) + it.qty;
+    if (qty > MAX_QTY) return { ok: false, error: "bad_quantity", productId: it.productId };
+    merged.set(key, { productId: it.productId, name: m.name, unitCents: m.priceCents + r.extraCents, qty, pointsExempt: m.pointsExempt, options: r.options });
   }
-  const lines: Array<{ productId: string; name: string; unitCents: number; qty: number; pointsExempt?: boolean }> = [];
-  for (const [productId, qty] of merged) {
-    const m = menu.get(productId);
-    if (!m || m.soldOut) return { ok: false, error: "unavailable", productId };
-    if (qty > MAX_QTY) return { ok: false, error: "bad_quantity", productId };
-    lines.push({ productId, name: m.name, unitCents: m.priceCents, qty, pointsExempt: m.pointsExempt });
-  }
+  const lines = [...merged.values()];
+  if (lines.length > MAX_LINES) return { ok: false, error: "too_many_items" };
   const fulfilment = fulfilmentOf(channel.kind);
-  const priced = priceOrder({ lines: lines.map((l) => ({ name: l.name, unitCents: l.unitCents, qty: l.qty, pointsExempt: l.pointsExempt })), fulfilment, serviceCharge: channel.serviceCharge, config: config.pricing });
+  const priced = priceOrder({ lines: lines.map((l) => ({ name: l.name, unitCents: l.unitCents, qty: l.qty, pointsExempt: l.pointsExempt })), fulfilment, serviceCharge: channel.serviceCharge, points: points ?? null, coupon: coupon ?? null, config: config.pricing });
   return { ok: true, channel, fulfilment, lines, priced };
 }
 
@@ -84,5 +100,9 @@ export const contrastRatio = (a: string, b: string): number => {
   return (hi! + 0.05) / (lo! + 0.05);
 };
 
-/** White or near-black text, whichever reads better on this background. Any brand colour stays usable. */
-export const readableOn = (bg: string): "#ffffff" | "#21252a" => (contrastRatio(bg, "#ffffff") >= contrastRatio(bg, "#21252a") ? "#ffffff" : "#21252a");
+/**
+ * White text when it reaches a 3:1 contrast (the accessibility minimum for bold or large text, which is what
+ * buttons are), otherwise near-black. Preferring white when it is acceptable keeps typical brand reds and
+ * oranges looking the way designers draw them; light colours such as yellow get dark text.
+ */
+export const readableOn = (bg: string): "#ffffff" | "#21252a" => (contrastRatio(bg, "#ffffff") >= 3 ? "#ffffff" : "#21252a");

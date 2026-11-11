@@ -1,4 +1,5 @@
 import type { Cents } from "./money.js";
+import type { OptionGroup } from "./options.js";
 
 /**
  * Catalog: what is sold, the price lists it is sold under, and the channels (dining / fulfilment
@@ -10,8 +11,9 @@ import type { Cents } from "./money.js";
  *   2. assigned to this channel, any outlet       (Grab, everywhere)
  *   3. assigned to this outlet, any channel       (LIDO, everything)
  *   4. the merchant's default pricebook
- * A product with no price in the winning pricebook falls through to the next one, unless that
- * pricebook is set to "hide", in which case the product is not sold in that context.
+ * Only the winning pricebook is ever consulted. A product with no price in it is NOT sold in that
+ * context and no other pricebook's price is substituted (spec A-1). The pricebook's `missing`
+ * setting only decides whether such a product is hidden from the menu or shown but blocked.
  */
 
 export interface Product {
@@ -20,6 +22,14 @@ export interface Product {
   category: string;
   soldOut?: boolean;
   pointsExempt?: boolean;
+  /** A line or two shown under the name. */
+  description?: string;
+  /** The name in another language, e.g. the Chinese name. */
+  altName?: string;
+  /** 0 or absent = no photo. Changes whenever the photo does, so devices refetch it. */
+  imageVersion?: number;
+  /** Hot/cold, protein, extras... Prices here are deltas on top of the pricebook's price. */
+  options?: OptionGroup[];
 }
 
 export interface Pricebook {
@@ -27,8 +37,8 @@ export interface Pricebook {
   name: string;
   /** productId → price in cents. A product that is absent has no price in this book. */
   prices: Record<string, Cents>;
-  /** When a product has no price here: use the next pricebook down, or do not sell it at all. */
-  missing: "fallback" | "hide";
+  /** A product with no price here can never be ordered; this decides whether it is hidden or shown (blocked). */
+  missing: "show" | "hide";
 }
 
 export type Fulfilment = "dine_in" | "takeaway" | "delivery";
@@ -95,11 +105,16 @@ export interface ResolvedPrice {
 
 /** The price of one product here, or null when it is not sold in this context. */
 export function resolvePrice(catalog: Catalog, productId: string, ctx: PriceContext): ResolvedPrice | null {
-  for (const book of pricebookChain(catalog, ctx)) {
-    if (Object.prototype.hasOwnProperty.call(book.prices, productId)) return { priceCents: book.prices[productId]!, pricebookId: book.id };
-    if (book.missing === "hide") return null;
-  }
-  return null;
+  const book = pricebookChain(catalog, ctx)[0];
+  if (!book || !Object.prototype.hasOwnProperty.call(book.prices, productId)) return null;
+  return { priceCents: book.prices[productId]!, pricebookId: book.id };
+}
+
+/** Products shown on the menu but not orderable here: no price in the winning book, and the book says "show". */
+export function blockedFor(catalog: Catalog, ctx: PriceContext): Product[] {
+  const book = pricebookChain(catalog, ctx)[0];
+  if (!book || book.missing === "hide") return [];
+  return catalog.products.filter((p) => !Object.prototype.hasOwnProperty.call(book.prices, p.id));
 }
 
 export interface MenuEntry extends Product {
@@ -137,7 +152,41 @@ export function validateCatalog(c: Catalog): string[] {
       if (!Number.isSafeInteger(cents) || cents < 0) problems.push(`pricebook ${b.id} has an invalid price for ${pid}`);
     }
   }
-  const def = c.pricebooks.find((p) => p.id === c.defaultPricebookId);
-  if (def && def.missing === "hide") problems.push("the default pricebook cannot be set to hide");
+  for (const p of c.products) {
+    if (p.description && p.description.length > 200) problems.push(`${p.id}: description is too long`);
+    if (p.altName && p.altName.length > 80) problems.push(`${p.id}: alternative name is too long`);
+    problems.push(...validateOptions(p.id, p.options));
+  }
   return problems;
+}
+
+/** Problems with one product's option groups. Empty means fine. */
+export function validateOptions(productId: string, groups: readonly OptionGroup[] | undefined): string[] {
+  if (!groups?.length) return [];
+  const out: string[] = [];
+  const at = (m: string) => out.push(`${productId}: ${m}`);
+  if (groups.length > 6) at("too many option groups (6 at most)");
+  const gids = new Set<string>();
+  for (const g of groups) {
+    if (!g.id || gids.has(g.id)) at(`option group id "${g.id}" is empty or repeated`);
+    gids.add(g.id);
+    if (!g.name?.trim() || g.name.length > 60) at(`option group "${g.id}" needs a name of up to 60 characters`);
+    if (!["single", "multi", "qty"].includes(g.kind)) at(`option group "${g.name}" has an unknown kind`);
+    if (g.variant && (g.kind !== "single" || !g.required)) at(`variant group "${g.name}" must be a required choose-one group`);
+    if (g.required && g.kind !== "single") at(`only a choose-one group can be required ("${g.name}")`);
+    if (!g.choices?.length || g.choices.length > 30) at(`option group "${g.name}" needs 1 to 30 choices`);
+    for (const k of ["max", "maxEach"] as const) if (g[k] !== undefined && (!Number.isInteger(g[k]) || g[k]! < 1)) at(`option group "${g.name}": ${k} must be a whole number of 1 or more`);
+    const cids = new Set<string>();
+    let defaults = 0;
+    for (const c of g.choices ?? []) {
+      if (!c.id || cids.has(c.id)) at(`choice id "${c.id}" in "${g.name}" is empty or repeated`);
+      cids.add(c.id);
+      if (!c.name?.trim() || c.name.length > 60) at(`a choice in "${g.name}" needs a name of up to 60 characters`);
+      if (!Number.isSafeInteger(c.priceCents) || c.priceCents < 0) at(`choice "${c.name}" has an invalid price`);
+      if (c.default) defaults++;
+    }
+    if (defaults > 1 || (defaults && g.kind !== "single")) at(`option group "${g.name}": only a choose-one group can have one default`);
+    if (g.required && g.kind === "single" && !(g.choices ?? []).some((c) => !c.soldOut)) at(`"${g.name}" is required but every choice is sold out`);
+  }
+  return out;
 }

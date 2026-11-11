@@ -1,10 +1,11 @@
 import {
-  encodeEpl, encodeEscPos, encodeZpl, isFullyPaid, itemLabel, kitchenTicket, receipt, visibleToKitchen, withDrawer,
+  encodeEpl, encodeEscPos, encodeEscPosRaster, encodeZpl, isFullyPaid, itemLabel, kitchenTicket, receipt, visibleToKitchen, withDrawer,
   type BusinessConfig, type Catalog, type Doc, type Label, type OrderLine, type OrderState, type PrintContext, type PrinterLanguage,
 } from "@pos/core";
 import { createHash } from "node:crypto";
 import type pg from "pg";
 import type { Db } from "./db/pool.js";
+import { canvasRenderer } from "./rasterFont.js";
 
 export type DocType = "receipt" | "kitchen" | "label" | "test";
 export type Role = "receipt" | "kitchen" | "label";
@@ -18,6 +19,8 @@ export interface Printer {
   categories: string[];
   widthChars: number;
   drawer: boolean;
+  /** Draw tickets as pictures (any script, same on every printer) instead of the printer's own text. */
+  raster: boolean;
   labelWidthMm: number | null;
   labelHeightMm: number | null;
   dpi: 203 | 300;
@@ -33,7 +36,7 @@ export const backoffSeconds = (attempt: number) => Math.min(120, 5 * 3 ** Math.m
 
 const toPrinter = (r: Record<string, any>): Printer => ({
   id: r.id, name: r.name, outletId: r.outlet_id, language: r.language, roles: r.roles, categories: r.categories, widthChars: r.width_chars,
-  drawer: r.drawer, labelWidthMm: r.label_width_mm, labelHeightMm: r.label_height_mm, dpi: r.dpi === 300 ? 300 : 203,
+  drawer: r.drawer, raster: !!r.raster, labelWidthMm: r.label_width_mm, labelHeightMm: r.label_height_mm, dpi: r.dpi === 300 ? 300 : 203,
   connection: r.connection, agentDeviceId: r.agent_device_id, active: r.active,
 });
 
@@ -72,7 +75,10 @@ interface EnqueueCtx {
   print: PrintContext;
 }
 
-const enc = (p: Printer, doc: Doc): Buffer => Buffer.from(encodeEscPos(doc, { widthChars: p.widthChars, drawer: p.drawer }));
+/** Printable dots across: 58 mm paper is 384 at 203 dpi, 80 mm is 576. */
+export const rasterWidthPx = (widthChars: number) => (widthChars <= 32 ? 384 : 576);
+const enc = (p: Printer, doc: Doc): Buffer =>
+  Buffer.from(p.raster ? encodeEscPosRaster(doc, { widthPx: rasterWidthPx(p.widthChars), render: canvasRenderer, drawer: p.drawer }) : encodeEscPos(doc, { widthChars: p.widthChars, drawer: p.drawer }));
 const encLabel = (p: Printer, l: Label): Buffer =>
   Buffer.from(p.language === "zpl" ? encodeZpl(l, { dpi: p.dpi }) : encodeEpl(l, { dpi: p.dpi }), "ascii");
 
@@ -96,12 +102,12 @@ export class PrintStore {
 
   async savePrinter(p: Printer): Promise<void> {
     await this.db.query(
-      `INSERT INTO printers (merchant_id,id,name,outlet_id,language,roles,categories,width_chars,drawer,label_width_mm,label_height_mm,dpi,connection,agent_device_id,active)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15)
+      `INSERT INTO printers (merchant_id,id,name,outlet_id,language,roles,categories,width_chars,drawer,raster,label_width_mm,label_height_mm,dpi,connection,agent_device_id,active)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16)
        ON CONFLICT (merchant_id,id) DO UPDATE SET name=EXCLUDED.name, outlet_id=EXCLUDED.outlet_id, language=EXCLUDED.language, roles=EXCLUDED.roles,
-         categories=EXCLUDED.categories, width_chars=EXCLUDED.width_chars, drawer=EXCLUDED.drawer, label_width_mm=EXCLUDED.label_width_mm,
+         categories=EXCLUDED.categories, width_chars=EXCLUDED.width_chars, drawer=EXCLUDED.drawer, raster=EXCLUDED.raster, label_width_mm=EXCLUDED.label_width_mm,
          label_height_mm=EXCLUDED.label_height_mm, dpi=EXCLUDED.dpi, connection=EXCLUDED.connection, agent_device_id=EXCLUDED.agent_device_id, active=EXCLUDED.active`,
-      [this.merchantId, p.id, p.name, p.outletId, p.language, p.roles, p.categories, p.widthChars, p.drawer, p.labelWidthMm, p.labelHeightMm, p.dpi, JSON.stringify(p.connection), p.agentDeviceId, p.active],
+      [this.merchantId, p.id, p.name, p.outletId, p.language, p.roles, p.categories, p.widthChars, p.drawer, !!p.raster, p.labelWidthMm, p.labelHeightMm, p.dpi, JSON.stringify(p.connection), p.agentDeviceId, p.active],
     );
   }
 
@@ -210,23 +216,24 @@ export class PrintStore {
 
   /**
    * Hand a delivery agent the next jobs for its printers, leasing each for a minute. A job whose lease
-   * ran out (the agent died mid-print) becomes available again, until it has used up its attempts.
+   * ran out (the agent died mid-print) may or may not have printed, so it is parked as "unconfirmed" for a
+   * person to reprint on purpose. It is never handed out again on its own.
    */
   async claim(agentDeviceId: string, limit = 10): Promise<Array<Job & { printer: Printer }>> {
     await this.db.query(
-      `UPDATE print_jobs SET status='failed', last_error=COALESCE(last_error,'') || ' (gave up: agent stopped responding)', updated_at=now()
-       WHERE merchant_id=$1 AND status='leased' AND leased_until < now() AND attempts >= $2`,
-      [this.merchantId, MAX_ATTEMPTS],
+      `UPDATE print_jobs SET status='unconfirmed', leased_until=NULL, last_error='print unconfirmed: the agent stopped responding, check the printer', updated_at=now()
+       WHERE merchant_id=$1 AND status='leased' AND leased_until < now()`,
+      [this.merchantId],
     );
     const r = await this.db.query(
       `UPDATE print_jobs j SET status='leased', leased_until = now() + make_interval(secs => $4), attempts = j.attempts + 1, updated_at = now()
        WHERE j.id IN (
          SELECT j2.id FROM print_jobs j2 JOIN printers p ON p.merchant_id=j2.merchant_id AND p.id=j2.printer_id
          WHERE j2.merchant_id=$1 AND p.active AND (p.agent_device_id IS NULL OR p.agent_device_id=$2)
-           AND ((j2.status='queued' AND j2.next_attempt_at <= now()) OR (j2.status='leased' AND j2.leased_until < now() AND j2.attempts < $5))
+           AND j2.status='queued' AND j2.next_attempt_at <= now()
          ORDER BY j2.created_at LIMIT $3 FOR UPDATE OF j2 SKIP LOCKED)
        RETURNING j.*`,
-      [this.merchantId, agentDeviceId, limit, LEASE_SECONDS, MAX_ATTEMPTS],
+      [this.merchantId, agentDeviceId, limit, LEASE_SECONDS],
     );
     const printers = new Map((await this.listPrinters()).map((p) => [p.id, p]));
     return r.rows
@@ -239,8 +246,19 @@ export class PrintStore {
     return (r.rowCount ?? 0) > 0;
   }
 
-  /** The agent could not deliver. Back to the queue with a delay, or failed for good after the last attempt. */
-  async markFailed(jobId: string, error: string): Promise<"retry" | "failed" | "unknown"> {
+  /**
+   * The agent could not deliver. Back to the queue with a delay, or failed for good after the last attempt.
+   * `ambiguous` means the connection was made and then broke, so the printer may already have the bytes:
+   * the job is parked as "unconfirmed" instead of being retried automatically.
+   */
+  async markFailed(jobId: string, error: string, ambiguous = false): Promise<"retry" | "failed" | "unconfirmed" | "unknown"> {
+    if (ambiguous) {
+      const u = await this.db.query(
+        "UPDATE print_jobs SET status='unconfirmed', leased_until=NULL, last_error=$3, updated_at=now() WHERE merchant_id=$1 AND id=$2 AND status='leased' RETURNING id",
+        [this.merchantId, jobId, `print unconfirmed: ${error}`.slice(0, 300)],
+      );
+      return u.rows[0] ? "unconfirmed" : "unknown";
+    }
     const r = await this.db.query(
       `UPDATE print_jobs SET
          status = CASE WHEN attempts >= $3 THEN 'failed' ELSE 'queued' END,
@@ -252,8 +270,9 @@ export class PrintStore {
     return r.rows[0] ? (r.rows[0].status === "failed" ? "failed" : "retry") : "unknown";
   }
 
+  /** A person chose to print this job again (failed, or unconfirmed and they checked the printer). */
   async retryFailed(jobId: string): Promise<boolean> {
-    const r = await this.db.query("UPDATE print_jobs SET status='queued', attempts=0, next_attempt_at=now(), updated_at=now() WHERE merchant_id=$1 AND id=$2 AND status='failed'", [this.merchantId, jobId]);
+    const r = await this.db.query("UPDATE print_jobs SET status='queued', attempts=0, next_attempt_at=now(), updated_at=now() WHERE merchant_id=$1 AND id=$2 AND status IN ('failed','unconfirmed')", [this.merchantId, jobId]);
     return (r.rowCount ?? 0) > 0;
   }
 

@@ -6,10 +6,16 @@ import {
   newId,
   nextQueueCounter,
   orderTotals,
+  splitEqual,
   priceOrder,
   fulfilmentOf,
   menuFor,
+  optionLines,
+  priceRange,
+  resolveOptions,
   type BusinessConfig,
+  type ChosenOption,
+  type ChosenOptionInput,
   type Catalog,
   type MenuEntry,
   type PaymentMethod,
@@ -18,11 +24,18 @@ import {
 import { useStaff } from "../auth";
 import { deviceId, getDeviceCode, record } from "../db";
 import { useOrders } from "../hooks";
+import { OptionSheet } from "./OptionSheet";
 import { getBalance, spend } from "../wallet";
 
 interface BagLine {
+  /** The item and its chosen options: the same item with different options is a different line. */
+  key: string;
   item: MenuEntry;
   qty: number;
+  selection: ChosenOptionInput[];
+  options: ChosenOption[];
+  /** One unit, options included. */
+  unitCents: number;
 }
 
 const TABLES = ["Table 5", "Table 12", "Table 18", "Bar Tab 2", "Bar Tab 4"];
@@ -75,10 +88,11 @@ export function Pos({ config, catalog, online, customerId, setCustomerId }: PosP
     setBag((cur) => {
       const next = cur.flatMap((l) => {
         const e = menu.find((m) => m.id === l.item.id);
-        return e ? [{ ...l, item: e }] : [];
+        const r = e ? resolveOptions(e.options, l.selection) : null;
+        return e && r?.ok ? [{ ...l, item: e, options: r.options, unitCents: e.priceCents + r.extraCents }] : [];
       });
       if (next.length < cur.length) notify(`${cur.length - next.length} item(s) removed: not sold in ${channel.name}.`);
-      return next.length === cur.length && next.every((l, i) => l.item.priceCents === cur[i]!.item.priceCents && l.item.pricebookId === cur[i]!.item.pricebookId) ? cur : next;
+      return next.length === cur.length && next.every((l, i) => l.unitCents === cur[i]!.unitCents && l.item.pricebookId === cur[i]!.item.pricebookId) ? cur : next;
     });
   }, [menu]);
 
@@ -86,19 +100,27 @@ export function Pos({ config, catalog, online, customerId, setCustomerId }: PosP
   const shown = menu.filter((m) => category === "All" || m.category === category);
 
   const priced = priceOrder({
-    lines: bag.map((b) => ({ name: b.item.name, unitCents: b.item.priceCents, qty: b.qty, pointsExempt: b.item.pointsExempt })),
+    lines: bag.map((b) => ({ name: b.item.name, unitCents: b.unitCents, qty: b.qty, pointsExempt: b.item.pointsExempt })),
     fulfilment,
     serviceCharge: channel.serviceCharge,
     config: config.pricing,
   });
 
-  const add = (item: MenuEntry) =>
+  const [picking, setPicking] = useState<MenuEntry | null>(null);
+
+  /** Put an item in the bag with its chosen options (none for a plain item). */
+  const addWith = (item: MenuEntry, selection: ChosenOptionInput[]) => {
+    const r = resolveOptions(item.options, selection);
+    if (!r.ok) return;
+    const key = `${item.id}#${r.key}`;
     setBag((cur) => {
-      const found = cur.find((l) => l.item.id === item.id);
-      return found ? cur.map((l) => (l === found ? { ...l, qty: l.qty + 1 } : l)) : [...cur, { item, qty: 1 }];
+      const found = cur.find((l) => l.key === key);
+      return found ? cur.map((l) => (l === found ? { ...l, qty: l.qty + 1 } : l)) : [...cur, { key, item, qty: 1, selection, options: r.options, unitCents: item.priceCents + r.extraCents }];
     });
-  const change = (id: string, d: number) =>
-    setBag((cur) => cur.map((l) => (l.item.id === id ? { ...l, qty: l.qty + d } : l)).filter((l) => l.qty > 0));
+  };
+  // An item with options (hot or cold, extras...) asks first; a plain one goes straight in.
+  const add = (item: MenuEntry) => (item.options?.length ? setPicking(item) : addWith(item, []));
+  const change = (key: string, d: number) => setBag((cur) => cur.map((l) => (l.key === key ? { ...l, qty: l.qty + d } : l)).filter((l) => l.qty > 0));
 
   /** Create the order in the local log. Nothing here needs the network. */
   async function place(payment: { method: PaymentMethod; confirmed: boolean } | null, existingOrderId?: string) {
@@ -123,9 +145,10 @@ export function Pos({ config, catalog, online, customerId, setCustomerId }: PosP
         lineId: newId(),
         productId: l.item.id,
         name: l.item.name,
-        unitCents: l.item.priceCents,
+        unitCents: l.unitCents,
         qty: l.qty,
         pointsExempt: l.item.pointsExempt,
+        options: l.options.length ? l.options : undefined,
       });
     }
     if (payment) {
@@ -184,6 +207,15 @@ export function Pos({ config, catalog, online, customerId, setCustomerId }: PosP
 
   const creditBlocked = !staff ? "Staff sign-in required" : !customerId ? "Enter a customer to use credit" : !online ? "Credit needs a connection" : "";
 
+  /** Open tab being split: how many people are still to pay, and a custom amount being typed. */
+  const [split, setSplit] = useState<{ orderId: string; n: number; custom: string } | null>(null);
+  const payShare = async (o: OrderState, cents: number, method: "cash" | "credit") => {
+    if (cents <= 0) return;
+    if (method === "credit") await settleTabWithCredit(o, cents);
+    else await record(o.orderId, { type: "PaymentRecorded", paymentId: newId(), method: "cash", amountCents: cents, confirmed: true });
+    setSplit((cur) => (cur && cur.orderId === o.orderId ? { ...cur, n: Math.max(1, cur.n - 1), custom: "" } : cur));
+  };
+
   const openTabs = orders.filter((o) => o.stage !== "cancelled" && o.stage !== "completed" && !isSettled(o, config));
   const prepay = config.paymentTiming === "prepay";
 
@@ -201,7 +233,7 @@ export function Pos({ config, catalog, online, customerId, setCustomerId }: PosP
           {shown.map((m) => (
             <button key={m.id} className="item" disabled={m.soldOut} onClick={() => add(m)}>
               <span className="n">{m.name}</span>
-              <span className="p">{m.soldOut ? "Sold out" : formatMoney(m.priceCents)}</span>
+              <span className="p">{m.soldOut ? "Sold out" : (() => { const [lo, hi] = priceRange(m.priceCents, m.options); return lo === hi ? formatMoney(lo) : `from ${formatMoney(lo)}`; })()}</span>
             </button>
           ))}
         </div>
@@ -233,14 +265,14 @@ export function Pos({ config, catalog, online, customerId, setCustomerId }: PosP
         <div className="lines">
           {bag.length === 0 && <p className="muted">Tap items to start an order.</p>}
           {bag.map((l) => (
-            <div className="line" key={l.item.id}>
-              <span className="nm">{l.item.name}</span>
+            <div className="line" key={l.key}>
+              <span className="nm">{l.item.name}{l.options.length > 0 && <small className="optline">{optionLines(l.options).join(" · ")}</small>}</span>
               <span className="step">
-                <button onClick={() => change(l.item.id, -1)}>−</button>
+                <button onClick={() => change(l.key, -1)}>−</button>
                 <b>{l.qty}</b>
-                <button onClick={() => change(l.item.id, +1)}>+</button>
+                <button onClick={() => change(l.key, +1)}>+</button>
               </span>
-              <span className="amt">{formatMoney(l.item.priceCents * l.qty)}</span>
+              <span className="amt">{formatMoney(l.unitCents * l.qty)}</span>
             </div>
           ))}
         </div>
@@ -308,11 +340,61 @@ export function Pos({ config, catalog, online, customerId, setCustomerId }: PosP
                   >
                     Use credit
                   </button>
+                  <button className="secondary sm" onClick={() => setSplit(split?.orderId === o.orderId ? null : { orderId: o.orderId, n: 2, custom: "" })}>
+                    Split
+                  </button>
                 </div>
+                {split?.orderId === o.orderId && (() => {
+                  const remaining = t.total - confirmedPaid(o);
+                  const shares = splitEqual(remaining, Array.from({ length: split.n }, (_, i) => `p${i}`), "p0");
+                  const next = shares.p0 ?? 0; // the first share carries any extra cents
+                  const custom = Math.round(parseFloat(split.custom || "0") * 100);
+                  return (
+                    <div className="split">
+                      <div className="split-row">
+                        <span>People still to pay</span>
+                        <span className="step">
+                          <button aria-label="Fewer people" onClick={() => setSplit({ ...split, n: Math.max(1, split.n - 1) })}>−</button>
+                          <b>{split.n}</b>
+                          <button aria-label="More people" onClick={() => setSplit({ ...split, n: Math.min(10, split.n + 1) })}>+</button>
+                        </span>
+                      </div>
+                      <div className="split-row">
+                        <span>Next share <b>{formatMoney(next)}</b> <small className="muted">of {formatMoney(remaining)} left</small></span>
+                        <span>
+                          <button className="primary sm" onClick={() => void payShare(o, next, "cash")}>Cash</button>{" "}
+                          <button className="secondary sm" disabled={!!creditBlocked || paying} title={creditBlocked} onClick={() => void payShare(o, next, "credit")}>Credit</button>
+                        </span>
+                      </div>
+                      <div className="split-row">
+                        <span>Or an amount <input className="split-amt" inputMode="decimal" placeholder="0.00" value={split.custom} onChange={(e) => setSplit({ ...split, custom: e.target.value })} /></span>
+                        <span>
+                          <button className="primary sm" disabled={!(custom > 0 && custom <= remaining)} onClick={() => void payShare(o, custom, "cash")}>Cash</button>{" "}
+                          <button className="secondary sm" disabled={!(custom > 0 && custom <= remaining) || !!creditBlocked || paying} onClick={() => void payShare(o, custom, "credit")}>Credit</button>
+                        </span>
+                      </div>
+                    </div>
+                  );
+                })()}
               </div>
             );
           })}
         </section>
+      )}
+      {picking && (
+        <OptionSheet
+          name={picking.name}
+          description={picking.description}
+          photoUrl={picking.imageVersion ? `/api/products/${picking.id}/image?v=${picking.imageVersion}` : null}
+          baseCents={picking.priceCents}
+          groups={picking.options!}
+          cta="Add to order"
+          onClose={() => setPicking(null)}
+          onAdd={(sel) => {
+            addWith(picking, sel);
+            setPicking(null);
+          }}
+        />
       )}
     </div>
   );

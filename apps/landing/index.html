@@ -1,0 +1,422 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Rezein: orders, kitchen and payments for your shop, even offline</title>
+  <meta name="description" content="Rezein is one system for the counter, the kitchen and your customers' phones: ordering, queue and kitchen screens, prepaid credit and printing. It keeps working when the internet drops." />
+  <meta name="theme-color" content="#091744" />
+  <style>
+    :root {
+      --navy: #091744;
+      --navy-2: #14246a;
+      --teal: #0e9aa7;
+      --teal-2: #19b5c4;
+      --bg: #f7f8f3;
+      --card: #ffffff;
+      --line: #e2e6da;
+      --muted: #4b5679;
+      --ok: #1f8f5f;
+      --radius: 20px;
+      --max: 1120px;
+      font-family: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+    }
+    * { box-sizing: border-box; }
+    html { scroll-behavior: smooth; }
+    body { margin: 0; background: var(--bg); color: var(--navy); line-height: 1.55; -webkit-font-smoothing: antialiased; }
+    img { max-width: 100%; display: block; }
+    a { color: inherit; }
+    .wrap { max-width: var(--max); margin: 0 auto; padding: 0 24px; }
+    h1, h2, h3 { line-height: 1.12; letter-spacing: -0.02em; margin: 0; }
+    h1 { font-size: clamp(2.4rem, 5.6vw, 4.2rem); font-weight: 800; }
+    h2 { font-size: clamp(1.8rem, 3.6vw, 2.6rem); font-weight: 800; }
+    h3 { font-size: 1.18rem; font-weight: 700; letter-spacing: -0.01em; }
+    p { margin: 0; }
+    .lead { font-size: clamp(1.08rem, 1.7vw, 1.3rem); color: var(--muted); max-width: 40em; }
+    .eyebrow { font-size: .8rem; font-weight: 700; letter-spacing: .14em; text-transform: uppercase; color: var(--teal); margin-bottom: 14px; display: flex; align-items: center; gap: 10px; }
+    .eyebrow::before { content: ""; width: 22px; height: 3px; border-radius: 2px; background: linear-gradient(90deg, var(--navy), var(--teal-2)); }
+    section { padding: 88px 0; }
+
+    /* Header */
+    header.site { position: sticky; top: 0; z-index: 20; background: color-mix(in srgb, var(--bg) 92%, transparent); backdrop-filter: blur(10px); border-bottom: 1px solid transparent; }
+    header.site .wrap { display: flex; align-items: center; justify-content: space-between; height: 72px; }
+    header.site img { height: 38px; width: auto; }
+    header.site nav { display: flex; gap: 26px; align-items: center; font-weight: 600; font-size: .95rem; }
+    header.site nav a { text-decoration: none; color: var(--muted); }
+    header.site nav a:hover { color: var(--navy); }
+    @media (max-width: 760px) { header.site nav a:not(.btn) { display: none; } }
+
+    .btn { display: inline-flex; align-items: center; justify-content: center; gap: 8px; padding: 14px 24px; border-radius: 999px; font-weight: 700; font-size: 1rem; text-decoration: none; border: 2px solid var(--navy); transition: transform .15s ease, box-shadow .15s ease; cursor: pointer; }
+    .btn.primary { background: var(--navy); color: #fff; box-shadow: 0 8px 22px rgba(9, 23, 68, .22); }
+    .btn.primary:hover { transform: translateY(-2px); box-shadow: 0 12px 28px rgba(9, 23, 68, .28); }
+    .btn.ghost { background: transparent; color: var(--navy); }
+    .btn.ghost:hover { background: #fff; }
+    .btn.sm { padding: 10px 18px; font-size: .92rem; }
+    .btn[hidden] { display: none; }
+    :focus-visible { outline: 3px solid var(--teal-2); outline-offset: 3px; border-radius: 6px; }
+
+    /* Hero */
+    .hero { padding: 56px 0 72px; position: relative; overflow: hidden; }
+    .hero .wrap { display: grid; grid-template-columns: 1.05fr .95fr; gap: 48px; align-items: center; }
+    .hero h1 .grad { background: linear-gradient(120deg, var(--navy) 10%, var(--teal) 90%); -webkit-background-clip: text; background-clip: text; color: transparent; }
+    .hero .lead { margin: 22px 0 32px; }
+    .cta-row { display: flex; gap: 14px; flex-wrap: wrap; }
+    .hero-note { margin-top: 20px; font-size: .92rem; color: var(--muted); display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+    .hero-note span { display: inline-flex; align-items: center; gap: 6px; }
+    .hero-note i { width: 8px; height: 8px; border-radius: 50%; background: var(--teal); display: inline-block; }
+    @media (max-width: 900px) { .hero .wrap { grid-template-columns: 1fr; } }
+
+    /* Illustrated screens */
+    .stage { position: relative; height: 500px; }
+    .stage::before { content: ""; position: absolute; inset: 6% 2% 0 8%; background: linear-gradient(140deg, #dff3f4, #eef1fb); border-radius: 36px; }
+    .dev { position: absolute; background: #fff; box-shadow: 0 24px 60px rgba(9, 23, 68, .18); border: 1px solid var(--line); }
+    .phone { width: 232px; left: 50%; top: 0; transform: translateX(-50%); border-radius: 34px; padding: 14px 12px 12px; border: 6px solid var(--navy); background: var(--bg); }
+    .ph-top { display: flex; justify-content: space-between; align-items: center; font-size: 10px; color: var(--muted); line-height: 1.1; margin-bottom: 8px; }
+    .ph-top b { display: block; font-size: 16px; color: var(--navy); }
+    .pill { font-style: normal; font-weight: 700; font-size: 10px; background: var(--navy); color: #fff; padding: 6px 10px; border-radius: 999px; }
+    .ph-seg { display: grid; grid-template-columns: 1fr 1fr; background: #e9ecdf; border-radius: 999px; padding: 3px; font-size: 10px; font-weight: 700; text-align: center; margin-bottom: 10px; }
+    .ph-seg span { padding: 6px 0; border-radius: 999px; color: var(--muted); }
+    .ph-seg span.on { background: #fff; color: var(--navy); box-shadow: 0 1px 3px rgba(0, 0, 0, .1); border: 1.5px solid var(--teal); }
+    .ph-card { display: grid; grid-template-columns: 54px 1fr 26px; gap: 8px; align-items: center; background: #fff; border: 1px solid var(--line); border-radius: 14px; padding: 6px; margin-bottom: 7px; }
+    .ph-img { height: 54px; border-radius: 9px; }
+    .c1 { background: linear-gradient(135deg, #e8c48a, #c98a42); }
+    .c2 { background: linear-gradient(135deg, #9fd4cf, #3b8f91); }
+    .c3 { background: linear-gradient(135deg, #f0b8a0, #d2674a); }
+    .ph-card b { display: block; font-size: 11px; line-height: 1.15; }
+    .ph-card small { display: block; font-size: 9px; color: var(--muted); line-height: 1.2; }
+    .ph-card strong { font-size: 11px; }
+    .ph-card .add { width: 24px; height: 24px; border-radius: 50%; background: var(--teal); color: #fff; font-style: normal; font-weight: 700; display: grid; place-items: center; font-size: 15px; line-height: 1; }
+    .ph-card.in { background: #e8f6f7; border-color: var(--teal); }
+    .ph-bar { margin-top: 10px; background: var(--navy); color: #fff; border-radius: 999px; padding: 10px 14px; display: flex; justify-content: space-between; font-size: 11px; font-weight: 600; }
+
+    .tablet { width: 250px; left: 0; bottom: 30px; border-radius: 16px; padding: 12px; transform: rotate(-3deg); }
+    .tk { border: 1px solid var(--line); border-radius: 10px; padding: 8px 10px; margin-bottom: 8px; background: #fff; }
+    .tk.hot { border-color: var(--teal); background: #eaf7f8; }
+    .tk-h { display: flex; justify-content: space-between; align-items: baseline; font-size: 10px; color: var(--muted); }
+    .tk-h b { font-size: 16px; color: var(--navy); }
+    .tk ul { margin: 4px 0 0; padding: 0; list-style: none; font-size: 11px; font-weight: 600; }
+    .tk li small { display: block; font-weight: 400; color: var(--muted); font-size: 9.5px; }
+    .tv { width: 200px; right: -6px; bottom: -4px; border-radius: 12px; background: var(--navy); color: #fff; border: 0; padding: 10px; transform: rotate(2deg); }
+    .tv h4 { margin: 0 0 6px; font-size: 9px; letter-spacing: .12em; text-transform: uppercase; color: #9fb0e8; }
+    .tv-cols { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+    .tv-cols div { border-radius: 8px; padding: 8px; background: rgba(255, 255, 255, .08); }
+    .tv-cols div.ready { background: var(--ok); }
+    .tv-cols b { display: block; font-size: 15px; line-height: 1.25; letter-spacing: .03em; }
+    @media (max-width: 900px) { .stage { height: 500px; max-width: 420px; margin: 0 auto; width: 100%; } .tablet { left: -6px; } .tv { right: -6px; } }
+
+    /* Trust strip */
+    .strip { padding: 0 0 12px; }
+    .strip ul { list-style: none; margin: 0; padding: 22px 28px; background: #fff; border: 1px solid var(--line); border-radius: var(--radius); display: grid; grid-template-columns: repeat(4, 1fr); gap: 20px; }
+    .strip li { font-size: .93rem; color: var(--muted); }
+    .strip li b { display: block; color: var(--navy); font-size: 1rem; }
+    @media (max-width: 860px) { .strip ul { grid-template-columns: 1fr 1fr; } }
+
+    /* Feature grid */
+    .section-head { margin-bottom: 44px; }
+    .section-head .lead { margin-top: 14px; }
+    .grid3 { display: grid; grid-template-columns: repeat(3, 1fr); gap: 20px; }
+    .card { background: var(--card); border: 1px solid var(--line); border-radius: var(--radius); padding: 28px; }
+    .card .ico { width: 46px; height: 46px; border-radius: 14px; background: linear-gradient(135deg, var(--navy), var(--teal)); display: grid; place-items: center; margin-bottom: 18px; }
+    .card .ico svg { width: 24px; height: 24px; stroke: #fff; fill: none; stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; }
+    .card p { color: var(--muted); margin-top: 8px; font-size: .98rem; }
+    @media (max-width: 920px) { .grid3 { grid-template-columns: 1fr 1fr; } }
+    @media (max-width: 620px) { .grid3 { grid-template-columns: 1fr; } }
+
+    /* Flow */
+    .flow { background: var(--navy); color: #fff; }
+    .flow .eyebrow { color: var(--teal-2); }
+    .flow .eyebrow::before { background: linear-gradient(90deg, #fff, var(--teal-2)); }
+    .flow .lead { color: #b7c2ee; }
+    .steps { list-style: none; margin: 44px 0 0; padding: 0; display: grid; grid-template-columns: repeat(5, 1fr); gap: 16px; counter-reset: s; }
+    .steps li { position: relative; padding: 22px 18px 20px; border-radius: 18px; background: rgba(255, 255, 255, .07); border: 1px solid rgba(255, 255, 255, .12); counter-increment: s; }
+    .steps li::before { content: counter(s); display: grid; place-items: center; width: 32px; height: 32px; border-radius: 50%; background: var(--teal-2); color: var(--navy); font-weight: 800; margin-bottom: 14px; }
+    .steps b { display: block; font-size: 1.02rem; margin-bottom: 6px; }
+    .steps span { font-size: .9rem; color: #b7c2ee; display: block; }
+    @media (max-width: 980px) { .steps { grid-template-columns: 1fr 1fr; } }
+    @media (max-width: 560px) { .steps { grid-template-columns: 1fr; } }
+
+    /* Modes */
+    .modes { display: grid; grid-template-columns: repeat(3, 1fr); gap: 20px; }
+    .mode { background: #fff; border: 1px solid var(--line); border-radius: var(--radius); padding: 28px; display: flex; flex-direction: column; gap: 10px; }
+    .mode p { color: var(--muted); font-size: .98rem; flex: 1; }
+    .tag { align-self: flex-start; font-size: .75rem; font-weight: 800; letter-spacing: .06em; text-transform: uppercase; padding: 5px 11px; border-radius: 999px; }
+    .tag.ready { background: #e0f4ea; color: var(--ok); }
+    .tag.part { background: #e5f4f6; color: #0a7480; }
+    .tag.soon { background: #eceef7; color: var(--muted); }
+    @media (max-width: 860px) { .modes { grid-template-columns: 1fr; } }
+
+    /* Two-column feature bands */
+    .band { display: grid; grid-template-columns: 1fr 1fr; gap: 20px; }
+    .panel { border-radius: var(--radius); padding: 36px; border: 1px solid var(--line); background: #fff; }
+    .panel.dark { background: linear-gradient(150deg, var(--navy) 30%, #123a6b); color: #fff; border: 0; }
+    .panel.dark p, .panel.dark li { color: #c3cdf2; }
+    .panel ul { margin: 18px 0 0; padding: 0; list-style: none; display: grid; gap: 12px; }
+    .panel li { position: relative; padding-left: 28px; color: var(--muted); font-size: .98rem; }
+    .panel li::before { content: ""; position: absolute; left: 0; top: .5em; width: 12px; height: 12px; border-radius: 3px; background: var(--teal-2); }
+    .swatches { display: flex; gap: 10px; margin-top: 22px; }
+    .swatches i { width: 40px; height: 40px; border-radius: 12px; display: block; border: 2px solid rgba(255,255,255,.5); }
+    @media (max-width: 860px) { .band { grid-template-columns: 1fr; } }
+
+    /* Status lists */
+    .status { display: grid; grid-template-columns: 1fr 1fr; gap: 20px; }
+    .status .panel h3 { display: flex; align-items: center; gap: 10px; }
+    .dot { width: 10px; height: 10px; border-radius: 50%; display: inline-block; background: var(--ok); }
+    .dot.next { background: var(--teal-2); }
+    .status li::before { background: var(--ok); }
+    .status .next li::before { background: transparent; border: 2px solid var(--teal); }
+    @media (max-width: 860px) { .status { grid-template-columns: 1fr; } }
+
+    /* CTA */
+    .cta { padding: 20px 0 96px; }
+    .cta-box { background: linear-gradient(135deg, var(--navy), var(--navy-2) 55%, #0b6f86); color: #fff; border-radius: 32px; padding: 64px 40px; text-align: center; position: relative; overflow: hidden; }
+    .cta-box::after { content: ""; position: absolute; right: 36px; top: 28px; width: 34px; height: 34px; background: var(--teal-2); opacity: .9; }
+    .cta-box::before { content: ""; position: absolute; right: 70px; top: 62px; width: 34px; height: 34px; background: rgba(255, 255, 255, .22); }
+    .cta-box p { color: #c3cdf2; max-width: 36em; margin: 16px auto 30px; font-size: 1.1rem; }
+    .cta-box .cta-row { justify-content: center; }
+    .cta-box .btn.primary { background: #fff; color: var(--navy); border-color: #fff; box-shadow: none; }
+    .cta-box .btn.ghost { color: #fff; border-color: rgba(255, 255, 255, .6); }
+    .cta-box .btn.ghost:hover { background: rgba(255, 255, 255, .12); }
+
+    footer.site { border-top: 1px solid var(--line); padding: 36px 0 48px; color: var(--muted); font-size: .92rem; }
+    footer.site .wrap { display: flex; justify-content: space-between; align-items: center; gap: 20px; flex-wrap: wrap; }
+    footer.site img { height: 30px; width: auto; }
+    footer.site small { display: block; margin-top: 4px; }
+
+    @media (prefers-reduced-motion: reduce) { html { scroll-behavior: auto; } .btn { transition: none; } }
+  </style>
+</head>
+<body>
+  <header class="site">
+    <div class="wrap">
+      <a href="#top" aria-label="Rezein home"><img src="assets/rezein-logo.png" alt="Rezein" /></a>
+      <nav aria-label="Main">
+        <a href="#what">What it does</a>
+        <a href="#flow">How it works</a>
+        <a href="#status">Status</a>
+        <a class="btn primary sm" data-cta="demo" href="#" hidden>Try the demo</a>
+        <a class="btn primary sm" data-cta="contact" href="#" hidden>Talk to us</a>
+      </nav>
+    </div>
+  </header>
+
+  <main id="top">
+    <!-- Hero -->
+    <div class="hero">
+      <div class="wrap">
+        <div>
+          <p class="eyebrow">Orders · Kitchen · Payments</p>
+          <h1>One system for your counter, kitchen and <span class="grad">customers</span>.</h1>
+          <p class="lead">Rezein takes orders at the till and on your customers' phones, runs the kitchen screen and the queue display, prints the tickets, and keeps working when the internet drops.</p>
+          <div class="cta-row">
+            <a class="btn primary" data-cta="demo" href="#" hidden>Try the customer demo</a>
+            <a class="btn ghost" data-cta="contact" href="#" hidden>Talk to us</a>
+            <a class="btn ghost" href="#flow">See how an order flows</a>
+          </div>
+          <p class="hero-note"><span><i></i>Works offline</span><span><i></i>Prepaid credit</span><span><i></i>Receipt and label printing</span></p>
+        </div>
+
+        <div class="stage" role="img" aria-label="Illustration: a customer ordering on a phone, a kitchen screen with tickets, and a queue display showing Preparing and Ready numbers.">
+          <div class="dev tablet">
+            <div class="tk hot"><div class="tk-h"><b>W012</b><span>Dine in · Table 5</span></div><ul><li>1 × Iced Coffee<small>Cold</small></li><li>2 × Kaya Toast</li></ul></div>
+            <div class="tk"><div class="tk-h"><b>A041</b><span>Take away</span></div><ul><li>1 × Nasi Lemak</li></ul></div>
+          </div>
+          <div class="dev phone">
+            <div class="ph-top"><div>Good afternoon!<b>Guest</b></div><i class="pill">Table 5</i></div>
+            <div class="ph-seg"><span class="on">Dine in</span><span>Take away</span></div>
+            <div class="ph-card in"><div class="ph-img c1"></div><div><b>Kaya Toast</b><small>Homemade kaya on crisp bread</small><strong>S$2.00</strong></div><i class="add">+</i></div>
+            <div class="ph-card"><div class="ph-img c2"></div><div><b>Iced Coffee</b><small>Traditional kopi, brewed strong</small><strong>from S$2.20</strong></div><i class="add">+</i></div>
+            <div class="ph-card"><div class="ph-img c3"></div><div><b>Nasi Lemak</b><small>Coconut rice, sambal, egg</small><strong>S$6.90</strong></div><i class="add">+</i></div>
+            <div class="ph-bar"><span>View bag · 2 items</span><b>S$5.45</b></div>
+          </div>
+          <div class="dev tv">
+            <div class="tv-cols">
+              <div><h4>Preparing</h4><b>W013<br />A042<br />W015</b></div>
+              <div class="ready"><h4 style="color:#d7f3e5">Ready</h4><b>W011<br />W012</b></div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Strip -->
+    <div class="strip">
+      <div class="wrap">
+        <ul>
+          <li><b>At the counter</b>A fast till with the kitchen and queue screens.</li>
+          <li><b>On the phone</b>Customers order from a QR code, no app to install.</li>
+          <li><b>In the kitchen</b>Screen and printed tickets, with every choice on them.</li>
+          <li><b>When the network drops</b>The till carries on and catches up later.</li>
+        </ul>
+      </div>
+    </div>
+
+    <!-- What it does -->
+    <section id="what">
+      <div class="wrap">
+        <div class="section-head">
+          <p class="eyebrow">What it does</p>
+          <h2>Everything between "I'd like a coffee" and "number 42 is ready".</h2>
+          <p class="lead">The pieces a food business actually needs, working from the same menu and the same prices.</p>
+        </div>
+        <div class="grid3">
+          <article class="card">
+            <div class="ico"><svg viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="13" rx="2"/><path d="M8 21h8M12 17v4"/></svg></div>
+            <h3>Counter and kitchen screens</h3>
+            <p>A quick till, a kitchen screen that shows an order the moment it is paid, and a queue display for the wall. Tap Start, tap Ready, and everyone sees it.</p>
+          </article>
+          <article class="card">
+            <div class="ico"><svg viewBox="0 0 24 24"><rect x="7" y="2" width="10" height="20" rx="2.5"/><path d="M11 18h2"/></svg></div>
+            <h3>Customers order from their phone</h3>
+            <p>Scan a table's QR code and order with photos, hot or cold, extras and live status. Your staff accept each order first, so nothing reaches the kitchen unchecked.</p>
+          </article>
+          <article class="card">
+            <div class="ico"><svg viewBox="0 0 24 24"><path d="M2 9a15 15 0 0 1 20 0M5 12.5a10 10 0 0 1 14 0M8.5 16a5 5 0 0 1 7 0"/><path d="M12 19.5h.01"/><path d="M3 3l18 18"/></svg></div>
+            <h3>Keeps working offline</h3>
+            <p>Every order is saved on the device first and sent when the connection returns. A network drop during lunch is an inconvenience, not an outage.</p>
+          </article>
+          <article class="card">
+            <div class="ico"><svg viewBox="0 0 24 24"><rect x="2.5" y="5" width="19" height="14" rx="2.5"/><path d="M2.5 10h19M6 15h4"/></svg></div>
+            <h3>Prepaid credit</h3>
+            <p>Customers top up at the counter and pay from their balance. Each spend is checked against one balance, so two tills cannot spend the same dollars, and every movement is recorded.</p>
+          </article>
+          <article class="card">
+            <div class="ico"><svg viewBox="0 0 24 24"><path d="M3 12l9-9 9 9-9 9z"/><path d="M12 8v8M9.5 10.5c0-1 1-1.5 2.5-1.5s2.5.5 2.5 1.5-1 1.3-2.5 1.5-2.5.6-2.5 1.5 1 1.5 2.5 1.5 2.5-.5 2.5-1.5"/></svg></div>
+            <h3>One menu, a price for each way you sell</h3>
+            <p>Dine in, take away, delivery partners or an event can each have their own price list and service charge, set once and applied everywhere.</p>
+          </article>
+          <article class="card">
+            <div class="ico"><svg viewBox="0 0 24 24"><path d="M6 9V3h12v6M6 18H4a1 1 0 0 1-1-1v-6a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2v6a1 1 0 0 1-1 1h-2"/><rect x="6" y="14" width="12" height="7" rx="1"/></svg></div>
+            <h3>Receipts, tickets and labels</h3>
+            <p>Prints to receipt printers and to Zebra label printers. If a printer is off, the job waits and retries instead of disappearing, and a manager can see what failed.</p>
+          </article>
+        </div>
+      </div>
+    </section>
+
+    <!-- Flow -->
+    <section id="flow" class="flow">
+      <div class="wrap">
+        <p class="eyebrow">How an order flows</p>
+        <h2>From a phone to a printed ticket in five steps.</h2>
+        <p class="lead" style="margin-top:14px">The same path works for orders a customer places and orders your staff key in.</p>
+        <ol class="steps">
+          <li><b>Customer orders</b><span>Picks items and options on their phone and gets a queue number.</span></li>
+          <li><b>Staff accept</b><span>The order appears on the counter. One tap accepts it, or turns it down.</span></li>
+          <li><b>Payment</b><span>Cash, or from the customer's prepaid credit. The kitchen starts once it is paid.</span></li>
+          <li><b>Kitchen ticket</b><span>Shown on the kitchen screen and printed, with every choice on it.</span></li>
+          <li><b>Ready</b><span>The queue display and the customer's phone both say so.</span></li>
+        </ol>
+      </div>
+    </section>
+
+    <!-- Modes -->
+    <section id="modes">
+      <div class="wrap">
+        <div class="section-head">
+          <p class="eyebrow">Set up for how you work</p>
+          <h2>A normal till, configured for your kind of business.</h2>
+          <p class="lead">Choose when customers pay, and the kitchen and queue behave to match.</p>
+        </div>
+        <div class="modes">
+          <article class="mode"><span class="tag ready">Ready</span><h3>Fast serve</h3><p>Pay first, then wait for your number. The kitchen sees an order only once it is paid.</p></article>
+          <article class="mode"><span class="tag part">Partly ready</span><h3>Restaurant</h3><p>Open a tab, send it to the kitchen, pay later. Adding to a tab prints just the new items. Splitting and combining bills is on the way.</p></article>
+          <article class="mode"><span class="tag soon">On the way</span><h3>Delivery</h3><p>Take the order now and track its progress. Partner orders from delivery apps come after.</p></article>
+        </div>
+      </div>
+    </section>
+
+    <!-- Brand + control -->
+    <section style="padding-top:0">
+      <div class="wrap band">
+        <div class="panel dark">
+          <p class="eyebrow" style="color:var(--teal-2)">Your brand</p>
+          <h2 style="font-size:clamp(1.6rem,3vw,2.1rem)">It looks like your shop, not a template.</h2>
+          <p style="margin-top:14px">Upload your logo and top photo, choose your colours, add a line under the photo and a special offer. The customer page dresses itself in them, with readable text chosen automatically.</p>
+          <div class="swatches" aria-hidden="true"><i style="background:#e1523e"></i><i style="background:#ea7016"></i><i style="background:#0e9aa7"></i><i style="background:#091744"></i></div>
+        </div>
+        <div class="panel">
+          <p class="eyebrow">In control</p>
+          <h2 style="font-size:clamp(1.6rem,3vw,2.1rem)">Staff, devices and money you can account for.</h2>
+          <ul>
+            <li>Staff sign in with a PIN, and roles decide who can refund or change prices.</li>
+            <li>A new tablet or printer hub has to be approved with a one-time code, and a lost one can be removed in a tap.</li>
+            <li>An audit trail shows who changed a price, topped up credit or approved a device.</li>
+            <li>Managers change prices, photos and the shop's look themselves, without calling anyone.</li>
+          </ul>
+        </div>
+      </div>
+    </section>
+
+    <!-- Status -->
+    <section id="status" style="padding-top:0">
+      <div class="wrap">
+        <div class="section-head">
+          <p class="eyebrow">Where it stands</p>
+          <h2>Ready today, and what is coming next.</h2>
+          <p class="lead">We would rather tell you plainly than promise a feature that is not there yet.</p>
+        </div>
+        <div class="status">
+          <div class="panel">
+            <h3><span class="dot"></span>Ready today</h3>
+            <ul>
+              <li>Till, kitchen screen and queue display, working offline</li>
+              <li>Customer ordering from a phone, with item options and live status</li>
+              <li>Prepaid credit: top up and pay from a balance</li>
+              <li>Prices and service charge by channel</li>
+              <li>Receipt, kitchen-ticket and label printing for network printers</li>
+              <li>Staff roles, approved devices and an audit trail</li>
+            </ul>
+          </div>
+          <div class="panel next">
+            <h3><span class="dot next"></span>On the way</h3>
+            <ul>
+              <li>Android hub: print controller, and backup internet when the shop's line is down</li>
+              <li>Manage the shop from Telegram: change a price, add an item, pull a report</li>
+              <li>Split and combine bills for restaurants</li>
+              <li>Delivery workflow and delivery-app orders</li>
+              <li>Paying online, and customer accounts with rewards</li>
+            </ul>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- CTA -->
+    <div class="cta">
+      <div class="wrap">
+        <div class="cta-box">
+          <h2>See it run on your menu.</h2>
+          <p>Try the customer page yourself, or tell us how your shop works and we will show you how Rezein would handle it.</p>
+          <div class="cta-row">
+            <a class="btn primary" data-cta="demo" href="#" hidden>Try the customer demo</a>
+            <a class="btn ghost" data-cta="contact" href="#" hidden>Talk to us</a>
+          </div>
+        </div>
+      </div>
+    </div>
+  </main>
+
+  <footer class="site">
+    <div class="wrap">
+      <div><img src="assets/rezein-logo.png" alt="Rezein" /><small>Illustrations on this page are drawn examples, not screenshots of a customer's shop.</small></div>
+      <div>&copy; <span id="year">2026</span> Rezein</div>
+    </div>
+  </footer>
+
+  <script>
+    // Set these two before publishing. A button whose value is empty stays hidden,
+    // so the page never shows a link that goes nowhere.
+    var CONFIG = {
+      demoUrl: "http://localhost:5173/#/shop", // the live customer ordering page
+      contactEmail: ""                          // e.g. "hello@yourcompany.com"
+    };
+    document.querySelectorAll("[data-cta=demo]").forEach(function (a) {
+      if (CONFIG.demoUrl) { a.href = CONFIG.demoUrl; a.hidden = false; }
+    });
+    document.querySelectorAll("[data-cta=contact]").forEach(function (a) {
+      if (CONFIG.contactEmail) { a.href = "mailto:" + CONFIG.contactEmail + "?subject=Rezein"; a.hidden = false; }
+    });
+    document.getElementById("year").textContent = new Date().getFullYear();
+  </script>
+</body>
+</html>

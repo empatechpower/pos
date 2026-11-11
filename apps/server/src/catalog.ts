@@ -1,5 +1,6 @@
 import { randomBytes } from "node:crypto";
-import { validateCatalog, type Catalog, type Channel, type ChannelKind, type PricebookAssignment, type Product } from "@pos/core";
+import { validateCatalog, type Catalog, type Channel, type ChannelKind, type OptionGroup, type PricebookAssignment, type Product } from "@pos/core";
+import { MAX_IMAGE_BYTES, sniffImage } from "./brand.js";
 import type pg from "pg";
 import type { Db } from "./db/pool.js";
 
@@ -29,8 +30,8 @@ export class PgCatalogStore implements CatalogStore {
     private readonly merchantId: string,
   ) {}
 
-  /** Load the sample catalog the first time a merchant has none. */
-  async ensureSeeded(seed: Catalog): Promise<void> {
+  /** Load a starting catalog (and photos, if given) the first time a merchant has none. */
+  async ensureSeeded(seed: Catalog, images?: ReadonlyMap<string, { bytes: Buffer; type: string }>): Promise<void> {
     const client = await this.db.connect();
     try {
       await client.query("BEGIN");
@@ -40,8 +41,14 @@ export class PgCatalogStore implements CatalogStore {
       );
       if (ins.rowCount) {
         const m = this.merchantId;
-        for (const p of seed.products)
-          await client.query("INSERT INTO products (merchant_id,id,name,category,sold_out,points_exempt) VALUES ($1,$2,$3,$4,$5,$6)", [m, p.id, p.name, p.category, !!p.soldOut, !!p.pointsExempt]);
+        for (const p of seed.products) {
+          const img = images?.get(p.id);
+          await client.query(
+            "INSERT INTO products (merchant_id,id,name,category,sold_out,points_exempt,description,alt_name,options,image_version) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)",
+            [m, p.id, p.name, p.category, !!p.soldOut, !!p.pointsExempt, p.description ?? null, p.altName ?? null, p.options ? JSON.stringify(p.options) : null, img ? 1 : 0],
+          );
+          if (img) await client.query("INSERT INTO product_images (merchant_id,product_id,bytes,type,version) VALUES ($1,$2,$3,$4,1)", [m, p.id, img.bytes, img.type]);
+        }
         for (const b of seed.pricebooks) {
           await client.query("INSERT INTO pricebooks (merchant_id,id,name,missing) VALUES ($1,$2,$3,$4)", [m, b.id, b.name, b.missing]);
           for (const [pid, cents] of Object.entries(b.prices))
@@ -69,7 +76,7 @@ export class PgCatalogStore implements CatalogStore {
     const m = this.merchantId;
     const [meta, products, books, prices, channels, assigns] = await Promise.all([
       q.query("SELECT version, default_pricebook_id FROM catalog_meta WHERE merchant_id=$1", [m]),
-      q.query("SELECT id,name,category,sold_out,points_exempt FROM products WHERE merchant_id=$1 ORDER BY sort", [m]),
+      q.query("SELECT id,name,category,sold_out,points_exempt,description,alt_name,options,image_version FROM products WHERE merchant_id=$1 ORDER BY sort", [m]),
       q.query("SELECT id,name,missing FROM pricebooks WHERE merchant_id=$1 ORDER BY name", [m]),
       q.query("SELECT pricebook_id, product_id, price_cents FROM pricebook_prices WHERE merchant_id=$1", [m]),
       q.query("SELECT id,name,kind,service_charge,active FROM channels WHERE merchant_id=$1 ORDER BY sort", [m]),
@@ -84,7 +91,19 @@ export class PgCatalogStore implements CatalogStore {
     return {
       version: Number(meta.rows[0].version),
       defaultPricebookId: meta.rows[0].default_pricebook_id,
-      products: products.rows.map((p): Product => ({ id: p.id, name: p.name, category: p.category, soldOut: p.sold_out || undefined, pointsExempt: p.points_exempt || undefined })),
+      products: products.rows.map(
+        (p): Product => ({
+          id: p.id,
+          name: p.name,
+          category: p.category,
+          soldOut: p.sold_out || undefined,
+          pointsExempt: p.points_exempt || undefined,
+          description: p.description ?? undefined,
+          altName: p.alt_name ?? undefined,
+          imageVersion: p.image_version || undefined,
+          options: (p.options as OptionGroup[] | null) ?? undefined,
+        }),
+      ),
       pricebooks: books.rows.map((b) => ({ id: b.id, name: b.name, missing: b.missing, prices: pb.get(b.id)! })),
       channels: channels.rows.map((c): Channel => ({ id: c.id, name: c.name, kind: c.kind as ChannelKind, serviceCharge: c.service_charge, active: c.active })),
       assignments: assigns.rows.map((a): PricebookAssignment => ({ pricebookId: a.pricebook_id, outletId: a.outlet_id ?? undefined, channelId: a.channel_id ?? undefined })),
@@ -136,7 +155,7 @@ export class PgCatalogStore implements CatalogStore {
     });
   }
 
-  createPricebook(name: string, missing: "fallback" | "hide") {
+  createPricebook(name: string, missing: "show" | "hide") {
     return this.change(async (c) => {
       const id = shortId("pb");
       await c.query("INSERT INTO pricebooks (merchant_id,id,name,missing) VALUES ($1,$2,$3,$4)", [this.merchantId, id, name, missing]);
@@ -144,7 +163,7 @@ export class PgCatalogStore implements CatalogStore {
     });
   }
 
-  updatePricebook(id: string, patch: { name?: string; missing?: "fallback" | "hide" }) {
+  updatePricebook(id: string, patch: { name?: string; missing?: "show" | "hide" }) {
     return this.change(async (c) => {
       const r = await c.query(
         "UPDATE pricebooks SET name=COALESCE($3,name), missing=COALESCE($4,missing) WHERE merchant_id=$1 AND id=$2 RETURNING id",
@@ -195,17 +214,28 @@ export class PgCatalogStore implements CatalogStore {
     });
   }
 
-  /** Add a product (with its price in the default pricebook) or edit an existing one. */
-  upsertProduct(p: { id?: string; name: string; category: string; soldOut?: boolean; pointsExempt?: boolean; priceCents?: number }) {
+  /**
+   * Add a product (with its price in the default pricebook) or edit an existing one. Fields that are not
+   * sent are left as they are, so a quick "mark sold out" can never wipe a description or its options.
+   * To clear one, send an empty string (text) or an empty list (options).
+   */
+  upsertProduct(p: { id?: string; name: string; category: string; soldOut?: boolean; pointsExempt?: boolean; priceCents?: number; description?: string; altName?: string; options?: OptionGroup[] }) {
     return this.change(async (c) => {
       const m = this.merchantId;
       const id = p.id ?? shortId("item");
       const existing = await c.query("SELECT 1 FROM products WHERE merchant_id=$1 AND id=$2", [m, id]);
       if (!existing.rowCount && p.priceCents === undefined) throw new ChangeError("a new product needs a price");
+      const text = (v: string | undefined) => (v === undefined ? [false, null] : [true, v.trim() === "" ? null : v.trim()]);
+      const [descGiven, desc] = text(p.description);
+      const [altGiven, alt] = text(p.altName);
+      const optsGiven = p.options !== undefined;
       await c.query(
-        `INSERT INTO products (merchant_id,id,name,category,sold_out,points_exempt) VALUES ($1,$2,$3,$4,$5,$6)
-         ON CONFLICT (merchant_id,id) DO UPDATE SET name=EXCLUDED.name, category=EXCLUDED.category, sold_out=EXCLUDED.sold_out, points_exempt=EXCLUDED.points_exempt`,
-        [m, id, p.name, p.category, !!p.soldOut, !!p.pointsExempt],
+        `INSERT INTO products (merchant_id,id,name,category,sold_out,points_exempt,description,alt_name,options) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)
+         ON CONFLICT (merchant_id,id) DO UPDATE SET name=EXCLUDED.name, category=EXCLUDED.category, sold_out=EXCLUDED.sold_out, points_exempt=EXCLUDED.points_exempt,
+           description = CASE WHEN $10 THEN EXCLUDED.description ELSE products.description END,
+           alt_name    = CASE WHEN $11 THEN EXCLUDED.alt_name    ELSE products.alt_name    END,
+           options     = CASE WHEN $12 THEN EXCLUDED.options     ELSE products.options     END`,
+        [m, id, p.name, p.category, !!p.soldOut, !!p.pointsExempt, desc, alt, optsGiven && p.options!.length ? JSON.stringify(p.options) : null, descGiven, altGiven, optsGiven],
       );
       if (p.priceCents !== undefined) {
         const def = (await c.query("SELECT default_pricebook_id FROM catalog_meta WHERE merchant_id=$1", [m])).rows[0].default_pricebook_id as string;
@@ -215,8 +245,31 @@ export class PgCatalogStore implements CatalogStore {
           [m, def, id, p.priceCents],
         );
       }
-      return { ...p, id, created: !existing.rowCount };
+      return { id, created: !existing.rowCount, name: p.name, category: p.category };
     });
+  }
+
+  /** Replace an item's photo. PNG, JPEG or WebP up to 300 KB, checked by content, not by the label. */
+  setImage(productId: string, bytes: Buffer) {
+    return this.change(async (c) => {
+      if (!bytes.length) throw new ChangeError("empty file");
+      if (bytes.length > MAX_IMAGE_BYTES) throw new ChangeError("photo must be 300 KB or smaller");
+      const type = sniffImage(bytes);
+      if (!type) throw new ChangeError("photo must be a PNG, JPEG or WebP image");
+      if (!(await c.query("SELECT 1 FROM products WHERE merchant_id=$1 AND id=$2", [this.merchantId, productId])).rowCount) throw new ChangeError("product not found");
+      const v = await c.query(
+        `INSERT INTO product_images (merchant_id,product_id,bytes,type,version) VALUES ($1,$2,$3,$4,1)
+         ON CONFLICT (merchant_id,product_id) DO UPDATE SET bytes=EXCLUDED.bytes, type=EXCLUDED.type, version=product_images.version+1 RETURNING version`,
+        [this.merchantId, productId, bytes, type],
+      );
+      await c.query("UPDATE products SET image_version=$3 WHERE merchant_id=$1 AND id=$2", [this.merchantId, productId, v.rows[0].version]);
+      return { productId, bytes: bytes.length, imageVersion: v.rows[0].version };
+    });
+  }
+
+  async getImage(productId: string): Promise<{ bytes: Buffer; type: string } | null> {
+    const r = await this.db.query("SELECT bytes, type FROM product_images WHERE merchant_id=$1 AND product_id=$2", [this.merchantId, productId]);
+    return r.rows[0] ? { bytes: r.rows[0].bytes, type: r.rows[0].type } : null;
   }
 }
 

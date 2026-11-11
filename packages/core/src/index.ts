@@ -12,3 +12,6 @@ export * from "./print/epl.js";
 export * from "./print/templates.js";
 export * from "./print/plain.js";
 export * from "./shop.js";
+export * from "./options.js";
+export * from "./tab.js";
+export * from "./print/raster.js";

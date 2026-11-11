@@ -1,0 +1,44 @@
+# Render Blueprint: one web service (API + built web app) and one Postgres database, both in Singapore.
+# Set the "sync: false" values in the Render dashboard (they are secrets or depend on your final address).
+databases:
+  - name: pos-db
+    region: singapore
+    plan: basic-256mb        # raise as orders grow; enable point-in-time recovery on a paid plan
+    databaseName: pos
+    user: pos
+
+services:
+  - type: web
+    name: pos
+    runtime: node
+    region: singapore
+    plan: standard
+    numInstances: 1
+    buildCommand: npm ci --include=dev && npm run build:web
+    startCommand: npm run start -w @pos/server
+    healthCheckPath: /api/health
+    envVars:
+      - key: NODE_VERSION
+        value: 22.21.0
+      - key: DATABASE_URL
+        fromDatabase: { name: pos-db, property: connectionString }
+      - key: TRUST_PROXY
+        value: "1"
+      - key: PUBLIC_URL          # e.g. https://order.yourshop.com (no trailing slash)
+        sync: false
+      - key: GOOGLE_CLIENT_ID
+        sync: false
+      - key: GOOGLE_CLIENT_SECRET
+        sync: false
+      - key: MICROSOFT_CLIENT_ID
+        sync: false
+      - key: MICROSOFT_CLIENT_SECRET
+        sync: false
+      - key: SMS_RECEIVE_NUMBER
+        sync: false
+      - key: SMS_WEBHOOK_SECRET
+        sync: false
+      - key: STRIPE_SECRET_KEY
+        sync: false
+      - key: STRIPE_WEBHOOK_SECRET
+        sync: false

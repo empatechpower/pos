@@ -14,8 +14,8 @@ export function seedCatalog(): Catalog {
     defaultPricebookId: "standard",
     products: MENU.map(({ priceCents: _p, ...p }) => p),
     pricebooks: [
-      { id: "standard", name: "Standard", missing: "fallback", prices: standard },
-      { id: "grab", name: "Grab", missing: "fallback", prices: grab },
+      { id: "standard", name: "Standard", missing: "show", prices: standard },
+      { id: "grab", name: "Grab", missing: "show", prices: grab },
     ],
     channels: [
       { id: "dine-in", name: "Dine in", kind: "dine_in", serviceCharge: true, active: true },

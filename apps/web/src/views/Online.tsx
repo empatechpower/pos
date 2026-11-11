@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { formatMoney, newId, orderTotals, confirmedPaid, type BusinessConfig } from "@pos/core";
+import { formatMoney, newId, optionLines, orderTotals, confirmedPaid, type BusinessConfig } from "@pos/core";
 import { useStaff } from "../auth";
 import { record, deviceId } from "../db";
 import { useOrders } from "../hooks";
@@ -46,7 +46,7 @@ export function Online({ config, online }: { config: BusinessConfig; online: boo
         <div>
           <b>{o.queueNumber}</b> <span className="muted">· {o.channelName}{o.spot ? ` · ${o.spot}` : ""} · {timeOf(o.openedAt)} · {formatMoney(t)}</span>
           <div>{o.customerName ?? "No name"}{o.customerPhone ? ` · ${o.customerPhone}` : ""}</div>
-          <div className="muted">{o.lines.filter((l) => l.qty > 0).map((l) => `${l.qty} × ${l.name}`).join(", ")}</div>
+          <div className="muted">{o.lines.filter((l) => l.qty > 0).map((l) => `${l.qty} × ${l.name}${l.options?.length ? ` (${optionLines(l.options).join(", ")})` : ""}`).join(", ")}</div>
         </div>
         <div className="tabr">
           {isNew ? (

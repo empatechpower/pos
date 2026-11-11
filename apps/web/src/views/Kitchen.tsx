@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { visibleToKitchen, type BusinessConfig, type OrderState } from "@pos/core";
+import { optionLines, visibleToKitchen, type BusinessConfig, type OrderState } from "@pos/core";
 import { record } from "../db";
 import { useOrders } from "../hooks";
 
@@ -64,6 +64,7 @@ function Ticket({ order, now, done, children }: { order: OrderState; now: number
         {order.lines.filter((l) => l.qty > 0).map((l) => (
           <li key={l.lineId}>
             <b>{l.qty}×</b> {l.name}
+            {l.options?.length ? <small className="optline">{optionLines(l.options).join(" · ")}</small> : null}
           </li>
         ))}
       </ul>

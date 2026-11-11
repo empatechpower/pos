@@ -2,6 +2,7 @@ import type { BusinessConfig } from "../config.js";
 import type { OrderLine, OrderState } from "../events.js";
 import { confirmedPaid, orderTotals } from "../events.js";
 import { formatMoney } from "../money.js";
+import { optionLines } from "../options.js";
 import type { Block, Doc, Label } from "./doc.js";
 
 export interface PrintContext {
@@ -35,7 +36,11 @@ export function receipt(order: OrderState, config: BusinessConfig, ctx: PrintCon
     { t: "text", text: stamp(ctx.now, ctx.timeZone) },
     { t: "rule" },
   ];
-  for (const l of liveLines(order)) b.push({ t: "cols", left: `${l.qty} x ${l.name}`, right: formatMoney(l.unitCents * l.qty) });
+  for (const l of liveLines(order)) {
+    b.push({ t: "cols", left: `${l.qty} x ${l.name}`, right: formatMoney(l.unitCents * l.qty) });
+    // Options sit under the item, marked with a dash (leading spaces would be collapsed when wrapping).
+    for (const o of optionLines(l.options)) b.push({ t: "text", text: `- ${o}` });
+  }
   b.push({ t: "rule" }, { t: "cols", left: "Subtotal", right: formatMoney(t.subtotal) });
   if (t.service) b.push({ t: "cols", left: "Service charge", right: formatMoney(t.service) });
   if (t.gst) b.push({ t: "cols", left: "GST", right: formatMoney(t.gst) });
@@ -73,7 +78,10 @@ export function kitchenTicket(order: OrderState, ctx: PrintContext, opts: Kitche
     { t: "text", text: stamp(ctx.now, ctx.timeZone), align: "center" },
     { t: "rule" },
   );
-  for (const l of lines) b.push({ t: "text", text: `${l.qty} x ${l.name}`, bold: true, size: 2 });
+  for (const l of lines) {
+    b.push({ t: "text", text: `${l.qty} x ${l.name}`, bold: true, size: 2 });
+    for (const o of optionLines(l.options)) b.push({ t: "text", text: `- ${o}`, bold: true });
+  }
   b.push({ t: "rule" }, { t: "feed", n: 3 }, { t: "cut" });
   return { blocks: b };
 }
@@ -86,7 +94,8 @@ export function itemLabel(order: OrderState, line: OrderLine, ctx: PrintContext,
     fields: [
       { t: "text", xMm: 3, yMm: 2, text: order.queueNumber ?? "-", heightMm: 9 },
       { t: "text", xMm: 3, yMm: 13, text: line.name.slice(0, 28), heightMm: 4.5 },
-      { t: "text", xMm: 3, yMm: 20, text: `${where(order)}  ${stamp(ctx.now, ctx.timeZone)}`.slice(0, 34), heightMm: 3.5 },
+      { t: "text", xMm: 3, yMm: 19, text: (optionLines(line.options).join(", ") || where(order)).slice(0, 34), heightMm: 3.5 },
+      { t: "text", xMm: 3, yMm: 24, text: `${where(order)}  ${stamp(ctx.now, ctx.timeZone)}`.slice(0, 34), heightMm: 3 },
     ],
   };
 }

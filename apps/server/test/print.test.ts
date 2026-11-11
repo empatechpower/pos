@@ -9,6 +9,7 @@ import { createEnrollmentCode, enroll } from "../src/devices.js";
 import { PgEventStore } from "../src/pgStore.js";
 import { MAX_ATTEMPTS, PrintStore, backoffSeconds } from "../src/print.js";
 import { runAgentOnce, sendRaw, type Sender } from "../src/printAgent.js";
+import { canvasRenderer } from "../src/rasterFont.js";
 import { startTestDb } from "./pg.js";
 import type { Db } from "../src/db/pool.js";
 
@@ -286,7 +287,7 @@ describe("delivery: retries, leases, competition", () => {
     expect((await agent(ok.send)).delivered).toBe(1);
   });
 
-  it("if an agent dies mid-print, the job becomes available again after its lease runs out", async () => {
+  it("if an agent dies mid-print, the job is parked as unconfirmed and never printed again on its own", async () => {
     await fresh();
     const o = orderEvents([{ id: "kopi", name: "Coffee", qty: 1 }], { queue: "A403", pay: "cash" });
     await push(o.events);
@@ -294,10 +295,24 @@ describe("delivery: retries, leases, competition", () => {
     expect(first).toHaveLength(1);
     expect(await queue().claim(hub.id, 5)).toHaveLength(0); // still leased: nobody else gets it
     await db.query("UPDATE print_jobs SET leased_until = now() - interval '1 second' WHERE id=$1", [first[0]!.id]);
-    const second = await queue().claim(other.id, 5);
-    expect(second.map((j) => j.id)).toEqual([first[0]!.id]);
-    expect(second[0]!.attempts).toBe(2);
-    await queue().markDone(second[0]!.id);
+    expect(await queue().claim(other.id, 5)).toHaveLength(0); // no silent reprint
+    const parked = (await queue().listJobs("unconfirmed")).find((j) => j.id === first[0]!.id);
+    expect(parked?.last_error).toMatch(/unconfirmed/);
+    expect(await queue().retryFailed(first[0]!.id)).toBe(true); // a person chose to reprint
+    const again = await queue().claim(other.id, 5);
+    expect(again.map((j) => j.id)).toEqual([first[0]!.id]);
+    await queue().markDone(again[0]!.id);
+  });
+
+  it("a failure after the printer connection was made is parked as unconfirmed, not retried", async () => {
+    await fresh();
+    await push(orderEvents([{ id: "kopi", name: "Coffee", qty: 1 }], { queue: "A404", pay: "cash" }).events);
+    const [j] = await queue().claim(hub.id, 5);
+    expect(await queue().markFailed(j!.id, "connection reset", true)).toBe("unconfirmed");
+    expect(await queue().claim(hub.id, 5)).toHaveLength(0);
+    await queue().retryFailed(j!.id);
+    const [k] = await queue().claim(hub.id, 5);
+    await queue().markDone(k!.id);
   });
 
   it("two agents claiming at once never receive the same job", async () => {
@@ -325,6 +340,37 @@ describe("delivery: retries, leases, competition", () => {
   it("the agent needs an enrolled device", async () => {
     expect((await call("/api/print/claim", { body: {} })).status).toBe(401);
     expect((await call("/api/print/claim", { body: {}, device: "nope" })).status).toBe(401);
+  });
+});
+
+describe("raster mode", () => {
+  it("the renderer draws Chinese and Tamil as real shapes, and a bitmap as wide as the paper", () => {
+    for (const text of ["咖啡 Kopi", "தமிழ்"]) {
+      const b = canvasRenderer.text(text, 384, { align: "center" });
+      expect(b.width).toBe(384);
+      expect(b.height).toBeGreaterThan(10);
+      expect(b.pixels.reduce((n, v) => n + v, 0)).toBeGreaterThan(40);
+    }
+  });
+
+  it("long text wraps instead of running off the paper", () => {
+    const one = canvasRenderer.text("Short", 384, {});
+    const many = canvasRenderer.text("A very long item name that cannot possibly fit on one line of a narrow receipt " .repeat(2), 384, {});
+    expect(many.height).toBeGreaterThan(one.height * 2);
+  });
+
+  it("a raster printer's job is bitmaps (GS v 0) and not text, and the preview of a plain printer is unchanged", async () => {
+    await db.query("UPDATE print_jobs SET status='done' WHERE status IN ('queued','leased')");
+    for (const id of ["front", "pass", "solo"]) await db.query("UPDATE printers SET active=false WHERE id=$1", [id]);
+    await setPrinter("pic", printerBody({ name: "Picture", roles: ["receipt"], raster: true, connection: { host: "10.0.2.1", port: 9100 } }));
+    const o = orderEvents([{ id: "kopi", name: "Coffee", qty: 1 }], { queue: "A501", pay: "cash" });
+    await push(o.events);
+    const [j] = await queue().claim(hub.id, 5);
+    const bytes = Array.from(j!.payload);
+    expect(bytes.some((v, i) => v === 0x1d && bytes[i + 1] === 0x76 && bytes[i + 2] === 0x30)).toBe(true);
+    expect(Buffer.from(bytes).toString("latin1")).not.toContain("A501"); // drawn, not sent as text
+    await queue().markDone(j!.id);
+    await db.query("UPDATE printers SET active=false WHERE id='pic'");
   });
 });
 

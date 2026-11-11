@@ -1,6 +1,6 @@
 import cors from "@fastify/cors";
 import Fastify, { type FastifyReply, type FastifyRequest } from "fastify";
-import { menuFor, newId, reduceOrder, type BusinessConfig, type ChannelKind, type OrderEvent } from "@pos/core";
+import { confirmedPaid, isFullyPaid, menuFor, newId, reduceOrder, type BusinessConfig, type ChannelKind, type OptionGroup, type OrderEvent } from "@pos/core";
 import { CASHIER_TOPUP_LIMIT_CENTS, audit, authenticate, can, createStaff, login, logout, recentAudit, type Permission, type Role, type Staff } from "./auth.js";
 import type { CatalogStore, ChangeResult, PgCatalogStore } from "./catalog.js";
 import type { Db } from "./db/pool.js";
@@ -9,6 +9,8 @@ import { authenticateDevice, createEnrollmentCode, enroll, issueStreamTicket, li
 import { BrandStore } from "./brand.js";
 import { PrintStore, validatePrinter, type Printer } from "./print.js";
 import { registerShop } from "./shop.js";
+import type { Integrations } from "./integrations.js";
+import { MemberStore } from "./members.js";
 import { FailureLimiter } from "./rateLimit.js";
 import type { EventStore, StoredEvent } from "./store.js";
 
@@ -32,6 +34,8 @@ interface Deps {
   logger?: boolean;
   /** Set when behind a reverse proxy, so per-address limits see the customer and not the proxy. */
   trustProxy?: boolean;
+  /** Google / Microsoft / SMS / Stripe settings; see integrations.ts. Optional: each one only switches a feature on. */
+  integrations?: Integrations;
 }
 
 const bearer = (req: FastifyRequest) => req.headers.authorization?.replace(/^Bearer\s+/i, "");
@@ -40,7 +44,7 @@ const deviceToken = (req: FastifyRequest) => {
   return Array.isArray(h) ? h[0] : h;
 };
 
-export async function buildApp({ config, store, db, catalog, catalogAdmin, print, logger = true, trustProxy = false }: Deps) {
+export async function buildApp({ config, store, db, catalog, catalogAdmin, print, logger = true, trustProxy = false, integrations }: Deps) {
   const app = Fastify({ logger, trustProxy });
   // Logo uploads arrive as raw image bytes.
   app.addContentTypeParser(["image/png", "image/jpeg", "image/webp"], { parseAs: "buffer", bodyLimit: 300 * 1024 + 1 }, (_req, body, done) => done(null, body));
@@ -99,11 +103,28 @@ export async function buildApp({ config, store, db, catalog, catalogAdmin, print
     }
   }
 
+  const members = db ? new MemberStore(db, merchantId, config.rewards.pointsEnabled ? config.rewards.welcomePoints : 0, config.rewards.welcomeVoucherCents) : undefined;
+
+  /** Points follow the order: earned once when it is paid, spent points returned if it is cancelled. */
+  async function settleMemberOrders(orderIds: string[]) {
+    for (const id of orderIds) {
+      const o = reduceOrder(id, await store.eventsForOrder(id));
+      if (!o?.memberId) continue;
+      if (o.stage === "cancelled") await members!.reverseForOrder(id);
+      else if (isFullyPaid(o, config)) {
+        if (config.rewards.pointsEnabled) await members!.earnForOrder(id, confirmedPaid(o), config.rewards.earnPointsPerDollar);
+        await members!.stampForOrder(id, confirmedPaid(o), config.rewards.stampCard);
+      }
+    }
+  }
+
   /** Store events, tell live screens, queue whatever now needs printing. Used for tills and for customers' orders alike. */
   async function ingest(events: OrderEvent[]): Promise<StoredEvent[]> {
     const added = await store.append(events);
     if (added.length) for (const push of streams) push(added);
-    if (added.length && print) await queuePrints([...new Set(added.map((a) => a.event.orderId))]);
+    const touched = [...new Set(added.map((a) => a.event.orderId))];
+    if (added.length && print) await queuePrints(touched);
+    if (added.length && members) await settleMemberOrders(touched);
     return added;
   }
 
@@ -207,7 +228,7 @@ export async function buildApp({ config, store, db, catalog, catalogAdmin, print
 
   // ---- customer ordering and shop look ------------------------------------------------------
 
-  registerShop(app, { db, config, store, catalog, brand: new BrandStore(db, merchantId), ingest, needs });
+  registerShop(app, { db, config, store, catalog, catalogAdmin, brand: new BrandStore(db, merchantId), ingest, members, needs, integrations });
 
   // ---- devices ----------------------------------------------------------------------------
 
@@ -268,15 +289,20 @@ export async function buildApp({ config, store, db, catalog, catalogAdmin, print
       },
     );
 
-    app.post<{ Body: { name?: string; missing?: "fallback" | "hide" } }>("/api/catalog/pricebooks", manage, async (req, reply) => {
-      const { name, missing = "fallback" } = req.body ?? {};
-      if (!name?.trim() || !["fallback", "hide"].includes(missing)) return bad(reply, "name and a valid missing rule are required");
+    app.put<{ Params: { id: string } }>("/api/catalog/products/:id/image", manage, async (req, reply) => {
+      if (!Buffer.isBuffer(req.body)) return reply.code(415).send({ error: "send the photo as image/png, image/jpeg or image/webp" });
+      return changed(req, reply, "product.image", () => cat.setImage(req.params.id, req.body as Buffer));
+    });
+
+    app.post<{ Body: { name?: string; missing?: "show" | "hide" } }>("/api/catalog/pricebooks", manage, async (req, reply) => {
+      const { name, missing = "show" } = req.body ?? {};
+      if (!name?.trim() || !["show", "hide"].includes(missing)) return bad(reply, "name and a valid missing rule are required");
       return changed(req, reply, "pricebook.create", () => cat.createPricebook(name.trim(), missing));
     });
 
-    app.patch<{ Params: { id: string }; Body: { name?: string; missing?: "fallback" | "hide" } }>("/api/catalog/pricebooks/:id", manage, async (req, reply) => {
+    app.patch<{ Params: { id: string }; Body: { name?: string; missing?: "show" | "hide" } }>("/api/catalog/pricebooks/:id", manage, async (req, reply) => {
       const { name, missing } = req.body ?? {};
-      if ((missing && !["fallback", "hide"].includes(missing)) || (name !== undefined && !name.trim())) return bad(reply, "invalid name or missing rule");
+      if ((missing && !["show", "hide"].includes(missing)) || (name !== undefined && !name.trim())) return bad(reply, "invalid name or missing rule");
       return changed(req, reply, "pricebook.update", () => cat.updatePricebook(req.params.id, { name: name?.trim(), missing }));
     });
 
@@ -305,7 +331,7 @@ export async function buildApp({ config, store, db, catalog, catalogAdmin, print
       return changed(req, reply, "default", () => cat.setDefaultPricebook(req.body!.pricebookId!));
     });
 
-    app.post<{ Body: { id?: string; name?: string; category?: string; soldOut?: boolean; pointsExempt?: boolean; priceCents?: number } }>(
+    app.post<{ Body: { id?: string; name?: string; category?: string; soldOut?: boolean; pointsExempt?: boolean; priceCents?: number; description?: string; altName?: string; options?: OptionGroup[] } }>(
       "/api/catalog/products",
       manage,
       async (req, reply) => {
@@ -313,7 +339,7 @@ export async function buildApp({ config, store, db, catalog, catalogAdmin, print
         if (!b.name?.trim() || !b.category?.trim()) return bad(reply, "name and category are required");
         if (b.priceCents !== undefined && !isCents(b.priceCents)) return bad(reply, "priceCents must be a whole number of cents, 0 or more");
         return changed(req, reply, "product", () =>
-          cat.upsertProduct({ id: b.id, name: b.name!.trim(), category: b.category!.trim(), soldOut: b.soldOut, pointsExempt: b.pointsExempt, priceCents: b.priceCents }),
+          cat.upsertProduct({ id: b.id, name: b.name!.trim(), category: b.category!.trim(), soldOut: b.soldOut, pointsExempt: b.pointsExempt, priceCents: b.priceCents, description: b.description, altName: b.altName, options: b.options }),
         );
       },
     );
@@ -339,6 +365,7 @@ export async function buildApp({ config, store, db, catalog, catalogAdmin, print
         categories: b.categories ?? [],
         widthChars: b.widthChars ?? 42,
         drawer: !!b.drawer,
+        raster: !!b.raster,
         labelWidthMm: b.labelWidthMm ?? null,
         labelHeightMm: b.labelHeightMm ?? null,
         dpi: b.dpi === 300 ? 300 : 203,
@@ -395,8 +422,8 @@ export async function buildApp({ config, store, db, catalog, catalogAdmin, print
 
     app.post<{ Params: { id: string } }>("/api/print/jobs/:id/done", agent, async (req, reply) => ((await queue.markDone(req.params.id)) ? { ok: true } : reply.code(404).send({ error: "not_leased" })));
 
-    app.post<{ Params: { id: string }; Body: { error?: string } }>("/api/print/jobs/:id/failed", agent, async (req, reply) => {
-      const r = await queue.markFailed(req.params.id, req.body?.error ?? "unknown error");
+    app.post<{ Params: { id: string }; Body: { error?: string; ambiguous?: boolean } }>("/api/print/jobs/:id/failed", agent, async (req, reply) => {
+      const r = await queue.markFailed(req.params.id, req.body?.error ?? "unknown error", req.body?.ambiguous === true);
       return r === "unknown" ? reply.code(404).send({ error: "not_leased" }) : { result: r };
     });
   }

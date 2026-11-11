@@ -17,3 +17,20 @@ export function nextQueueCounter(deviceCode: string, issuedToday: readonly strin
   }
   return max + 1;
 }
+
+/**
+ * Collection number for an order that has a phone number (spec 11.2): the last 5 digits, no prefix.
+ * If another active order already holds it, try base+A, base+B... and take the first free one, so a
+ * number freed by a completed order is reused. Returns undefined when there are fewer than 8 digits.
+ */
+export function collectionNumber(phone: string | undefined, taken: ReadonlySet<string>): string | undefined {
+  const digits = (phone ?? "").replace(/\D/g, "");
+  if (digits.length < 8) return undefined;
+  const base = digits.slice(-5);
+  if (!taken.has(base)) return base;
+  for (let i = 0; i < 26; i++) {
+    const c = `${base}${String.fromCharCode(65 + i)}`;
+    if (!taken.has(c)) return c;
+  }
+  return undefined;
+}

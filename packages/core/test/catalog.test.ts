@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { DEFAULT_PRICING, fulfilmentOf, menuFor, newId, orderTotals, pricebookChain, reduceOrder, resolvePrice, validateCatalog, PRESETS, type Catalog, type OrderEvent } from "../src/index.js";
+import { DEFAULT_PRICING, blockedFor, fulfilmentOf, menuFor, newId, orderTotals, pricebookChain, reduceOrder, resolvePrice, validateCatalog, PRESETS, type Catalog, type OrderEvent } from "../src/index.js";
 
 /** The McDonald's example from the client: same cone, S$1.70 at Regal, S$2.20 at LIDO. */
 const catalog = (): Catalog => ({
@@ -11,9 +11,9 @@ const catalog = (): Catalog => ({
     { id: "shake", name: "Shake", category: "Drinks" },
   ],
   pricebooks: [
-    { id: "std", name: "Standard", missing: "fallback", prices: { cone: 170, burger: 500, shake: 300 } },
-    { id: "lido", name: "LIDO", missing: "fallback", prices: { cone: 220 } },
-    { id: "grab", name: "Grab", missing: "fallback", prices: { cone: 250, burger: 650 } },
+    { id: "std", name: "Standard", missing: "show", prices: { cone: 170, burger: 500, shake: 300 } },
+    { id: "lido", name: "LIDO", missing: "show", prices: { cone: 220 } },
+    { id: "grab", name: "Grab", missing: "show", prices: { cone: 250, burger: 650 } },
     { id: "event", name: "Movie event", missing: "hide", prices: { cone: 100 } },
   ],
   channels: [
@@ -38,14 +38,22 @@ describe("resolvePrice", () => {
     expect(price(c, "cone", "LIDO", "take")).toBe(220);
   });
 
-  it("an outlet pricebook falls back to the default for products it does not price", () => {
-    expect(price(catalog(), "burger", "LIDO", "take")).toBe(500);
+  it("an item missing from the winning pricebook is not sold: no fallback to another book (A-1)", () => {
+    expect(price(catalog(), "burger", "LIDO", "take")).toBeNull();
+    expect(price(catalog(), "cone", "LIDO", "take")).toBe(220);
+  });
+
+  it("blockedFor lists unpriced items only when the book says show", () => {
+    const c = catalog();
+    expect(blockedFor(c, { outletId: "LIDO", channelId: "take" }).map((p) => p.id).sort()).toEqual(["burger", "shake"]);
+    expect(blockedFor(c, { outletId: "Regal", channelId: "movie" })).toEqual([]); // movie is set to hide
   });
 
   it("a channel pricebook applies at every outlet", () => {
     const c = catalog();
     expect(price(c, "burger", "Regal", "grab")).toBe(650);
     expect(price(c, "burger", "LIDO", "grab")).toBe(650);
+    expect(price(c, "shake", "Regal", "grab")).toBeNull(); // grab has no shake price
   });
 
   it("channel beats outlet when only one is set", () => {
@@ -55,7 +63,7 @@ describe("resolvePrice", () => {
 
   it("outlet + channel together beat channel alone and outlet alone", () => {
     const c = catalog();
-    c.pricebooks.push({ id: "lido-grab", name: "LIDO Grab", missing: "fallback", prices: { cone: 275 } });
+    c.pricebooks.push({ id: "lido-grab", name: "LIDO Grab", missing: "show", prices: { cone: 275 } });
     c.assignments.push({ pricebookId: "lido-grab", outletId: "LIDO", channelId: "grab" });
     expect(price(c, "cone", "LIDO", "grab")).toBe(275);
     expect(price(c, "cone", "Regal", "grab")).toBe(250); // other outlets unaffected
@@ -96,7 +104,7 @@ describe("resolvePrice", () => {
 describe("menuFor", () => {
   it("lists the whole menu with the context's prices", () => {
     const m = menuFor(catalog(), { outletId: "LIDO", channelId: "take" });
-    expect(Object.fromEntries(m.map((x) => [x.id, x.priceCents]))).toEqual({ cone: 220, burger: 500, shake: 300 });
+    expect(Object.fromEntries(m.map((x) => [x.id, x.priceCents]))).toEqual({ cone: 220 });
   });
 });
 
@@ -113,11 +121,6 @@ describe("validateCatalog", () => {
     expect(validateCatalog(c).length).toBeGreaterThanOrEqual(6);
   });
 
-  it("refuses a default pricebook that hides products", () => {
-    const c = catalog();
-    c.pricebooks[0]!.missing = "hide";
-    expect(validateCatalog(c)).toContain("the default pricebook cannot be set to hide");
-  });
 });
 
 describe("channels on orders", () => {

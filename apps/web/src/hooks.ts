@@ -75,8 +75,12 @@ export function useFailedPrintJobs(): number {
     if (!staff || staff.role === "cashier") return setN(0);
     let alive = true;
     const load = async () => {
-      const r = await staffFetch("/api/print/jobs?status=failed");
-      if (alive && "res" in r && r.res.ok) setN(((await r.res.json()) as { jobs: unknown[] }).jobs.length);
+      let total = 0;
+      for (const status of ["failed", "unconfirmed"]) {
+        const r = await staffFetch(`/api/print/jobs?status=${status}`);
+        if ("res" in r && r.res.ok) total += ((await r.res.json()) as { jobs: unknown[] }).jobs.length;
+      }
+      if (alive) setN(total);
     };
     void load();
     const t = window.setInterval(() => void load(), 15000);

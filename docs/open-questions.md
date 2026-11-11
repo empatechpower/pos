@@ -41,3 +41,17 @@ See the full lists in the project discussion. The ones that gate code:
 - **Languages:** the prototype has 8; the customer page is English only for now.
 - **Coupons, points and the rewards screens** from the prototype are not in the customer page yet.
 - **Tables:** the QR code carries the table name (`?table=Table%205`). Who prints and places the codes?
+
+
+## From rebuilding the customer page to match the prototype (confirm with the client)
+- **Login options.** The prototype's first screen offers Google, Microsoft, ID/email, phone number (one-time code) and
+  guest. Is that the intended list for the real product? Each needs setup (Google/Microsoft developer accounts, an SMS
+  provider for phone codes). The customer page is guest-only today. This also decides how customers could pay with
+  prepaid credit online.
+- **Rewards, points, coupons and stamp cards** (the prototype's Rewards and Account screens) need customer accounts first.
+- **Languages:** the prototype offers 8 (English, Malay, Indonesian, Chinese, Japanese, French, German, Tamil). Which are required?
+- **Gelato flavours and toppings:** please send the flavour list for Single/Double Scoop Gelato.
+- **"Take Away Only" items:** should the customer page hide them for Dine in? (Needs a per-item channel rule.)
+- **Option prices per channel:** option prices (e.g. Cold +S$0.80) are the same in every channel today; only the item's base price follows the pricebook. Is that right for Grab and events?
+- **Item photos:** the prototype's are small (up to 36 KB). Do they have better originals?
+- **Multiple outlets:** the prototype lists several outlets (all marked demo). Real outlet names and addresses?

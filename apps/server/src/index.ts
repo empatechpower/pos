@@ -1,8 +1,13 @@
+import { existsSync } from "node:fs";
 import { fileURLToPath } from "node:url";
+import fastifyStatic from "@fastify/static";
 import { PRESETS } from "@pos/core";
 import { buildApp } from "./app.js";
 import { PgCatalogStore, StaticCatalogStore } from "./catalog.js";
+import { BrandStore } from "./brand.js";
+import { loadIntegrations } from "./integrations.js";
 import { seedCatalog } from "./catalogSeed.js";
+import { loadBaileyPatch } from "./seed.js";
 import { PrintStore } from "./print.js";
 import { createPool, migrate } from "./db/pool.js";
 import { PgEventStore } from "./pgStore.js";
@@ -20,7 +25,26 @@ if (db) await migrate(db);
 const store: EventStore = db ? new PgEventStore(db, config.businessId, config.outletName) : new JsonFileEventStore(dataFile);
 
 const pgCatalog = db ? new PgCatalogStore(db, config.businessId) : null;
-await pgCatalog?.ensureSeeded(seedCatalog());
+// A brand-new database starts with the Bailey & Patch menu from the prototype (SEED=sample for a tiny demo menu).
+const bp = process.env.SEED === "sample" ? null : loadBaileyPatch();
+if (pgCatalog && db) {
+  await pgCatalog.ensureSeeded(bp?.catalog ?? seedCatalog(), bp?.images);
+  if (bp) await new BrandStore(db, config.businessId).seedIfEmpty(bp.brand);
+}
 
-const app = await buildApp({ config, store, db, catalog: pgCatalog ?? new StaticCatalogStore(seedCatalog()), catalogAdmin: pgCatalog ?? undefined, print: db ? new PrintStore(db, config.businessId) : undefined, trustProxy: process.env.TRUST_PROXY === "1" });
+const app = await buildApp({ config, store, db, catalog: pgCatalog ?? new StaticCatalogStore(seedCatalog()), catalogAdmin: pgCatalog ?? undefined, print: db ? new PrintStore(db, config.businessId) : undefined, trustProxy: process.env.TRUST_PROXY === "1", integrations: loadIntegrations(process.env) });
+// In production one service serves both the API and the built web app (same address, so sign-in redirects and
+// payment webhooks all land in one place). Skipped in development, where Vite serves the web app.
+const webDist = fileURLToPath(new URL("../../web/dist", import.meta.url));
+if (existsSync(webDist)) {
+  // Hashed assets never change; the shell and service worker must always be re-checked.
+  await app.register(fastifyStatic, {
+    root: webDist,
+    wildcard: false,
+    cacheControl: false,
+    setHeaders: (res, path) => res.setHeader("cache-control", path.includes("/assets/") ? "public, max-age=31536000, immutable" : "no-cache"),
+  });
+  app.setNotFoundHandler((req, reply) => (req.url.startsWith("/api/") ? reply.code(404).send({ error: "not found" }) : reply.header("cache-control", "no-cache").sendFile("index.html")));
+}
+
 await app.listen({ port: Number(process.env.PORT ?? 8787), host: "0.0.0.0" });

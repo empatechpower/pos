@@ -10,6 +10,7 @@ interface Printer {
   categories: string[];
   widthChars: number;
   drawer: boolean;
+  raster: boolean;
   labelWidthMm: number | null;
   labelHeightMm: number | null;
   dpi: 203 | 300;
@@ -22,7 +23,7 @@ interface Job {
   printer_id: string;
   doc_type: string;
   title: string | null;
-  status: "queued" | "leased" | "done" | "failed";
+  status: "queued" | "leased" | "done" | "failed" | "unconfirmed";
   attempts: number;
   last_error: string | null;
   created_at: string;
@@ -39,9 +40,9 @@ const kindOf = (p: Printer): Kind => (p.roles.includes("label") ? "label" : p.ro
 const rolesOf = (k: Kind): Printer["roles"] => (k === "both" ? ["receipt", "kitchen"] : [k]);
 const slug = (s: string) => s.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "").slice(0, 32);
 
-const blank = (): Printer => ({ id: "", name: "", language: "escpos", roles: ["receipt"], categories: [], widthChars: 42, drawer: false, labelWidthMm: null, labelHeightMm: null, dpi: 203, connection: { host: "", port: 9100 }, agentDeviceId: null, active: true });
+const blank = (): Printer => ({ id: "", name: "", language: "escpos", roles: ["receipt"], categories: [], widthChars: 42, drawer: false, raster: false, labelWidthMm: null, labelHeightMm: null, dpi: 203, connection: { host: "", port: 9100 }, agentDeviceId: null, active: true });
 
-const STATUS: Record<Job["status"], string> = { queued: "Waiting", leased: "Printing", done: "Printed", failed: "Failed" };
+const STATUS: Record<Job["status"], string> = { queued: "Waiting", leased: "Printing", done: "Printed", failed: "Failed", unconfirmed: "Unconfirmed" };
 const timeOf = (iso: string) => new Date(iso).toLocaleTimeString("en-GB", { hour: "2-digit", minute: "2-digit", timeZone: "Asia/Singapore" });
 
 /** Managers and owners: set up printers, check they work, and see (and retry) what did not print. */
@@ -79,7 +80,7 @@ export function Printers({ catalog }: { catalog: Catalog }) {
   async function save() {
     if (!editing) return;
     const p = { ...editing, id: isNew ? slug(editing.name) || "printer" : editing.id };
-    const body = { ...p, categories: p.roles.includes("label") || p.roles.includes("kitchen") ? p.categories : [], drawer: p.roles.includes("receipt") && p.drawer };
+    const body = { ...p, categories: p.roles.includes("label") || p.roles.includes("kitchen") ? p.categories : [], drawer: p.roles.includes("receipt") && p.drawer, raster: p.roles.includes("label") ? false : p.raster };
     const r = await staffFetch(`/api/printers/${p.id}`, { method: "PUT", body });
     if ("problem" in r) return setMsg(r.problem);
     if (!r.res.ok) {
@@ -110,6 +111,7 @@ export function Printers({ catalog }: { catalog: Catalog }) {
   }
 
   const failed = jobs.filter((j) => j.status === "failed");
+  const unconfirmed = jobs.filter((j) => j.status === "unconfirmed");
   const nameOf = (id: string) => printers.find((p) => p.id === id)?.name ?? id;
   const cats = [...new Set(catalog.products.map((p) => p.category))];
   const kind = editing ? kindOf(editing) : "receipt";
@@ -119,6 +121,9 @@ export function Printers({ catalog }: { catalog: Catalog }) {
     <div className="credit prices">
       <h2>Printers</h2>
       {msg && <div className="flash">{msg}</div>}
+      {unconfirmed.length > 0 && (
+        <div className="flash warn">{unconfirmed.length} print job{unconfirmed.length > 1 ? "s" : ""} unconfirmed: the printer may already have printed {unconfirmed.length > 1 ? "them" : "it"}. Look at the printer, then press Reprint only if nothing came out.</div>
+      )}
       {failed.length > 0 && (
         <div className="flash warn">{failed.length} print job{failed.length > 1 ? "s" : ""} failed. Check the printer is on, has paper and is on the network, then retry below.</div>
       )}
@@ -164,6 +169,9 @@ export function Printers({ catalog }: { catalog: Catalog }) {
           </div>
           {kind !== "label" && (
             <label className="field">Paper width<select value={editing.widthChars} onChange={(e) => set({ widthChars: Number(e.target.value) })}><option value={32}>58 mm (32 characters)</option><option value={42}>80 mm (42 characters)</option><option value={48}>80 mm, small font (48 characters)</option></select></label>
+          )}
+          {kind !== "label" && (
+            <label className="inline"><input type="checkbox" checked={editing.raster} onChange={(e) => set({ raster: e.target.checked })} /> Print as a picture (Chinese, Tamil and logos; a little slower)</label>
           )}
           {(kind === "receipt" || kind === "both") && (
             <label className="inline"><input type="checkbox" checked={editing.drawer} onChange={(e) => set({ drawer: e.target.checked })} /> Open the cash drawer for cash sales</label>
@@ -211,6 +219,7 @@ export function Printers({ catalog }: { catalog: Catalog }) {
           <span className="muted">{timeOf(j.created_at)}{j.attempts > 1 ? ` · try ${j.attempts}` : ""}</span>
           {j.last_error && j.status !== "done" && <span className="err">{j.last_error}</span>}
           {j.status === "failed" && <button className="secondary sm" onClick={() => void retry(j)}>Retry</button>}
+          {j.status === "unconfirmed" && <button className="secondary sm" onClick={() => void retry(j)}>Reprint</button>}
         </div>
       ))}
     </div>

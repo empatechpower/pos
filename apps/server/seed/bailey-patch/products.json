@@ -1,0 +1,1671 @@
+[
+ {
+  "id": "p0",
+  "name": "Kaya Toast",
+  "altName": "咖椰面包",
+  "category": "Toast",
+  "priceCents": 200,
+  "description": "Homemade kaya on crisp toasted bread",
+  "image": "images/p0.jpg"
+ },
+ {
+  "id": "p1",
+  "name": "Kaya Margarine Toast",
+  "altName": "咖椰牛油面包",
+  "category": "Toast",
+  "priceCents": 230,
+  "image": "images/p1.jpg"
+ },
+ {
+  "id": "p2",
+  "name": "Kaya Cheese Toast",
+  "altName": "咖椰芝士面包",
+  "category": "Toast",
+  "priceCents": 300,
+  "image": "images/p2.jpg"
+ },
+ {
+  "id": "p3",
+  "name": "Peanut Toast",
+  "altName": "花生酱面包",
+  "category": "Toast",
+  "priceCents": 230,
+  "image": "images/p3.jpg"
+ },
+ {
+  "id": "p4",
+  "name": "Peanut Margarine Toast",
+  "altName": "牛油花生酱烤面包",
+  "category": "Toast",
+  "priceCents": 260,
+  "image": "images/p4.jpg"
+ },
+ {
+  "id": "p5",
+  "name": "Soft Boiled Egg (2pcs)",
+  "category": "Toast",
+  "priceCents": 220,
+  "image": "images/p5.jpg"
+ },
+ {
+  "id": "p6",
+  "name": "Coffee",
+  "category": "Coffee & Tea",
+  "priceCents": 220,
+  "description": "Traditional kopi, brewed strong",
+  "image": "images/p6.jpg",
+  "options": [
+   {
+    "id": "variant",
+    "name": "Variant",
+    "kind": "single",
+    "required": true,
+    "variant": true,
+    "choices": [
+     {
+      "id": "hot",
+      "name": "Hot",
+      "priceCents": 0,
+      "default": true
+     },
+     {
+      "id": "iced",
+      "name": "Iced",
+      "priceCents": 80
+     }
+    ]
+   }
+  ]
+ },
+ {
+  "id": "p7",
+  "name": "Coffee C",
+  "category": "Coffee & Tea",
+  "priceCents": 220,
+  "image": "images/p7.jpg",
+  "options": [
+   {
+    "id": "variant",
+    "name": "Variant",
+    "kind": "single",
+    "required": true,
+    "variant": true,
+    "choices": [
+     {
+      "id": "hot",
+      "name": "Hot",
+      "priceCents": 0,
+      "default": true
+     },
+     {
+      "id": "iced",
+      "name": "Iced",
+      "priceCents": 80
+     }
+    ]
+   }
+  ]
+ },
+ {
+  "id": "p8",
+  "name": "Coffee O",
+  "category": "Coffee & Tea",
+  "priceCents": 200,
+  "image": "images/p8.jpg",
+  "options": [
+   {
+    "id": "variant",
+    "name": "Variant",
+    "kind": "single",
+    "required": true,
+    "variant": true,
+    "choices": [
+     {
+      "id": "hot",
+      "name": "Hot",
+      "priceCents": 0,
+      "default": true
+     },
+     {
+      "id": "iced",
+      "name": "Iced",
+      "priceCents": 80
+     }
+    ]
+   }
+  ]
+ },
+ {
+  "id": "p9",
+  "name": "Hard Boiled Egg (2pcs)",
+  "category": "Coffee & Tea",
+  "priceCents": 300,
+  "image": "images/p9.jpg"
+ },
+ {
+  "id": "p10",
+  "name": "Milo",
+  "category": "Coffee & Tea",
+  "priceCents": 250,
+  "image": "images/p10.jpg",
+  "options": [
+   {
+    "id": "variant",
+    "name": "Variant",
+    "kind": "single",
+    "required": true,
+    "variant": true,
+    "choices": [
+     {
+      "id": "hot",
+      "name": "Hot",
+      "priceCents": 0,
+      "default": true
+     },
+     {
+      "id": "iced",
+      "name": "Iced",
+      "priceCents": 80
+     }
+    ]
+   }
+  ]
+ },
+ {
+  "id": "p11",
+  "name": "Teh",
+  "category": "Coffee & Tea",
+  "priceCents": 220,
+  "image": "images/p11.jpg",
+  "options": [
+   {
+    "id": "variant",
+    "name": "Variant",
+    "kind": "single",
+    "required": true,
+    "variant": true,
+    "choices": [
+     {
+      "id": "hot",
+      "name": "Hot",
+      "priceCents": 0,
+      "default": true
+     },
+     {
+      "id": "iced",
+      "name": "Iced",
+      "priceCents": 80
+     }
+    ]
+   }
+  ]
+ },
+ {
+  "id": "p12",
+  "name": "Teh C",
+  "category": "Coffee & Tea",
+  "priceCents": 220,
+  "image": "images/p12.jpg",
+  "options": [
+   {
+    "id": "variant",
+    "name": "Variant",
+    "kind": "single",
+    "required": true,
+    "variant": true,
+    "choices": [
+     {
+      "id": "hot",
+      "name": "Hot",
+      "priceCents": 0,
+      "default": true
+     },
+     {
+      "id": "iced",
+      "name": "Iced",
+      "priceCents": 80
+     }
+    ]
+   }
+  ]
+ },
+ {
+  "id": "p13",
+  "name": "Teh O",
+  "category": "Coffee & Tea",
+  "priceCents": 200,
+  "image": "images/p13.jpg",
+  "options": [
+   {
+    "id": "variant",
+    "name": "Variant",
+    "kind": "single",
+    "required": true,
+    "variant": true,
+    "choices": [
+     {
+      "id": "hot",
+      "name": "Hot",
+      "priceCents": 0,
+      "default": true
+     },
+     {
+      "id": "iced",
+      "name": "Iced",
+      "priceCents": 80
+     }
+    ]
+   }
+  ]
+ },
+ {
+  "id": "p14",
+  "name": "Balonglong Drinks (Homemade)",
+  "altName": "自制沙梨酸梅水",
+  "category": "Beverages",
+  "priceCents": 380,
+  "image": "images/p14.jpg"
+ },
+ {
+  "id": "p15",
+  "name": "Honey Lemon (Homemade)",
+  "altName": "自制柠檬蜜",
+  "category": "Beverages",
+  "priceCents": 350,
+  "image": "images/p15.jpg",
+  "options": [
+   {
+    "id": "variant",
+    "name": "Variant",
+    "kind": "single",
+    "required": true,
+    "variant": true,
+    "choices": [
+     {
+      "id": "hot",
+      "name": "Hot",
+      "priceCents": 0,
+      "default": true
+     },
+     {
+      "id": "iced",
+      "name": "Iced",
+      "priceCents": 30
+     }
+    ]
+   }
+  ]
+ },
+ {
+  "id": "p16",
+  "name": "Lemon Tea (Homemade)",
+  "altName": "自制柠檬茶",
+  "category": "Beverages",
+  "priceCents": 350,
+  "image": "images/p16.jpg",
+  "options": [
+   {
+    "id": "variant",
+    "name": "Variant",
+    "kind": "single",
+    "required": true,
+    "variant": true,
+    "choices": [
+     {
+      "id": "hot",
+      "name": "Hot",
+      "priceCents": 0,
+      "default": true
+     },
+     {
+      "id": "iced",
+      "name": "Iced",
+      "priceCents": 30
+     }
+    ]
+   }
+  ]
+ },
+ {
+  "id": "p17",
+  "name": "Soursop Drinks (Homemade)",
+  "altName": "自制番荔枝",
+  "category": "Beverages",
+  "priceCents": 380,
+  "image": "images/p17.jpg"
+ },
+ {
+  "id": "p18",
+  "name": "Honey Kamquat Drink (NEW!)",
+  "altName": "金桔蜜",
+  "category": "Beverages",
+  "priceCents": 350,
+  "image": "images/p18.jpg",
+  "options": [
+   {
+    "id": "variant",
+    "name": "Variant",
+    "kind": "single",
+    "required": true,
+    "variant": true,
+    "choices": [
+     {
+      "id": "hot",
+      "name": "Hot",
+      "priceCents": 0,
+      "default": true
+     },
+     {
+      "id": "iced",
+      "name": "Iced",
+      "priceCents": 30
+     }
+    ]
+   }
+  ]
+ },
+ {
+  "id": "p19",
+  "name": "Coke Classic 320ml BCRS",
+  "category": "Beverages",
+  "priceCents": 250,
+  "description": "Chilled canned drink",
+  "image": "images/p19.jpg"
+ },
+ {
+  "id": "p20",
+  "name": "Coke Zero",
+  "category": "Beverages",
+  "priceCents": 250,
+  "image": "images/p20.jpg"
+ },
+ {
+  "id": "p21",
+  "name": "A&W Root Beer",
+  "category": "Beverages",
+  "priceCents": 250,
+  "image": "images/p21.jpg"
+ },
+ {
+  "id": "p22",
+  "name": "Pokka Oolong Tea",
+  "altName": "乌龙茶",
+  "category": "Beverages",
+  "priceCents": 250,
+  "image": "images/p22.jpg"
+ },
+ {
+  "id": "p23",
+  "name": "100 Plus",
+  "altName": "罐装",
+  "category": "Beverages",
+  "priceCents": 250,
+  "image": "images/p23.jpg"
+ },
+ {
+  "id": "p24",
+  "name": "Pokka Green Tea",
+  "altName": "绿茶",
+  "category": "Beverages",
+  "priceCents": 250,
+  "image": "images/p24.jpg"
+ },
+ {
+  "id": "p25",
+  "name": "Mineral Bottled Water",
+  "altName": "矿泉水",
+  "category": "Beverages",
+  "priceCents": 200,
+  "image": "images/p25.jpg"
+ },
+ {
+  "id": "p26",
+  "name": "Water",
+  "category": "Beverages",
+  "priceCents": 50,
+  "image": "images/p26.jpg"
+ },
+ {
+  "id": "p27",
+  "name": "Barley Water (Homemade)",
+  "altName": "自制薏米水",
+  "category": "Beverages",
+  "priceCents": 270,
+  "soldOut": true,
+  "image": "images/p27.jpg",
+  "options": [
+   {
+    "id": "variant",
+    "name": "Variant",
+    "kind": "single",
+    "required": true,
+    "variant": true,
+    "choices": [
+     {
+      "id": "hot",
+      "name": "Hot",
+      "priceCents": 0,
+      "default": true
+     },
+     {
+      "id": "iced",
+      "name": "Iced",
+      "priceCents": 30
+     }
+    ]
+   }
+  ]
+ },
+ {
+  "id": "p28",
+  "name": "Soda Water F&N",
+  "category": "Beverages",
+  "priceCents": 250,
+  "image": "images/p28.jpg"
+ },
+ {
+  "id": "p29",
+  "name": "Ayataka Japanese Green Tea",
+  "category": "Beverages",
+  "priceCents": 250,
+  "image": "images/p29.jpg"
+ },
+ {
+  "id": "p30",
+  "name": "Minute Maid (Refresh Orange)",
+  "category": "Beverages",
+  "priceCents": 250,
+  "image": "images/p30.jpg"
+ },
+ {
+  "id": "p31",
+  "name": "Asahi Beer",
+  "category": "Beer / Whisky",
+  "priceCents": 1000,
+  "pointsExempt": true,
+  "image": "images/p31.jpg",
+  "options": [
+   {
+    "id": "variant",
+    "name": "Variant",
+    "kind": "single",
+    "required": true,
+    "variant": true,
+    "choices": [
+     {
+      "id": "pint",
+      "name": "Pint",
+      "priceCents": 0,
+      "default": true
+     },
+     {
+      "id": "bottle",
+      "name": "Bottle",
+      "priceCents": 300
+     }
+    ]
+   }
+  ]
+ },
+ {
+  "id": "p32",
+  "name": "Asahi Twin Full Pint (Happy Hour)",
+  "category": "Beer / Whisky",
+  "priceCents": 2400,
+  "pointsExempt": true,
+  "image": "images/p32.jpg"
+ },
+ {
+  "id": "p33",
+  "name": "Wine McGuigan Private Bin",
+  "category": "Beer / Whisky",
+  "priceCents": 4800,
+  "pointsExempt": true,
+  "image": "images/p33.jpg"
+ },
+ {
+  "id": "p34",
+  "name": "Whisky-The Singleton 15 Years (Bottle)",
+  "category": "Beer / Whisky",
+  "priceCents": 18800,
+  "pointsExempt": true,
+  "image": "images/p34.jpg",
+  "options": [
+   {
+    "id": "variant",
+    "name": "Variant",
+    "kind": "single",
+    "required": true,
+    "variant": true,
+    "choices": [
+     {
+      "id": "small",
+      "name": "Small",
+      "priceCents": 0,
+      "default": true
+     },
+     {
+      "id": "big",
+      "name": "Big",
+      "priceCents": 16000
+     }
+    ]
+   }
+  ]
+ },
+ {
+  "id": "p35",
+  "name": "Fried Prawn Paste Chicken Wing (5pcs)",
+  "altName": "炸虾酱鸡中翅",
+  "category": "Starter & Side Dishes",
+  "priceCents": 1080,
+  "image": "images/p35.jpg"
+ },
+ {
+  "id": "p36",
+  "name": "Ayam Berempah (Ala Cart)",
+  "altName": "香料炸鸡",
+  "category": "Starter & Side Dishes",
+  "priceCents": 980,
+  "image": "images/p36.jpg"
+ },
+ {
+  "id": "p37",
+  "name": "Crispy Pork Chop",
+  "altName": "香脆猪扒",
+  "category": "Starter & Side Dishes",
+  "priceCents": 880,
+  "image": "images/p37.jpg"
+ },
+ {
+  "id": "p38",
+  "name": "Fried Luncheon Meat (10pcs)",
+  "altName": "炸午餐肉",
+  "category": "Starter & Side Dishes",
+  "priceCents": 880,
+  "image": "images/p38.jpg"
+ },
+ {
+  "id": "p39",
+  "name": "Fried Tempura Prawn (4pcs)",
+  "altName": "炸天妇罗虾",
+  "category": "Starter & Side Dishes",
+  "priceCents": 980,
+  "image": "images/p39.jpg"
+ },
+ {
+  "id": "p40",
+  "name": "Tater Tots",
+  "altName": "炸薯球",
+  "category": "Starter & Side Dishes",
+  "priceCents": 880,
+  "image": "images/p40.jpg"
+ },
+ {
+  "id": "p41",
+  "name": "French Fries",
+  "altName": "炸薯条",
+  "category": "Starter & Side Dishes",
+  "priceCents": 780,
+  "image": "images/p41.jpg"
+ },
+ {
+  "id": "p42",
+  "name": "Fried Spring Roll (5pcs)",
+  "altName": "炸春卷",
+  "category": "Starter & Side Dishes",
+  "priceCents": 880,
+  "soldOut": true,
+  "image": "images/p42.jpg"
+ },
+ {
+  "id": "p43",
+  "name": "Curry chicken (ala cart)",
+  "altName": "咖喱鸡",
+  "category": "Starter & Side Dishes",
+  "priceCents": 880,
+  "image": "images/p43.jpg"
+ },
+ {
+  "id": "p44",
+  "name": "Spicy Dumpling in Red Oil (5pcs)",
+  "altName": "红油炒手",
+  "category": "Starter & Side Dishes",
+  "priceCents": 980,
+  "soldOut": true,
+  "image": "images/p44.jpg"
+ },
+ {
+  "id": "p45",
+  "name": "Chicken Karaage Bites",
+  "category": "Starter & Side Dishes",
+  "priceCents": 880,
+  "image": "images/p45.jpg"
+ },
+ {
+  "id": "p46",
+  "name": "Chicken Nugget Bites",
+  "category": "Starter & Side Dishes",
+  "priceCents": 880,
+  "image": "images/p46.jpg"
+ },
+ {
+  "id": "p47",
+  "name": "Black Pepper Roasted Chicken",
+  "category": "Starter & Side Dishes",
+  "priceCents": 880,
+  "image": "images/p47.jpg"
+ },
+ {
+  "id": "p48",
+  "name": "Fried Prawn Roll (Hei Zho)- 7pcs",
+  "altName": "炸虾枣",
+  "category": "Starter & Side Dishes",
+  "priceCents": 1080,
+  "image": "images/p48.jpg"
+ },
+ {
+  "id": "p49",
+  "name": "Handmade Crispy Dumplings",
+  "altName": "手工脆饺",
+  "category": "Starter & Side Dishes",
+  "priceCents": 880,
+  "soldOut": true,
+  "image": "images/p49.jpg"
+ },
+ {
+  "id": "p50",
+  "name": "Crispy Milk Roll (4pcs)",
+  "altName": "脆皮奶卷",
+  "category": "Starter & Side Dishes",
+  "priceCents": 780,
+  "image": "images/p50.jpg"
+ },
+ {
+  "id": "p51",
+  "name": "Busting Glutinous Rice Cake with Brown Sugar (4pcs)",
+  "altName": "爆酱红糖糍粑",
+  "category": "Starter & Side Dishes",
+  "priceCents": 780,
+  "image": "images/p51.jpg"
+ },
+ {
+  "id": "p52",
+  "name": "Sunny Side Egg/pc",
+  "altName": "荷包蛋",
+  "category": "Starter & Side Dishes",
+  "priceCents": 200,
+  "image": "images/p52.jpg"
+ },
+ {
+  "id": "p53",
+  "name": "Braised Tou Pok",
+  "altName": "卤豆卜",
+  "category": "Starter & Side Dishes",
+  "priceCents": 500,
+  "image": "images/p53.jpg"
+ },
+ {
+  "id": "p54",
+  "name": "Crunchy Fish Bites",
+  "altName": "酥炸鱼块",
+  "category": "Starter & Side Dishes",
+  "priceCents": 792,
+  "soldOut": true,
+  "image": "images/p54.jpg"
+ },
+ {
+  "id": "p55",
+  "name": "Seafood Golden Soup Rice Noodle (Signature)",
+  "altName": "招牌海鲜金汤米线",
+  "category": "Noodle",
+  "priceCents": 1280,
+  "image": "images/p55.jpg"
+ },
+ {
+  "id": "p56",
+  "name": "Fish Slices Golden Soup Rice Noodle",
+  "altName": "鱼片金汤米线",
+  "category": "Noodle",
+  "priceCents": 1180,
+  "image": "images/p56.jpg"
+ },
+ {
+  "id": "p57",
+  "name": "Lala Golden Soup Rice Noodle",
+  "altName": "啦啦金汤米线",
+  "category": "Noodle",
+  "priceCents": 1180,
+  "image": "images/p57.jpg"
+ },
+ {
+  "id": "p58",
+  "name": "Mushroom Golden Soup Rice Noodle",
+  "altName": "三姑金汤米线",
+  "category": "Noodle",
+  "priceCents": 1080,
+  "image": "images/p58.jpg"
+ },
+ {
+  "id": "p59",
+  "name": "Signature Mee Goreng",
+  "altName": "招牌炒面",
+  "category": "Noodle",
+  "priceCents": 1380,
+  "image": "images/p59.jpg"
+ },
+ {
+  "id": "p60",
+  "name": "Braised Pork Rice",
+  "altName": "卤肉饭",
+  "category": "Braised Dishes",
+  "priceCents": 1080,
+  "image": "images/p60.jpg"
+ },
+ {
+  "id": "p61",
+  "name": "Braised Pork Ribs Rice",
+  "altName": "卤排骨饭",
+  "category": "Braised Dishes",
+  "priceCents": 1080,
+  "image": "images/p61.jpg"
+ },
+ {
+  "id": "p62",
+  "name": "Braised Pork Noodle",
+  "altName": "卤肉面",
+  "category": "Braised Dishes",
+  "priceCents": 1080,
+  "image": "images/p62.jpg"
+ },
+ {
+  "id": "p63",
+  "name": "Braised Pork Ribs Noodle",
+  "altName": "卤排骨面",
+  "category": "Braised Dishes",
+  "priceCents": 1080,
+  "image": "images/p63.jpg"
+ },
+ {
+  "id": "p64",
+  "name": "Braised Egg (1pc)",
+  "altName": "卤蛋",
+  "category": "Braised Dishes",
+  "priceCents": 180,
+  "image": "images/p64.jpg"
+ },
+ {
+  "id": "p65",
+  "name": "Ayam Berempah Tornado Rice",
+  "altName": "香料炸鸡蛋饭",
+  "category": "Tornado Egg Rice",
+  "priceCents": 1280,
+  "image": "images/p65.jpg"
+ },
+ {
+  "id": "p66",
+  "name": "Black Pepper Roasted Chicken Tornado Rice",
+  "altName": "黑胡椒鸡蛋饭",
+  "category": "Tornado Egg Rice",
+  "priceCents": 1280,
+  "image": "images/p66.jpg"
+ },
+ {
+  "id": "p67",
+  "name": "Curry Chicken Tornado Rice",
+  "altName": "咖喱鸡蛋饭",
+  "category": "Tornado Egg Rice",
+  "priceCents": 1180,
+  "image": "images/p67.jpg"
+ },
+ {
+  "id": "p68",
+  "name": "Chicken Karaage Tornado Rice",
+  "altName": "香脆鸡块蛋饭",
+  "category": "Tornado Egg Rice",
+  "priceCents": 1080,
+  "description": "Tornado omelette over rice with crispy chicken karaage",
+  "image": "images/p68.jpg",
+  "options": [
+   {
+    "id": "egg",
+    "name": "Egg style",
+    "kind": "single",
+    "required": true,
+    "choices": [
+     {
+      "id": "tornado",
+      "name": "Tornado",
+      "priceCents": 0,
+      "default": true
+     },
+     {
+      "id": "sunny",
+      "name": "Sunny side",
+      "priceCents": 0
+     },
+     {
+      "id": "scrambled",
+      "name": "Scrambled",
+      "priceCents": 0
+     }
+    ]
+   },
+   {
+    "id": "extras",
+    "name": "Extras",
+    "kind": "qty",
+    "required": false,
+    "max": 8,
+    "maxEach": 4,
+    "choices": [
+     {
+      "id": "sunny-egg",
+      "name": "Sunny Side Egg",
+      "priceCents": 200
+     },
+     {
+      "id": "braised-egg",
+      "name": "Braised Egg (1pc)",
+      "priceCents": 180
+     },
+     {
+      "id": "jasmine-rice",
+      "name": "Jasmine Rice",
+      "priceCents": 160
+     }
+    ]
+   }
+  ]
+ },
+ {
+  "id": "p69",
+  "name": "Salted Egg Chicken Karaage Tornado Rice",
+  "altName": "咸蛋鸡块蛋饭",
+  "category": "Tornado Egg Rice",
+  "priceCents": 1280,
+  "image": "images/p69.jpg"
+ },
+ {
+  "id": "p70",
+  "name": "Crispy Pork Chop Tornado Rice",
+  "altName": "脆猪扒蛋饭",
+  "category": "Tornado Egg Rice",
+  "priceCents": 1280,
+  "image": "images/p70.jpg"
+ },
+ {
+  "id": "p71",
+  "name": "Luncheon Meat Tornado Rice",
+  "altName": "午餐肉蛋饭",
+  "category": "Tornado Egg Rice",
+  "priceCents": 980,
+  "image": "images/p71.jpg"
+ },
+ {
+  "id": "p72",
+  "name": "Tempura Prawn Tornado Egg Rice",
+  "altName": "炸天妇罗虾蛋饭",
+  "category": "Tornado Egg Rice",
+  "priceCents": 1180,
+  "image": "images/p72.jpg"
+ },
+ {
+  "id": "p73",
+  "name": "Mushroom Treasure Tornado Rice",
+  "altName": "三姑蛋饭",
+  "category": "Tornado Egg Rice",
+  "priceCents": 1280,
+  "image": "images/p73.jpg"
+ },
+ {
+  "id": "p74",
+  "name": "Ayam Berempeh Nasi Lemak",
+  "altName": "马来香料炸鸡椰浆饭",
+  "category": "Nasi Lemak",
+  "priceCents": 1380,
+  "image": "images/p74.jpg"
+ },
+ {
+  "id": "p75",
+  "name": "Curry Chicken Nasi Lemak",
+  "altName": "咖喱鸡椰浆饭",
+  "category": "Nasi Lemak",
+  "priceCents": 1280,
+  "image": "images/p75.jpg"
+ },
+ {
+  "id": "p76",
+  "name": "Chicken Karaage Nasi Lemak",
+  "altName": "脆鸡块椰浆饭",
+  "category": "Nasi Lemak",
+  "priceCents": 1180,
+  "image": "images/p76.jpg"
+ },
+ {
+  "id": "p77",
+  "name": "Crispy Pork Chop Nasi Lemak",
+  "altName": "炸猪扒椰浆饭",
+  "category": "Nasi Lemak",
+  "priceCents": 1380,
+  "image": "images/p77.jpg"
+ },
+ {
+  "id": "p78",
+  "name": "Luncheon Meat Nasi Lemak",
+  "altName": "午餐肉椰浆饭",
+  "category": "Nasi Lemak",
+  "priceCents": 1080,
+  "image": "images/p78.jpg"
+ },
+ {
+  "id": "p79",
+  "name": "Tempura Prawn Nasi Lemak",
+  "altName": "天妇罗虾椰浆饭",
+  "category": "Nasi Lemak",
+  "priceCents": 1280,
+  "image": "images/p79.jpg"
+ },
+ {
+  "id": "p80",
+  "name": "Prawn Fried Rice",
+  "altName": "虾炒饭",
+  "category": "Fried Rice",
+  "priceCents": 1280,
+  "image": "images/p80.jpg"
+ },
+ {
+  "id": "p81",
+  "name": "Ayam Berempah Fried Rice",
+  "altName": "香料炸鸡炒饭",
+  "category": "Fried Rice",
+  "priceCents": 1380,
+  "image": "images/p81.jpg"
+ },
+ {
+  "id": "p82",
+  "name": "Black Pepper Roasted Chicken Fried Rice",
+  "altName": "黑胡椒鸡炒饭",
+  "category": "Fried Rice",
+  "priceCents": 1380,
+  "image": "images/p82.jpg"
+ },
+ {
+  "id": "p83",
+  "name": "Curry Chicken Fried Rice",
+  "altName": "咖喱鸡炒饭",
+  "category": "Fried Rice",
+  "priceCents": 1280,
+  "image": "images/p83.jpg"
+ },
+ {
+  "id": "p84",
+  "name": "Chicken Karaage Fried Rice",
+  "altName": "香脆鸡块炒饭",
+  "category": "Fried Rice",
+  "priceCents": 1180,
+  "image": "images/p84.jpg"
+ },
+ {
+  "id": "p85",
+  "name": "Salted Egg Chicken Karaage Fried Rice",
+  "altName": "咸蛋香脆鸡炒饭",
+  "category": "Fried Rice",
+  "priceCents": 1380,
+  "image": "images/p85.jpg"
+ },
+ {
+  "id": "p86",
+  "name": "Crispy Pork Chop Fried Rice",
+  "altName": "香脆猪扒炒饭",
+  "category": "Fried Rice",
+  "priceCents": 1380,
+  "image": "images/p86.jpg"
+ },
+ {
+  "id": "p87",
+  "name": "Luncheon Meat Fried Rice",
+  "altName": "午餐肉炒饭",
+  "category": "Fried Rice",
+  "priceCents": 1080,
+  "image": "images/p87.jpg"
+ },
+ {
+  "id": "p88",
+  "name": "Tempura Prawn Fried Rice",
+  "altName": "天妇罗虾炒饭",
+  "category": "Fried Rice",
+  "priceCents": 1280,
+  "image": "images/p88.jpg"
+ },
+ {
+  "id": "p89",
+  "name": "Mushroom Treasure Fried Rice",
+  "altName": "三姑炒饭",
+  "category": "Fried Rice",
+  "priceCents": 1380,
+  "image": "images/p89.jpg"
+ },
+ {
+  "id": "p90",
+  "name": "Scallop & Crab Meat Fried Rice",
+  "altName": "瑶柱蟹肉炒饭",
+  "category": "Fried Rice",
+  "priceCents": 1680,
+  "image": "images/p90.jpg"
+ },
+ {
+  "id": "p91",
+  "name": "Stir Fried Tofu with Minced Pork",
+  "altName": "家乡肉碎豆腐",
+  "category": "Tofu Dishes",
+  "priceCents": 1380,
+  "image": "images/p91.jpg"
+ },
+ {
+  "id": "p92",
+  "name": "Seafood Tofu Pot",
+  "altName": "海鲜豆腐煲",
+  "category": "Tofu Dishes",
+  "priceCents": 1880,
+  "image": "images/p92.jpg"
+ },
+ {
+  "id": "p93",
+  "name": "Stir Fried Tofu with Cai Pu",
+  "altName": "香味菜脯豆腐",
+  "category": "Tofu Dishes",
+  "priceCents": 1280,
+  "image": "images/p93.jpg"
+ },
+ {
+  "id": "p94",
+  "name": "Spring Onion Omelette Egg",
+  "altName": "大葱煎蛋",
+  "category": "Omelette Egg",
+  "priceCents": 1080,
+  "image": "images/p94.jpg"
+ },
+ {
+  "id": "p95",
+  "name": "Cai Po Omelette Egg",
+  "altName": "菜脯煎蛋",
+  "category": "Omelette Egg",
+  "priceCents": 1080,
+  "image": "images/p95.jpg"
+ },
+ {
+  "id": "p96",
+  "name": "Shrimp Omelette Egg",
+  "altName": "虾仁煎蛋",
+  "category": "Omelette Egg",
+  "priceCents": 1280,
+  "image": "images/p96.jpg"
+ },
+ {
+  "id": "p97",
+  "name": "Sesame Oil Chicken Claypot (Signature)",
+  "altName": "招牌砂煲麻油鸡",
+  "category": "Claypot",
+  "priceCents": 1580,
+  "image": "images/p97.jpg"
+ },
+ {
+  "id": "p98",
+  "name": "Assam Fish Claypot",
+  "altName": "砂煲亞參鱼",
+  "category": "Claypot",
+  "priceCents": 1680,
+  "image": "images/p98.jpg"
+ },
+ {
+  "id": "p99",
+  "name": "Braised Pork Ribs Claypot",
+  "altName": "砂煲卤排骨",
+  "category": "Claypot",
+  "priceCents": 1580,
+  "image": "images/p99.jpg"
+ },
+ {
+  "id": "p100",
+  "name": "Lala Soup Claypot",
+  "altName": "砂煲啦啦汤",
+  "category": "Claypot",
+  "priceCents": 1480,
+  "image": "images/p100.jpg"
+ },
+ {
+  "id": "p101",
+  "name": "Fortune Herbal Prawns Soup Claypot",
+  "altName": "富贵药膳虾",
+  "category": "Claypot",
+  "priceCents": 2580,
+  "image": "images/p101.jpg"
+ },
+ {
+  "id": "p102",
+  "name": "Jasmine Rice",
+  "altName": "香米饭",
+  "category": "Jasmine Rice",
+  "priceCents": 160,
+  "image": "images/p102.jpg"
+ },
+ {
+  "id": "p103",
+  "name": "Nasi Lemak Rice",
+  "altName": "椰浆饭",
+  "category": "Jasmine Rice",
+  "priceCents": 250,
+  "image": "images/p103.jpg"
+ },
+ {
+  "id": "p104",
+  "name": "Stir-Fried lala in Ginger and Garlic",
+  "altName": "清炒啦啦",
+  "category": "Seafood Dishes",
+  "priceCents": 1680,
+  "image": "images/p104.jpg"
+ },
+ {
+  "id": "p105",
+  "name": "Gan Xiang Lala",
+  "altName": "甘香啦啦",
+  "category": "Seafood Dishes",
+  "priceCents": 1680,
+  "image": "images/p105.jpg"
+ },
+ {
+  "id": "p106",
+  "name": "Gan Xiang Prawns",
+  "altName": "甘香虾",
+  "category": "Seafood Dishes",
+  "priceCents": 2580,
+  "image": "images/p106.jpg"
+ },
+ {
+  "id": "p107",
+  "name": "King Prawns in Premium Soy Sauce",
+  "altName": "豉油王虾",
+  "category": "Seafood Dishes",
+  "priceCents": 2580,
+  "image": "images/p107.jpg"
+ },
+ {
+  "id": "p108",
+  "name": "Herbal Prawn Claypot",
+  "altName": "药膳虾煲",
+  "category": "Seafood Dishes",
+  "priceCents": 2580,
+  "image": "images/p108.jpg"
+ },
+ {
+  "id": "p109",
+  "name": "Golden Scallop Crab Meat Thick Soup",
+  "altName": "鲜味瑶柱蟹肉羹",
+  "category": "Seafood Dishes",
+  "priceCents": 1080,
+  "image": "images/p109.jpg",
+  "options": [
+   {
+    "id": "variant",
+    "name": "Variant",
+    "kind": "single",
+    "required": true,
+    "variant": true,
+    "choices": [
+     {
+      "id": "small",
+      "name": "Small",
+      "priceCents": 0,
+      "default": true
+     },
+     {
+      "id": "medium",
+      "name": "Medium",
+      "priceCents": 2800
+     }
+    ]
+   }
+  ]
+ },
+ {
+  "id": "p110",
+  "name": "Xiao Bai Chye",
+  "altName": "小白菜",
+  "category": "Vegetables Dishes",
+  "priceCents": 1080,
+  "image": "images/p110.jpg"
+ },
+ {
+  "id": "p111",
+  "name": "Lettuce",
+  "altName": "玻璃生菜",
+  "category": "Vegetables Dishes",
+  "priceCents": 1180,
+  "image": "images/p111.jpg"
+ },
+ {
+  "id": "p112",
+  "name": "Stir Fried Broccoli with Garlic",
+  "altName": "蒜炒西兰花",
+  "category": "Vegetables Dishes",
+  "priceCents": 1280,
+  "image": "images/p112.jpg"
+ },
+ {
+  "id": "p113",
+  "name": "Stir Fried Broccoli with 3 Treasure Mushroom",
+  "altName": "三姑炒西兰花",
+  "category": "Vegetables Dishes",
+  "priceCents": 1580,
+  "image": "images/p113.jpg"
+ },
+ {
+  "id": "p114",
+  "name": "Pet Cai Fan (~180g)",
+  "category": "Pet Cai Fan/ Gelato",
+  "priceCents": 1380,
+  "image": "images/p114.jpg"
+ },
+ {
+  "id": "p115",
+  "name": "Meat Lover Special (80g)",
+  "category": "Pet Cai Fan/ Gelato",
+  "priceCents": 880,
+  "image": "images/p115.jpg",
+  "options": [
+   {
+    "id": "variant",
+    "name": "Variant",
+    "kind": "single",
+    "required": true,
+    "variant": true,
+    "choices": [
+     {
+      "id": "small",
+      "name": "Small",
+      "priceCents": 0,
+      "default": true
+     },
+     {
+      "id": "big",
+      "name": "Big",
+      "priceCents": 100
+     }
+    ]
+   },
+   {
+    "id": "protein",
+    "name": "Protein",
+    "kind": "single",
+    "required": true,
+    "choices": [
+     {
+      "id": "beef",
+      "name": "Beef",
+      "priceCents": 0,
+      "default": true
+     },
+     {
+      "id": "kangaroo",
+      "name": "Kangaroo",
+      "priceCents": 100
+     },
+     {
+      "id": "lamb",
+      "name": "Lamb",
+      "priceCents": 0
+     },
+     {
+      "id": "pork",
+      "name": "Pork",
+      "priceCents": 0
+     },
+     {
+      "id": "salmon",
+      "name": "Salmon & White Fish",
+      "priceCents": 0
+     }
+    ]
+   },
+   {
+    "id": "icecream",
+    "name": "Add pet ice cream (50% off)",
+    "kind": "multi",
+    "required": false,
+    "choices": [
+     {
+      "id": "peanut-butter",
+      "name": "Peanut Butter",
+      "priceCents": 540
+     },
+     {
+      "id": "blueberry-coconut",
+      "name": "Blueberry Coconut",
+      "priceCents": 540
+     },
+     {
+      "id": "pumpkin-cinnamon",
+      "name": "Pumpkin Cinnamon",
+      "priceCents": 540
+     },
+     {
+      "id": "yogurt",
+      "name": "Yogurt",
+      "priceCents": 540
+     },
+     {
+      "id": "wild-raw-honey",
+      "name": "Wild Raw Honey",
+      "priceCents": 540
+     }
+    ]
+   }
+  ]
+ },
+ {
+  "id": "p116",
+  "name": "Fruit Platter 80g",
+  "altName": "宠物水果拼盘",
+  "category": "Pet Cai Fan/ Gelato",
+  "priceCents": 880,
+  "image": "images/p116.jpg"
+ },
+ {
+  "id": "p117",
+  "name": "Pet IceCream — Blueberry Burst 3.5oz",
+  "category": "Pet Cai Fan/ Gelato",
+  "priceCents": 780,
+  "image": "images/p117.jpg",
+  "options": [
+   {
+    "id": "variant",
+    "name": "Variant",
+    "kind": "single",
+    "required": true,
+    "variant": true,
+    "choices": [
+     {
+      "id": "small",
+      "name": "Small",
+      "priceCents": 0,
+      "default": true
+     },
+     {
+      "id": "medium",
+      "name": "Medium",
+      "priceCents": 300
+     }
+    ]
+   },
+   {
+    "id": "flavour",
+    "name": "Flavour",
+    "kind": "single",
+    "required": true,
+    "choices": [
+     {
+      "id": "blueberry-burst",
+      "name": "Blueberry Burst",
+      "priceCents": 0,
+      "default": true
+     },
+     {
+      "id": "peanut-butter",
+      "name": "Peanut Butter",
+      "priceCents": 0
+     },
+     {
+      "id": "blueberry-coconut",
+      "name": "Blueberry Coconut",
+      "priceCents": 0
+     },
+     {
+      "id": "pumpkin-cinnamon",
+      "name": "Pumpkin Cinnamon",
+      "priceCents": 0
+     },
+     {
+      "id": "yogurt",
+      "name": "Yogurt",
+      "priceCents": 0
+     },
+     {
+      "id": "wild-raw-honey",
+      "name": "Wild Raw Honey",
+      "priceCents": 0
+     },
+     {
+      "id": "cendol",
+      "name": "PetCubes Cendol Icecream (Limited Edition)",
+      "priceCents": 300
+     },
+     {
+      "id": "strawberry-paradise",
+      "name": "PetCubes Strawberry Paradise",
+      "priceCents": 300,
+      "soldOut": true
+     }
+    ]
+   }
+  ]
+ },
+ {
+  "id": "p118",
+  "name": "Pet Cubes (28 Cubes/Case) - Frozen Pack (Take Away Only)",
+  "category": "Pet Cai Fan/ Gelato",
+  "priceCents": 6600,
+  "image": "images/p118.jpg",
+  "options": [
+   {
+    "id": "variant",
+    "name": "Variant",
+    "kind": "single",
+    "required": true,
+    "variant": true,
+    "choices": [
+     {
+      "id": "small",
+      "name": "Small",
+      "priceCents": 0,
+      "default": true
+     },
+     {
+      "id": "big",
+      "name": "Big",
+      "priceCents": 1000
+     }
+    ]
+   },
+   {
+    "id": "protein",
+    "name": "Protein",
+    "kind": "single",
+    "required": true,
+    "choices": [
+     {
+      "id": "pork",
+      "name": "Pork",
+      "priceCents": 0,
+      "default": true
+     },
+     {
+      "id": "beef",
+      "name": "Beef",
+      "priceCents": 0
+     },
+     {
+      "id": "lamb",
+      "name": "Lamb",
+      "priceCents": 600
+     },
+     {
+      "id": "salmon",
+      "name": "Salmon & White Fish",
+      "priceCents": 0
+     },
+     {
+      "id": "kangaroo",
+      "name": "Kangaroo",
+      "priceCents": 1000
+     }
+    ]
+   }
+  ]
+ },
+ {
+  "id": "p119",
+  "name": "Pet Cubes (4 Cubes/Tray) - Frozen Pack (Take Away Only)",
+  "category": "Pet Cai Fan/ Gelato",
+  "priceCents": 1180,
+  "image": "images/p119.jpg",
+  "options": [
+   {
+    "id": "variant",
+    "name": "Variant",
+    "kind": "single",
+    "required": true,
+    "variant": true,
+    "choices": [
+     {
+      "id": "small",
+      "name": "Small",
+      "priceCents": 0,
+      "default": true
+     },
+     {
+      "id": "big",
+      "name": "Big",
+      "priceCents": 200
+     }
+    ]
+   },
+   {
+    "id": "protein",
+    "name": "Protein",
+    "kind": "single",
+    "required": true,
+    "choices": [
+     {
+      "id": "pork",
+      "name": "Pork",
+      "priceCents": 0,
+      "default": true
+     },
+     {
+      "id": "beef",
+      "name": "Beef",
+      "priceCents": 0
+     },
+     {
+      "id": "lamb",
+      "name": "Lamb",
+      "priceCents": 100
+     },
+     {
+      "id": "salmon",
+      "name": "Salmon & White Fish",
+      "priceCents": 0
+     },
+     {
+      "id": "kangaroo",
+      "name": "Kangaroo",
+      "priceCents": 200
+     },
+     {
+      "id": "beef-noodle",
+      "name": "Beef Noodle",
+      "priceCents": 200
+     }
+    ]
+   }
+  ]
+ },
+ {
+  "id": "p120",
+  "name": "Dog treats 50g (Ingredient :Banana,Rolled Oat,Peanut Butter)",
+  "category": "Pet Cai Fan/ Gelato",
+  "priceCents": 600,
+  "image": "images/p120.jpg"
+ },
+ {
+  "id": "p121",
+  "name": "Lucky Osmanthus Jelly",
+  "altName": "好运桂花糕",
+  "category": "Dessert",
+  "priceCents": 480,
+  "image": "images/p121.jpg"
+ },
+ {
+  "id": "p122",
+  "name": "Single Scoop Gelato (in cup)",
+  "category": "Dessert",
+  "priceCents": 480,
+  "image": "images/p122.jpg"
+ },
+ {
+  "id": "p123",
+  "name": "Double Scoop Gelato (in cup)",
+  "category": "Dessert",
+  "priceCents": 880,
+  "image": "images/p123.jpg"
+ },
+ {
+  "id": "p124",
+  "name": "Waffle Cone (Double Scoop)",
+  "category": "Dessert",
+  "priceCents": 1080,
+  "image": "images/p124.jpg"
+ },
+ {
+  "id": "p125",
+  "name": "Golden Osmanthus Oolong Beancurd (Limited!)",
+  "altName": "桂花乌龙豆花",
+  "category": "Dessert",
+  "priceCents": 580,
+  "soldOut": true,
+  "image": "images/p125.jpg"
+ },
+ {
+  "id": "p126",
+  "name": "Waffle Cone (Single Scoop)",
+  "category": "Dessert",
+  "priceCents": 680,
+  "image": "images/p126.jpg"
+ },
+ {
+  "id": "p127",
+  "name": "Belgium Waffle (Single Scoop)",
+  "category": "Dessert",
+  "priceCents": 1080,
+  "image": "images/p127.jpg"
+ },
+ {
+  "id": "p128",
+  "name": "Belgium Waffle (Double Scoop)",
+  "category": "Dessert",
+  "priceCents": 1480,
+  "image": "images/p128.jpg"
+ },
+ {
+  "id": "p129",
+  "name": "Belgium Waffle (Triple Scoop)",
+  "category": "Dessert",
+  "priceCents": 1880,
+  "image": "images/p129.jpg"
+ },
+ {
+  "id": "p130",
+  "name": "Pee Pad (1pc)",
+  "category": "Others",
+  "priceCents": 100,
+  "image": "images/p130.jpg"
+ },
+ {
+  "id": "p131",
+  "name": "Pet Diapers",
+  "category": "Others",
+  "priceCents": 150,
+  "image": "images/p131.jpg"
+ }
+]

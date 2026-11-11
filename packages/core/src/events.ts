@@ -1,5 +1,6 @@
 import type { BusinessConfig } from "./config.js";
 import type { Fulfilment } from "./catalog.js";
+import type { ChosenOption } from "./options.js";
 import { type Cents } from "./money.js";
 import { priceOrder, type PriceResult, type PricedLine } from "./pricing.js";
 
@@ -26,9 +27,15 @@ export type OrderEventBody =
       source?: "pos" | "online";
       customerName?: string;
       customerPhone?: string;
+      /** The signed-in member who placed it (set by the server only, never by a client). */
+      memberId?: string;
     }
   | { type: "OrderAccepted" }
-  | { type: "ItemAdded"; lineId: string; productId: string; name: string; unitCents: Cents; qty: number; bcrs?: boolean; pointsExempt?: boolean }
+  /** A coupon or voucher the member used. The discount is capped at the items subtotal; the minimum spend is on items only. */
+  | { type: "CouponApplied"; title: string; amountCents: Cents; minSpendCents: Cents }
+  /** Points the member spent on this order (100 points = S$1). Reduces what is owed. */
+  | { type: "PointsRedeemed"; points: number }
+  | { type: "ItemAdded"; lineId: string; productId: string; name: string; /** includes the price of any options */ unitCents: Cents; qty: number; bcrs?: boolean; pointsExempt?: boolean; options?: ChosenOption[] }
   | { type: "ItemQtySet"; lineId: string; qty: number }
   | { type: "PaymentRecorded"; paymentId: string; method: PaymentMethod; amountCents: Cents; /** false = awaiting gateway confirmation */ confirmed: boolean }
   | { type: "PaymentConfirmed"; paymentId: string }
@@ -48,6 +55,7 @@ export type OrderEvent = OrderEventBody & {
 export interface OrderLine extends PricedLine {
   lineId: string;
   productId: string;
+  options?: ChosenOption[];
 }
 
 export interface OrderState {
@@ -60,6 +68,10 @@ export interface OrderState {
   source: "pos" | "online";
   customerName?: string;
   customerPhone?: string;
+  memberId?: string;
+  coupon?: { title: string; amountCents: Cents; minSpendCents: Cents };
+  /** Points spent on this order; they pay for part of the bill. */
+  pointsRedeemed?: number;
   /** When staff accepted an online order. Always unset for POS orders, which need no acceptance. */
   acceptedAt?: number;
   spot?: string;
@@ -94,14 +106,14 @@ export function reduceOrder(orderId: string, events: readonly OrderEvent[]): Ord
   for (const e of mine) {
     if (e.type === "OrderOpened") {
       if (state) continue; // first open wins
-      state = { orderId, fulfilment: e.fulfilment, channelId: e.channelId, channelName: e.channelName, serviceCharge: e.serviceCharge, source: e.source ?? "pos", customerName: e.customerName, customerPhone: e.customerPhone, spot: e.spot, queueNumber: e.queueNumber, openedAt: e.ts, lines: [], payments: [], stage: "open" };
+      state = { orderId, fulfilment: e.fulfilment, channelId: e.channelId, channelName: e.channelName, serviceCharge: e.serviceCharge, source: e.source ?? "pos", customerName: e.customerName, customerPhone: e.customerPhone, memberId: e.memberId, spot: e.spot, queueNumber: e.queueNumber, openedAt: e.ts, lines: [], payments: [], stage: "open" };
       continue;
     }
     if (!state) continue; // events that arrived before the open are applied once it exists on the next replay
     switch (e.type) {
       case "ItemAdded": {
         if (state.lines.some((l) => l.lineId === e.lineId)) break;
-        state.lines.push({ lineId: e.lineId, productId: e.productId, name: e.name, unitCents: e.unitCents, qty: e.qty, bcrs: e.bcrs, pointsExempt: e.pointsExempt });
+        state.lines.push({ lineId: e.lineId, productId: e.productId, name: e.name, unitCents: e.unitCents, qty: e.qty, bcrs: e.bcrs, pointsExempt: e.pointsExempt, options: e.options });
         break;
       }
       case "ItemQtySet": {
@@ -119,6 +131,12 @@ export function reduceOrder(orderId: string, events: readonly OrderEvent[]): Ord
         if (p) p.confirmed = true;
         break;
       }
+      case "CouponApplied":
+        state.coupon ??= { title: e.title, amountCents: e.amountCents, minSpendCents: e.minSpendCents }; // once only
+        break;
+      case "PointsRedeemed":
+        state.pointsRedeemed ??= Math.max(0, Math.floor(e.points)); // once only
+        break;
       case "OrderAccepted":
         state.acceptedAt ??= e.ts;
         break;
@@ -141,7 +159,8 @@ export function reduceAll(events: readonly OrderEvent[]): OrderState[] {
 }
 
 export function orderTotals(state: OrderState, config: BusinessConfig): PriceResult {
-  return priceOrder({ lines: state.lines, fulfilment: state.fulfilment, serviceCharge: state.serviceCharge, config: config.pricing });
+  const points = state.pointsRedeemed ? { balance: state.pointsRedeemed, requested: state.pointsRedeemed } : null;
+  return priceOrder({ lines: state.lines, fulfilment: state.fulfilment, serviceCharge: state.serviceCharge, points, coupon: state.coupon ?? null, config: config.pricing });
 }
 
 export const confirmedPaid = (state: OrderState): Cents =>

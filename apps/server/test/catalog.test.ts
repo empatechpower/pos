@@ -125,10 +125,10 @@ describe("price changes", () => {
     expect((await put("/api/catalog/pricebooks/nope/prices/teh", { priceCents: 100 })).status).toBe(400);
   });
 
-  it("removing a channel price (null) makes it fall through to the default", async () => {
+  it("removing a channel price (null) makes the item unsellable there, with no fallback (A-1)", async () => {
     await put("/api/catalog/pricebooks/grab/prices/teh", { priceCents: null });
     const c = await getCatalog();
-    expect(resolvePrice(c, "teh", { outletId: "EV", channelId: "grab" })?.pricebookId).toBe("standard");
+    expect(resolvePrice(c, "teh", { outletId: "EV", channelId: "grab" })).toBeNull();
   });
 
   it("20 simultaneous changes: none lost, version rises by exactly 20", async () => {
@@ -167,14 +167,6 @@ describe("outlets, channels and pricebooks", () => {
     expect(r.json.problems.join(" ")).toMatch(/missing pricebook|violates|foreign/i);
     expect((await getCatalog()).version).toBe(before.version);
     expect((await getCatalog()).assignments).toEqual(before.assignments);
-  });
-
-  it("the default pricebook cannot be switched to hide, and the refusal is not half-applied", async () => {
-    const before = await getCatalog();
-    const r = await call("PATCH", "/api/catalog/pricebooks/standard", { body: { missing: "hide" }, staff: mgr });
-    expect(r.status).toBe(400);
-    expect((await getCatalog()).pricebooks.find((p) => p.id === "standard")?.missing).toBe("fallback");
-    expect((await getCatalog()).version).toBe(before.version);
   });
 
   it("a hide-pricebook channel sells only what it prices", async () => {

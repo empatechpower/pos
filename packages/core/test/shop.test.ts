@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { PRESETS, contrastRatio, isHexColor, newId, quoteOrder, readableOn, reduceOrder, shopStatus, visibleToKitchen, type Catalog, type OrderEvent } from "../src/index.js";
+import { PRESETS, orderTotals, contrastRatio, isHexColor, newId, quoteOrder, readableOn, reduceOrder, shopStatus, visibleToKitchen, type Catalog, type OrderEvent } from "../src/index.js";
 
 const catalog = (): Catalog => ({
   version: 1,
@@ -11,8 +11,8 @@ const catalog = (): Catalog => ({
     { id: "beer", name: "Beer", category: "Bar", pointsExempt: true },
   ],
   pricebooks: [
-    { id: "std", name: "Standard", missing: "fallback", prices: { kaya: 200, kopi: 220, gone: 200, beer: 900 } },
-    { id: "grab", name: "Grab", missing: "fallback", prices: { kaya: 230 } },
+    { id: "std", name: "Standard", missing: "show", prices: { kaya: 200, kopi: 220, gone: 200, beer: 900 } },
+    { id: "grab", name: "Grab", missing: "show", prices: { kaya: 230 } },
   ],
   channels: [
     { id: "dine", name: "Dine in", kind: "dine_in", serviceCharge: true, active: true },
@@ -37,7 +37,7 @@ describe("quoteOrder", () => {
 
   it("merges repeated lines and ignores any attempt to supply a price", () => {
     const q = quoteOrder(catalog(), config, ctx("take"), [{ productId: "kaya", qty: 1 }, { productId: "kaya", qty: 2, unitCents: 1 } as never]);
-    expect(q.ok && q.lines).toEqual([{ productId: "kaya", name: "Kaya Toast", unitCents: 200, qty: 3, pointsExempt: undefined }]);
+    expect(q.ok && q.lines).toEqual([{ productId: "kaya", name: "Kaya Toast", unitCents: 200, qty: 3, pointsExempt: undefined, options: [] }]);
   });
 
   it("refuses sold-out items, unknown items and items a channel does not sell", () => {
@@ -124,11 +124,34 @@ describe("brand colours", () => {
     expect(readableOn("#000000")).toBe("#ffffff");
     expect(readableOn("#ffe000")).toBe("#21252a"); // bright yellow needs dark text
     expect(readableOn("#1a237e")).toBe("#ffffff"); // deep blue needs white
+    expect(readableOn("#e1523e")).toBe("#ffffff"); // the prototype's red keeps white text (3.8:1, fine for bold buttons)
+    expect(readableOn("#ea7016")).toBe("#ffffff"); // and its orange
+    expect(readableOn("#00acc1")).toBe("#21252a"); // a light teal does not reach 3:1 with white
     for (const bg of ["#ea7016", "#e1523e", "#2e9d5b", "#7b1fa2", "#fdd835", "#00acc1"]) expect(contrastRatio(bg, readableOn(bg))).toBeGreaterThan(3);
   });
 
   it("contrast ratio is 21 for black on white and 1 for the same colour", () => {
     expect(Math.round(contrastRatio("#000000", "#ffffff"))).toBe(21);
     expect(contrastRatio("#abcdef", "#abcdef")).toBe(1);
+  });
+});
+
+describe("points on a quote and on an order", () => {
+  it("a quote with points lowers the total by what is usable, at 1 point = 1 cent", () => {
+    const q = quoteOrder(catalog(), config, ctx("take"), [{ productId: "kaya", qty: 5 }], { balance: 500, requested: null });
+    expect(q.ok && q.priced.pointsUsed).toBeGreaterThan(0);
+  });
+
+  it("a PointsRedeemed event lowers what the order owes, and counts once", () => {
+    const base = { orderId: "o1", deviceId: "d", ts: 1 };
+    const ev = (n: number, body: object) => ({ id: `e${n}`, seq: n, ...base, ...body }) as any;
+    const state = reduceOrder("o1", [
+      ev(1, { type: "OrderOpened", fulfilment: "takeaway", serviceCharge: false }),
+      ev(2, { type: "ItemAdded", lineId: "l", productId: "kaya", name: "Kaya", unitCents: 1000, qty: 1 }),
+      ev(3, { type: "PointsRedeemed", points: 300 }),
+      ev(4, { type: "PointsRedeemed", points: 900 }),
+    ])!;
+    expect(state.pointsRedeemed).toBe(300);
+    expect(orderTotals(state, config).total).toBe(700);
   });
 });

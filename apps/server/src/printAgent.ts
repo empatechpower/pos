@@ -19,12 +19,22 @@ export interface AgentJob {
 
 export type Sender = (host: string, port: number, bytes: Buffer) => Promise<void>;
 
+/** A failure after the connection was made: the printer may already have received the job. */
+export class AmbiguousDelivery extends Error {
+  ambiguous = true;
+}
+
 export const sendRaw: Sender = (host, port, bytes) =>
   new Promise((resolve, reject) => {
+    let connected = false;
+    const fail = (e: Error) => reject(connected ? Object.assign(new AmbiguousDelivery(e.message)) : e);
     const sock = createConnection({ host, port, timeout: 5000 });
     sock.once("timeout", () => sock.destroy(new Error(`timed out talking to ${host}:${port}`)));
-    sock.once("error", reject);
-    sock.once("connect", () => sock.end(bytes));
+    sock.once("error", fail);
+    sock.once("connect", () => {
+      connected = true;
+      sock.end(bytes);
+    });
     sock.once("close", (hadError) => !hadError && resolve());
   });
 
@@ -36,10 +46,10 @@ export interface AgentOptions {
 
 /**
  * Tell the server how a job went. If this call is lost after a successful print, the lease runs out
- * and the job prints a second time, so it is retried and any final failure is shouted about.
+ * and the job is parked as "unconfirmed" (never reprinted on its own), so it is retried and any final failure is shouted about.
  */
-async function report(baseUrl: string, token: string, jobId: string, outcome: "done" | "failed", error?: string): Promise<void> {
-  const body = outcome === "failed" ? JSON.stringify({ error: error ?? "unknown error" }) : undefined;
+async function report(baseUrl: string, token: string, jobId: string, outcome: "done" | "failed", error?: string, ambiguous = false): Promise<void> {
+  const body = outcome === "failed" ? JSON.stringify({ error: error ?? "unknown error", ...(ambiguous ? { ambiguous: true } : {}) }) : undefined;
   const headers: Record<string, string> = { "x-device-token": token, ...(body ? { "content-type": "application/json" } : {}) };
   let last = "";
   for (let attempt = 1; attempt <= 3; attempt++) {
@@ -78,7 +88,7 @@ export async function runAgentOnce({ baseUrl, deviceToken, send = sendRaw }: Age
       delivered++;
     } catch (err) {
       broken.add(job.printer.id);
-      await report(baseUrl, deviceToken, job.id, "failed", err instanceof Error ? err.message : String(err));
+      await report(baseUrl, deviceToken, job.id, "failed", err instanceof Error ? err.message : String(err), err instanceof AmbiguousDelivery);
       failed++;
     }
   }

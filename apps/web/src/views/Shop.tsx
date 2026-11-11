@@ -1,26 +1,77 @@
-import { useEffect, useMemo, useState } from "react";
-import { formatMoney, menuFor, quoteOrder, type BusinessConfig, type Catalog, type ShopStatus } from "@pos/core";
+import { useEffect, useMemo, useRef, useState } from "react";
+import { defaultSelection, formatMoney, menuFor, optionLines, priceRange, quoteOrder, readableOn, resolveOptions, type BusinessConfig, type Catalog, type ChosenOptionInput, type MenuEntry, type ShopStatus } from "@pos/core";
+import { OptionSheet } from "./OptionSheet";
+import "../shopProto.css";
+import { LANGS, detectedLang, greeting, lang, langMode, setLangMode, shortLabel, t, useLang } from "../shopI18n";
 
 interface Info {
   name: string;
   outletName: string;
   paymentTiming: string;
   channels: Array<{ id: string; name: string; kind: string }>;
-  brand: { primary: string; accent: string; ink: string; logoUrl: string | null };
+  brand: { primary: string; accent: string; ink: string; logoUrl: string | null; heroUrl: string | null; tagline: string | null; promoTitle: string | null; promoBody: string | null };
+  /** What this shop can do beyond email sign-in and paying at the counter. */
+  auth: { google: boolean; microsoft: boolean; phone: { number: string; simulated?: boolean } | null };
+  payments: { online: boolean; methods: string[] };
 }
 interface OrderView {
   orderId: string;
   queueNumber: string;
   status: ShopStatus;
   channelName?: string;
-  items: Array<{ name: string; qty: number; unitCents: number }>;
+  items: Array<{ name: string; qty: number; unitCents: number; options: string[] }>;
   totalCents: number;
   paidCents: number;
+  canCancel?: boolean;
+  canPayOnline?: boolean;
+}
+interface PastOrder {
+  orderId: string;
+  at: string;
+  queueNumber: string;
+  status: ShopStatus;
+  channelName?: string;
+  itemCount: number;
+  totalCents: number;
+}
+interface BagLine {
+  key: string;
+  productId: string;
+  qty: number;
+  selection: ChosenOptionInput[];
 }
 
 const LS_LAST = "shop.lastOrder";
+const LS_ENTERED = "shop.entered";
+const LS_MEMBER = "shop.member";
+interface CouponView {
+  id: string;
+  title: string;
+  amountCents: number;
+  minSpendCents: number;
+}
+interface StampView {
+  count: number;
+  completed: number;
+  target: number;
+  rewardTitle: string;
+  minPaidCents: number;
+}
+interface MemberView {
+  id: string;
+  email: string | null;
+  name: string | null;
+  phone: string | null;
+  pointsBalance: number;
+}
 const params = () => new URLSearchParams(location.hash.split("?")[1] ?? "");
 const orderIdFromHash = () => /^#\/shop\/order\/([\w-]+)/.exec(location.hash)?.[1] ?? null;
+
+/** A pale version of a colour, for card backgrounds and chips. */
+const tint = (hex: string, amount = 0.88) => {
+  const c = [1, 3, 5].map((i) => parseInt(hex.slice(i, i + 2), 16));
+  return "#" + c.map((v) => Math.round(v + (255 - v) * amount).toString(16).padStart(2, "0")).join("");
+};
 
 const STATUS_TEXT: Record<ShopStatus, { title: string; body: (o: OrderView) => string }> = {
   received: { title: "Order sent", body: () => "Waiting for the shop to accept your order. This page updates by itself." },
@@ -33,13 +84,70 @@ const STATUS_TEXT: Record<ShopStatus, { title: string; body: (o: OrderView) => s
 };
 const STEPS: ShopStatus[] = ["received", "awaiting_payment", "queued", "preparing", "ready"];
 
+const ICONS: Record<string, string> = {
+  pin: '<path d="M12 21s-6.5-5.4-6.5-10.2A6.5 6.5 0 0 1 12 4a6.5 6.5 0 0 1 6.5 6.8C18.5 15.6 12 21 12 21Z"/><circle cx="12" cy="10.6" r="2.3"/>',
+  bag: '<path d="M5.5 8h13l-1 12.5h-11L5.5 8Z"/><path d="M9 10.5V6.8a3 3 0 0 1 6 0v3.7"/>',
+  table: '<path d="M3 9.5h18"/><path d="M5.5 9.5V20M18.5 9.5V20"/><path d="M5.5 15h13"/><circle cx="12" cy="6" r="1.6"/>',
+  cutlery: '<path d="M7 3.5v6.2M4.8 3.5v3.4a2.2 2.2 0 0 0 4.4 0V3.5M7 9.7v10.8M17.5 3.5c-1.7 1.2-2.6 3.4-2.6 5.7 0 1.9 1 3 2.6 3v8.3"/>',
+  user: '<circle cx="12" cy="8.2" r="3.7"/><path d="M5 20.2c1.2-3.4 3.8-5 7-5s5.8 1.6 7 5"/>',
+  gift: '<rect x="4" y="10" width="16" height="4"/><path d="M6 14v6.5h12V14M12 10v10.5M12 10a2.8 2.8 0 1 1 2.8-2.8c0 1.8-2.8 2.8-2.8 2.8Zm0 0a2.8 2.8 0 1 0-2.8-2.8C9.2 8.9 12 10 12 10Z"/>',
+  search: '<circle cx="11" cy="11" r="7"/><path d="m20.5 20.5-4.6-4.6"/>',
+  paw: '<circle cx="7.2" cy="7.6" r="1.7"/><circle cx="12" cy="5.4" r="1.8"/><circle cx="16.8" cy="7.6" r="1.7"/><circle cx="5.4" cy="12.4" r="1.6"/><circle cx="18.6" cy="12.4" r="1.6"/><path d="M12 11.2c2.9 0 5.2 2.3 5.2 4.9 0 1.8-1.3 2.9-3 2.9-1 0-1.5-.3-2.2-.3s-1.2.3-2.2.3c-1.7 0-3-1.1-3-2.9 0-2.6 2.3-4.9 5.2-4.9Z"/>',
+  ticket: '<path d="M4 8.5A1.5 1.5 0 0 1 5.5 7h13A1.5 1.5 0 0 1 20 8.5v2a2.5 2.5 0 0 0 0 5v2a1.5 1.5 0 0 1-1.5 1.5h-13A1.5 1.5 0 0 1 4 17.5v-2a2.5 2.5 0 0 0 0-5v-2Z"/><path d="M13.5 7v1.8M13.5 11.2v1.8M13.5 15.2V17"/>',
+  arrowR: '<path d="M4.5 12h14M13.5 6l6 6-6 6"/>',
+  logout: '<path d="M13.5 4.5H7A1.5 1.5 0 0 0 5.5 6v12A1.5 1.5 0 0 0 7 19.5h6.5"/><path d="M10.5 12h10M17 8l3.5 4L17 16"/>',
+  globe: '<circle cx="12" cy="12" r="8.5"/><path d="M3.5 12h17M12 3.5c2.4 2.3 3.6 5.2 3.6 8.5s-1.2 6.2-3.6 8.5c-2.4-2.3-3.6-5.2-3.6-8.5S9.6 5.8 12 3.5Z"/>',
+  chevL: '<path d="m14.5 6-6 6 6 6"/>',
+  chevR: '<path d="m9.5 6 6 6-6 6"/>',
+  chevD: '<path d="m6 9.5 6 6 6-6"/>',
+  mail: '<rect x="3.5" y="5.5" width="17" height="13" rx="2"/><path d="m4.2 7.2 7.8 5.8 7.8-5.8"/>',
+  phone: '<path d="M5.2 4h3.6L10.3 8 8.2 9.6a12.5 12.5 0 0 0 6.2 6.2L16 13.7l4 1.5v3.6a1.9 1.9 0 0 1-2 1.9C10.2 20 4 13.8 3.3 6A1.9 1.9 0 0 1 5.2 4Z"/>',
+  check: '<path d="m5 12.8 4.5 4.5L19 7.5"/>',
+  stack: '<ellipse cx="12" cy="5.8" rx="7" ry="2.8"/><path d="M5 5.8v6.2c0 1.6 3.1 2.8 7 2.8s7-1.2 7-2.8V5.8"/><path d="M5 12v6.2c0 1.6 3.1 2.8 7 2.8s7-1.2 7-2.8V12"/>',
+  card: '<rect x="3.5" y="6" width="17" height="12.5" rx="2"/><path d="M3.5 10h17"/>',
+  help: '<circle cx="12" cy="12" r="8.6"/><path d="M9.6 9.4A2.5 2.5 0 1 1 12 12.4V14"/><circle cx="12" cy="17" r=".4" fill="currentColor"/>',
+  can: '<rect x="7" y="3.5" width="10" height="17" rx="1.5"/><path d="M7 7.2h10M7 16.8h10"/>',
+  basket: '<path d="M4.8 9.8h14.4l-1.2 8.4a2 2 0 0 1-2 1.8H8a2 2 0 0 1-2-1.8L4.8 9.8Z"/><path d="M8.3 9.8 12 4.2l3.7 5.6"/><path d="M9.4 13.2v3.4M12 13.2v3.4M14.6 13.2v3.4"/>',
+};
+function Icon({ name, size = 20 }: { name: keyof typeof ICONS; size?: number }) {
+  return <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true" dangerouslySetInnerHTML={{ __html: ICONS[name]! }} />;
+}
+const channelIcon = (kind: string): keyof typeof ICONS => (kind === "dine_in" ? "cutlery" : "bag");
+
+const photo = (p: { id: string; imageVersion?: number }) => (p.imageVersion ? `/api/products/${p.id}/image?v=${p.imageVersion}` : null);
+// The card shows the plain lower price; Variants are chosen on the sheet (no ranges on cards).
+const cardPrice = (m: MenuEntry) => formatMoney(priceRange(m.priceCents, m.options)[0]);
+
 /** The customer's own ordering page: no sign-in, no device set-up. Public by design. */
 export function Shop() {
+  useLang(); // re-render everything below when the language changes
   const [info, setInfo] = useState<Info | null>(null);
   const [catalog, setCatalog] = useState<Catalog | null>(null);
   const [config, setConfig] = useState<BusinessConfig | null>(null);
   const [failed, setFailed] = useState(false);
   const [orderId, setOrderId] = useState(orderIdFromHash());
+  // Coming back from Google or Microsoft: trade the one-time ticket for a session before showing anything.
+  const [signing, setSigning] = useState(() => !!params().get("ticket"));
+  const [loginError, setLoginError] = useState<string | null>(null);
+  useEffect(() => {
+    const p = params();
+    const ticket = p.get("ticket");
+    const err = p.get("login_error");
+    if (err) setLoginError(err === "cancelled" ? "Sign-in was cancelled." : "That sign-in didn't work. Please try again, or use another way.");
+    if (!ticket && !err) return;
+    history.replaceState(null, "", "#/shop");
+    if (!ticket) return;
+    fetch("/api/shop/auth/ticket", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ ticket }) })
+      .then(async (r) => {
+        const j = (await r.json().catch(() => ({}))) as { token?: string };
+        if (r.ok && j.token) {
+          localStorage.setItem(LS_MEMBER, j.token);
+          sessionStorage.setItem(LS_ENTERED, "1");
+        } else setLoginError("That sign-in link has expired. Please try again.");
+      })
+      .catch(() => setLoginError("No connection. Please try again."))
+      .finally(() => setSigning(false));
+  }, []);
 
   useEffect(() => {
     const onHash = () => setOrderId(orderIdFromHash());
@@ -59,59 +167,186 @@ export function Shop() {
   }, []);
 
   if (failed) return <div className="shop"><div className="shop-msg"><h2>Ordering isn't available right now</h2><p>Please order at the counter, or try again in a moment.</p></div></div>;
-  if (!info || !catalog || !config) return <div className="shop"><div className="shop-msg"><p>Loading…</p></div></div>;
+  if (!info || !catalog || !config || signing) return <div className="shop"><div className="shop-msg"><p>{signing ? "Signing you in…" : "Loading…"}</p></div></div>;
 
-  const theme = { "--brand": info.brand.primary, "--brand-ink": info.brand.ink, "--brand-soft": info.brand.accent } as React.CSSProperties;
+  const b = info.brand;
+  const theme = {
+    "--brand": b.primary,
+    "--brand-ink": b.ink,
+    "--accent": b.accent,
+    "--accent-ink": readableOn(b.accent),
+    "--soft": tint(b.accent),
+    "--brand-soft": tint(b.accent),
+  } as React.CSSProperties;
   return (
     <div className="shop" style={theme}>
-      <header className="shop-head">
-        {info.brand.logoUrl ? <img src={info.brand.logoUrl} alt={info.name} /> : <b className="shop-name">{info.name}</b>}
-        <span>{info.outletName}</span>
-      </header>
-      {orderId ? <Status orderId={orderId} /> : <Menu info={info} catalog={catalog} config={config} />}
+      {orderId ? (
+        <>
+          <Status orderId={orderId} info={info} />
+        </>
+      ) : (
+        <Menu info={info} catalog={catalog} config={config} loginError={loginError} />
+      )}
     </div>
   );
 }
 
-function Menu({ info, catalog, config }: { info: Info; catalog: Catalog; config: BusinessConfig }) {
+type Screen = "login" | "order" | "rewards" | "account" | "bag" | "summary" | "checkout" | "payment";
+
+function Menu({ info, catalog, config, loginError }: { info: Info; catalog: Catalog; config: BusinessConfig; loginError: string | null }) {
   const q = params();
   const channels = info.channels;
   const wanted = q.get("channel");
   const table = q.get("table") ?? "";
+  const startTab = q.get("tab");
+  const entered = () => !!localStorage.getItem(LS_MEMBER) || sessionStorage.getItem(LS_ENTERED) === "1";
+  const [screen, setScreenRaw] = useState<Screen>(startTab === "account" ? "account" : entered() ? "order" : "login");
   const [channelId, setChannelId] = useState(channels.find((c) => c.id === wanted)?.id ?? (table ? channels.find((c) => c.kind === "dine_in")?.id : undefined) ?? channels[0]?.id ?? "");
   const [category, setCategory] = useState("All");
-  const [bag, setBag] = useState<Record<string, number>>({});
-  const [open, setOpen] = useState(false);
+  const [search, setSearch] = useState<string | null>(null);
+  const [bag, setBag] = useState<BagLine[]>([]);
+  const [picking, setPicking] = useState<MenuEntry | null>(null);
   const [name, setName] = useState("");
   const [phone, setPhone] = useState("");
   const [spot, setSpot] = useState(table);
+  const [tableEdit, setTableEdit] = useState(false);
   const [busy, setBusy] = useState(false);
   const [note, setNote] = useState<string | null>(null);
-  const [agreed, setAgreed] = useState<number | null>(null); // total the customer has accepted after a price change
+  const [agreed, setAgreed] = useState<number | null>(null);
+  const [member, setMember] = useState<MemberView | null>(null);
+  const [usePoints, setUsePoints] = useState(false);
+  const [coupons, setCoupons] = useState<CouponView[]>([]);
+  const [couponId, setCouponId] = useState<string | null>(null);
+  const [stamps, setStamps] = useState<StampView | null>(null);
+  const [confirmClear, setConfirmClear] = useState(false);
+  const [wallet, setWallet] = useState(false);
+  const [guestOk, setGuestOk] = useState(false);
+  const [guestForm, setGuestForm] = useState(false);
+  const [acctPanel, setAcctPanel] = useState<null | "profile" | "help">(null);
+  const [langOpen, setLangOpen] = useState(false);
+  const [payMethod, setPayMethod] = useState<"counter" | "card" | "paynow">("counter");
+  const [history, setHistory] = useState<PastOrder[] | null>(null);
+  const [editName, setEditName] = useState("");
+  const [editPhone, setEditPhone] = useState("");
+  const [profileMsg, setProfileMsg] = useState<string | null>(null);
+  const b = info.brand;
+  // The greeting, outlet and Dine in / Take away toggle stay put; the category rail sticks just below them.
+  const headRef = useRef<HTMLDivElement | null>(null);
+  useEffect(() => {
+    const el = headRef.current;
+    if (!el) return;
+    const set = () => document.querySelector<HTMLElement>(".shop")?.style.setProperty("--head-h", `${el.offsetHeight}px`);
+    set();
+    const ro = new ResizeObserver(set);
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, [screen, tableEdit]);
+
+  const setScreen = (s: Screen) => {
+    setScreenRaw(s);
+    setNote(null);
+    setAcctPanel(null);
+    window.scrollTo(0, 0);
+  };
+
+  const loadMember = async () => {
+    const t = localStorage.getItem(LS_MEMBER);
+    if (!t) return setMember(null);
+    const r = await fetch("/api/shop/me", { headers: { authorization: `Bearer ${t}` } }).catch(() => null);
+    if (r?.ok) {
+      const j = (await r.json()) as { member: MemberView; coupons?: CouponView[]; stamps?: StampView | null };
+      setMember(j.member);
+      setCoupons(j.coupons ?? []);
+      setStamps(j.stamps ?? null);
+      setName((n) => n || j.member.name || "");
+      setPhone((p) => p || j.member.phone || "");
+    } else if (r && r.status === 401) {
+      localStorage.removeItem(LS_MEMBER);
+      setMember(null);
+    }
+  };
+  useEffect(() => { void loadMember(); }, []);
+  useEffect(() => {
+    if (screen !== "account" || !member) return;
+    const t = localStorage.getItem(LS_MEMBER);
+    void fetch("/api/shop/me/orders", { headers: { authorization: `Bearer ${t}` } })
+      .then((r) => (r.ok ? (r.json() as Promise<{ orders: PastOrder[] }>) : null))
+      .then((j) => setHistory(j?.orders ?? []))
+      .catch(() => setHistory([]));
+  }, [screen, member?.id]);
+  async function saveProfile() {
+    const r = await fetch("/api/shop/me", { method: "PATCH", headers: { "content-type": "application/json", authorization: `Bearer ${localStorage.getItem(LS_MEMBER) ?? ""}` }, body: JSON.stringify({ name: editName, phone: editPhone }) }).catch(() => null);
+    if (r?.ok) {
+      setProfileMsg("Saved.");
+      if (editPhone) setPhone(editPhone);
+      await loadMember();
+    } else setProfileMsg("Couldn't save. Please try again.");
+  }
+  const signOut = async () => {
+    const t = localStorage.getItem(LS_MEMBER);
+    if (t) await fetch("/api/shop/auth/logout", { method: "POST", headers: { authorization: `Bearer ${t}` } }).catch(() => undefined);
+    localStorage.removeItem(LS_MEMBER);
+    sessionStorage.removeItem(LS_ENTERED);
+    setMember(null);
+    setCoupons([]);
+    setStamps(null);
+    setCouponId(null);
+    setUsePoints(false);
+    setGuestOk(false);
+    setScreen("login");
+  };
 
   const ctx = { outletId: info.outletName, channelId };
   const menu = useMemo(() => menuFor(catalog, ctx), [catalog, info.outletName, channelId]);
+  const byId = useMemo(() => new Map(menu.map((m) => [m.id, m])), [menu]);
   const channel = channels.find((c) => c.id === channelId);
   const categories = useMemo(() => ["All", ...new Set(menu.map((m) => m.category))], [menu]);
 
-  // Items this channel does not sell leave the bag when the customer switches channel.
+  // Switching channel can remove items it does not sell, or choices that no longer exist.
   useEffect(() => {
     setBag((cur) => {
-      const kept = Object.fromEntries(Object.entries(cur).filter(([id]) => menu.some((m) => m.id === id && !m.soldOut)));
-      if (Object.keys(kept).length < Object.keys(cur).length) setNote(`Some items were removed: they aren't sold for ${channel?.name}.`);
-      return Object.keys(kept).length === Object.keys(cur).length ? cur : kept;
+      const kept = cur.filter((l) => {
+        const m = byId.get(l.productId);
+        return m && !m.soldOut && resolveOptions(m.options, l.selection).ok;
+      });
+      if (kept.length < cur.length) setNote(`Some items were removed: they aren't available for ${channel?.name}.`);
+      return kept.length === cur.length ? cur : kept;
     });
-  }, [menu]);
+  }, [byId]);
 
-  const items = Object.entries(bag).map(([productId, qty]) => ({ productId, qty }));
-  const count = items.reduce((n, i) => n + i.qty, 0);
-  const quote = items.length ? quoteOrder(catalog, config, ctx, items) : null;
+  const items = bag.map((l) => ({ productId: l.productId, qty: l.qty, options: l.selection }));
+  const count = bag.reduce((n, l) => n + l.qty, 0);
+  const canUsePoints = !!member && config.rewards.pointsEnabled && member.pointsBalance >= config.pricing.minPointsRedeem;
+  const pointsAsk = usePoints && canUsePoints ? { balance: member!.pointsBalance, requested: null } : null;
+  const chosen = coupons.find((c) => c.id === couponId) ?? null;
+  const preview = items.length ? quoteOrder(catalog, config, ctx, items, null, null) : null;
+  const itemsSubtotal = preview?.ok ? preview.priced.subtotal : 0;
+  // A coupon only counts once the items alone reach its minimum spend.
+  const chosenOk = !!chosen && itemsSubtotal >= chosen.minSpendCents;
+  const quote = items.length ? quoteOrder(catalog, config, ctx, items, pointsAsk, chosen && chosenOk ? { amountCents: chosen.amountCents, minSpendCents: chosen.minSpendCents } : null) : null;
   const total = quote?.ok ? quote.priced.total : 0;
-  const add = (id: string, d: number) => setBag((cur) => {
-    const next = Math.min(20, (cur[id] ?? 0) + d);
-    const { [id]: _, ...rest } = cur;
-    return next > 0 ? { ...rest, [id]: next } : rest;
-  });
+  const shownTotal = agreed ?? total;
+  const inBag = (id: string) => bag.filter((l) => l.productId === id).reduce((n, l) => n + l.qty, 0);
+  const earnPts = Math.floor((itemsSubtotal / 100) * config.rewards.earnPointsPerDollar);
+
+  const addLine = (m: MenuEntry, selection: ChosenOptionInput[], d = 1) => {
+    const r = resolveOptions(m.options, selection);
+    if (!r.ok) return;
+    const key = `${m.id}#${r.key}`;
+    setBag((cur) => {
+      const have = cur.find((l) => l.key === key);
+      const qty = (have?.qty ?? 0) + d;
+      if (qty <= 0) return cur.filter((l) => l.key !== key);
+      const next = Math.min(20, qty);
+      return have ? cur.map((l) => (l.key === key ? { ...l, qty: next } : l)) : [...cur, { key, productId: m.id, qty: next, selection }];
+    });
+    setAgreed(null);
+  };
+  const bump = (l: BagLine, d: number) => {
+    const m = byId.get(l.productId);
+    if (m) addLine(m, l.selection, d);
+  };
+  const addSimple = (m: MenuEntry, d: number) => addLine(m, m.options?.length ? defaultSelection(m.options) : [], d);
 
   async function place() {
     if (!quote?.ok || busy) return;
@@ -120,19 +355,38 @@ function Menu({ info, catalog, config }: { info: Info; catalog: Catalog; config:
     try {
       const res = await fetch("/api/shop/orders", {
         method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({ channelId, items, customerName: name, customerPhone: phone, spot, expectedTotalCents: agreed ?? total }),
+        headers: { "content-type": "application/json", ...(member ? { authorization: `Bearer ${localStorage.getItem(LS_MEMBER) ?? ""}` } : {}) },
+        body: JSON.stringify({ channelId, items, customerName: name, customerPhone: phone, spot, expectedTotalCents: agreed ?? total, ...(pointsAsk ? { usePoints: "max" } : {}), ...(chosen && chosenOk ? { couponId: chosen.id } : {}) }),
       });
-      const j = (await res.json().catch(() => ({}))) as { orderId?: string; error?: string; totalCents?: number; productId?: string };
+      const j = (await res.json().catch(() => ({}))) as { orderId?: string; error?: string; totalCents?: number };
       if (res.ok && j.orderId) {
         localStorage.setItem(LS_LAST, j.orderId);
+        if (payMethod !== "counter") {
+          // The order exists; now send the customer to the card / PayNow page. If that is unavailable they land on the
+          // order's page, which offers to pay again or to pay at the counter.
+          const pr = await fetch(`/api/shop/orders/${j.orderId}/pay`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ method: payMethod }) })
+            .then((r) => r.json() as Promise<{ url?: string }>)
+            .catch(() => ({}) as { url?: string });
+          if (pr.url) {
+            location.href = pr.url;
+            return;
+          }
+        }
         location.hash = `#/shop/order/${j.orderId}`;
       } else if (res.status === 409 && j.error === "price_changed") {
         setAgreed(j.totalCents ?? null);
-        setNote(`Prices changed while you were ordering. The new total is ${formatMoney(j.totalCents ?? 0)}. Tap Place order again to confirm.`);
+        setNote(`Prices changed while you were ordering. The new total is ${formatMoney(j.totalCents ?? 0)}. Tap Pay again to confirm.`);
       } else if (res.status === 429) {
         setNote("Too many orders from this device. Please wait a few minutes or order at the counter.");
-      } else if (j.error === "unavailable") {
+      } else if (j.error === "coupon_not_available" || j.error === "coupon_not_eligible") {
+        setCouponId(null);
+        void loadMember();
+        setNote("That coupon can't be used on this order. Please check your total and try again.");
+      } else if (j.error === "not_enough_points") {
+        setUsePoints(false);
+        void loadMember();
+        setNote("Your points balance changed. Please check your total and try again.");
+      } else if (j.error === "unavailable" || j.error === "option_sold_out") {
         setNote("One of your items just sold out. Please check your bag.");
       } else {
         setNote("We couldn't place your order. Please try again, or order at the counter.");
@@ -145,113 +399,919 @@ function Menu({ info, catalog, config }: { info: Info; catalog: Catalog; config:
   }
 
   const last = localStorage.getItem(LS_LAST);
-  const phoneOk = !phone || /^[+\d][\d\s-]{5,19}$/.test(phone);
-  return (
+  const phoneOk = /^[+\d][\d\s-]{5,19}$/.test(phone) && phone.replace(/\D/g, "").length >= 8;
+  const needle = (search ?? "").trim().toLowerCase();
+  const shown = menu.filter((m) => (category === "All" || m.category === category) && (!needle || m.name.toLowerCase().includes(needle) || (m.altName ?? "").toLowerCase().includes(needle)));
+  const dine = channel?.kind === "dine_in";
+  const spotText = dine ? spot || "Add table" : "Pickup counter";
+  const who = member ? member.name || (member.email ?? member.phone ?? "Member").split("@")[0] : t("guestW", "Guest");
+  const canOrder = !!quote?.ok && (!!member || guestOk) && phoneOk;
+  const navActive = screen === "rewards" ? "rewards" : screen === "account" ? "account" : "order";
+
+  /* ---- shared pieces ---- */
+  const header = (noSpot: boolean) => (
+    <header className="shop-top">
+      <div className="shop-left">
+        <span className="shop-greet">{greeting()}</span>
+        <b className="shop-name">{who}</b>
+        <button className="shop-chip" onClick={() => setLangOpen(true)} aria-label={`${t("language", "Language")} — ${LANGS.find((l) => l.code === lang())!.native}`}><Icon name="globe" size={15} /><span>{shortLabel()}</span></button>
+      </div>
+      <div className="shop-logo">{b.logoUrl ? <img src={b.logoUrl} alt={info.name} /> : <b>{info.name}</b>}</div>
+      <div className="shop-meta">
+        {dine && !noSpot && (
+          <button className={`shop-table ${spot ? "on" : ""}`} onClick={() => setTableEdit((v) => !v)} aria-label="Change table">
+            <Icon name="table" size={16} />{spot || "Add table"}
+          </button>
+        )}
+        {member ? (
+          config.rewards.pointsEnabled && <span className="shop-pts">{member.pointsBalance.toLocaleString()} points</span>
+        ) : (
+          <button className="shop-pts link" onClick={() => setScreen("login")}>{t("signUpNow", "Sign up now")}<br />&amp; get {config.rewards.welcomePoints} points</button>
+        )}
+        <span className="shop-outlet"><Icon name="pin" size={13} />{info.outletName}</span>
+      </div>
+    </header>
+  );
+  const seg = (
+    <div className="shop-seg">
+      {channels.map((c) => <button key={c.id} className={c.id === channelId ? "on" : ""} onClick={() => { setChannelId(c.id); setAgreed(null); }}><Icon name={channelIcon(c.kind)} size={19} />{c.kind === "dine_in" ? t("dineIn", c.name) : c.kind === "takeaway" ? t("takeAway", c.name) : c.name}</button>)}
+    </div>
+  );
+  const pageHead = (title: string, opts: { seg?: boolean } = {}) => (
+    <div className="shop-headwrap">
+      {header(true)}
+      {opts.seg && seg}
+      <h2 className="page-title">{title}</h2>
+    </div>
+  );
+  const back = (label: string, to: Screen) => <button className="e2e-back" onClick={() => setScreen(to)}><Icon name="chevL" size={16} /> {label}</button>;
+  const noteEl = note && <div className="shop-note">{note}</div>;
+
+  const totalsRows = (q2: NonNullable<typeof quote> & { ok: true }) => (
     <>
-      {last && <a className="shop-last" href={`#/shop/order/${last}`}>View my last order</a>}
-      <div className="shop-seg">
-        {channels.map((c) => (
-          <button key={c.id} className={c.id === channelId ? "on" : ""} onClick={() => { setChannelId(c.id); setAgreed(null); }}>{c.name}</button>
-        ))}
-      </div>
-      <div className="shop-chips">
-        {categories.map((c) => <button key={c} className={c === category ? "on" : ""} onClick={() => setCategory(c)}>{c}</button>)}
-      </div>
-      {note && !open && <div className="shop-note">{note}</div>}
-      <div className="shop-grid">
-        {menu.filter((m) => category === "All" || m.category === category).map((m) => (
-          <div key={m.id} className={`shop-card ${bag[m.id] ? "in" : ""} ${m.soldOut ? "out" : ""}`}>
-            <span className="n">{m.name}</span>
-            <span className="p">{m.soldOut ? "Sold out" : formatMoney(m.priceCents)}</span>
-            {!m.soldOut && (bag[m.id] ? (
-              <span className="step"><button aria-label={`Fewer ${m.name}`} onClick={() => add(m.id, -1)}>−</button><b>{bag[m.id]}</b><button aria-label={`More ${m.name}`} onClick={() => add(m.id, 1)}>+</button></span>
-            ) : (
-              <button className="add" onClick={() => add(m.id, 1)}>Add</button>
-            ))}
-          </div>
-        ))}
-      </div>
+      <div className="sum-row"><span className="k">{t("itemsSubtotal", "Items subtotal")}</span><span className="v">{formatMoney(q2.priced.subtotal)}</span></div>
+      {q2.priced.couponDiscount > 0 && <div className="sum-row neg"><span className="k">{chosen?.title ?? "Coupon / voucher"}</span><span className="v">−{formatMoney(q2.priced.couponDiscount)}</span></div>}
+      {q2.priced.pointsDiscount > 0 && <div className="sum-row neg"><span className="k">Points · {q2.priced.pointsUsed.toLocaleString()} pts</span><span className="v">−{formatMoney(q2.priced.pointsDiscount)}</span></div>}
+      {q2.priced.service > 0 && <div className="sum-row"><span className="k">{t("pmService", "Service charge")}</span><span className="v">{formatMoney(q2.priced.service)}</span></div>}
+      {q2.priced.gst > 0 && <div className="sum-row"><span className="k">GST</span><span className="v">{formatMoney(q2.priced.gst)}</span></div>}
+      {q2.priced.bcrs > 0 && <div className="sum-row"><span className="k">{t("bcrsDeposit", "BCRS Deposit")}</span><span className="v">{formatMoney(q2.priced.bcrs)}</span></div>}
+      <div className="sum-row grand"><span className="k">{t("total", "Total")}</span><span className="v">{formatMoney(shownTotal)}</span></div>
+    </>
+  );
+  const lineView = (l: BagLine) => {
+    const m = byId.get(l.productId);
+    const r = m ? resolveOptions(m.options, l.selection) : null;
+    if (!m || !r?.ok) return null;
+    return { m, r, lineCents: (m.priceCents + r.extraCents) * l.qty, opts: optionLines(r.options).join(" · ") };
+  };
+  const itemRows = (thumbs: boolean) =>
+    bag.map((l) => {
+      const v = lineView(l);
+      if (!v) return null;
+      const img = photo(v.m) ?? b.heroUrl;
+      return (
+        <div className="sum-row" key={l.key}>
+          <span className="k with-thumb">{thumbs && img && <img className="status-thumb" src={img} alt="" />}<span>{v.m.name} × {l.qty}{v.opts && <small className="muted" style={{ display: "block" }}>{v.opts}</small>}</span></span>
+          <span className="v">{formatMoney(v.lineCents)}</span>
+        </div>
+      );
+    });
+  const detailsCard = (
+    <div className="e2e-card">
+      <h3>{t("detailsW", "Details")}</h3>
+      <div className="sum-row"><span className="k">{t("outletW", "Outlet")}</span><span className="v">{info.outletName}</span></div>
+      <div className="sum-row"><span className="k">{t("modeW", "Mode")}</span><span className="v">{channel?.name}{dine ? ` · ${spot || "no table yet"}` : " · Pickup counter"}</span></div>
+      <div className="sum-row"><span className="k">{t("memberW", "Member")}</span><span className="v">{member ? `${who} · ${member.pointsBalance.toLocaleString()} points` : "Guest"}</span></div>
+      {phone && <div className="sum-row"><span className="k">{t("phoneW", "Phone")}</span><span className="v">{phone}</span></div>}
+    </div>
+  );
 
-      {count > 0 && !open && (
-        <button className="shop-bar" onClick={() => setOpen(true)}>
-          <span>View bag · {count} item{count > 1 ? "s" : ""}</span><b>{formatMoney(total)}</b>
-        </button>
-      )}
+  const nav = (
+    <nav className="shop-nav" aria-label="Sections">
+      {([["order", "basket", screen !== "order" && count > 0 && navActive === "order" ? t("addMore", "Add More") : t("order", "Order")], ["rewards", "gift", t("rewards", "Rewards")], ["account", "user", t("account", "Account")]] as const).map(([id, ic, label]) => (
+        <button key={id} aria-current={navActive === id ? "page" : undefined} onClick={() => setScreen(id)}><Icon name={ic} size={20} /><span>{label}</span></button>
+      ))}
+    </nav>
+  );
 
-      {open && quote?.ok && (
-        <div className="shop-sheet" role="dialog" aria-label="Your bag">
-          <div className="shop-sheet-in">
-            <div className="shop-sheet-head"><h2>Your order</h2><button onClick={() => setOpen(false)} aria-label="Close">✕</button></div>
-            <p className="muted">{channel?.name} · {info.outletName}</p>
-            {quote.lines.map((l) => (
-              <div className="shop-line" key={l.productId}>
-                <span>{l.name}</span>
-                <span className="step"><button onClick={() => add(l.productId, -1)} aria-label={`Fewer ${l.name}`}>−</button><b>{l.qty}</b><button onClick={() => add(l.productId, 1)} aria-label={`More ${l.name}`}>+</button></span>
-                <span>{formatMoney(l.unitCents * l.qty)}</span>
-              </div>
-            ))}
-            <dl className="shop-totals">
-              <div><dt>Subtotal</dt><dd>{formatMoney(quote.priced.subtotal)}</dd></div>
-              {quote.priced.service > 0 && <div><dt>Service charge</dt><dd>{formatMoney(quote.priced.service)}</dd></div>}
-              {quote.priced.gst > 0 && <div><dt>GST</dt><dd>{formatMoney(quote.priced.gst)}</dd></div>}
-              {quote.priced.bcrs > 0 && <div><dt>BCRS deposit</dt><dd>{formatMoney(quote.priced.bcrs)}</dd></div>}
-              <div className="grand"><dt>Total</dt><dd>{formatMoney(agreed ?? total)}</dd></div>
-            </dl>
-            <label>Your name (optional)<input value={name} maxLength={40} onChange={(e) => setName(e.target.value)} autoComplete="name" /></label>
-            <label>Mobile number (optional, so we can reach you)<input value={phone} inputMode="tel" maxLength={20} onChange={(e) => setPhone(e.target.value)} autoComplete="tel" /></label>
-            {!phoneOk && <div className="shop-note">That number doesn't look right.</div>}
-            {channel?.kind === "dine_in" && <label>Table<input value={spot} maxLength={30} onChange={(e) => setSpot(e.target.value)} placeholder="e.g. Table 12" /></label>}
-            <p className="muted">{info.paymentTiming === "prepay" ? "You pay at the counter. We start your order once it is paid." : "You can pay at the counter."}</p>
-            {note && <div className="shop-note">{note}</div>}
-            <button className="shop-primary" disabled={busy || !phoneOk} onClick={() => void place()}>{busy ? "Sending…" : `Place order · ${formatMoney(agreed ?? total)}`}</button>
-          </div>
+  const langSheet = langOpen && (
+    <div className="shop-sheet" role="dialog" aria-label={t("language", "Language")}>
+      <div className="shop-sheet-in">
+        <div className="shop-sheet-head"><h2>{t("language", "Language")}</h2><button onClick={() => setLangOpen(false)} aria-label={t("close", "Close")}>✕</button></div>
+        <p className="muted">{t("langLead", "Choose the language for this app.")}</p>
+        <div className="lang-list">
+          <button className="lang-opt" aria-current={langMode() === "auto"} onClick={() => { setLangMode("auto"); setLangOpen(false); }}>
+            <Icon name="globe" size={19} /><span className="lang-names"><span className="lang-native">{t("auto", "Auto")}</span><span className="lang-en">{LANGS.find((l) => l.code === detectedLang())!.native} · {LANGS.find((l) => l.code === detectedLang())!.en}</span></span>
+            {langMode() === "auto" && <span className="cur">{t("current", "Current")}</span>}
+          </button>
+          {LANGS.map((l) => (
+            <button key={l.code} className="lang-opt" aria-current={langMode() === l.code} onClick={() => { setLangMode(l.code); setLangOpen(false); }}>
+              <span className="lang-names"><span className="lang-native">{l.native}</span><span className="lang-en">{l.en}</span></span>
+              {langMode() === l.code ? <span className="cur">{t("current", "Current")}</span> : langMode() === "auto" && lang() === l.code ? <span className="cur">{t("autoShort", "Auto")}</span> : null}
+            </button>
+          ))}
+        </div>
+        <button className="shop-primary" onClick={() => setLangOpen(false)}>{t("close", "Close")}</button>
+      </div>
+    </div>
+  );
+  const walletSheet = wallet && (
+    <div className="shop-sheet" role="dialog" aria-label="Coupons and vouchers">
+      <div className="shop-sheet-in">
+        <div className="shop-sheet-head"><h2>Coupons &amp; vouchers</h2><button onClick={() => setWallet(false)} aria-label="Close">✕</button></div>
+        {!member && <button className="shop-link" onClick={() => { setWallet(false); setScreen("login"); }}>Sign in to use your coupons &amp; vouchers</button>}
+        {member && coupons.length === 0 && <p className="muted">You have no coupons right now.</p>}
+        {coupons.map((c) => {
+          const ok = itemsSubtotal >= c.minSpendCents;
+          return (
+            <label key={c.id} className={`shop-coupon ${ok ? "" : "off"}`}>
+              <input type="radio" name="coupon" disabled={!ok} checked={couponId === c.id} onChange={() => { setCouponId(c.id); setAgreed(null); }} onClick={() => couponId === c.id && setCouponId(null)} />
+              <span>
+                {c.title}
+                <small className="muted">
+                  {c.minSpendCents > 0 ? `Min. spend ${formatMoney(c.minSpendCents)} on items only (before service charge, tax and deposits)` : "No minimum spend"}
+                  {!ok && ` · Add ${formatMoney(c.minSpendCents - itemsSubtotal)} more in items`}
+                </small>
+              </span>
+            </label>
+          );
+        })}
+        <button className="shop-primary" onClick={() => setWallet(false)}>{t("done", "Done")}</button>
+      </div>
+    </div>
+  );
+
+  /* ================= Login ================= */
+  if (screen === "login") {
+    return (
+      <Login
+        info={info}
+        loginError={loginError}
+        welcome={config.rewards.welcomePoints}
+        onGuest={() => { sessionStorage.setItem(LS_ENTERED, "1"); setScreen("order"); }}
+        onDone={(t) => { localStorage.setItem(LS_MEMBER, t); sessionStorage.setItem(LS_ENTERED, "1"); void loadMember(); setScreen("order"); }}
+      />
+    );
+  }
+
+  /* ================= Order ================= */
+  const orderScreen = (
+    <>
+      <div className="shop-fixedhead" ref={headRef}>
+        {header(false)}
+        {tableEdit && dine && (
+          <div className="shop-tableedit"><input autoFocus value={spot} maxLength={30} placeholder="e.g. Table 12" onChange={(e) => setSpot(e.target.value)} onKeyDown={(e) => e.key === "Enter" && setTableEdit(false)} /><button onClick={() => setTableEdit(false)}>{t("done", "Done")}</button></div>
+        )}
+        {seg}
+      </div>
+      {last && <a className="shop-last" href={`#/shop/order/${last}`}>View my last order →</a>}
+      {b.heroUrl && (
+        <div className="shop-hero">
+          <img src={b.heroUrl} alt="" />
+          {b.tagline && <span><Icon name="paw" size={16} />{b.tagline}</span>}
         </div>
       )}
+      <div className="shop-catalog">
+        {(b.promoTitle || b.promoBody) && (
+          <>
+            <h2 className="shop-sec">{t("specialOffer", "Special Offer")}</h2>
+            <section className="shop-promo">
+              {b.promoTitle && <h3>{b.promoTitle}</h3>}
+              {b.promoBody && <p>{b.promoBody}</p>}
+            </section>
+          </>
+        )}
+        <div className="shop-chips">
+          <button className={`search ${search !== null ? "on" : ""}`} aria-label="Search the menu" aria-expanded={search !== null} onClick={() => setSearch((s) => (s === null ? "" : null))}><Icon name="search" size={18} /></button>
+          {categories.map((c) => <button key={c} className={c === category ? "on" : ""} onClick={() => setCategory(c)}>{c}</button>)}
+        </div>
+        {search !== null && <input className="shop-search" autoFocus placeholder="Search the menu" value={search} onChange={(e) => setSearch(e.target.value)} />}
+        {noteEl}
+        <div className="shop-list">
+          {shown.length === 0 && <p className="shop-msg">Nothing matches.</p>}
+          {shown.map((m) => {
+            const n = inBag(m.id);
+            const img = photo(m);
+            const hasOpts = !!m.options?.length;
+            return (
+              <div key={m.id} className={`sc ${n ? "in" : ""} ${m.soldOut ? "out" : ""}`}>
+                <div className="sc-photo">
+                  {img ? <img src={img} alt="" loading="lazy" /> : <span className="sc-noimg" />}
+                  {n > 0 && <span className="sc-badge">×{n} in bag</span>}
+                </div>
+                <div className="sc-main">
+                  <b>{m.name}</b>
+                  <span className="muted">{m.description ?? m.category}</span>
+                  <span className="sc-price">{m.soldOut ? "Sold out" : cardPrice(m)}{!m.soldOut && /bcrs/i.test(m.name) && <em className="bcrs-badge"><Icon name="can" size={11} />+10c BCRS Deposit</em>}</span>
+                </div>
+                {!m.soldOut && (
+                  <div className="sc-act">
+                    {n > 0 && !hasOpts ? (
+                      <span className="sc-step"><button className="minus" aria-label={`Fewer ${m.name}`} onClick={() => addSimple(m, -1)}>−</button><b>{n}</b><button className="plus" aria-label={`More ${m.name}`} onClick={() => addSimple(m, 1)}>+</button></span>
+                    ) : (
+                      <button className="sc-add" aria-label={`Add ${m.name}`} onClick={() => (hasOpts ? setPicking(m) : addSimple(m, 1))}>+</button>
+                    )}
+                  </div>
+                )}
+              </div>
+            );
+          })}
+        </div>
+      </div>
+      {count > 0 && (
+        <button className="shop-bar" onClick={() => setScreen("bag")}>
+          <Icon name="bag" size={20} /><span>{t("viewBag", "View bag")} · {count} item{count > 1 ? "s" : ""}</span>
+          <span className="amt"><i className="div" /><b>{formatMoney(total)}</b><Icon name="arrowR" size={18} /></span>
+        </button>
+      )}
+    </>
+  );
+
+  /* ================= Rewards ================= */
+  const rewardsScreen = (
+    <>
+      {pageHead("Your rewards")}
+      <div className="scroll-body shop-body">
+        {!member ? (
+          <div className="e2e-card">
+            <h3>{t("guestRewardsT", "Rewards are for members")}</h3>
+            <p className="e2e-sub" style={{ textAlign: "left", margin: 0 }}>Members earn points on every order and redeem them for money off. Sign up free to start earning.</p>
+            {earnPts > 0 && <div className="ready-banner" role="status">Sign up to earn {earnPts.toLocaleString()} points on this order</div>}
+            <button className="e2e-cta" onClick={() => setScreen("login")}><span>{t("signUpBtn", "Sign up")}</span><Icon name="arrowR" size={19} /></button>
+            <button className="e2e-cta queue-btn" onClick={() => setScreen("order")}><span>{t("backToOrder", "Back to Order")}</span><Icon name="arrowR" size={19} /></button>
+          </div>
+        ) : (
+          <>
+            <div className="member-card">
+              <div className="member-top">
+                <span className="avatar">{b.logoUrl ? <img src={b.logoUrl} alt="" /> : <Icon name="user" size={26} />}</span>
+                <div className="member-main">
+                  <div className="name">{who}</div>
+                  {config.rewards.pointsEnabled && <div className="pts-stack"><span className="pts-line"><b>{member.pointsBalance.toLocaleString()}</b><span>{t("points", "points")}</span></span><span className="pts-worth">{formatMoney(member.pointsBalance)} worth</span></div>}
+                </div>
+              </div>
+            </div>
+            {stamps && (
+              <div className="stamp-panel">
+                <div className="panel-head"><h3>Your stamp card</h3></div>
+                <div className="stamp-type-name">{stamps.rewardTitle}</div>
+                <div className="shop-stamps" aria-label={`Stamp card ${stamps.count} of ${stamps.target}`}><span>{Array.from({ length: stamps.target }, (_, i) => <i key={i} className={i < stamps.count ? "on" : ""} />)}</span></div>
+                <div className="stamp-progress"><div className="big">{stamps.count} / {stamps.target} stamps</div>
+                  <div className="sub">{stamps.target - stamps.count > 0 ? `${stamps.target - stamps.count} more to unlock ${stamps.rewardTitle}` : `Ready — ${stamps.rewardTitle}`}{stamps.minPaidCents > 0 ? ` · orders of ${formatMoney(stamps.minPaidCents)}+` : ""}</div></div>
+              </div>
+            )}
+            <div className="coupon-head"><h3>Coupons &amp; points</h3></div>
+            <div className="reward-slots">
+              {rewardSlots(false)}
+            </div>
+          </>
+        )}
+      </div>
+    </>
+  );
+
+  function rewardSlots(inBagScreen: boolean) {
+    const n = coupons.length;
+    return (
+      <>
+        <div className="reward-slot">
+          <span className="ric" style={{ color: "var(--red)" }}><Icon name="ticket" size={26} /></span>
+          <span className="reward-copy slot-scroll"><span className="t">{t("walletEntryT", "Coupon(s) / voucher(s)")}</span><span className="d">{chosen && chosenOk ? `${chosen.title} applied · ` : ""}{n} in your wallet</span></span>
+          <span className="slot-actions">
+            {chosen && chosenOk && <button className="slot-act remove" onClick={() => { setCouponId(null); setAgreed(null); }}>{t("removeW", "Remove")}</button>}
+            <button className="slot-act" onClick={() => setWallet(true)}>{n > 0 ? "View" : "Details"}</button>
+          </span>
+        </div>
+        {config.rewards.pointsEnabled && (
+          <div className={`reward-slot ${usePoints && canUsePoints ? "is-on" : ""}`}>
+            <span className="ric" style={{ color: "var(--orange-dark)" }}><Icon name="stack" size={26} /></span>
+            <span className="reward-copy slot-scroll">
+              <span className="t">{pointsAsk && quote?.ok ? `${quote.priced.pointsUsed.toLocaleString()} points = ${formatMoney(quote.priced.pointsDiscount)} off` : "Points — 100 points = S$1 off"}</span>
+              <span className="d">{canUsePoints ? `You have ${member!.pointsBalance.toLocaleString()} points. Using points redeems all you can use on this order.` : `You have ${(member?.pointsBalance ?? 0).toLocaleString()} points (${config.pricing.minPointsRedeem} needed to use them).`}</span>
+            </span>
+            <span className="slot-actions">
+              {pointsAsk ? (
+                <button className="slot-act remove" onClick={() => { setUsePoints(false); setAgreed(null); }}>{t("removeW", "Remove")}</button>
+              ) : (
+                <button className={`slot-act ${canUsePoints && inBagScreen ? "" : "is-disabled"}`} disabled={!canUsePoints || !inBagScreen} onClick={() => { setUsePoints(true); setAgreed(null); }}>{t("usePointsBtn", "Use points")}</button>
+              )}
+            </span>
+          </div>
+        )}
+      </>
+    );
+  }
+
+  /* ================= Account ================= */
+  const acctRow = (ic: keyof typeof ICONS, title: string, desc: string, onClick: () => void) => (
+    <button className="acct-row" onClick={onClick}><span className="aic"><Icon name={ic} size={21} /></span><span className="at">{title}{desc && <span className="ad">{desc}</span>}</span><span className="chev"><Icon name="chevR" size={16} /></span></button>
+  );
+  const accountScreen = (
+    <>
+      {pageHead("Account")}
+      <div className="scroll-body shop-body">
+        {acctPanel === "profile" ? (
+          <>
+            <button className="e2e-back" onClick={() => setAcctPanel(null)}><Icon name="chevL" size={16} /> Back to Account</button>
+            <div className="e2e-card">
+              <h3>{t("profile", "Profile details")}</h3>
+              {member ? (
+                <>
+                  {member.email && <div className="sum-row"><span className="k">{t("emailW", "Email")}</span><span className="v">{member.email}</span></div>}
+                  <div className="e2e-field"><label htmlFor="pf-name">{t("displayNameL", "Display name")}</label><input className="e2e-input" id="pf-name" value={editName} maxLength={40} onChange={(e) => { setEditName(e.target.value); setProfileMsg(null); }} /></div>
+                  <div className="e2e-field"><label htmlFor="pf-phone">{t("phoneW", "Phone")}</label><input className="e2e-input" id="pf-phone" type="tel" value={editPhone} maxLength={20} onChange={(e) => { setEditPhone(e.target.value); setProfileMsg(null); }} /></div>
+                  {profileMsg && <p className="e2e-note" role="status">{profileMsg}</p>}
+                  <button className="e2e-cta" onClick={() => void saveProfile()}><span>Save changes</span><Icon name="check" size={19} /></button>
+                </>
+              ) : (
+                <>
+                  <div className="sum-row"><span className="k">{t("signedInAs", "Signed in as")}</span><span className="v">{t("guestW", "Guest")}</span></div>
+                  <button className="e2e-cta" onClick={() => setScreen("login")}><span>{t("signUpBtn", "Sign up")}</span><Icon name="arrowR" size={19} /></button>
+                </>
+              )}
+            </div>
+          </>
+        ) : acctPanel === "help" ? (
+          <>
+            <button className="e2e-back" onClick={() => setAcctPanel(null)}><Icon name="chevL" size={16} /> Back to Account</button>
+            <div className="e2e-card">
+              <h3>Help &amp; support</h3>
+              <div className="sum-row"><span className="k">{t("outletW", "Outlet")}</span><span className="v">{info.name} · {info.outletName}</span></div>
+              <div className="sum-row" style={{ display: "block" }}><span className="k" style={{ fontWeight: 700, color: "var(--ink)" }}>How do I collect my order?</span><span className="ad" style={{ display: "block", marginTop: 2, fontSize: 12 }}>Your collection number is the last 5 digits of the phone number you ordered with. Watch for it on the counter screen.</span></div>
+              <div className="sum-row" style={{ display: "block" }}><span className="k" style={{ fontWeight: 700, color: "var(--ink)" }}>{t("helpQ2", "How do points work?")}</span><span className="ad" style={{ display: "block", marginTop: 2, fontSize: 12 }}>Members earn points on every order. 100 points = S$1 off a later order — apply points in the Bag before you check out.</span></div>
+              <p className="e2e-note">Still need help? Please ask at the counter and we will sort it out.</p>
+            </div>
+          </>
+        ) : (
+          <>
+            <div className="member-card">
+              <div className="member-top">
+                <span className="avatar">{b.logoUrl ? <img src={b.logoUrl} alt="" /> : <Icon name="user" size={26} />}</span>
+                {member ? (
+                  <div className="member-main">
+                    <div className="name">{who}</div>
+                    {member.phone && <div className="acct-phone">{member.phone}</div>}
+                    {config.rewards.pointsEnabled && <div className="pts-stack"><span className="pts-line"><b>{member.pointsBalance.toLocaleString()}</b><span>{t("points", "points")}</span></span><span className="pts-worth">{formatMoney(member.pointsBalance)} worth</span></div>}
+                  </div>
+                ) : (
+                  <div className="member-main">
+                    <div className="name">{t("guestW", "Guest")}</div>
+                    <div className="pts-stack"><span className="pts-line" style={{ fontSize: 14, lineHeight: "18px", fontWeight: 600 }}>{earnPts > 0 ? `Sign up to earn ${earnPts.toLocaleString()} points on this order` : "Sign up to earn points on this order"}</span></div>
+                    <button className="history" onClick={() => setScreen("login")}>Sign up <Icon name="chevR" size={14} /></button>
+                  </div>
+                )}
+              </div>
+            </div>
+            <div className="acct-sec">{t("myAccount", "My account")}</div>
+            <div className="acct-list">
+              {acctRow("user", "Profile details", "Name, phone and email on this account", () => { setEditName(member?.name ?? ""); setEditPhone(member?.phone ?? ""); setProfileMsg(null); setAcctPanel("profile"); })}
+              {acctRow("globe", t("language", "Language"), LANGS.find((l) => l.code === lang())!.native + (langMode() === "auto" ? " · " + t("autoShort", "Auto") : ""), () => setLangOpen(true))}
+              {acctRow("help", "Help & support", "FAQs and contacting the outlet", () => setAcctPanel("help"))}
+            </div>
+            <div className="acct-sec">{t("orderHistory", "Order history")}</div>
+            <div className="order-hist">
+              {!member ? (
+                last ? <a className="acct-row" href={`#/shop/order/${last}`}><span className="aic"><Icon name="ticket" size={21} /></span><span className="at">View my last order<span className="ad">See its status and items</span></span><span className="chev"><Icon name="chevR" size={16} /></span></a> : <p className="e2e-sub" style={{ textAlign: "left" }}>Sign in to see your past orders.</p>
+              ) : history === null ? (
+                <p className="e2e-sub" style={{ textAlign: "left" }}>Loading…</p>
+              ) : history.length === 0 ? (
+                <p className="e2e-sub" style={{ textAlign: "left" }}>No orders yet.</p>
+              ) : (
+                history.map((o) => (
+                  <a key={o.orderId} className="acct-row" href={`#/shop/order/${o.orderId}`}>
+                    <span className="aic"><Icon name="ticket" size={21} /></span>
+                    <span className="at">{o.queueNumber} — {o.channelName ?? "Order"}<span className="ad">{STATUS_TEXT[o.status].title.split(":")[0]} · {new Date(o.at).toLocaleDateString()} · {o.itemCount} item{o.itemCount === 1 ? "" : "s"}</span></span>
+                    <span className="v" style={{ fontWeight: 700 }}>{formatMoney(o.totalCents)}</span>
+                  </a>
+                ))
+              )}
+            </div>
+            {member ? (
+              <button className="signout-btn" onClick={() => void signOut()}><Icon name="logout" size={19} /><span>{t("signOut", "Sign out")}</span></button>
+            ) : (
+              <button className="signout-btn" onClick={() => setScreen("login")}><Icon name="user" size={19} /><span>{t("signInUp", "Sign up / Sign in")}</span></button>
+            )}
+          </>
+        )}
+      </div>
+    </>
+  );
+
+  /* ================= Bag ================= */
+  const bagScreen = (
+    <>
+      <div className="shop-headwrap">
+        {header(true)}
+        {seg}
+        <div className="title-row">
+          <button className="back-btn" onClick={() => setScreen("order")} aria-label="Back"><Icon name="chevL" size={20} /></button>
+          <h2 className="page-title">{t("yourBag", "Your bag")}</h2>
+          <span className="table-tag tag-with-icon"><Icon name={dine ? "table" : "bag"} size={15} />{spotText}</span>
+          {confirmClear ? (
+            <span className="clear-confirm">{t("clearBagQ", "Clear bag?")}<button className="yes" onClick={() => { setBag([]); setConfirmClear(false); setScreen("order"); }}>{t("clear", "Clear")}</button><button className="no" onClick={() => setConfirmClear(false)}>{t("keep", "Keep")}</button></span>
+          ) : (
+            bag.length > 0 && <button className="clear-btn" onClick={() => setConfirmClear(true)}>{t("clearAll", "Clear all")}</button>
+          )}
+        </div>
+      </div>
+      <div className="bag-sheet shop-body">
+        {noteEl}
+        {bag.length === 0 && <div className="bag-empty">{t("bagEmptyShort", "Your bag is empty.")}<br />{t("emptyBagD", "Add items from the Order tab.")}</div>}
+        {bag.map((l) => {
+          const v = lineView(l);
+          if (!v) return null;
+          const img = photo(v.m);
+          return (
+            <div className="bag-card" key={l.key}>
+              {img ? <img className="bag-photo" src={img} alt={v.m.name} /> : <span className="bag-photo-ph"><Icon name="paw" size={26} /></span>}
+              <div className="bag-copy2">
+                <h3 className="bag-name">{v.m.name}</h3>
+                <p className="bag-desc">{v.opts || v.m.description || v.m.category}</p>
+                <div className="bag-pricerow">{formatMoney(v.lineCents)}</div>
+              </div>
+              <div className="sc-act"><span className="sc-step"><button className="minus" aria-label={`Fewer ${v.m.name}`} onClick={() => bump(l, -1)}>−</button><b>{l.qty}</b><button className="plus" aria-label={`More ${v.m.name}`} onClick={() => bump(l, 1)}>+</button></span></div>
+            </div>
+          );
+        })}
+        {quote?.ok && bag.length > 0 && (
+          <>
+            <div className="reward-head">{t("applyReward", "Apply a reward")}</div>
+            {member ? (
+              <div className="reward-slots">{rewardSlots(true)}</div>
+            ) : (
+              <div className="reward-slots">
+                <div className="reward-slot">
+                  <span className="ric" style={{ color: "var(--orange-dark)" }}><Icon name="stack" size={26} /></span>
+                  <span className="reward-copy slot-scroll"><span className="t">{earnPts > 0 ? `Sign up to earn ${earnPts.toLocaleString()} points on this order` : "Sign up to earn points on this order"}</span><span className="d">Members earn points on every order and redeem them for money off. Sign up free to start earning.</span></span>
+                  <span className="slot-actions"><button className="slot-act" onClick={() => setScreen("login")}>{t("signUpBtn", "Sign up")}</button></span>
+                </div>
+              </div>
+            )}
+            <div className="totals">
+              <div className="row"><span>{t("subtotal", "Subtotal")}</span><span className="v">{formatMoney(quote.priced.subtotal)}</span></div>
+              {quote.priced.couponDiscount > 0 && <div className="row coupon"><span>{chosen?.title ?? "Coupon"}</span><span className="v">−{formatMoney(quote.priced.couponDiscount)}</span></div>}
+              {quote.priced.pointsDiscount > 0 && <div className="row coupon"><span>Points · {quote.priced.pointsUsed.toLocaleString()} pts</span><span className="v">−{formatMoney(quote.priced.pointsDiscount)}</span></div>}
+              {quote.priced.service > 0 && <div className="row"><span>{t("pmService", "Service charge")}</span><span className="v">{formatMoney(quote.priced.service)}</span></div>}
+              {quote.priced.gst > 0 && <div className="row"><span>GST</span><span className="v">{formatMoney(quote.priced.gst)}</span></div>}
+              {quote.priced.bcrs > 0 && <div className="row"><span>{t("bcrsDeposit", "BCRS Deposit")}</span><span className="v">{formatMoney(quote.priced.bcrs)}</span></div>}
+              <div className="row grand"><span>{t("total", "Total")}</span><span className="v">{formatMoney(shownTotal)}</span></div>
+            </div>
+            <div className="stamp-note"><span style={{ display: "flex", color: "var(--ink)" }}><Icon name="gift" size={27} /></span><span><span className="t">{t("stampNoteT", "1 stamp after confirmed payment")}</span><br /><span className="d">You'll earn 1 stamp for this order.</span></span></div>
+          </>
+        )}
+        <button className={`review-cta ${bag.length === 0 ? "off" : ""}`} disabled={bag.length === 0 || !quote?.ok} onClick={() => setScreen("summary")}>
+          <Icon name="bag" size={19} /><span>Review order · {count} item{count === 1 ? "" : "s"}</span><span className="div" /><span>{formatMoney(shownTotal)}</span><Icon name="arrowR" size={19} />
+        </button>
+      </div>
+    </>
+  );
+
+  /* ================= Order summary ================= */
+  const summaryScreen = quote?.ok ? (
+    <>
+      {pageHead("Order Summary")}
+      <div className="e2e-scroll shop-body">
+        {back("Back to bag", "bag")}
+        {noteEl}
+        <div className="e2e-card">
+          <h3>{t("itemsCardT", "Items")}</h3>
+          {itemRows(true)}
+          {totalsRows(quote)}
+        </div>
+        <div className="e2e-card">
+          <h3>Voucher &amp; payment</h3>
+          <button className="sum-link-row" onClick={() => setWallet(true)}><span className="sl-ic"><Icon name="ticket" size={21} /></span><span className="sl-t">{t("voucher", "Voucher")}<span className="sl-d">Coupons &amp; vouchers from your wallet</span></span><span className="sl-v">{chosen && chosenOk ? chosen.title : "None applied"}</span><span className="chev"><Icon name="chevR" size={16} /></span></button>
+          <button className="sum-link-row" onClick={() => setScreen("payment")}><span className="sl-ic"><Icon name="card" size={21} /></span><span className="sl-t">{t("payMethodW", "Payment method")}<span className="sl-d">Chosen at the payment step</span></span><span className="sl-v">{t("chooseLater", "Choose later")}</span><span className="chev"><Icon name="chevR" size={16} /></span></button>
+          <div className="sum-link-row" style={{ cursor: "default" }}><span className="sl-ic"><Icon name="pin" size={21} /></span><span className="sl-t">{dine ? `${channel?.name} · ${spot || "no table yet"}` : `${channel?.name} · Pickup counter`}<span className="sl-d">{info.outletName}</span></span></div>
+        </div>
+        {detailsCard}
+        {dine && !spot && (
+          <div className="e2e-card"><h3>{t("typeTableW", "Table")}</h3><div className="e2e-field"><label htmlFor="sum-table">Table number</label><input className="e2e-input" id="sum-table" value={spot} maxLength={30} placeholder="e.g. Table 12" onChange={(e) => setSpot(e.target.value)} /></div></div>
+        )}
+        {!member && (
+          <div className="summary-guest-row" role="group" aria-label="Sign up or check out as guest">
+            <button className="summary-signup-btn" onClick={() => setScreen("login")}><span>{t("signUpBtn", "Sign up")}</span></button>
+            <button className="summary-guest-btn" aria-pressed={guestOk} onClick={() => setGuestForm(true)}><span>{t("checkoutGuest", "Check out as guest")}</span></button>
+          </div>
+        )}
+        {(member ? !phoneOk : guestForm) && (
+          <div className="e2e-card guest-inline">
+            <h3>{t("beforeOrder", "Before you order")}</h3>
+            <p className="e2e-sub" style={{ textAlign: "left", margin: 0 }}>Enter your phone number to place this order. For takeaway, your <b>collection number comes from this number</b> — watch for it on the counter screen.</p>
+            <div className="e2e-field"><label htmlFor="g-name">Name (optional)</label><input className="e2e-input" id="g-name" value={name} maxLength={40} autoComplete="name" onChange={(e) => setName(e.target.value)} /></div>
+            <div className="e2e-field"><label htmlFor="g-phone">{t("phoneReq", "Phone number (required)")}</label><input className="e2e-input" id="g-phone" type="tel" inputMode="tel" value={phone} maxLength={20} placeholder="e.g. +65 9123 4567" autoComplete="tel" onChange={(e) => setPhone(e.target.value)} /></div>
+            {phone !== "" && !phoneOk && <p className="login-err" role="alert">That number doesn't look right.</p>}
+            {!member && <button className="e2e-cta" disabled={!phoneOk} onClick={() => { setGuestOk(true); setGuestForm(false); }}><span>{t("continueW", "Continue")}</span><Icon name="arrowR" size={19} /></button>}
+          </div>
+        )}
+        {!member && guestOk && <p className="e2e-note">{t("guestNoPoints", "Continuing as guest — no points will be earned on this order.")}</p>}
+        <button className={`e2e-cta ${canOrder && (!dine || !!spot) ? "" : "off"}`} disabled={!canOrder || (dine && !spot)} onClick={() => setScreen("checkout")}>
+          <span>Order Now · {count} item{count === 1 ? "" : "s"}</span><span>{formatMoney(shownTotal)}</span>
+        </button>
+        {!canOrder && <p className="e2e-sub">{member ? "Add your phone number to place this order." : "Tap Sign up, or Check out as guest, to place this order."}</p>}
+      </div>
+    </>
+  ) : null;
+
+  /* ================= Checkout ================= */
+  const checkoutScreen = quote?.ok ? (
+    <>
+      {pageHead("Checkout")}
+      <div className="e2e-scroll shop-body">
+        {back("Back to order summary", "summary")}
+        <div className="e2e-card"><h3>{t("orderSummaryCard", "Order summary")}</h3>{itemRows(false)}</div>
+        <div className="e2e-card"><h3>Charges &amp; rewards</h3>{totalsRows(quote)}</div>
+        {detailsCard}
+        <button className="e2e-cta" onClick={() => setScreen("payment")}><span>{t("jumpPay", "Proceed to payment")}</span><span>{formatMoney(shownTotal)}</span></button>
+      </div>
+    </>
+  ) : null;
+
+  /* ================= Payment ================= */
+  const paymentScreen = quote?.ok ? (
+    <>
+      {pageHead("Payment")}
+      <div className="e2e-scroll shop-body">
+        {busy ? (
+          <>
+            <div className="spinner" aria-hidden="true" />
+            <h2 className="e2e-title" style={{ fontSize: 21 }}>Placing your order…</h2>
+            <p className="e2e-sub">{t("processingD", "Please wait — do not close this screen.")}</p>
+          </>
+        ) : (
+          <>
+            {back("Back to order summary", "summary")}
+            {noteEl}
+            <div className="e2e-card"><h3>{t("totalToPay", "Total to pay")}</h3><div className="sum-row grand" style={{ border: 0, margin: 0, padding: 0 }}><span className="k">{t("total", "Total")}</span><span className="v">{formatMoney(shownTotal)}</span></div></div>
+            {([["card", "Card", "Debit or credit card.", "card"], ["paynow", "PayNow", "Pay with PayNow QR.", "stack"]] as const).map(([m, title, desc, ic]) => {
+              const on = info.payments.online;
+              return (
+                <button key={m} className="pay-opt" aria-pressed={on && payMethod === m} disabled={!on} style={on ? undefined : { opacity: 0.5 }} onClick={() => setPayMethod(m)}>
+                  <span style={{ display: "flex", color: "var(--orange-dark)" }}><Icon name={ic} size={24} /></span>
+                  <span className="pt"><b>{title}</b><span>{on ? desc : "Not available yet"}</span></span>
+                  {on && <span className="radio" />}
+                </button>
+              );
+            })}
+            <button className="pay-opt" aria-pressed={payMethod === "counter"} onClick={() => setPayMethod("counter")}><span style={{ display: "flex", color: "var(--orange-dark)" }}><Icon name="ticket" size={24} /></span><span className="pt"><b>{info.paymentTiming === "prepay" ? "Pay at the counter" : "Cash on pickup"}</b><span>{info.paymentTiming === "prepay" ? "Quote your number at the counter. We start your order once it is paid." : "Pay at the counter when you collect."}</span></span><span className="radio" /></button>
+            <button className="e2e-cta" onClick={() => void place()}><span>{payMethod === "counter" ? "Place order" : "Pay"} · {formatMoney(shownTotal)}</span><Icon name="arrowR" size={19} /></button>
+          </>
+        )}
+      </div>
+    </>
+  ) : null;
+
+  const body =
+    screen === "rewards" ? rewardsScreen :
+    screen === "account" ? accountScreen :
+    screen === "bag" ? bagScreen :
+    screen === "summary" ? summaryScreen :
+    screen === "checkout" ? checkoutScreen :
+    screen === "payment" ? paymentScreen :
+    orderScreen;
+
+  return (
+    <>
+      {body ?? (
+        <div className="shop-msg"><p>{t("bagEmptyShort", "Your bag is empty.")}</p><button className="shop-primary" onClick={() => setScreen("order")}>{t("backToOrder", "Back to Order")}</button></div>
+      )}
+      {walletSheet}
+      {langSheet}
+      {picking && (
+        <OptionSheet
+          name={picking.name}
+          description={picking.description}
+          photoUrl={photo(picking)}
+          baseCents={picking.priceCents}
+          groups={picking.options!}
+          onClose={() => setPicking(null)}
+          onAdd={(sel) => { addLine(picking, sel); setPicking(null); }}
+        />
+      )}
+      {nav}
     </>
   );
 }
 
-function Status({ orderId }: { orderId: string }) {
+const COUNTRIES: Array<[string, string, string]> = [
+  ["65", "SG", "Singapore"], ["60", "MY", "Malaysia"], ["62", "ID", "Indonesia"], ["66", "TH", "Thailand"], ["63", "PH", "Philippines"], ["84", "VN", "Vietnam"],
+  ["852", "HK", "Hong Kong"], ["86", "CN", "China"], ["91", "IN", "India"], ["61", "AU", "Australia"], ["44", "GB", "United Kingdom"], ["1", "US", "United States / Canada"], ["81", "JP", "Japan"], ["82", "KR", "South Korea"],
+];
+
+/** The prototype's Welcome screen: Google, Microsoft, email, phone (by text message) or guest. */
+function Login({ info, welcome, loginError, onGuest, onDone }: { info: Info; welcome: number; loginError: string | null; onGuest: () => void; onDone: (token: string) => void }) {
+  const [view, setView] = useState<"home" | "email" | "otp" | "phone" | "sms">("home");
+  const [mode, setMode] = useState<"login" | "signup">("login");
+  const [email, setEmail] = useState("");
+  const [name, setName] = useState("");
+  const [code, setCode] = useState("");
+  const [cc, setCc] = useState("65");
+  const [local, setLocal] = useState("");
+  const [sms, setSms] = useState<{ id: string; code: string; to: string; left: number } | null>(null);
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState<string | null>(loginError);
+  const [done, setDone] = useState(false);
+  const post = (url: string, body: object) => fetch(url, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body) });
+  const finish = (token: string) => {
+    setDone(true);
+    window.setTimeout(() => onDone(token), 900);
+  };
+  const { google, microsoft, phone: phoneOn } = info.auth;
+  const provider = (p: "google" | "microsoft", on: boolean, label: string) => {
+    if (!on) return setErr(`${label} sign-in isn't set up for this shop yet. Please use Email, or continue as guest.`);
+    location.href = `/api/shop/auth/oauth/${p}/start`;
+  };
+
+  async function start() {
+    setBusy(true);
+    setErr(null);
+    try {
+      const r = await post("/api/shop/auth/email/start", { email });
+      const j = (await r.json().catch(() => ({}))) as { devCode?: string };
+      if (!r.ok) setErr(r.status === 429 ? "Too many tries. Please wait a few minutes." : "That email doesn't look right.");
+      else {
+        setView("otp");
+        if (j.devCode) setCode(j.devCode); // only outside production, where no email is sent yet
+      }
+    } catch {
+      setErr("No connection. Please try again.");
+    } finally {
+      setBusy(false);
+    }
+  }
+  async function verify() {
+    setBusy(true);
+    setErr(null);
+    try {
+      const r = await post("/api/shop/auth/email/verify", { email, code, name: mode === "signup" ? name : "" });
+      const j = (await r.json().catch(() => ({}))) as { token?: string };
+      if (r.ok && j.token) finish(j.token);
+      else setErr("That code didn't work. Check it and try again, or ask for a new one.");
+    } catch {
+      setErr("No connection. Please try again.");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  const fullPhone = `${cc}${local.replace(/\D/g, "").replace(/^0+/, "")}`;
+  async function startSms() {
+    setBusy(true);
+    setErr(null);
+    try {
+      const r = await post("/api/shop/auth/phone/start", { phone: fullPhone });
+      const j = (await r.json().catch(() => ({}))) as { id?: string; code?: string; to?: string; expiresInSeconds?: number };
+      if (r.ok && j.id) {
+        setSms({ id: j.id, code: j.code!, to: j.to!, left: j.expiresInSeconds ?? 300 });
+        setView("sms");
+      } else setErr(r.status === 429 ? "Too many tries. Please wait a few minutes." : "That number doesn't look right.");
+    } catch {
+      setErr("No connection. Please try again.");
+    } finally {
+      setBusy(false);
+    }
+  }
+  // While the text message screen is open: count down, and ask the server whether the text has arrived.
+  useEffect(() => {
+    if (view !== "sms" || !sms) return;
+    let alive = true;
+    const tick = window.setInterval(() => setSms((s) => (s && s.left > 0 ? { ...s, left: s.left - 1 } : s)), 1000);
+    const poll = window.setInterval(async () => {
+      const r = await fetch(`/api/shop/auth/phone/${sms.id}`).catch(() => null);
+      if (!alive || !r?.ok) return;
+      const j = (await r.json()) as { state: string; token?: string; secondsLeft?: number };
+      if (j.state === "verified" && j.token) {
+        alive = false;
+        finish(j.token);
+      } else if (j.state === "expired") setSms((s) => (s ? { ...s, left: 0 } : s));
+    }, 2000);
+    return () => {
+      alive = false;
+      window.clearInterval(tick);
+      window.clearInterval(poll);
+    };
+  }, [view, sms?.id]);
+
+  const back = <button className="e2e-back" onClick={() => { setView("home"); setErr(null); }}><Icon name="chevL" size={16} /> All sign-in options</button>;
+  const clock = (s: number) => `${Math.floor(s / 60)}:${String(s % 60).padStart(2, "0")}`;
+
+  return (
+    <div className="e2e-scroll login-page">
+      {info.brand.logoUrl && <img className="e2e-logo" src={info.brand.logoUrl} alt={info.name} />}
+      {done ? (
+        <>
+          <div className="login-done"><Icon name="check" size={30} /></div>
+          <h3 className="login-done-t">{mode === "signup" && view !== "sms" ? "Account created" : "Signed in"}</h3>
+          <p className="e2e-sub">Taking you in…</p>
+        </>
+      ) : (
+        <>
+          <h2 className="e2e-title">{t("welcomeW", "Welcome")}</h2>
+          <p className="e2e-sub">Sign in to order at {info.name} · {info.outletName}</p>
+          {view === "home" && (
+            <>
+              <div className="login-icons" role="group" aria-label="Sign-in options">
+                <button className="login-icon-btn" onClick={() => provider("google", google, "Google")} aria-label="Continue with Google"><span className="g-mark">G</span><span className="li-cap">Google</span></button>
+                <button className="login-icon-btn" onClick={() => provider("microsoft", microsoft, "Microsoft")} aria-label="Continue with Microsoft"><span className="ms-grid"><i style={{ background: "#f25022" }} /><i style={{ background: "#7fba00" }} /><i style={{ background: "#00a4ef" }} /><i style={{ background: "#ffb900" }} /></span><span className="li-cap">Microsoft</span></button>
+                <button className="login-icon-btn" onClick={() => { setErr(null); setView("email"); }} aria-label="Continue with email"><span className="li-mail"><Icon name="mail" size={26} /></span><span className="li-cap">{t("emailW", "Email")}</span></button>
+              </div>
+              <button className="login-btn" style={{ marginTop: 12 }} onClick={() => (phoneOn ? (setErr(null), setView("phone")) : setErr("Phone sign-in isn't set up for this shop yet. Please use Email, or continue as guest."))}><span className="lb-ic" style={{ color: "var(--orange-dark)" }}><Icon name="phone" size={24} /></span><span>{t("phoneNumT", "Phone number")}<span className="lb-sub">{t("phoneSub", "Verify by sending an SMS from your phone")}</span></span></button>
+              {err && <p className="login-err" role="alert">{err}</p>}
+              <button className="login-btn" style={{ marginTop: 12 }} onClick={onGuest}><span className="lb-ic" style={{ color: "var(--orange-dark)" }}><Icon name="bag" size={24} /></span><span>{t("guestCta", "Continue as guest")}<span className="lb-sub">Browse &amp; order as guest — sign-up (or guest checkout) is asked at Order Summary</span></span></button>
+            </>
+          )}
+          {view === "email" && (
+            <>
+              {back}
+              <div className="e2e-card" style={{ marginTop: 2 }}>
+                <h3>{mode === "signup" ? "Sign up with email" : "Login with email"}</h3>
+                <div className="login-seg" role="group" aria-label="Email login or sign up">
+                  <button aria-pressed={mode === "login"} onClick={() => setMode("login")}>{t("signInW", "Sign in")}</button>
+                  <button aria-pressed={mode === "signup"} onClick={() => setMode("signup")}>{t("signUpBtn", "Sign up")}</button>
+                </div>
+                {mode === "signup" && <div className="e2e-field"><label htmlFor="em-name">{t("nameW", "Name")}</label><input className="e2e-input" id="em-name" value={name} maxLength={40} placeholder="Your name" autoComplete="name" onChange={(e) => setName(e.target.value)} /></div>}
+                <div className="e2e-field"><label htmlFor="em-email">{t("emailW", "Email")}</label><input className="e2e-input" id="em-email" type="email" inputMode="email" value={email} maxLength={120} placeholder="you@example.com" autoComplete="email" onChange={(e) => setEmail(e.target.value)} /></div>
+                {err && <p className="login-err" role="alert">{err}</p>}
+                <button className="e2e-cta" disabled={busy || !email.includes("@")} onClick={() => void start()}><span>{busy ? "Sending…" : "Send OTP"}</span><Icon name="arrowR" size={19} /></button>
+                <p className="e2e-note">We'll send a one-time code to your email so you can enter it back here.{mode === "signup" ? ` New members get ${welcome} points.` : ""}</p>
+              </div>
+            </>
+          )}
+          {view === "otp" && (
+            <>
+              {back}
+              <div className="e2e-card" style={{ marginTop: 2 }}>
+                <h3>{t("enterOtp", "Enter your OTP")}</h3>
+                <p className="e2e-sub" style={{ textAlign: "left", margin: 0 }}>Code sent to {email}</p>
+                <div className="e2e-field"><label htmlFor="em-otp">{t("oneTimeCode", "One-time code")}</label><input className="e2e-input" id="em-otp" inputMode="numeric" maxLength={6} value={code} placeholder="6-digit code" autoComplete="one-time-code" onChange={(e) => setCode(e.target.value.replace(/\D/g, ""))} /></div>
+                {err && <p className="login-err" role="alert">{err}</p>}
+                <button className="e2e-cta" disabled={busy || code.length !== 6} onClick={() => void verify()}><span>{busy ? "Checking…" : mode === "signup" ? "Verify & create account" : "Verify & sign in"}</span><Icon name="arrowR" size={19} /></button>
+              </div>
+            </>
+          )}
+          {view === "phone" && (
+            <>
+              {back}
+              <div className="e2e-card" style={{ marginTop: 2 }}>
+                <h3>{t("phoneNumT", "Phone number")}</h3>
+                <p className="e2e-sub" style={{ textAlign: "left", margin: 0 }}>We verify your number by having you send us a short text from it. No code is sent to you.</p>
+                <div className="e2e-field"><label htmlFor="ph-num">{t("mobileNum", "Mobile number")}</label>
+                  <div className="phone-row">
+                    <select className="cc-select" id="ph-cc" value={cc} aria-label="Country code" onChange={(e) => setCc(e.target.value)}>{COUNTRIES.map(([d, , n]) => <option key={n} value={d}>+{d} {n}</option>)}</select>
+                    <input className="e2e-input" id="ph-num" type="tel" inputMode="numeric" autoComplete="tel-national" placeholder="9123 4567" value={local} onChange={(e) => setLocal(e.target.value)} />
+                  </div>
+                </div>
+                {err && <p className="login-err" role="alert">{err}</p>}
+                <button className="e2e-cta" disabled={busy || local.replace(/\D/g, "").length < 6} onClick={() => void startSms()}><span>{busy ? "Starting…" : "Continue"}</span><Icon name="arrowR" size={19} /></button>
+              </div>
+            </>
+          )}
+          {view === "sms" && sms && (
+            <>
+              {back}
+              <div className="e2e-card" style={{ marginTop: 2 }}>
+                <h3 style={{ textAlign: "center" }}>Verify by SMS</h3>
+                <p className="sms-step">1. Using the number <b>+{fullPhone}</b></p>
+                <p className="sms-step">2. Send the message <span className="sms-code">{sms.code}</span> to <b>{sms.to}</b></p>
+                {sms.left > 0 ? (
+                  <>
+                    <p className="sms-exp">This code will expire in <span className="sms-count">{clock(sms.left)}</span></p>
+                    <a className="e2e-cta" style={{ textDecoration: "none" }} href={`sms:${sms.to.replace(/\s/g, "")}?&body=${sms.code}`}><span>Send from this device</span></a>
+                    <p className="e2e-note">Waiting for your text… this page signs you in the moment it arrives.</p>
+                    {info.auth.phone?.simulated && (
+                      <button className="login-btn" style={{ justifyContent: "center", marginTop: 10 }} onClick={() => void post("/api/shop/auth/phone/simulate", { phone: fullPhone, code: sms.code })}><span>Developer: pretend the text arrived</span></button>
+                    )}
+                  </>
+                ) : (
+                  <>
+                    <p className="login-err" role="alert">That code has expired.</p>
+                    <button className="e2e-cta" onClick={() => void startSms()}><span>{t("genNewCode", "Generate a new code")}</span><Icon name="arrowR" size={19} /></button>
+                  </>
+                )}
+              </div>
+            </>
+          )}
+        </>
+      )}
+    </div>
+  );
+}
+
+function Status({ orderId, info }: { orderId: string; info: Info }) {
   const [o, setO] = useState<OrderView | null>(null);
   const [problem, setProblem] = useState<string | null>(null);
+  const [copied, setCopied] = useState(false);
+  const [confirmCancel, setConfirmCancel] = useState(false);
+  const [working, setWorking] = useState(false);
 
+  const load = async () => {
+    try {
+      const res = await fetch(`/api/shop/orders/${orderId}`);
+      if (res.status === 404) return setProblem("We can't find that order.");
+      if (!res.ok) return setProblem("Couldn't refresh. Retrying…");
+      setO((await res.json()) as OrderView);
+      setProblem(null);
+    } catch {
+      setProblem("No connection. Retrying…");
+    }
+  };
   useEffect(() => {
     let alive = true;
-    const load = async () => {
-      try {
-        const res = await fetch(`/api/shop/orders/${orderId}`);
-        if (!alive) return;
-        if (res.status === 404) return setProblem("We can't find that order.");
-        if (!res.ok) return setProblem("Couldn't refresh. Retrying…");
-        setO((await res.json()) as OrderView);
-        setProblem(null);
-      } catch {
-        if (alive) setProblem("No connection. Retrying…");
-      }
-    };
-    void load();
-    const t = window.setInterval(() => void load(), 4000);
+    const run = () => { if (alive) void load(); };
+    run();
+    const t = window.setInterval(run, 4000);
     return () => {
       alive = false;
       window.clearInterval(t);
     };
   }, [orderId]);
 
-  if (!o) return <div className="shop-msg"><p>{problem ?? "Loading your order…"}</p><a href="#/shop">Back to the menu</a></div>;
+  async function cancel() {
+    setWorking(true);
+    const r = await fetch(`/api/shop/orders/${orderId}/cancel`, { method: "POST" }).catch(() => null);
+    setConfirmCancel(false);
+    setWorking(false);
+    if (r?.ok) await load();
+    else setProblem("This order can no longer be cancelled.");
+  }
+  async function pay(method: "card" | "paynow") {
+    setWorking(true);
+    const j = await fetch(`/api/shop/orders/${orderId}/pay`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ method }) })
+      .then((r) => r.json() as Promise<{ url?: string }>)
+      .catch(() => ({}) as { url?: string });
+    setWorking(false);
+    if (j.url) location.href = j.url;
+    else setProblem("Online payment isn't available right now. You can pay at the counter.");
+  }
+
+  const goBack = () => { location.hash = "#/shop"; };
+  const head = <div className="shop-headwrap"><h2 className="page-title" style={{ padding: "14px 16px 10px" }}>{t("orderStatusW", "Order status")}</h2></div>;
+  if (!o) return <>{head}<div className="e2e-scroll shop-body"><button className="e2e-back" onClick={goBack}><Icon name="chevL" size={16} /> Back</button><p className="e2e-sub">{problem ?? "Loading your order…"}</p></div></>;
   const text = STATUS_TEXT[o.status];
   const step = STEPS.indexOf(o.status);
+  const cancelled = o.status === "cancelled";
+  const paid = o.paidCents >= o.totalCents;
   return (
-    <div className="shop-status">
-      <div className="shop-number" aria-label={`Your number is ${o.queueNumber}`}>{o.queueNumber}</div>
-      <h2 className={`s-${o.status}`}>{text.title}</h2>
-      <p>{text.body(o)}</p>
-      {step >= 0 && <ol className="shop-steps">{STEPS.map((s, i) => <li key={s} className={i <= step ? "done" : ""}>{STATUS_TEXT[s].title.split(":")[0]}</li>)}</ol>}
-      <div className="shop-receipt">
-        {o.items.map((i) => <div key={i.name}><span>{i.qty} × {i.name}</span><span>{formatMoney(i.qty * i.unitCents)}</span></div>)}
-        <div className="grand"><span>Total</span><span>{formatMoney(o.totalCents)}</span></div>
+    <>
+      {head}
+      <div className="e2e-scroll shop-body">
+        <button className="e2e-back" onClick={goBack}><Icon name="chevL" size={16} /> Back</button>
+        <p className="e2e-sub" style={{ marginTop: 2 }}>{cancelled ? "Order cancelled" : paid ? "Payment successful" : "Order sent"}</p>
+        <div className="status-coll-label">{t("collectionNo", "Collection number")}</div>
+        <div className="status-headline" aria-label={`Your number is ${o.queueNumber}`}>{o.queueNumber}</div>
+        <p className="status-coll-hint">Your collection number is {o.queueNumber} — watch for it on the counter screen</p>
+        <div className="status-order-row">
+          <span className="status-order-line">Order <span className="status-id">{o.orderId}</span></span>
+          <button className="copy-id-btn" onClick={() => { void navigator.clipboard?.writeText(o.orderId).then(() => setCopied(true)).catch(() => undefined); }}><Icon name="ticket" size={15} />{copied ? "ORDER ID copied" : "Copy ORDER ID"}</button>
+        </div>
+        {o.channelName && <p className="e2e-sub">{o.channelName}</p>}
+        {cancelled ? (
+          <div className="e2e-card" style={{ borderColor: "#f2c4b8", background: "#fdf0ec" }}><h3 style={{ color: "#b03a26" }}>{text.title}</h3><p className="e2e-sub" style={{ textAlign: "left", margin: 0 }}>{text.body(o)}</p></div>
+        ) : (
+          <div className="e2e-card">
+            <div className="status-steps">
+              {STEPS.map((s, idx) => {
+                const cls = idx < step ? "done" : idx === step ? "now" : "";
+                return (
+                  <div key={s} className={`status-step ${cls}`}>
+                    <span className="dot">{idx < step ? "✓" : idx + 1}</span>
+                    <span><span className="st-t">{STATUS_TEXT[s].title.split(":")[0]}</span><br /><span className="st-d">{idx === step ? text.body(o) : idx < step ? "Done" : "—"}</span></span>
+                  </div>
+                );
+              })}
+            </div>
+            <p className="e2e-note" style={{ marginTop: 2 }}>Status updates automatically.</p>
+          </div>
+        )}
+        {!cancelled && o.canPayOnline && info.payments.online && (
+          <div className="e2e-card">
+            <h3>Pay now</h3>
+            <p className="e2e-sub" style={{ textAlign: "left", margin: 0 }}>{formatMoney(o.totalCents - o.paidCents)} to pay. Or pay at the counter.</p>
+            <button className="e2e-cta" disabled={working} onClick={() => void pay("card")}><span>Pay by card</span><Icon name="card" size={19} /></button>
+            <button className="e2e-cta queue-btn" disabled={working} onClick={() => void pay("paynow")}><span>Pay with PayNow</span><Icon name="stack" size={19} /></button>
+          </div>
+        )}
+        <div className="e2e-card">
+          <h3>{t("itemsCardT", "Items")}</h3>
+          {o.items.map((i, n) => (
+            <div key={n} className="sum-row"><span className="k">{i.name} × {i.qty}{i.options.length > 0 && <small className="muted" style={{ display: "block" }}>{i.options.join(" · ")}</small>}</span><span className="v">{formatMoney(i.qty * i.unitCents)}</span></div>
+          ))}
+          <div className="sum-row grand"><span className="k">{t("total", "Total")}</span><span className="v">{formatMoney(o.totalCents)}</span></div>
+        </div>
+        {o.canCancel && (confirmCancel ? (
+          <div className="e2e-card" style={{ borderColor: "#f2c4b8" }}>
+            <h3>Cancel this order?</h3>
+            <p className="e2e-sub" style={{ textAlign: "left", margin: 0 }}>Points or a coupon you used will be returned.</p>
+            <button className="login-btn" disabled={working} style={{ justifyContent: "center", color: "#b03a26", borderColor: "#f2c4b8" }} onClick={() => void cancel()}><span>Yes, cancel my order</span></button>
+            <button className="login-btn" style={{ justifyContent: "center", marginTop: 8 }} onClick={() => setConfirmCancel(false)}><span>Keep my order</span></button>
+          </div>
+        ) : (
+          <button className="login-btn" style={{ justifyContent: "center", color: "#b03a26", borderColor: "#f2c4b8", marginTop: 10 }} onClick={() => setConfirmCancel(true)}><span>{t("cancelOrder", "Cancel order")}</span></button>
+        ))}
+        {problem && <div className="shop-note">{problem}</div>}
+        <a className="login-btn" style={{ justifyContent: "center", marginTop: 10, textDecoration: "none" }} href="#/shop?tab=account">View in Account</a>
+        <a className="e2e-cta" style={{ textDecoration: "none" }} href="#/shop" onClick={() => localStorage.removeItem(LS_LAST)}><span>{t("backToOrder", "Back to Order")}</span><Icon name="arrowR" size={19} /></a>
       </div>
-      {problem && <div className="shop-note">{problem}</div>}
-      <a className="shop-primary link" href="#/shop" onClick={() => localStorage.removeItem(LS_LAST)}>Order again</a>
-    </div>
+    </>
   );
 }

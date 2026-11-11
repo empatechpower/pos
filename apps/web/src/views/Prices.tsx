@@ -16,6 +16,16 @@ const toCents = (text: string): number | null => {
   return text.trim() !== "" && Number.isFinite(n) && n >= 0 && n < 100000 ? Math.round(n * 100) : null;
 };
 
+interface Brand {
+  primary: string;
+  accent: string;
+  logoUrl: string | null;
+  heroUrl: string | null;
+  tagline: string | null;
+  promoTitle: string | null;
+  promoBody: string | null;
+}
+
 /** Managers and owners: prices per pricebook, channels, and where each pricebook applies. */
 export function Prices({ catalog, outletId }: { catalog: Catalog; outletId: string }) {
   const staff = useStaff();
@@ -25,9 +35,10 @@ export function Prices({ catalog, outletId }: { catalog: Catalog; outletId: stri
   const [newItem, setNewItem] = useState({ name: "", category: "", price: "" });
   const [newBook, setNewBook] = useState("");
   const [newKind, setNewKind] = useState<ChannelKind>("delivery");
-  const [brand, setBrand] = useState<{ primary: string; accent: string; logoUrl: string | null } | null>(null);
+  const [brand, setBrand] = useState<Brand | null>(null);
+  const [find, setFind] = useState("");
   useEffect(() => {
-    void fetch("/api/brand").then(async (r) => r.ok && setBrand((await r.json()) as { primary: string; accent: string; logoUrl: string | null }));
+    void fetch("/api/brand").then(async (r) => r.ok && setBrand((await r.json()) as Brand));
   }, []);
 
   if (!staff || staff.role === "cashier")
@@ -66,6 +77,18 @@ export function Prices({ catalog, outletId }: { catalog: Catalog; outletId: stri
 
   const assignmentFor = (channelId: string) => catalog.assignments.find((a) => a.channelId === channelId && !a.outletId)?.pricebookId ?? "";
 
+  async function uploadBrandImage(e: React.ChangeEvent<HTMLInputElement>, path: "logo" | "hero", label: string) {
+    const f = e.target.files?.[0];
+    e.target.value = "";
+    if (!f) return;
+    if (f.size > 300 * 1024) return setMsg(`That ${label.toLowerCase()} is too big. Use a PNG, JPEG or WebP under 300 KB.`);
+    const res = await fetch(`/api/brand/${path}`, { method: "PUT", headers: { "content-type": f.type, ...authHeader() }, body: f }).catch(() => null);
+    if (res?.ok) {
+      setBrand((await res.json()) as Brand);
+      setMsg(`${label} saved.`);
+    } else setMsg(((await res?.json().catch(() => ({}))) as { error?: string } | undefined)?.error ?? `The ${label.toLowerCase()} was not saved.`);
+  }
+
   return (
     <div className="credit prices">
       <h2>Prices</h2>
@@ -87,7 +110,7 @@ export function Prices({ catalog, outletId }: { catalog: Catalog; outletId: stri
           <label className="inline">
             Items without a price here:
             <select value={book.missing} onChange={(e) => void send("PATCH", `pricebooks/${book.id}`, { missing: e.target.value }, "Saved.")}>
-              <option value="fallback">use the default price</option>
+              <option value="show">show it, but it cannot be ordered</option>
               <option value="hide">don't sell them</option>
             </select>
           </label>
@@ -95,7 +118,8 @@ export function Prices({ catalog, outletId }: { catalog: Catalog; outletId: stri
       </div>
 
       <div className="pricelist">
-        {catalog.products.map((p) => {
+        <input className="findbox" placeholder={`Search ${catalog.products.length} items`} value={find} onChange={(e) => setFind(e.target.value)} aria-label="Search items" />
+        {catalog.products.filter((p) => !find.trim() || `${p.name} ${p.category}`.toLowerCase().includes(find.trim().toLowerCase())).map((p) => {
           const own = book.prices[p.id];
           return (
             <div className="pricerow" key={p.id}>
@@ -113,6 +137,18 @@ export function Prices({ catalog, outletId }: { catalog: Catalog; outletId: stri
               {own !== undefined && book.id !== catalog.defaultPricebookId && (
                 <button className="secondary sm" title="Remove this price" onClick={() => void send("PUT", `pricebooks/${book.id}/prices/${p.id}`, { priceCents: null }, "Price removed.")}>✕</button>
               )}
+              <label className="secondary sm filebtn" title="Replace this item's photo">
+                {p.imageVersion ? "Photo" : "Add photo"}
+                <input type="file" accept="image/png,image/jpeg,image/webp" hidden aria-label={`Photo for ${p.name}`} onChange={async (e) => {
+                  const f = e.target.files?.[0];
+                  e.target.value = "";
+                  if (!f) return;
+                  if (f.size > 300 * 1024) return setMsg("That photo is too big. Use a PNG, JPEG or WebP under 300 KB.");
+                  const res = await fetch(`/api/catalog/products/${p.id}/image`, { method: "PUT", headers: { "content-type": f.type, ...authHeader() }, body: f }).catch(() => null);
+                  if (res?.ok) { setMsg(`Photo saved for ${p.name}.`); window.dispatchEvent(new Event("pos:catalog-refresh")); }
+                  else setMsg(((await res?.json().catch(() => ({}))) as { problems?: string[]; error?: string } | undefined)?.problems?.join("; ") ?? "The photo was not saved.");
+                }} />
+              </label>
               <button className="secondary sm" onClick={() => void send("POST", "products", { id: p.id, name: p.name, category: p.category, pointsExempt: p.pointsExempt, soldOut: !p.soldOut }, p.soldOut ? "Back on sale." : "Marked sold out.")}>
                 {p.soldOut ? "Back on" : "Sold out"}
               </button>
@@ -161,30 +197,32 @@ export function Prices({ catalog, outletId }: { catalog: Catalog; outletId: stri
       </div>
 
       <h3>Shop look</h3>
-      <p className="muted">Colours and logo on the page customers order from. Share <b>{location.origin}/#/shop</b>, or add <b>?table=Table%205</b> for a table's QR code.</p>
+      <p className="muted">How the page customers order from looks. Share <b>{location.origin}/#/shop</b>, or add <b>?table=Table%205</b> for a table's QR code.</p>
       {brand && (
-        <div className="row brand">
-          {brand.logoUrl ? <img className="logo-preview" src={brand.logoUrl} alt="Current logo" /> : <span className="muted">No logo yet</span>}
-          <label className="inline">Main colour <input type="color" value={brand.primary} onChange={(e) => setBrand({ ...brand, primary: e.target.value })} aria-label="Main colour" /></label>
-          <label className="inline">Soft colour <input type="color" value={brand.accent} onChange={(e) => setBrand({ ...brand, accent: e.target.value })} aria-label="Soft colour" /></label>
-          <button className="primary sm" onClick={async () => {
-            const r = await staffFetch("/api/brand", { method: "PUT", body: { primary: brand.primary, accent: brand.accent } });
-            setMsg("problem" in r ? r.problem : r.res.ok ? "Shop colours saved." : "Colours were not saved.");
-          }}>Save colours</button>
-          <label className="secondary sm filebtn">
-            Upload logo
-            <input type="file" accept="image/png,image/jpeg,image/webp" hidden aria-label="Upload logo" onChange={async (e) => {
-              const f = e.target.files?.[0];
-              e.target.value = "";
-              if (!f) return;
-              if (f.size > 300 * 1024) return setMsg("That logo is too big. Use a PNG, JPEG or WebP under 300 KB.");
-              const res = await fetch("/api/brand/logo", { method: "PUT", headers: { "content-type": f.type, ...authHeader() }, body: f }).catch(() => null);
-              if (res?.ok) {
-                setBrand((await res.json()) as { primary: string; accent: string; logoUrl: string | null });
-                setMsg("Logo saved.");
-              } else setMsg((await res?.json().catch(() => ({})) as { error?: string } | undefined)?.error ?? "The logo was not saved.");
-            }} />
-          </label>
+        <div className="brandbox">
+          <div className="row brand">
+            {brand.logoUrl ? <img className="logo-preview" src={brand.logoUrl} alt="Current logo" /> : <span className="muted">No logo yet</span>}
+            <label className="secondary sm filebtn">Upload logo<input type="file" accept="image/png,image/jpeg,image/webp" hidden aria-label="Upload logo" onChange={(e) => void uploadBrandImage(e, "logo", "Logo")} /></label>
+            {brand.heroUrl ? <img className="logo-preview wide" src={brand.heroUrl} alt="Current top photo" /> : <span className="muted">No top photo yet</span>}
+            <label className="secondary sm filebtn">Upload top photo<input type="file" accept="image/png,image/jpeg,image/webp" hidden aria-label="Upload top photo" onChange={(e) => void uploadBrandImage(e, "hero", "Top photo")} /></label>
+          </div>
+          <div className="row brand">
+            <label className="inline">Button colour <input type="color" value={brand.primary} onChange={(e) => setBrand({ ...brand, primary: e.target.value })} aria-label="Button colour" /></label>
+            <label className="inline">Highlight colour <input type="color" value={brand.accent} onChange={(e) => setBrand({ ...brand, accent: e.target.value })} aria-label="Highlight colour" /></label>
+            <button className="primary sm" onClick={async () => {
+              const r = await staffFetch("/api/brand", { method: "PUT", body: { primary: brand.primary, accent: brand.accent } });
+              setMsg("problem" in r ? r.problem : r.res.ok ? "Shop colours saved." : "Colours were not saved.");
+            }}>Save colours</button>
+          </div>
+          <div className="editor">
+            <label className="field">Line under the top photo<input aria-label="Tagline" maxLength={80} value={brand.tagline ?? ""} onChange={(e) => setBrand({ ...brand, tagline: e.target.value })} /></label>
+            <label className="field">Special offer title (leave empty to hide the offer)<input aria-label="Offer title" maxLength={80} value={brand.promoTitle ?? ""} onChange={(e) => setBrand({ ...brand, promoTitle: e.target.value })} /></label>
+            <label className="field">Special offer text<textarea aria-label="Offer text" maxLength={400} rows={3} value={brand.promoBody ?? ""} onChange={(e) => setBrand({ ...brand, promoBody: e.target.value })} /></label>
+            <button className="primary sm" onClick={async () => {
+              const r = await staffFetch("/api/brand/content", { method: "PUT", body: { tagline: brand.tagline ?? "", promoTitle: brand.promoTitle ?? "", promoBody: brand.promoBody ?? "" } });
+              setMsg("problem" in r ? r.problem : r.res.ok ? "Shop text saved." : "The text was not saved.");
+            }}>Save text</button>
+          </div>
         </div>
       )}
 
