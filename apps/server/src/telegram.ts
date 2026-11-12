@@ -105,15 +105,16 @@ export async function setupTelegramWebhook(integ: Integrations, log: (m: string)
 export function registerTelegram(app: FastifyInstance, d: TelegramDeps): void {
   const t = d.integ.telegram;
   const f = d.integ.fetch ?? fetch;
-  const api = async (method: string, body: object): Promise<{ ok?: boolean; result?: any; description?: string }> => {
+  const api = async (method: string, body: object, tries = 4): Promise<{ ok?: boolean; result?: any; description?: string }> => {
     if (!t) return { ok: false };
     // The network from the host to Telegram is sometimes slow to connect, so a dropped connection is tried again.
-    for (let attempt = 1; attempt <= 3; attempt++) {
+    for (let attempt = 1; attempt <= tries; attempt++) {
       try {
-        const r = await f(`https://api.telegram.org/bot${t.token}/${method}`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body) });
+        // Give up on a stuck connection after 5 seconds and try again, rather than waiting out the long default.
+        const r = await f(`https://api.telegram.org/bot${t.token}/${method}`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body), signal: AbortSignal.timeout(5000) });
         return (await r.json().catch(() => ({}))) as { ok?: boolean; result?: any; description?: string };
       } catch {
-        if (attempt < 3) await new Promise((r) => setTimeout(r, 500 * attempt));
+        if (attempt < tries) await new Promise((r) => setTimeout(r, 300 * attempt));
       }
     }
     return { ok: false };
@@ -396,6 +397,8 @@ export function registerTelegram(app: FastifyInstance, d: TelegramDeps): void {
     const got = req.headers["x-telegram-bot-api-secret-token"];
     if (typeof got !== "string" || !sameSecret(got, t.webhookSecret)) return reply.code(401).send({ error: "bad_secret" });
     const u = req.body ?? {};
+    // Show "typing…" at once so a slow reply does not look like silence. Best effort: one try, never waited for.
+    if (u.message?.chat.type === "private") void api("sendChatAction", { chat_id: u.message.chat.id, action: "typing" }, 1);
     try {
       if (u.callback_query) await onCallback(u.callback_query);
       else if (u.message) await onMessage(u.message);

@@ -23,10 +23,10 @@ export function Manager({ config }: { config: BusinessConfig }) {
         <div className="flash">Sign in to see orders and manage members. <a href="#/login">Sign in</a></div>
       ) : (
         <>
-          <div className="seg" style={{ display: "flex", gap: 8, margin: "4px 0 12px" }}>
-            <button className={tab === "orders" ? "primary sm" : "secondary sm"} onClick={() => setTab("orders")}>Transactions</button>
-            <button className={tab === "members" ? "primary sm" : "secondary sm"} onClick={() => setTab("members")}>Members</button>
-            {staff.role !== "cashier" && <button className={tab === "telegram" ? "primary sm" : "secondary sm"} onClick={() => setTab("telegram")}>Telegram</button>}
+          <div className="seg" style={{ margin: "4px 0 12px" }}>
+            <button className={tab === "orders" ? "on" : ""} aria-pressed={tab === "orders"} onClick={() => setTab("orders")}>Transactions</button>
+            <button className={tab === "members" ? "on" : ""} aria-pressed={tab === "members"} onClick={() => setTab("members")}>Members</button>
+            {staff.role !== "cashier" && <button className={tab === "telegram" ? "on" : ""} aria-pressed={tab === "telegram"} onClick={() => setTab("telegram")}>Telegram</button>}
           </div>
           {tab === "orders" ? <Transactions config={config} /> : tab === "telegram" ? <TelegramPanel /> : <Members canAdjustPoints={staff.role !== "cashier"} canImport={staff.role !== "cashier"} rewardsOn={config.rewards.pointsEnabled} />}
         </>
