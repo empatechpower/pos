@@ -87,12 +87,12 @@ class MainActivity : Activity() {
 
         // ---- link this tablet to the shop (once)
         setupGroup = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
-        setupGroup.addView(text("Link this tablet to the shop. Ask a manager for the shop address and a one-time enrollment code (it lasts 15 minutes)."))
+        setupGroup.addView(text("Connect this device to the shop, once. Shop address: demo.rezein.com (or your shop's address). Enrollment code: in the shop app, open Devices and make one (it lasts 15 minutes)."))
         address = field("Shop address, e.g. pos-itlp.onrender.com", InputType.TYPE_TEXT_VARIATION_URI)
         code = field("Enrollment code", InputType.TYPE_TEXT_FLAG_CAP_CHARACTERS or InputType.TYPE_TEXT_FLAG_NO_SUGGESTIONS)
-        deviceName = field("Name for this tablet").apply { setText("Kitchen tablet") }
+        deviceName = field("A name for this device (anything you like)").apply { setText("Rezein device") }
         linkMessage = text("")
-        linkButton = button("Link this tablet") { link() }
+        linkButton = button("Connect to the shop") { link() }
         listOf(address, code, deviceName, linkButton, linkMessage).forEach { setupGroup.addView(it) }
         root.addView(setupGroup)
 
@@ -109,7 +109,7 @@ class MainActivity : Activity() {
         smsSave = button("Save the number for customer sign-in") { saveSmsNumber() }
         val testButton = button("Print a test page") { testPrint() }
         log = text("", 12f).apply { typeface = Typeface.MONOSPACE }
-        val unlink = button("Unlink this tablet") { unlink() }
+        val unlink = button("Disconnect from the shop") { unlink() }
         listOf(status, detail, toggle, battery, text("Customer sign-in by text: the number of the SIM in this tablet is shown to customers, who text it a code.", 14f, true), smsNumber, smsSave, smsMessage, smsButton, text("Check a printer is reachable from this tablet:"), printerIp, testButton, text("Recent activity", 14f, true), log, unlink).forEach { statusGroup.addView(it) }
         root.addView(statusGroup)
 
