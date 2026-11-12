@@ -95,6 +95,20 @@ export async function listDevices(db: Db, merchantId: string) {
 /** A device asking for print jobs is a print hub that is alive. */
 export const markPrintPoll = (db: Db, deviceId: string) => db.query("UPDATE devices SET last_print_poll_at = now() WHERE id=$1", [deviceId]).then(() => undefined);
 
+/** The tablet tells us the number of the SIM it receives texts on. */
+export async function setSmsNumber(db: Db, deviceId: string, number: string | null): Promise<void> {
+  await db.query("UPDATE devices SET sms_number=$2 WHERE id=$1", [deviceId, number]);
+}
+
+/** The number customers should text right now: that of a tablet running Rezein that has checked in within the last minute. */
+export async function liveSmsNumber(db: Db, merchantId: string): Promise<string | null> {
+  const r = await db.query(
+    "SELECT sms_number FROM devices WHERE merchant_id=$1 AND active AND sms_number IS NOT NULL AND last_print_poll_at > now() - interval '60 seconds' ORDER BY last_print_poll_at DESC LIMIT 1",
+    [merchantId],
+  );
+  return (r.rows[0]?.sms_number as string | undefined) ?? null;
+}
+
 export async function revokeDevice(db: Db, merchantId: string, deviceId: string): Promise<boolean> {
   const r = await db.query("UPDATE devices SET active=false WHERE id=$1 AND merchant_id=$2 AND active", [deviceId, merchantId]);
   return (r.rowCount ?? 0) > 0;

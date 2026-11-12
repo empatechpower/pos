@@ -5,7 +5,7 @@ import { CASHIER_TOPUP_LIMIT_CENTS, audit, authenticate, can, createStaff, login
 import type { CatalogStore, ChangeResult, PgCatalogStore } from "./catalog.js";
 import type { Db } from "./db/pool.js";
 import { balanceOf, refund, spend, topUp } from "./ledger.js";
-import { authenticateDevice, createEnrollmentCode, enroll, markPrintPoll, issueStreamTicket, listDevices, redeemStreamTicket, revokeDevice, type Device } from "./devices.js";
+import { authenticateDevice, createEnrollmentCode, enroll, markPrintPoll, setSmsNumber, issueStreamTicket, listDevices, redeemStreamTicket, revokeDevice, type Device } from "./devices.js";
 import { BrandStore } from "./brand.js";
 import { PrintStore, validatePrinter, type Printer } from "./print.js";
 import { registerShop } from "./shop.js";
@@ -402,6 +402,20 @@ export async function buildApp({ config, store, db, catalog, catalogAdmin, print
     return { matched };
   });
 
+
+  /** The Rezein app tells us the number of the SIM it receives texts on, so customers are shown the right number to text. */
+  app.put<{ Body: { number?: string } }>("/api/print/sms/number", { preHandler: needsDevice }, async (req, reply) => {
+    const raw = String(req.body?.number ?? "").trim();
+    if (raw === "") {
+      if (db) await setSmsNumber(db, req.device!.id, null);
+      return { ok: true, number: null };
+    }
+    const digits = raw.replace(/\D/g, "");
+    if (!/^\+?[\d\s-]{8,20}$/.test(raw) || digits.length < 8 || digits.length > 15) return reply.code(400).send({ error: "that does not look like a phone number" });
+    const number = `${raw.startsWith("+") ? "+" : ""}${digits}`;
+    if (db) await setSmsNumber(db, req.device!.id, number);
+    return { ok: true, number };
+  });
 
   // ---- printers and the print queue -------------------------------------------------------
 

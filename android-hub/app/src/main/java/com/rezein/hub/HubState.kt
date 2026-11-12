@@ -17,6 +17,11 @@ class Config(context: Context) {
         get() = prefs.getBoolean("wantRunning", true)
         set(v) = prefs.edit().putBoolean("wantRunning", v).apply()
 
+    /** The phone number of the SIM in this tablet, which the shop shows customers to text. */
+    var smsNumber: String
+        get() = prefs.getString("smsNumber", "") ?: ""
+        set(v) = prefs.edit().putString("smsNumber", v).apply()
+
     fun link(baseUrl: String, token: String, name: String) {
         prefs.edit().putString("baseUrl", baseUrl).putString("token", token).putString("name", name).putBoolean("wantRunning", true).apply()
     }

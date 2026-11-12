@@ -68,10 +68,12 @@ fun testPage(): ByteArray {
 class Http(private val baseUrl: String) {
     class Reply(val status: Int, val body: String)
 
-    fun post(path: String, token: String?, json: JSONObject?): Reply {
+    fun post(path: String, token: String?, json: JSONObject?): Reply = send("POST", path, token, json)
+
+    fun send(method: String, path: String, token: String?, json: JSONObject?): Reply {
         val conn = URL(baseUrl + path).openConnection() as HttpURLConnection
         try {
-            conn.requestMethod = "POST"
+            conn.requestMethod = method
             conn.connectTimeout = 10_000
             conn.readTimeout = 20_000
             if (token != null) conn.setRequestProperty("x-device-token", token)
@@ -108,6 +110,13 @@ class HubClient(
             val p = j.getJSONObject("printer")
             Job(j.getString("id"), j.optString("docType", "ticket"), p.getString("id"), p.optString("name", p.getString("id")), p.getString("host"), p.getInt("port"), Base64.getDecoder().decode(j.getString("payloadBase64")))
         }
+    }
+
+    /** Tell the shop which number customers should text to sign in: the number of the SIM in this tablet. Empty clears it. */
+    fun setSmsNumber(number: String): Boolean {
+        val r = http.send("PUT", "/api/print/sms/number", token, JSONObject().put("number", number))
+        if (r.status == 401) throw NotLinked()
+        return r.status in 200..299
     }
 
     /** Pass on a text this tablet received. The shop checks whether it is a customer's sign-in code. Returns true when it was accepted. */

@@ -251,6 +251,20 @@ describe("phone sign-in by text message", () => {
     expect((await call("/api/print/sms", { device: till.token, body: { from: "+6587771111", body: `${s.json.code}` } })).json.matched).toBe(false);
   });
 
+  it("shows customers the number of the tablet that is running Rezein, with no server setting", async () => {
+    expect((await call("/api/print/sms/number", { method: "PUT", body: { number: "12" } })).status).toBe(401);
+    expect((await call("/api/print/sms/number", { method: "PUT", device: till.token, body: { number: "abc" } })).status).toBe(400);
+    const put = await call("/api/print/sms/number", { method: "PUT", device: till.token, body: { number: "+65 9000 1111" } });
+    expect(put.json).toMatchObject({ ok: true, number: "+6590001111" });
+    // Without a recent check-in the tablet is not live, so the server's own number is what customers see.
+    expect((await call("/api/shop/info")).json.auth.phone.number).toBe("+65 8799 6394");
+    await db.query("UPDATE devices SET last_print_poll_at = now() WHERE id=$1", [till.id]);
+    expect((await call("/api/shop/info")).json.auth.phone.number).toBe("+6590001111");
+    expect((await call("/api/shop/auth/phone/start", { body: { phone: "6587770000" } })).json.to).toBe("+6590001111");
+    await db.query("UPDATE devices SET last_print_poll_at = now() - interval '5 minutes' WHERE id=$1", [till.id]);
+    expect((await call("/api/shop/info")).json.auth.phone.number).toBe("+65 8799 6394");
+  });
+
   it("expires, and starting again retires the older code", async () => {
     const a = await call("/api/shop/auth/phone/start", { body: { phone: "6583334444" } });
     const b = await call("/api/shop/auth/phone/start", { body: { phone: "6583334444" } });

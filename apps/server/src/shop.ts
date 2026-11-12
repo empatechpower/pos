@@ -3,6 +3,7 @@ import { collectionNumber, confirmedPaid, newId, optionLines, orderTotals, quote
 import { audit, type Permission } from "./auth.js";
 import type { BrandStore } from "./brand.js";
 import type { CatalogStore, PgCatalogStore } from "./catalog.js";
+import { liveSmsNumber } from "./devices.js";
 import type { Db } from "./db/pool.js";
 import { balanceOf, refund as refundCredit, spend as spendCredit } from "./ledger.js";
 import { FailureLimiter } from "./rateLimit.js";
@@ -114,10 +115,13 @@ export function registerShop(app: FastifyInstance, d: ShopDeps) {
   };
 
   const tables = parseTables(process.env.SHOP_TABLES);
+  /** The number customers text to sign in: the SIM of a tablet running Rezein right now, else the server's own setting. */
+  const smsNumber = async () => (await liveSmsNumber(d.db, merchantId)) ?? integ.sms?.number ?? null;
   /** Everything the ordering page needs to dress itself. Public. */
   app.get("/api/shop/info", async (req, reply) => {
     if (limited(readLimit, req, reply)) return;
     const cat = await d.catalog.load();
+    const smsTo = await smsNumber();
     return {
       name: d.config.name,
       outletName: d.config.outletName,
@@ -129,7 +133,7 @@ export function registerShop(app: FastifyInstance, d: ShopDeps) {
       channels: cat.channels.filter((c) => c.active && (!tables.length || c.kind === "dine_in")).map((c) => ({ id: c.id, name: c.name, kind: c.kind })),
       brand: await brandPayload(),
       // What this deployment can do beyond email sign-in and paying at the counter. The page enables only these.
-      auth: { google: !!integ.google && !!d.members, microsoft: !!integ.microsoft && !!d.members, phone: !!d.members && (integ.sms ? { number: integ.sms.number } : showCodes ? { number: "+65 8000 0000", simulated: true } : null) },
+      auth: { google: !!integ.google && !!d.members, microsoft: !!integ.microsoft && !!d.members, phone: !!d.members && (smsTo ? { number: smsTo } : showCodes ? { number: "+65 8000 0000", simulated: true } : null) },
       payments: { online: !!integ.stripe, methods: integ.stripe ? ["card", "paynow"] : [] },
     };
   });
@@ -296,11 +300,12 @@ export function registerShop(app: FastifyInstance, d: ShopDeps) {
 
     app.post<{ Body: { phone?: string } }>("/api/shop/auth/phone/start", async (req, reply) => {
       if (limited(authLimit, req, reply)) return;
-      if (!integ.sms && !showCodes) return reply.code(404).send({ error: "provider_not_available" });
+      const smsTo = await smsNumber();
+      if (!smsTo && !showCodes) return reply.code(404).send({ error: "provider_not_available" });
       const phone = digitsOf(req.body?.phone);
       if (phone.length < 8 || phone.length > 15) return reply.code(400).send({ error: "phone number looks wrong" });
       const c = await members.startSms(phone, SMS_SECONDS);
-      return { id: c.id, code: c.code, to: integ.sms?.number ?? "+65 8000 0000", expiresInSeconds: SMS_SECONDS };
+      return { id: c.id, code: c.code, to: smsTo ?? "+65 8000 0000", expiresInSeconds: SMS_SECONDS };
     });
 
     /** The customer's browser asks whether the text has arrived. The session is handed over once. */

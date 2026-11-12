@@ -69,6 +69,7 @@ class HubClientTest {
                     reports.add(Triple(parts[4], parts[5], body))
                     Pair(200, "{}")
                 }
+                path == "/api/print/sms/number" -> { texts.add("number:" + body); Pair(200, "{}") }
                 path == "/api/print/sms" -> { texts.add(body); Pair(200, "{\"matched\":true}") }
                 path == "/api/devices/enroll" -> {
                     val code = JSONObject(body).getString("code")
@@ -136,6 +137,11 @@ class HubClientTest {
         client { _, _, _ -> throw AmbiguousDelivery("connection broke while printing") }.runOnce()
         val body = JSONObject(reports.first { it.first == "j1" }.third)
         assertTrue(body.getBoolean("ambiguous"))
+    }
+
+    @Test fun tellsTheShopWhichNumberCustomersShouldText() {
+        assertTrue(client().setSmsNumber("+65 8799 6394"))
+        assertEquals("+65 8799 6394", JSONObject(texts.single().removePrefix("number:")).getString("number"))
     }
 
     @Test fun passesAReceivedTextToTheShopWithItsSenderAndCode() {

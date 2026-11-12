@@ -39,9 +39,11 @@ and a Play Store listing.
 
 The same app can receive the text a customer sends to sign in. Any SIM in the tablet will do.
 
-1. Put a SIM in the tablet and note its number.
-2. On the server, set `SMS_RECEIVE_NUMBER` to that number (for example `+65 8799 6394`). This is the number the shop page tells customers to text. No other setting is needed for this route.
-3. In Rezein on the tablet, press **Allow reading texts (for customer sign-in)** and allow it.
+1. Put a SIM in the tablet.
+2. In Rezein, type the SIM's phone number (for example `+65 8799 6394`) under "Customer sign-in by text" and press **Save the number for customer sign-in**. Rezein tells the shop, and the shop page shows customers that number while Rezein is running. There is nothing to set on the server.
+3. Press **Allow reading texts (for customer sign-in)** and allow it.
 4. A customer enters their mobile number on the shop page, is shown a short code, and presses **Send the text message using this device**, which opens their messages app with the number and code ready. When the text arrives, Rezein passes the sender's number and the code to the shop. If they match the person waiting, they are signed in. Nothing from the text is kept on the tablet.
 
 If the tablet is off, offline or Rezein is stopped, customers cannot sign in by text. Rezein shows "Text from … passed to the shop" in its activity list for each one it receives.
+
+If more than one tablet has a number saved, customers are shown the number of the one that checked in most recently. If no tablet is running Rezein, the shop falls back to a number set on the server with `SMS_RECEIVE_NUMBER`, if there is one.

@@ -38,6 +38,7 @@ class HubService : Service() {
             HubState.running = true
             HubState.onChange(refresh)
             HubState.log("Hub started for ${config.baseUrl}")
+            if (config.smsNumber.isNotEmpty()) Thread { try { HubClient(config.baseUrl!!, config.token!!).setSmsNumber(config.smsNumber) } catch (_: Exception) {} }.start()
             worker = Thread({ loop(config.baseUrl!!, config.token!!) }, "hub-loop").also { it.isDaemon = true; it.start() }
         }
         return START_STICKY
