@@ -70,33 +70,36 @@ export async function setupTelegramWebhook(integ: Integrations, log: (m: string)
     const r = await f(`https://api.telegram.org/bot${t.token}/${method}`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body) });
     return (await r.json().catch(() => ({}))) as { ok?: boolean; description?: string };
   };
-  // A fresh deploy can start before its network is ready, so try a few times before giving up.
-  for (let attempt = 1; attempt <= 4; attempt++) {
-   try {
-    const hook = await call("setWebhook", { url: `${integ.publicUrl}/api/telegram/webhook`, secret_token: t.webhookSecret, allowed_updates: ["message", "callback_query"] });
-    log(hook.ok ? `[telegram] webhook set to ${integ.publicUrl}/api/telegram/webhook` : `[telegram] could not set the webhook: ${hook.description ?? "unknown error"}`);
-    await call("setMyCommands", {
-      commands: [
-        { command: "newpricebook", description: "Copy Dine in into a new pricebook and channel" },
-        { command: "price", description: "Change one item's price" },
-        { command: "off", description: "Switch an item off in a pricebook" },
-        { command: "on", description: "Switch an item back on" },
-        { command: "edit", description: "Open the web page to edit all items" },
-        { command: "pricebooks", description: "List pricebooks and channels" },
-        { command: "items", description: "Find an item and its prices" },
-        { command: "help", description: "What I can do" },
-      ],
-    });
-    return;
-   } catch (e) {
-    const c = (e instanceof Error ? e.cause : undefined) as (Error & { code?: string; errors?: (Error & { code?: string })[] }) | undefined;
-    const why = [c?.name, c?.code, c?.message, ...(c?.errors ?? []).map((x) => `${x.code ?? x.name}: ${x.message}`)].filter(Boolean).join(" | ");
-    const shape = /^\d{6,}:[A-Za-z0-9_-]{30,}$/.test(t.token) ? "token looks well-formed" : "token does NOT look like 123456:ABC... (check for stray characters)";
-    const cause = ` (${why || "no detail from the network layer"}; ${shape})`;
-    log(`[telegram] setup attempt ${attempt} failed: ${e instanceof Error ? e.message : e}${cause}`);
-    if (attempt < 4) await new Promise((r) => setTimeout(r, attempt * 5000));
-   }
-  }
+  // The host's route to Telegram is sometimes slow to connect, so each step is tried a few times on its own.
+  const step = async (name: string, method: string, body: object): Promise<boolean> => {
+    for (let attempt = 1; attempt <= 5; attempt++) {
+      try {
+        const r = await call(method, body);
+        if (r.ok) return true;
+        log(`[telegram] ${name} was refused: ${r.description ?? "unknown error"}`);
+        return false;
+      } catch (e) {
+        const c = (e instanceof Error ? e.cause : undefined) as (Error & { code?: string; errors?: (Error & { code?: string })[] }) | undefined;
+        const why = [c?.code, ...(c?.errors ?? []).map((x) => x.code ?? x.name)].filter(Boolean).join(" ") || (e instanceof Error ? e.message : String(e));
+        log(`[telegram] ${name} attempt ${attempt} failed: ${why}`);
+        if (attempt < 5) await new Promise((r) => setTimeout(r, attempt * 4000));
+      }
+    }
+    return false;
+  };
+  if (await step("webhook", "setWebhook", { url: `${integ.publicUrl}/api/telegram/webhook`, secret_token: t.webhookSecret, allowed_updates: ["message", "callback_query"] })) log(`[telegram] webhook set to ${integ.publicUrl}/api/telegram/webhook`);
+  await step("command list", "setMyCommands", {
+    commands: [
+      { command: "newpricebook", description: "Copy Dine in into a new pricebook and channel" },
+      { command: "price", description: "Change one item's price" },
+      { command: "off", description: "Switch an item off in a pricebook" },
+      { command: "on", description: "Switch an item back on" },
+      { command: "edit", description: "Open the web page to edit all items" },
+      { command: "pricebooks", description: "List pricebooks and channels" },
+      { command: "items", description: "Find an item and its prices" },
+      { command: "help", description: "What I can do" },
+    ],
+  });
 }
 
 export function registerTelegram(app: FastifyInstance, d: TelegramDeps): void {
@@ -104,12 +107,16 @@ export function registerTelegram(app: FastifyInstance, d: TelegramDeps): void {
   const f = d.integ.fetch ?? fetch;
   const api = async (method: string, body: object): Promise<{ ok?: boolean; result?: any; description?: string }> => {
     if (!t) return { ok: false };
-    try {
-      const r = await f(`https://api.telegram.org/bot${t.token}/${method}`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body) });
-      return (await r.json().catch(() => ({}))) as { ok?: boolean; result?: any; description?: string };
-    } catch {
-      return { ok: false };
+    // The network from the host to Telegram is sometimes slow to connect, so a dropped connection is tried again.
+    for (let attempt = 1; attempt <= 3; attempt++) {
+      try {
+        const r = await f(`https://api.telegram.org/bot${t.token}/${method}`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body) });
+        return (await r.json().catch(() => ({}))) as { ok?: boolean; result?: any; description?: string };
+      } catch {
+        if (attempt < 3) await new Promise((r) => setTimeout(r, 500 * attempt));
+      }
     }
+    return { ok: false };
   };
   const send = (chatId: number, text: string, buttons?: Button[][]) =>
     api("sendMessage", { chat_id: chatId, text, disable_web_page_preview: true, ...(buttons ? { reply_markup: { inline_keyboard: buttons } } : {}) });
