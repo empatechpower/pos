@@ -22,7 +22,7 @@ import { Queue } from "./views/Queue";
 type Route = "pos" | "kitchen" | "queue" | "credit" | "login" | "devices" | "prices" | "printers" | "orders" | "online" | "shop" | "manager";
 const routeFromHash = (): Route => {
   const h = location.hash.replace("#/", "").split("?")[0]!.split("/")[0]!;
-  return h === "kitchen" || h === "queue" || h === "credit" || h === "login" || h === "devices" || h === "prices" || h === "printers" || h === "orders" || h === "online" || h === "shop" || h === "manager" ? h : "pos";
+  return h === "kitchen" || h === "queue" || h === "credit" || h === "login" || h === "devices" || h === "prices" || h === "printers" || h === "orders" || h === "online" || h === "shop" || h === "manager" || h === "pos" ? h : "manager";
 };
 
 export function App() {
@@ -65,16 +65,13 @@ export function App() {
           <span>{config ? `${config.outletName} · ${modeLabel(config.paymentTiming)}` : "waiting for first sync"}</span>
         </div>
         <nav>
-          <a href="#/pos" className={route === "pos" ? "on" : ""}>POS</a>
-          <a href="#/kitchen" className={route === "kitchen" ? "on" : ""}>Kitchen</a>
-          <a href="#/online" className={route === "online" ? "on" : ""}>Online{newOnline > 0 ? <b className="dot">{newOnline}</b> : null}</a>
-          <a href="#/credit" className={route === "credit" ? "on" : ""}>Credit</a>
-          {staff && staff.role !== "cashier" && catalog && <a href="#/printers" className={route === "printers" ? "on" : ""}>Printers{failedJobs > 0 ? <b className="dot">{failedJobs}</b> : null}</a>}
+          {/* This version is for running the shop: orders, printing, members, menu and devices. The till (POS), Kitchen, Credit,
+              Orders and Queue screens still exist at #/pos, #/kitchen, #/credit, #/orders and #/queue; they are just not in the bar. */}
           {device.required && staff && <a href="#/manager" className={route === "manager" ? "on" : ""}>Manager</a>}
-          {device.required && staff && <a href="#/orders" className={route === "orders" ? "on" : ""}>Orders</a>}
+          <a href="#/online" className={route === "online" ? "on" : ""}>Online{newOnline > 0 ? <b className="dot">{newOnline}</b> : null}</a>
+          {staff && staff.role !== "cashier" && catalog && <a href="#/printers" className={route === "printers" ? "on" : ""}>Printers{failedJobs > 0 ? <b className="dot">{failedJobs}</b> : null}</a>}
           {staff && staff.role !== "cashier" && catalog && <a href="#/prices" className={route === "prices" ? "on" : ""}>Prices</a>}
           {device.required && staff && staff.role !== "cashier" && <a href="#/devices" className={route === "devices" ? "on" : ""}>Devices</a>}
-          <a href="#/queue" target="_blank" rel="noreferrer">Queue screen ↗</a>
         </nav>
         <div className="right">
           <a href="#/login" className="staffbtn" title={staff ? "Signed in" : "Sign in"}>{staff ? `${staff.name} · ${staff.role}` : "Sign in"}</a>

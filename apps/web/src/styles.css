@@ -26,7 +26,7 @@ button:disabled { opacity: .45; cursor: not-allowed; }
 .top { display: flex; align-items: center; gap: 16px; padding: 10px 16px; background: var(--header); border-bottom: 1px solid var(--line); flex-wrap: wrap; }
 .brand { display: flex; flex-direction: column; line-height: 1.2; }
 .brand span { font-size: 12px; color: var(--text-2); }
-.top nav { display: flex; gap: 6px; flex: 1; }
+.top nav { display: flex; gap: 6px; flex: 1; flex-wrap: wrap; min-width: 0; }
 .top nav a { padding: 8px 14px; border-radius: 999px; text-decoration: none; color: var(--text-2); font-weight: 500; }
 .top nav a.on { background: var(--selected); color: var(--orange); }
 .right { display: flex; align-items: center; gap: 10px; }
