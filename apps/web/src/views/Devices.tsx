@@ -19,7 +19,7 @@ const ago = (iso: string | null) => {
 export function Devices() {
   const staff = useStaff();
   const [rows, setRows] = useState<Row[]>([]);
-  const [code, setCode] = useState<{ code: string; reissueFor?: string } | null>(null);
+  const [code, setCode] = useState<{ code: string; reissueFor?: string; testing?: boolean } | null>(null);
   const [msg, setMsg] = useState<string | null>(null);
 
   const load = async () => {
@@ -36,10 +36,10 @@ export function Devices() {
   if (!staff) return <div className="credit"><h2>Devices</h2><p className="muted">Sign in as a manager or owner to manage devices. <a href="#/login">Sign in</a></p></div>;
   if (staff.role === "cashier") return <div className="credit"><h2>Devices</h2><p className="muted">Only managers and owners can manage devices.</p></div>;
 
-  async function makeCode(deviceId?: string) {
+  async function makeCode(deviceId?: string, testing = false) {
     setMsg(null);
-    const res = await fetch("/api/devices/enrollment", { method: "POST", headers: { "content-type": "application/json", ...authHeader() }, body: JSON.stringify({ deviceId }) }).catch(() => null);
-    if (res?.ok) setCode({ code: ((await res.json()) as { code: string }).code, reissueFor: deviceId });
+    const res = await fetch("/api/devices/enrollment", { method: "POST", headers: { "content-type": "application/json", ...authHeader() }, body: JSON.stringify({ deviceId, testing }) }).catch(() => null);
+    if (res?.ok) setCode({ code: ((await res.json()) as { code: string }).code, reissueFor: deviceId, testing });
     else setMsg("Could not create a code. Check the connection and your sign-in.");
   }
 
@@ -53,12 +53,13 @@ export function Devices() {
   return (
     <div className="credit">
       <h2>Devices</h2>
-      <button className="primary" onClick={() => void makeCode()}>Add a device</button>
+      <button className="primary" onClick={() => void makeCode()}>Add a device</button>{" "}
+      <button className="secondary" onClick={() => void makeCode(undefined, true)}>Code for testing many devices</button>
       {code && (
         <div className="flash codebox">
           <div>{code.reissueFor ? "Re-enrollment code" : "Enrollment code"}</div>
           <b className="bigcode">{code.code}</b>
-          <div className="muted">Type it on the new device. Works once, expires in 15 minutes.</div>
+          <div className="muted">{code.testing ? "Type it on each device you want to add. Works for up to 25 devices and expires in 4 hours. Use it for testing only." : "Type it on the new device. Works once, expires in 15 minutes."}</div>
         </div>
       )}
       {msg && <div className="flash">{msg}</div>}

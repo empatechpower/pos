@@ -267,9 +267,9 @@ export async function buildApp({ config, store, db, catalog, catalogAdmin, print
     return { token: r.token, deviceId: r.device.id, outletId: r.device.outletId };
   });
 
-  app.post<{ Body: { deviceId?: string } }>("/api/devices/enrollment", { preHandler: needs("device.manage") }, async (req) => {
-    const c = await createEnrollmentCode(db, { merchantId, outletId: config.outletName, createdBy: req.staff!.id, deviceId: req.body?.deviceId });
-    await audit(db, merchantId, req.staff!.id, "device.code", { reissue: req.body?.deviceId ?? null });
+  app.post<{ Body: { deviceId?: string; testing?: boolean } }>("/api/devices/enrollment", { preHandler: needs("device.manage") }, async (req) => {
+    const c = await createEnrollmentCode(db, { merchantId, outletId: config.outletName, createdBy: req.staff!.id, deviceId: req.body?.deviceId, testing: !!req.body?.testing });
+    await audit(db, merchantId, req.staff!.id, "device.code", { reissue: req.body?.deviceId ?? null, testing: !!req.body?.testing });
     return c;
   });
 

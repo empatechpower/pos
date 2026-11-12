@@ -4,6 +4,8 @@ import type { Db } from "./db/pool.js";
 const sha256 = (s: string) => createHash("sha256").update(s).digest("hex");
 
 export const ENROLLMENT_MINUTES = 15;
+export const TESTING_CODE_MINUTES = 240;
+export const TESTING_CODE_USES = 25;
 // No 0/O/1/I/L: a code read aloud or typed from a screen should not be ambiguous.
 const ALPHABET = "ABCDEFGHJKMNPQRSTUVWXYZ23456789";
 
@@ -27,15 +29,18 @@ const newCode = () =>
 /** A manager or owner creates a one-time code and types or shows it on the new device. */
 export async function createEnrollmentCode(
   db: Db,
-  i: { merchantId: string; outletId: string; createdBy: string | null; deviceId?: string },
-): Promise<{ code: string; expiresAt: Date }> {
+  i: { merchantId: string; outletId: string; createdBy: string | null; deviceId?: string; testing?: boolean },
+): Promise<{ code: string; expiresAt: Date; maxUses: number }> {
   const code = newCode();
-  const expiresAt = new Date(Date.now() + ENROLLMENT_MINUTES * 60_000);
+  // A testing code enrols many devices over a few hours, for setting up lots of phones and tablets at once. Never for a re-issue.
+  const testing = !!i.testing && !i.deviceId;
+  const expiresAt = new Date(Date.now() + (testing ? TESTING_CODE_MINUTES : ENROLLMENT_MINUTES) * 60_000);
+  const maxUses = testing ? TESTING_CODE_USES : 1;
   await db.query(
-    "INSERT INTO enrollment_codes (code_hash, merchant_id, outlet_id, device_id, created_by, expires_at) VALUES ($1,$2,$3,$4,$5,$6)",
-    [sha256(code), i.merchantId, i.outletId, i.deviceId ?? null, i.createdBy, expiresAt],
+    "INSERT INTO enrollment_codes (code_hash, merchant_id, outlet_id, device_id, created_by, expires_at, max_uses) VALUES ($1,$2,$3,$4,$5,$6,$7)",
+    [sha256(code), i.merchantId, i.outletId, i.deviceId ?? null, i.createdBy, expiresAt, maxUses],
   );
-  return { code, expiresAt };
+  return { code, expiresAt, maxUses };
 }
 
 /**
@@ -44,7 +49,7 @@ export async function createEnrollmentCode(
  */
 export async function enroll(db: Db, merchantId: string, code: string, name: string): Promise<{ token: string; device: Device; enrolledBy: string | null } | null> {
   const used = await db.query(
-    `UPDATE enrollment_codes SET used_at = now()
+    `UPDATE enrollment_codes SET uses = uses + 1, used_at = CASE WHEN uses + 1 >= max_uses THEN now() ELSE NULL END
      WHERE code_hash=$1 AND merchant_id=$2 AND used_at IS NULL AND expires_at > now()
      RETURNING outlet_id, device_id, created_by`,
     [sha256(code.toUpperCase().trim()), merchantId],
