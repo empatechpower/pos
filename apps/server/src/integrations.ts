@@ -28,7 +28,7 @@ export function loadIntegrations(env: NodeJS.ProcessEnv): Integrations {
     google: pair(env.GOOGLE_CLIENT_ID, env.GOOGLE_CLIENT_SECRET),
     microsoft: pair(env.MICROSOFT_CLIENT_ID, env.MICROSOFT_CLIENT_SECRET),
     sms: env.SMS_RECEIVE_NUMBER && env.SMS_WEBHOOK_SECRET ? { number: env.SMS_RECEIVE_NUMBER, webhookSecret: env.SMS_WEBHOOK_SECRET } : undefined,
-    telegram: env.TELEGRAM_BOT_TOKEN && env.TELEGRAM_WEBHOOK_SECRET ? { token: env.TELEGRAM_BOT_TOKEN, webhookSecret: env.TELEGRAM_WEBHOOK_SECRET } : undefined,
+    telegram: env.TELEGRAM_BOT_TOKEN?.trim() && env.TELEGRAM_WEBHOOK_SECRET?.trim() ? { token: env.TELEGRAM_BOT_TOKEN.trim().replace(/^bot/i, ""), webhookSecret: env.TELEGRAM_WEBHOOK_SECRET.trim() } : undefined,
     mail: env.RESEND_API_KEY && env.MAIL_FROM ? { apiKey: env.RESEND_API_KEY, from: env.MAIL_FROM } : undefined,
     stripe: env.STRIPE_SECRET_KEY && env.STRIPE_WEBHOOK_SECRET ? { secretKey: env.STRIPE_SECRET_KEY, webhookSecret: env.STRIPE_WEBHOOK_SECRET } : undefined,
   };

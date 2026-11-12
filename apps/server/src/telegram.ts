@@ -70,7 +70,9 @@ export async function setupTelegramWebhook(integ: Integrations, log: (m: string)
     const r = await f(`https://api.telegram.org/bot${t.token}/${method}`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body) });
     return (await r.json().catch(() => ({}))) as { ok?: boolean; description?: string };
   };
-  try {
+  // A fresh deploy can start before its network is ready, so try a few times before giving up.
+  for (let attempt = 1; attempt <= 4; attempt++) {
+   try {
     const hook = await call("setWebhook", { url: `${integ.publicUrl}/api/telegram/webhook`, secret_token: t.webhookSecret, allowed_updates: ["message", "callback_query"] });
     log(hook.ok ? `[telegram] webhook set to ${integ.publicUrl}/api/telegram/webhook` : `[telegram] could not set the webhook: ${hook.description ?? "unknown error"}`);
     await call("setMyCommands", {
@@ -85,8 +87,12 @@ export async function setupTelegramWebhook(integ: Integrations, log: (m: string)
         { command: "help", description: "What I can do" },
       ],
     });
-  } catch (e) {
-    log(`[telegram] setup failed: ${e instanceof Error ? e.message : e}`);
+    return;
+   } catch (e) {
+    const cause = e instanceof Error && e.cause instanceof Error ? ` (${e.cause.message})` : "";
+    log(`[telegram] setup attempt ${attempt} failed: ${e instanceof Error ? e.message : e}${cause}`);
+    if (attempt < 4) await new Promise((r) => setTimeout(r, attempt * 5000));
+   }
   }
 }
 
