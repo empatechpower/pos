@@ -15,7 +15,7 @@ const newKey = () => (globalThis.crypto?.randomUUID ? globalThis.crypto.randomUU
 /** Staff page for the shop: every order and payment, and the members' points and prepaid credit. No till. */
 export function Manager({ config }: { config: BusinessConfig }) {
   const staff = useStaff();
-  const [tab, setTab] = useState<"orders" | "members">("orders");
+  const [tab, setTab] = useState<"orders" | "members" | "telegram">("orders");
   return (
     <div className="credit prices">
       <h2>Manager</h2>
@@ -26,8 +26,9 @@ export function Manager({ config }: { config: BusinessConfig }) {
           <div className="seg" style={{ display: "flex", gap: 8, margin: "4px 0 12px" }}>
             <button className={tab === "orders" ? "primary sm" : "secondary sm"} onClick={() => setTab("orders")}>Transactions</button>
             <button className={tab === "members" ? "primary sm" : "secondary sm"} onClick={() => setTab("members")}>Members</button>
+            {staff.role !== "cashier" && <button className={tab === "telegram" ? "primary sm" : "secondary sm"} onClick={() => setTab("telegram")}>Telegram</button>}
           </div>
-          {tab === "orders" ? <Transactions config={config} /> : <Members canAdjustPoints={staff.role !== "cashier"} canImport={staff.role !== "cashier"} rewardsOn={config.rewards.pointsEnabled} />}
+          {tab === "orders" ? <Transactions config={config} /> : tab === "telegram" ? <TelegramPanel /> : <Members canAdjustPoints={staff.role !== "cashier"} canImport={staff.role !== "cashier"} rewardsOn={config.rewards.pointsEnabled} />}
         </>
       )}
     </div>
@@ -386,6 +387,67 @@ function UploadMembers({ onDone }: { onDone: () => void }) {
           {result.bad.length > 0 && <ul style={{ margin: "6px 0 0", paddingLeft: 18 }}>{result.bad.slice(0, 20).map((b) => <li key={b.row}>Row {b.row}: {b.why}</li>)}{result.bad.length > 20 && <li>…and {result.bad.length - 20} more</li>}</ul>}
         </div>
       )}
+    </div>
+  );
+}
+
+type TgStatus = { configured: boolean; bot?: string | null; linked: { telegramId: string; name: string | null; staffName: string; role: string; since: string }[] };
+
+/** Connect a person's Telegram to their staff sign-in, so they can run the shop's prices by chatting with the bot. */
+function TelegramPanel() {
+  const [st, setSt] = useState<TgStatus | null>(null);
+  const [code, setCode] = useState<{ code: string; minutes: number; bot: string | null } | null>(null);
+  const [msg, setMsg] = useState<string | null>(null);
+  const load = useCallback(async () => {
+    const r = await staffFetch("/api/telegram/status");
+    if ("problem" in r) return setMsg(r.problem);
+    if (r.res.ok) setSt((await r.res.json()) as TgStatus);
+  }, []);
+  useEffect(() => void load(), [load]);
+
+  async function makeCode() {
+    setMsg(null);
+    const r = await staffFetch("/api/telegram/link-code", { method: "POST", body: {} });
+    if ("problem" in r) return setMsg(r.problem);
+    if (!r.res.ok) return setMsg("Could not make a code.");
+    setCode((await r.res.json()) as { code: string; minutes: number; bot: string | null });
+  }
+  async function unlink(id: string) {
+    if (!confirm("Disconnect this Telegram account? It will no longer be able to change prices.")) return;
+    const r = await staffFetch(`/api/telegram/links/${id}`, { method: "DELETE" });
+    if ("problem" in r) return setMsg(r.problem);
+    void load();
+  }
+
+  if (!st) return <p className="muted">{msg ?? "Loading…"}</p>;
+  if (!st.configured)
+    return (
+      <div className="tab" style={{ display: "block" }}>
+        <b>The Telegram bot isn't switched on yet.</b>
+        <p className="muted">Create a bot with @BotFather in Telegram, then put its token in the server settings as TELEGRAM_BOT_TOKEN (and a long random TELEGRAM_WEBHOOK_SECRET). See docs/telegram-bot.md.</p>
+      </div>
+    );
+  return (
+    <div>
+      {msg && <div className="flash warn">{msg}</div>}
+      <div className="tab" style={{ display: "block", marginBottom: 10 }}>
+        <b>Connect your Telegram</b>
+        <p className="muted">Press the button, then open {st.bot ? <b>@{st.bot}</b> : "the bot"} in Telegram and send it: <b>/link CODE</b>. Then try /help, /newpricebook Grab, /price latte 5.50, /off cheesecake or /edit.</p>
+        <button className="primary sm" onClick={() => void makeCode()}>Make a code</button>
+        {code && (
+          <p>
+            Send <b style={{ fontSize: "1.2em" }}>/link {code.code}</b> to the bot within {code.minutes} minutes. It works once.
+          </p>
+        )}
+      </div>
+      <b>Connected</b>
+      {st.linked.length === 0 && <p className="muted">Nobody yet.</p>}
+      {st.linked.map((l) => (
+        <div className="tab" key={l.telegramId} style={{ display: "block" }}>
+          <b>{l.staffName}</b> <span className="muted">({l.role}) · Telegram {l.name ?? l.telegramId}</span>{" "}
+          <button className="secondary sm" onClick={() => void unlink(l.telegramId)}>Disconnect</button>
+        </div>
+      ))}
     </div>
   );
 }

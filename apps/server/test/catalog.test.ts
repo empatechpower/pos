@@ -1,5 +1,5 @@
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import { PRESETS, resolvePrice, type Catalog } from "@pos/core";
+import { PRESETS, greyedFor, menuFor, resolvePrice, type Catalog } from "@pos/core";
 import { buildApp } from "../src/app.js";
 import { createStaff } from "../src/auth.js";
 import { PgCatalogStore } from "../src/catalog.js";
@@ -211,5 +211,99 @@ describe("adding and editing items", () => {
     const c = await getCatalog();
     expect(c.products.find((p) => p.id === "kopi")?.soldOut).toBe(true);
     expect(resolvePrice(c, "kopi", { outletId: "EV", channelId: "dine-in" })).not.toBeNull();
+  });
+});
+
+describe("turning items off in a pricebook, free items, bulk edits and copying a pricebook", () => {
+  const ctx = (channelId: string) => ({ outletId: "EV", channelId });
+  // Each test here works on its own copy of the standard pricebook and its own channel, whatever other tests did before.
+  let pb = "";
+  let ch = "";
+  beforeAll(async () => {
+    const r = await post("/api/catalog/pricebooks/standard/clone", { name: "Off test", kind: "takeaway" });
+    pb = r.json.id;
+    ch = r.json.channelId;
+  });
+
+  it("an item switched off in a pricebook leaves that channel's menu but keeps its price, and comes back", async () => {
+    const before = resolvePrice(await getCatalog(), "teh", ctx(ch));
+    expect(before).not.toBeNull();
+    expect((await put(`/api/catalog/pricebooks/${pb}/off/teh`, { off: true })).status).toBe(200);
+    const c = await getCatalog();
+    expect(resolvePrice(c, "teh", ctx(ch))).toBeNull();
+    expect(menuFor(c, ctx(ch)).some((m) => m.id === "teh")).toBe(false);
+    expect(greyedFor(c, ctx(ch)).map((p) => p.id)).toContain("teh"); // a till shows it greyed out
+    expect(resolvePrice(c, "teh", ctx("dine-in"))).not.toBeNull(); // other pricebooks are untouched
+    expect(c.pricebooks.find((b) => b.id === pb)!.prices.teh).toBe(before!.priceCents); // the price is still there
+    await put(`/api/catalog/pricebooks/${pb}/off/teh`, { off: false });
+    expect(resolvePrice(await getCatalog(), "teh", ctx(ch))).toEqual(before);
+  });
+
+  it("a price of 0 is a real price: the item is sellable", async () => {
+    expect((await put("/api/catalog/pricebooks/standard/prices/teh", { priceCents: 0 })).status).toBe(200);
+    expect(resolvePrice(await getCatalog(), "teh", ctx("dine-in"))).toMatchObject({ priceCents: 0 });
+    expect(menuFor(await getCatalog(), ctx("dine-in")).some((m) => m.id === "teh" && m.priceCents === 0)).toBe(true);
+    await put("/api/catalog/pricebooks/standard/prices/teh", { priceCents: 200 });
+  });
+
+  it("only managers can switch things off, and only for pricebooks and items that exist", async () => {
+    expect((await put(`/api/catalog/pricebooks/${pb}/off/teh`, { off: true }, cashier)).status).toBe(403);
+    expect((await put(`/api/catalog/pricebooks/${pb}/off/teh`, { off: "yes" })).status).toBe(400);
+    expect((await put("/api/catalog/pricebooks/nope/off/teh", { off: true })).status).toBe(400);
+    expect((await put(`/api/catalog/pricebooks/${pb}/off/ghost`, { off: true })).status).toBe(400);
+  });
+
+  it("a bulk edit applies prices, removals and switches together, and bumps the version once", async () => {
+    const v = (await getCatalog()).version;
+    const r = await post(`/api/catalog/pricebooks/${pb}/bulk`, { prices: { teh: 333, "nasi-lemak": 0 }, off: { teh: true, "nasi-lemak": false } });
+    expect(r.status).toBe(200);
+    expect(r.json).toMatchObject({ version: v + 1, priced: 2, switched: 2 });
+    const c = await getCatalog();
+    const book = c.pricebooks.find((b) => b.id === pb)!;
+    expect(book.prices).toMatchObject({ teh: 333, "nasi-lemak": 0 });
+    expect(book.off).toContain("teh");
+    await post(`/api/catalog/pricebooks/${pb}/bulk`, { off: { teh: false } });
+  });
+
+  it("a bulk edit with one bad entry changes nothing", async () => {
+    const before = await getCatalog();
+    expect((await post(`/api/catalog/pricebooks/${pb}/bulk`, { prices: { teh: 999, "nasi-lemak": -5 } })).status).toBe(400);
+    expect((await post(`/api/catalog/pricebooks/${pb}/bulk`, { prices: { teh: 999, ghost: 100 } })).status).toBe(400);
+    expect((await post(`/api/catalog/pricebooks/${pb}/bulk`, {})).status).toBe(400);
+    const after = await getCatalog();
+    expect(after.version).toBe(before.version);
+    expect(after.pricebooks.find((b) => b.id === pb)!.prices.teh).toBe(before.pricebooks.find((b) => b.id === pb)!.prices.teh);
+    expect((await post(`/api/catalog/pricebooks/${pb}/bulk`, { prices: { teh: 1 } }, cashier)).status).toBe(403);
+  });
+
+  it("copying a pricebook gives the new one every price and switch, and a new channel that uses it", async () => {
+    await put("/api/catalog/pricebooks/standard/off/teh", { off: true });
+    const src = (await getCatalog()).pricebooks.find((b) => b.id === "standard")!;
+    const r = await post("/api/catalog/pricebooks/standard/clone", { name: "Delivery Plus", kind: "delivery" });
+    expect(r.status).toBe(200);
+    const { id, channelId } = r.json;
+    const c = await getCatalog();
+    const copy = c.pricebooks.find((b) => b.id === id)!;
+    expect(copy.name).toBe("Delivery Plus");
+    expect(copy.prices).toEqual(src.prices);
+    expect(copy.off).toEqual(src.off);
+    const ch = c.channels.find((x) => x.id === channelId)!;
+    expect(ch).toMatchObject({ name: "Delivery Plus", kind: "delivery", serviceCharge: false, active: true });
+    expect(c.assignments).toContainEqual({ pricebookId: id, channelId });
+    expect(resolvePrice(c, "nasi-lemak", ctx(channelId))).toMatchObject({ pricebookId: id });
+    // changing the copy does not touch the original
+    await put(`/api/catalog/pricebooks/${id}/prices/nasi-lemak`, { priceCents: 1 });
+    expect((await getCatalog()).pricebooks.find((b) => b.id === "standard")!.prices["nasi-lemak"]).toBe(src.prices["nasi-lemak"]);
+    await put("/api/catalog/pricebooks/standard/off/teh", { off: false });
+  });
+
+  it("copying keeps the source's kind and service charge unless a kind is asked for, and needs a name", async () => {
+    const r = await post("/api/catalog/pricebooks/standard/clone", { name: "Same As Dine In" });
+    const ch = (await getCatalog()).channels.find((x) => x.id === r.json.channelId)!;
+    expect(ch.kind).toBe("dine_in");
+    expect(ch.serviceCharge).toBe(true);
+    expect((await post("/api/catalog/pricebooks/standard/clone", { name: "  " })).status).toBe(400);
+    expect((await post("/api/catalog/pricebooks/nope/clone", { name: "X" })).status).toBe(400);
+    expect((await post("/api/catalog/pricebooks/standard/clone", { name: "X" }, cashier)).status).toBe(403);
   });
 });

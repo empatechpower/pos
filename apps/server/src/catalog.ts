@@ -74,14 +74,17 @@ export class PgCatalogStore implements CatalogStore {
 
   private async read(q: Pick<pg.Pool, "query">): Promise<Catalog> {
     const m = this.merchantId;
-    const [meta, products, books, prices, channels, assigns] = await Promise.all([
+    const [meta, products, books, prices, channels, assigns, offs] = await Promise.all([
       q.query("SELECT version, default_pricebook_id FROM catalog_meta WHERE merchant_id=$1", [m]),
       q.query("SELECT id,name,category,sold_out,points_exempt,description,alt_name,options,image_version FROM products WHERE merchant_id=$1 ORDER BY sort", [m]),
       q.query("SELECT id,name,missing FROM pricebooks WHERE merchant_id=$1 ORDER BY name", [m]),
       q.query("SELECT pricebook_id, product_id, price_cents FROM pricebook_prices WHERE merchant_id=$1", [m]),
       q.query("SELECT id,name,kind,service_charge,active FROM channels WHERE merchant_id=$1 ORDER BY sort", [m]),
       q.query("SELECT pricebook_id, outlet_id, channel_id FROM pricebook_assignments WHERE merchant_id=$1", [m]),
+      q.query("SELECT pricebook_id, product_id FROM pricebook_off WHERE merchant_id=$1", [m]),
     ]);
+    const offBy = new Map<string, string[]>();
+    for (const r of offs.rows) offBy.set(r.pricebook_id as string, [...(offBy.get(r.pricebook_id as string) ?? []), r.product_id as string]);
     if (!meta.rows[0]) throw new Error("catalog not initialised");
     const pb = new Map<string, Record<string, number>>(books.rows.map((b) => [b.id as string, {}]));
     for (const r of prices.rows) {
@@ -104,7 +107,7 @@ export class PgCatalogStore implements CatalogStore {
           options: (p.options as OptionGroup[] | null) ?? undefined,
         }),
       ),
-      pricebooks: books.rows.map((b) => ({ id: b.id, name: b.name, missing: b.missing, prices: pb.get(b.id)! })),
+      pricebooks: books.rows.map((b) => ({ id: b.id, name: b.name, missing: b.missing, prices: pb.get(b.id)!, ...(offBy.get(b.id)?.length ? { off: offBy.get(b.id)! } : {}) })),
       channels: channels.rows.map((c): Channel => ({ id: c.id, name: c.name, kind: c.kind as ChannelKind, serviceCharge: c.service_charge, active: c.active })),
       assignments: assigns.rows.map((a): PricebookAssignment => ({ pricebookId: a.pricebook_id, outletId: a.outlet_id ?? undefined, channelId: a.channel_id ?? undefined })),
     };
@@ -152,6 +155,85 @@ export class PgCatalogStore implements CatalogStore {
         );
       }
       return { pricebookId, productId, previous, priceCents };
+    });
+  }
+
+  /** Switch an item off (or back on) in one pricebook. It keeps its price there. */
+  setOff(pricebookId: string, productId: string, off: boolean) {
+    return this.change(async (c) => {
+      const m = this.merchantId;
+      if (!(await c.query("SELECT 1 FROM pricebooks WHERE merchant_id=$1 AND id=$2", [m, pricebookId])).rowCount) throw new ChangeError("pricebook not found");
+      if (!(await c.query("SELECT 1 FROM products WHERE merchant_id=$1 AND id=$2", [m, productId])).rowCount) throw new ChangeError("product not found");
+      if (off) await c.query("INSERT INTO pricebook_off (merchant_id,pricebook_id,product_id) VALUES ($1,$2,$3) ON CONFLICT DO NOTHING", [m, pricebookId, productId]);
+      else await c.query("DELETE FROM pricebook_off WHERE merchant_id=$1 AND pricebook_id=$2 AND product_id=$3", [m, pricebookId, productId]);
+      return { pricebookId, productId, off };
+    });
+  }
+
+  /**
+   * Change many items in one pricebook in one step: a price in cents (0 is a real price), null to remove the price, and/or
+   * on or off. Either everything is applied or nothing is.
+   */
+  bulkUpdate(pricebookId: string, edits: { prices?: Record<string, number | null>; off?: Record<string, boolean> }) {
+    return this.change(async (c) => {
+      const m = this.merchantId;
+      if (!(await c.query("SELECT 1 FROM pricebooks WHERE merchant_id=$1 AND id=$2", [m, pricebookId])).rowCount) throw new ChangeError("pricebook not found");
+      const known = new Set((await c.query("SELECT id FROM products WHERE merchant_id=$1", [m])).rows.map((r) => r.id as string));
+      let priced = 0, cleared = 0, switched = 0;
+      for (const [pid, cents] of Object.entries(edits.prices ?? {})) {
+        if (!known.has(pid)) throw new ChangeError(`unknown item ${pid}`);
+        if (cents === null) {
+          await c.query("DELETE FROM pricebook_prices WHERE merchant_id=$1 AND pricebook_id=$2 AND product_id=$3", [m, pricebookId, pid]);
+          cleared++;
+        } else {
+          if (!Number.isSafeInteger(cents) || cents < 0) throw new ChangeError(`invalid price for ${pid}`);
+          await c.query(
+            `INSERT INTO pricebook_prices (merchant_id,pricebook_id,product_id,price_cents) VALUES ($1,$2,$3,$4)
+             ON CONFLICT (merchant_id,pricebook_id,product_id) DO UPDATE SET price_cents=EXCLUDED.price_cents`,
+            [m, pricebookId, pid, cents],
+          );
+          priced++;
+        }
+      }
+      for (const [pid, off] of Object.entries(edits.off ?? {})) {
+        if (!known.has(pid)) throw new ChangeError(`unknown item ${pid}`);
+        if (off) await c.query("INSERT INTO pricebook_off (merchant_id,pricebook_id,product_id) VALUES ($1,$2,$3) ON CONFLICT DO NOTHING", [m, pricebookId, pid]);
+        else await c.query("DELETE FROM pricebook_off WHERE merchant_id=$1 AND pricebook_id=$2 AND product_id=$3", [m, pricebookId, pid]);
+        switched++;
+      }
+      return { pricebookId, priced, cleared, switched };
+    });
+  }
+
+  /**
+   * Make a new pricebook that is a copy of another (the default, "Dine in", unless told otherwise): every price and every
+   * on/off switch. It also makes a new channel with the new name, copied from the channel that uses the source book
+   * (its kind and service charge, or the kind asked for), and points that channel at the new book.
+   */
+  clonePricebook(name: string, o: { fromPricebookId?: string; kind?: ChannelKind } = {}) {
+    return this.change(async (c) => {
+      const m = this.merchantId;
+      const from = o.fromPricebookId ?? ((await c.query("SELECT default_pricebook_id FROM catalog_meta WHERE merchant_id=$1", [m])).rows[0].default_pricebook_id as string);
+      const src = await c.query("SELECT missing FROM pricebooks WHERE merchant_id=$1 AND id=$2", [m, from]);
+      if (!src.rows[0]) throw new ChangeError("pricebook to copy not found");
+      const id = shortId("pb");
+      await c.query("INSERT INTO pricebooks (merchant_id,id,name,missing) VALUES ($1,$2,$3,$4)", [m, id, name, src.rows[0].missing]);
+      const prices = await c.query("INSERT INTO pricebook_prices (merchant_id,pricebook_id,product_id,price_cents) SELECT merchant_id, $3, product_id, price_cents FROM pricebook_prices WHERE merchant_id=$1 AND pricebook_id=$2", [m, from, id]);
+      await c.query("INSERT INTO pricebook_off (merchant_id,pricebook_id,product_id) SELECT merchant_id, $3, product_id FROM pricebook_off WHERE merchant_id=$1 AND pricebook_id=$2", [m, from, id]);
+      // The channel to copy: the one that uses the source book, else a dine-in channel, else any.
+      const srcChannel = (
+        await c.query(
+          `SELECT ch.* FROM channels ch
+            WHERE ch.merchant_id=$1 AND (ch.id IN (SELECT channel_id FROM pricebook_assignments WHERE merchant_id=$1 AND pricebook_id=$2 AND channel_id IS NOT NULL) OR ch.kind='dine_in')
+            ORDER BY (ch.id IN (SELECT channel_id FROM pricebook_assignments WHERE merchant_id=$1 AND pricebook_id=$2 AND channel_id IS NOT NULL)) DESC, ch.sort LIMIT 1`,
+          [m, from],
+        )
+      ).rows[0];
+      const channelId = shortId("ch");
+      const kind = (o.kind ?? srcChannel?.kind ?? "dine_in") as ChannelKind;
+      await c.query("INSERT INTO channels (merchant_id,id,name,kind,service_charge,active) VALUES ($1,$2,$3,$4,$5,true)", [m, channelId, name, kind, o.kind && srcChannel && o.kind !== srcChannel.kind ? kind === "dine_in" : !!srcChannel?.service_charge]);
+      await c.query("INSERT INTO pricebook_assignments (merchant_id,pricebook_id,outlet_id,channel_id) VALUES ($1,$2,NULL,$3)", [m, id, channelId]);
+      return { id, name, channelId, kind, copiedPrices: prices.rowCount ?? 0 };
     });
   }
 

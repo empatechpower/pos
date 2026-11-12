@@ -15,14 +15,16 @@ import { Shop } from "./views/Shop";
 import { Orders } from "./views/Orders";
 import { Printers } from "./views/Printers";
 import { Prices } from "./views/Prices";
+import { PricebookEditor } from "./views/PricebookEditor";
+import { TelegramSignIn } from "./views/TelegramSignIn";
 import { Kitchen } from "./views/Kitchen";
 import { Pos } from "./views/Pos";
 import { Queue } from "./views/Queue";
 
-type Route = "pos" | "kitchen" | "queue" | "credit" | "login" | "devices" | "prices" | "printers" | "orders" | "online" | "shop" | "manager";
+type Route = "pos" | "kitchen" | "queue" | "credit" | "login" | "devices" | "prices" | "printers" | "orders" | "online" | "shop" | "manager" | "tg" | "pricebook";
 const routeFromHash = (): Route => {
   const h = location.hash.replace("#/", "").split("?")[0]!.split("/")[0]!;
-  return h === "kitchen" || h === "queue" || h === "credit" || h === "login" || h === "devices" || h === "prices" || h === "printers" || h === "orders" || h === "online" || h === "shop" || h === "manager" || h === "pos" ? h : "manager";
+  return h === "kitchen" || h === "queue" || h === "credit" || h === "login" || h === "devices" || h === "prices" || h === "printers" || h === "orders" || h === "online" || h === "shop" || h === "manager" || h === "pos" || h === "tg" || h === "pricebook" ? h : "manager";
 };
 
 export function App() {
@@ -49,6 +51,9 @@ export function App() {
 
   // The customer ordering page is public: no enrolment, no sign-in, none of the staff chrome.
   if (route === "shop") return <Shop />;
+
+  // A one-time link from the Telegram bot: it enrols this browser and signs the person in, so it comes before the enrolment screen.
+  if (route === "tg") return <TelegramSignIn />;
 
   // Nothing talks to the server until this device is enrolled (queue displays included).
   if (needsEnrollment(device)) return <Enroll online={status.online} />;
@@ -113,6 +118,8 @@ export function App() {
           <Manager config={config} />
         ) : route === "orders" ? (
           <Orders config={config} />
+        ) : route === "pricebook" ? (
+          <PricebookEditor catalog={catalog} bookId={decodeURIComponent(location.hash.replace("#/", "").split("?")[0]!.split("/")[1] ?? "")} />
         ) : route === "prices" ? (
           <Prices catalog={catalog} outletId={config.outletName} />
         ) : route === "devices" ? (

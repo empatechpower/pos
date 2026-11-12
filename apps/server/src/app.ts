@@ -10,6 +10,7 @@ import { BrandStore } from "./brand.js";
 import { PrintStore, validatePrinter, type Printer } from "./print.js";
 import { registerShop } from "./shop.js";
 import { sendMail, type Integrations } from "./integrations.js";
+import { registerTelegram } from "./telegram.js";
 import { MemberStore } from "./members.js";
 import { FailureLimiter } from "./rateLimit.js";
 import type { EventStore, StoredEvent } from "./store.js";
@@ -246,6 +247,10 @@ export async function buildApp({ config, store, db, catalog, catalogAdmin, print
 
   registerShop(app, { db, config, store, catalog, catalogAdmin, brand: new BrandStore(db, merchantId), ingest, members, needs, integrations });
 
+  // ---- the Telegram bot for managing prices ---------------------------------------------------
+
+  if (catalogAdmin) registerTelegram(app, { db, merchantId, outletId: config.outletName, integ: integrations ?? { publicUrl: "" }, cat: catalogAdmin as PgCatalogStore, needs });
+
   // ---- devices ----------------------------------------------------------------------------
 
   /** A new device trades a one-time code for its token. Open route, so attempts are limited per IP. */
@@ -320,6 +325,29 @@ export async function buildApp({ config, store, db, catalog, catalogAdmin, print
       const { name, missing } = req.body ?? {};
       if ((missing && !["show", "hide"].includes(missing)) || (name !== undefined && !name.trim())) return bad(reply, "invalid name or missing rule");
       return changed(req, reply, "pricebook.update", () => cat.updatePricebook(req.params.id, { name: name?.trim(), missing }));
+    });
+
+    /** Switch an item off (or back on) in one pricebook: hidden from online ordering, greyed out on a till. It keeps its price. */
+    app.put<{ Params: { id: string; productId: string }; Body: { off?: boolean } }>("/api/catalog/pricebooks/:id/off/:productId", manage, async (req, reply) => {
+      if (typeof req.body?.off !== "boolean") return bad(reply, "off must be true or false");
+      return changed(req, reply, "pricebook.off", () => cat.setOff(req.params.id, req.params.productId, req.body!.off!));
+    });
+
+    /** Edit many items in one pricebook at once: { prices: { itemId: cents | null }, off: { itemId: true | false } }. All or nothing. */
+    app.post<{ Params: { id: string }; Body: { prices?: Record<string, number | null>; off?: Record<string, boolean> } }>("/api/catalog/pricebooks/:id/bulk", manage, async (req, reply) => {
+      const { prices, off } = req.body ?? {};
+      if ((!prices && !off) || Object.keys(prices ?? {}).length + Object.keys(off ?? {}).length > 2000) return bad(reply, "send prices and/or off, up to 2000 changes");
+      for (const v of Object.values(prices ?? {})) if (v !== null && !isCents(v)) return bad(reply, "every price must be a whole number of cents, 0 or more, or null to remove");
+      for (const v of Object.values(off ?? {})) if (typeof v !== "boolean") return bad(reply, "off values must be true or false");
+      return changed(req, reply, "pricebook.bulk", () => cat.bulkUpdate(req.params.id, { prices, off }));
+    });
+
+    /** A new pricebook that copies this one (every price and switch), with a new channel of the same name pointed at it. */
+    app.post<{ Params: { id: string }; Body: { name?: string; kind?: ChannelKind } }>("/api/catalog/pricebooks/:id/clone", manage, async (req, reply) => {
+      const name = req.body?.name?.trim();
+      if (!name || name.length > 40) return bad(reply, "a name of up to 40 characters is required");
+      if (req.body?.kind && !KINDS.includes(req.body.kind)) return bad(reply, "unknown channel kind");
+      return changed(req, reply, "pricebook.clone", () => cat.clonePricebook(name, { fromPricebookId: req.params.id, kind: req.body?.kind }));
     });
 
     app.post<{ Body: { id?: string; name?: string; kind?: ChannelKind; serviceCharge?: boolean; active?: boolean } }>("/api/catalog/channels", manage, async (req, reply) => {

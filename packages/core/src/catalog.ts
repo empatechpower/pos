@@ -39,6 +39,8 @@ export interface Pricebook {
   prices: Record<string, Cents>;
   /** A product with no price here can never be ordered; this decides whether it is hidden or shown (blocked). */
   missing: "show" | "hide";
+  /** Products switched off in this book: hidden from online ordering, greyed out on the till. They keep their price here. A price of 0 is a real price: that item is sellable. */
+  off?: string[];
 }
 
 export type Fulfilment = "dine_in" | "takeaway" | "delivery";
@@ -107,6 +109,7 @@ export interface ResolvedPrice {
 export function resolvePrice(catalog: Catalog, productId: string, ctx: PriceContext): ResolvedPrice | null {
   const book = pricebookChain(catalog, ctx)[0];
   if (!book || !Object.prototype.hasOwnProperty.call(book.prices, productId)) return null;
+  if (book.off?.includes(productId)) return null;
   return { priceCents: book.prices[productId]!, pricebookId: book.id };
 }
 
@@ -114,7 +117,15 @@ export function resolvePrice(catalog: Catalog, productId: string, ctx: PriceCont
 export function blockedFor(catalog: Catalog, ctx: PriceContext): Product[] {
   const book = pricebookChain(catalog, ctx)[0];
   if (!book || book.missing === "hide") return [];
-  return catalog.products.filter((p) => !Object.prototype.hasOwnProperty.call(book.prices, p.id));
+  return catalog.products.filter((p) => !Object.prototype.hasOwnProperty.call(book.prices, p.id) && !book.off?.includes(p.id));
+}
+
+/** Products switched off here, for a till to show greyed out. Online ordering simply leaves them off the menu. */
+export function greyedFor(catalog: Catalog, ctx: PriceContext): Product[] {
+  const book = pricebookChain(catalog, ctx)[0];
+  if (!book?.off?.length) return [];
+  const off = new Set(book.off);
+  return catalog.products.filter((p) => off.has(p.id));
 }
 
 export interface MenuEntry extends Product {
@@ -151,6 +162,7 @@ export function validateCatalog(c: Catalog): string[] {
       if (!products.has(pid)) problems.push(`pricebook ${b.id} prices unknown product ${pid}`);
       if (!Number.isSafeInteger(cents) || cents < 0) problems.push(`pricebook ${b.id} has an invalid price for ${pid}`);
     }
+    for (const pid of b.off ?? []) if (!products.has(pid)) problems.push(`pricebook ${b.id} switches off unknown product ${pid}`);
   }
   for (const p of c.products) {
     if (p.description && p.description.length > 200) problems.push(`${p.id}: description is too long`);

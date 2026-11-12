@@ -64,6 +64,17 @@ export async function enroll(db: Db, merchantId: string, code: string, name: str
   return { token, device: toDevice(r.rows[0]), enrolledBy: c.created_by };
 }
 
+/**
+ * A device made without an enrollment code, for a browser opened from a one-time Telegram link. Older devices made the same way
+ * for the same person are switched off, so there is one at a time and no pile of them.
+ */
+export async function createLinkedDevice(db: Db, merchantId: string, outletId: string, name: string, enrolledBy: string): Promise<{ token: string; device: Device }> {
+  await db.query("UPDATE devices SET active=false WHERE merchant_id=$1 AND name=$2 AND enrolled_by=$3 AND active", [merchantId, name, enrolledBy]);
+  const token = randomBytes(32).toString("base64url");
+  const r = await db.query("INSERT INTO devices (merchant_id, outlet_id, name, token_hash, enrolled_by) VALUES ($1,$2,$3,$4,$5) RETURNING *", [merchantId, outletId, name, sha256(token), enrolledBy]);
+  return { token, device: toDevice(r.rows[0]) };
+}
+
 export async function authenticateDevice(db: Db, token: string | undefined): Promise<Device | null> {
   if (!token) return null;
   const r = await db.query(

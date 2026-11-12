@@ -58,6 +58,14 @@ export async function signIn(code: string, pin: string): Promise<{ ok: true } | 
   }
 }
 
+/** Start a session the server has already granted (a one-time Telegram link), with no PIN typed. */
+export function adoptSession(token: string, info: StaffInfo) {
+  localStorage.setItem(LS_TOKEN, token);
+  localStorage.setItem(LS_STAFF, JSON.stringify(info));
+  staff = info;
+  emit();
+}
+
 export async function signOut() {
   const headers = authHeader();
   clearSession();

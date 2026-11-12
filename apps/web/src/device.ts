@@ -68,6 +68,16 @@ export async function refreshDeviceMode(): Promise<void> {
   }
 }
 
+/** Take on a device made for us by the server (a one-time Telegram link), the same way enrolling with a code does. */
+export async function adoptLinkedDevice(token: string, deviceId: string): Promise<void> {
+  const previous = localStorage.getItem(LS_DEVICE_ID);
+  localStorage.setItem(LS_DEVICE_ID, deviceId);
+  if (previous && previous !== deviceId) await adoptDeviceId(deviceId);
+  localStorage.setItem(LS_TOKEN, token);
+  localStorage.setItem(LS_REQUIRED, "1");
+  set({ token, rejected: false, required: true });
+}
+
 export async function enrollDevice(code: string, name: string): Promise<{ ok: true } | { ok: false; reason: "invalid" | "limited" | "unavailable" }> {
   try {
     const res = await fetch("/api/devices/enroll", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ code, name }) });

@@ -6,6 +6,7 @@ import { buildApp } from "./app.js";
 import { PgCatalogStore, StaticCatalogStore } from "./catalog.js";
 import { BrandStore } from "./brand.js";
 import { loadIntegrations } from "./integrations.js";
+import { setupTelegramWebhook } from "./telegram.js";
 import { seedCatalog } from "./catalogSeed.js";
 import { loadBaileyPatch } from "./seed.js";
 import { PrintStore } from "./print.js";
@@ -50,3 +51,5 @@ if (existsSync(webDist)) {
 }
 
 await app.listen({ port: Number(process.env.PORT ?? 8787), host: "0.0.0.0" });
+// If the Telegram bot is set up, tell Telegram where to send messages. Safe to repeat on every start.
+if (db) void setupTelegramWebhook(loadIntegrations(process.env));

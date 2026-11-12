@@ -102,6 +102,7 @@ export function Prices({ catalog, outletId }: { catalog: Catalog; outletId: stri
           ))}
         </select>
       </label>
+      <p><a href={`#/pricebook/${book.id}`}>Edit all items in a table →</a></p>
       <div className="row">
         {book.id !== catalog.defaultPricebookId && (
           <button className="secondary sm" onClick={() => void send("PUT", "default-pricebook", { pricebookId: book.id }, `${book.name} is now the default.`)}>Make default</button>
@@ -134,6 +135,9 @@ export function Prices({ catalog, outletId }: { catalog: Catalog; outletId: stri
                 aria-label={`Price for ${p.name}`}
               />
               <span className="muted cur">{own === undefined ? (book.missing === "hide" ? "not sold" : "default") : formatMoney(own)}</span>
+              {own !== undefined && (
+                <button className={book.off?.includes(p.id) ? "secondary sm" : "primary sm"} aria-pressed={!book.off?.includes(p.id)} title={book.off?.includes(p.id) ? "Off in this pricebook: hidden online, greyed out on the till. Press to switch on." : "On. Press to switch off in this pricebook (hides it online, greys it out on the till)."} onClick={() => void send("PUT", `pricebooks/${book.id}/off/${p.id}`, { off: !book.off?.includes(p.id) }, book.off?.includes(p.id) ? `${p.name} is back on in ${book.name}.` : `${p.name} is off in ${book.name}.`)}>{book.off?.includes(p.id) ? "Off" : "On"}</button>
+              )}
               {own !== undefined && book.id !== catalog.defaultPricebookId && (
                 <button className="secondary sm" title="Remove this price" onClick={() => void send("PUT", `pricebooks/${book.id}/prices/${p.id}`, { priceCents: null }, "Price removed.")}>✕</button>
               )}

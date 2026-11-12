@@ -108,6 +108,17 @@ export async function login(db: Db, merchantId: string, code: string, pin: strin
   return { ok: true, token, staff: toStaff(row), expiresAt };
 }
 
+/** Open a staff session without a PIN, for a sign-in that has already been proven another way (a one-time code from Telegram). */
+export async function startSessionFor(db: Db, merchantId: string, staffId: string, via: string): Promise<{ token: string; staff: Staff; expiresAt: Date } | null> {
+  const r = await db.query("SELECT * FROM staff WHERE id=$1 AND merchant_id=$2 AND active", [staffId, merchantId]);
+  if (!r.rows[0]) return null;
+  const token = randomBytes(32).toString("base64url");
+  const expiresAt = new Date(Date.now() + SESSION_HOURS * 3_600_000);
+  await db.query("INSERT INTO sessions (token_hash, staff_id, expires_at) VALUES ($1,$2,$3)", [sha256(token), staffId, expiresAt]);
+  await audit(db, merchantId, staffId, "auth.login", { via });
+  return { token, staff: toStaff(r.rows[0]), expiresAt };
+}
+
 export async function authenticate(db: Db, token: string | undefined): Promise<Staff | null> {
   if (!token) return null;
   const r = await db.query(
