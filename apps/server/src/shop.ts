@@ -10,6 +10,7 @@ import { FailureLimiter } from "./rateLimit.js";
 import { normaliseEmail, type MemberStore } from "./members.js";
 import { authorizeUrl, createStripeCheckout, createStripeRefund, fetchProfile, sendMail, newState, newVerifier, sameSecret, verifyStripeSignature, type Integrations, type OAuthProvider } from "./integrations.js";
 import type { EventStore } from "./store.js";
+import { createHash } from "node:crypto";
 
 /** The server's own device id on events it creates for customers. */
 export const SHOP_DEVICE = "shop";
@@ -380,6 +381,8 @@ export function registerShop(app: FastifyInstance, d: ShopDeps) {
     couponId?: string;
     /** Pay the whole order from the member's prepaid credit. Needs a signed-in member. The order is then paid and accepted at once. */
     payWithCredit?: boolean;
+    /** Made by the phone for this checkout attempt; required with credit. A retry with the same key never debits twice. */
+    idempotencyKey?: string;
   }
 
   /** A customer places an order. Held for staff to accept; nothing reaches the kitchen yet. */
@@ -432,8 +435,39 @@ export function registerShop(app: FastifyInstance, d: ShopDeps) {
     // The minimum spend is on the items subtotal only (before service charge, tax and deposits).
     if (coupon && quote.priced.couponIneligible) return reply.code(400).send({ error: "coupon_not_eligible", shortfallCents: coupon.minSpendCents - quote.priced.subtotal });
     if (b.payWithCredit && !member) return reply.code(401).send({ error: "sign_in_to_use_credit" });
-    const orderId = newId();
-    return serially(async () => {
+    let orderId = newId();
+
+    // A credit purchase carries an idempotency key made by the customer's phone for this attempt. A retry (double tap,
+    // timeout, refresh) with the same key gets the first result back and never a second debit; the same key with
+    // different content is refused. Without one, a credit purchase is not accepted.
+    let idemKey: string | null = null;
+    if (b.payWithCredit && member) {
+      const key = String(b.idempotencyKey ?? "");
+      if (!/^[\w-]{8,64}$/.test(key)) return reply.code(400).send({ error: "idempotency_key_required" });
+      const hash = createHash("sha256").update(JSON.stringify({ m: member.id, c: b.channelId, i: items.map((x) => [x.productId, x.qty, x.options]), s: table ?? clean(b.spot, 30) ?? null, p: b.usePoints ?? null, k: b.couponId ?? null })).digest("hex");
+      const ins = await d.db.query("INSERT INTO purchase_requests (merchant_id, idem_key, request_hash, member_id, order_id) VALUES ($1,$2,$3,$4,$5) ON CONFLICT DO NOTHING", [merchantId, key, hash, member.id, orderId]);
+      if (!ins.rowCount) {
+        const ex = (await d.db.query("SELECT * FROM purchase_requests WHERE merchant_id=$1 AND idem_key=$2", [merchantId, key])).rows[0];
+        if (ex.request_hash !== hash || ex.member_id !== member.id) return reply.code(409).send({ error: "idempotency_key_reused" });
+        if (ex.state === "done") return { ...(ex.result as object), replayed: true };
+        if (Date.now() - new Date(ex.created_at).getTime() < 120_000) return reply.code(409).send({ error: "purchase_in_progress", orderId: ex.order_id });
+        // An attempt that never finished. If its order exists, hand that back; if not, undo any debit and start over with a new order id.
+        if ((await d.store.eventsForOrder(ex.order_id)).length > 0) {
+          const o = reduceOrder(ex.order_id, await d.store.eventsForOrder(ex.order_id))!;
+          const result = { orderId: o.orderId, queueNumber: o.queueNumber, totalCents: orderTotals(o, d.config).total, recovered: true };
+          await d.db.query("UPDATE purchase_requests SET state='done', result=$3 WHERE merchant_id=$1 AND idem_key=$2", [merchantId, key, JSON.stringify(result)]);
+          return result;
+        }
+        await reverseUnfinishedDebit(ex.order_id);
+        await d.db.query("UPDATE purchase_requests SET order_id=$3, created_at=now() WHERE merchant_id=$1 AND idem_key=$2", [merchantId, key, orderId]);
+      }
+      idemKey = key;
+    }
+
+    const dropAttempt = () => (idemKey ? d.db.query("DELETE FROM purchase_requests WHERE merchant_id=$1 AND idem_key=$2 AND state='pending'", [merchantId, idemKey]) : Promise.resolve());
+    let out: unknown;
+    try {
+    out = await serially(async () => {
     const taken = await activeQueueNumbers(d.db, merchantId);
     const queueNumber = collectionNumber(phone, taken) ?? (await nextOnlineNumber(d.db, merchantId));
     const ts = Date.now();
@@ -487,7 +521,59 @@ export function registerShop(app: FastifyInstance, d: ShopDeps) {
     }
     return { orderId, queueNumber, totalCents: quote.priced.total, pointsUsed, couponDiscountCents: quote.priced.couponDiscount, paidWithCreditCents: creditCents, creditBalanceCents: member ? await balanceOf(d.db, merchantId, member.id) : undefined, status: creditCents > 0 ? "queued" : "received" };
     });
+    } catch (e) {
+      await dropAttempt();
+      throw e;
+    }
+    if (idemKey) {
+      if (reply.statusCode >= 400) await dropAttempt();
+      else await d.db.query("UPDATE purchase_requests SET state='done', result=$3 WHERE merchant_id=$1 AND idem_key=$2", [merchantId, idemKey, JSON.stringify(out)]);
+    }
+    return out;
   });
+
+  /** After a timeout the phone asks what became of its attempt, by key. Only the member who made it can ask. */
+  if (members) {
+    app.get<{ Params: { key: string } }>("/api/shop/purchases/:key", async (req, reply) => {
+      const m = await members.fromToken(bearer(req));
+      if (!m) return reply.code(401).send({ error: "not_signed_in" });
+      const r = (await d.db.query("SELECT state, order_id, result, member_id FROM purchase_requests WHERE merchant_id=$1 AND idem_key=$2", [merchantId, req.params.key])).rows[0];
+      if (!r || r.member_id !== m.id) return reply.code(404).send({ error: "not_found" });
+      return { state: r.state, orderId: r.order_id, result: r.result ?? null };
+    });
+  }
+
+  /** Give back a debit whose order never got recorded. Safe to call twice: the credit-back has one fixed key per order. */
+  async function reverseUnfinishedDebit(orderId: string) {
+    const r = await d.db.query(
+      `SELECT w.customer_id, -e.amount_cents AS cents FROM ledger_entries e JOIN wallets w ON w.id=e.wallet_id
+       WHERE w.merchant_id=$1 AND e.kind='spend' AND e.idempotency_key=$2`,
+      [merchantId, `credit-order:${orderId}`],
+    );
+    for (const row of r.rows) {
+      await refundCredit(d.db, { merchantId, customerId: row.customer_id as string, amountCents: Number(row.cents), idempotencyKey: `credit-back:${orderId}`, orderId, deviceId: SHOP_DEVICE, outletId: d.config.outletName, note: "Order was never recorded: debit reversed" });
+    }
+  }
+
+  /** A debit with no order behind it (the server stopped between the two steps) is reversed after two minutes. */
+  async function sweepOrphanDebits() {
+    const r = await d.db.query(
+      `SELECT e.order_id FROM ledger_entries e JOIN wallets w ON w.id=e.wallet_id
+       WHERE w.merchant_id=$1 AND e.kind='spend' AND e.idempotency_key LIKE 'credit-order:%' AND e.created_at < now() - interval '2 minutes'
+         AND NOT EXISTS (SELECT 1 FROM ledger_entries r WHERE r.wallet_id=e.wallet_id AND r.idempotency_key = 'credit-back:' || e.order_id)
+         AND NOT EXISTS (SELECT 1 FROM events ev WHERE ev.merchant_id=$1 AND ev.order_id = e.order_id)`,
+      [merchantId],
+    );
+    for (const row of r.rows) {
+      await reverseUnfinishedDebit(row.order_id as string);
+      console.log(`[credit] reversed a debit with no order: ${row.order_id}`);
+    }
+    return r.rowCount ?? 0;
+  }
+  void sweepOrphanDebits().catch(() => undefined);
+  const sweeper = setInterval(() => void sweepOrphanDebits().catch(() => undefined), 5 * 60_000);
+  sweeper.unref();
+  app.addHook("onClose", async () => clearInterval(sweeper));
 
   /** Status for the customer. The order id is a long random value, so only whoever placed it has it. */
   app.get<{ Params: { id: string } }>("/api/shop/orders/:id", async (req, reply) => {

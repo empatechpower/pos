@@ -144,6 +144,7 @@ describe("money needs a signed-in staff member with the right role", () => {
     const cashier = await signIn("C1", "3333");
     const manager = await signIn("MGR", "222222");
     const body = { customerId: "w1", amountCents: 100, orderId: "o1" };
+    expect((await post("/api/wallet/spend", { ...body, idempotencyKey: key() }, cashier)).statusCode).toBe(200); // the order the refund reverses
     expect((await post("/api/wallet/refund", { ...body, idempotencyKey: key() }, cashier)).statusCode).toBe(403);
     expect((await post("/api/wallet/refund", { ...body, idempotencyKey: key() }, manager)).statusCode).toBe(200);
   });

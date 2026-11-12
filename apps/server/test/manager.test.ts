@@ -199,7 +199,7 @@ describe("importing a list of members", () => {
 });
 
 describe("paying for an order with member credit", () => {
-  const order = (token: string | undefined, o: object = {}) => call("/api/shop/orders", { staff: token, device: "", body: { channelId: "take-away", items: [{ productId: "kaya-toast", qty: 2 }], customerPhone: "9123 4567", ...o } });
+  const order = (token: string | undefined, o: object = {}) => call("/api/shop/orders", { staff: token, device: "", body: { channelId: "take-away", items: [{ productId: "kaya-toast", qty: 2 }], customerPhone: "9123 4567", ...((o as { payWithCredit?: boolean }).payWithCredit ? { idempotencyKey: `k-${++ip}-${Math.random().toString(36).slice(2)}` } : {}), ...o } });
   const creditOf = async (email: string) => (await list(email)).json.members[0].creditCents as number;
 
   it("takes the credit, marks the order paid and accepted, and it is ready for the kitchen", async () => {

@@ -613,6 +613,33 @@ export const PHRASES: Record<string, string[]> = {
   "Ihr Guthaben reicht für diese Bestellung nicht aus. Bitte am Tresen aufladen.",
   "இந்த ஆர்டருக்கு உங்கள் கிரெடிட் போதாது. கவுண்டரில் டாப் அப் செய்யவும்."
  ],
+ "Your order is still being placed. Please wait a moment, then tap Pay again. You will not be charged twice.": [
+  "Pesanan anda masih diproses. Sila tunggu sebentar, kemudian tekan Bayar semula. Anda tidak akan dicaj dua kali.",
+  "Pesanan Anda masih diproses. Mohon tunggu sebentar, lalu ketuk Bayar lagi. Anda tidak akan dikenakan biaya dua kali.",
+  "您的订单仍在处理中。请稍候，然后再次点按“付款”。不会重复扣款。",
+  "注文を処理中です。少しお待ちいただき、もう一度お支払いをタップしてください。二重に請求されることはありません。",
+  "Votre commande est en cours. Patientez un instant, puis appuyez de nouveau sur Payer. Vous ne serez pas débité deux fois.",
+  "Ihre Bestellung wird noch aufgegeben. Bitte kurz warten und erneut auf Bezahlen tippen. Sie werden nicht doppelt belastet.",
+  "உங்கள் ஆர்டர் இன்னும் பதிவாகிறது. சற்று காத்திருந்து மீண்டும் செலுத்து என்பதைத் தட்டவும். இரண்டு முறை கட்டணம் வசூலிக்கப்படாது."
+ ],
+ "Something changed on your order. Please check it and tap Pay again.": [
+  "Sesuatu telah berubah pada pesanan anda. Sila semak dan tekan Bayar semula.",
+  "Ada perubahan pada pesanan Anda. Silakan periksa dan ketuk Bayar lagi.",
+  "您的订单有变动。请检查后再次点按“付款”。",
+  "注文内容が変更されました。ご確認のうえ、もう一度お支払いをタップしてください。",
+  "Votre commande a changé. Vérifiez-la et appuyez de nouveau sur Payer.",
+  "An Ihrer Bestellung hat sich etwas geändert. Bitte prüfen und erneut auf Bezahlen tippen.",
+  "உங்கள் ஆர்டரில் மாற்றம் உள்ளது. சரிபார்த்து மீண்டும் செலுத்து என்பதைத் தட்டவும்."
+ ],
+ "We lost the connection, so we cannot tell if your order went through. Tap Pay again: you will not be charged twice.": [
+  "Sambungan terputus, jadi kami tidak pasti sama ada pesanan anda berjaya. Tekan Bayar semula: anda tidak akan dicaj dua kali.",
+  "Koneksi terputus, jadi kami tidak tahu apakah pesanan Anda berhasil. Ketuk Bayar lagi: Anda tidak akan dikenakan biaya dua kali.",
+  "连接中断，我们无法确认订单是否已提交。请再次点按“付款”：不会重复扣款。",
+  "接続が切れたため、注文が完了したか確認できません。もう一度お支払いをタップしてください。二重に請求されることはありません。",
+  "La connexion a été perdue, nous ne pouvons pas savoir si votre commande est passée. Appuyez de nouveau sur Payer : vous ne serez pas débité deux fois.",
+  "Die Verbindung ist abgebrochen, wir wissen nicht, ob Ihre Bestellung angekommen ist. Tippen Sie erneut auf Bezahlen: Sie werden nicht doppelt belastet.",
+  "இணைப்பு துண்டிக்கப்பட்டதால் உங்கள் ஆர்டர் சென்றதா எனத் தெரியவில்லை. மீண்டும் செலுத்து என்பதைத் தட்டவும்: இரண்டு முறை கட்டணம் வசூலிக்கப்படாது."
+ ],
  "in bag": [
   "dalam beg",
   "di tas",

@@ -516,6 +516,48 @@ export async function buildApp({ config, store, db, catalog, catalogAdmin, print
     balanceCents: await balanceOf(db, merchantId, req.params.customerId),
   }));
 
+  // Refunds are checked against what the order took, one at a time, so two at once cannot both pass the check.
+  let refundChain: Promise<void> = Promise.resolve();
+  const refundLock = () => {
+    let release!: () => void;
+    const mine = new Promise<void>((r) => (release = r));
+    const prev = refundChain;
+    refundChain = refundChain.then(() => mine);
+    return prev.then(() => release);
+  };
+
+  /**
+   * The books, for the event's close: opening balances + other credits - debits + reversals must equal what the wallets hold now,
+   * and every wallet must equal its own entries.
+   */
+  app.get("/api/wallet/reconciliation", { preHandler: needs("audit.read") }, async () => {
+    const t = await db.query(
+      `SELECT COALESCE(SUM(e.amount_cents) FILTER (WHERE e.kind='topup' AND e.idempotency_key LIKE 'open:%'),0) AS opening,
+              COALESCE(SUM(e.amount_cents) FILTER (WHERE e.kind='topup' AND e.idempotency_key NOT LIKE 'open:%'),0) AS credits,
+              COALESCE(SUM(e.amount_cents) FILTER (WHERE e.kind='spend'),0) AS debits,
+              COALESCE(SUM(e.amount_cents) FILTER (WHERE e.kind='refund'),0) AS reversals,
+              COALESCE(SUM(e.amount_cents) FILTER (WHERE e.kind='adjust'),0) AS adjustments,
+              COUNT(*) AS entries
+       FROM ledger_entries e JOIN wallets w ON w.id=e.wallet_id WHERE w.merchant_id=$1`,
+      [merchantId],
+    );
+    const c = await db.query("SELECT COALESCE(SUM(balance_cents),0) AS closing, COUNT(*) AS wallets FROM wallets WHERE merchant_id=$1", [merchantId]);
+    const bad = await db.query(
+      `SELECT w.customer_id, w.balance_cents AS stored, COALESCE(SUM(e.amount_cents),0) AS rebuilt
+       FROM wallets w LEFT JOIN ledger_entries e ON e.wallet_id=w.id WHERE w.merchant_id=$1 GROUP BY w.id HAVING w.balance_cents <> COALESCE(SUM(e.amount_cents),0)`,
+      [merchantId],
+    );
+    const r = t.rows[0];
+    const opening = Number(r.opening), credits = Number(r.credits), debits = Number(r.debits), reversals = Number(r.reversals), adjustments = Number(r.adjustments), closing = Number(c.rows[0].closing);
+    return {
+      openingCents: opening, creditsCents: credits, debitsCents: debits, reversalsCents: reversals, adjustmentsCents: adjustments, closingCents: closing,
+      wallets: Number(c.rows[0].wallets), entries: Number(r.entries),
+      // debits are stored negative, so the sum of the parts is the closing balance
+      balanced: opening + credits + debits + reversals + adjustments === closing && bad.rowCount === 0,
+      mismatchedWallets: bad.rows.map((x) => ({ customerId: x.customer_id as string, storedCents: Number(x.stored), rebuiltCents: Number(x.rebuilt) })),
+    };
+  });
+
   const routes = [
     ["topup", topUp, "wallet.topup"],
     ["spend", spend, "wallet.spend"],
@@ -528,6 +570,26 @@ export async function buildApp({ config, store, db, catalog, catalogAdmin, print
       const staff = req.staff!;
       if (path === "topup" && staff.role === "cashier" && b!.amountCents! > CASHIER_TOPUP_LIMIT_CENTS) {
         return reply.code(403).send({ error: "over_limit", limitCents: CASHIER_TOPUP_LIMIT_CENTS });
+      }
+      // A refund is a linked reversal: it must name the order it reverses, and cannot exceed what that order took from this wallet.
+      if (path === "refund") {
+        if (!b!.orderId) return reply.code(400).send({ error: "orderId_required", message: "A refund must name the order it reverses." });
+        const release = await refundLock();
+        try {
+          const t = await db.query(
+            `SELECT COALESCE(-SUM(e.amount_cents) FILTER (WHERE e.kind='spend'),0) AS spent, COALESCE(SUM(e.amount_cents) FILTER (WHERE e.kind='refund'),0) AS refunded
+             FROM ledger_entries e JOIN wallets w ON w.id=e.wallet_id WHERE w.merchant_id=$1 AND w.customer_id=$2 AND e.order_id=$3 AND NOT (e.kind='refund' AND e.idempotency_key=$4)`,
+            [merchantId, b!.customerId, b!.orderId, b!.idempotencyKey],
+          );
+          const remaining = Number(t.rows[0].spent) - Number(t.rows[0].refunded);
+          const already = await db.query("SELECT 1 FROM ledger_entries e JOIN wallets w ON w.id=e.wallet_id WHERE w.merchant_id=$1 AND w.customer_id=$2 AND e.idempotency_key=$3", [merchantId, b!.customerId, b!.idempotencyKey]);
+          if (!already.rowCount && b!.amountCents! > remaining) return reply.code(409).send({ ok: false, error: "over_refund", remainingCents: Math.max(0, remaining) });
+          const r = await refund(db, { merchantId, customerId: b!.customerId!, amountCents: b!.amountCents!, idempotencyKey: b!.idempotencyKey!, orderId: b!.orderId, deviceId: req.device!.id, outletId: config.outletName, staffId: staff.id, note: b!.note });
+          if (r.ok && !r.replayed) await audit(db, merchantId, staff.id, "wallet.refund", { customerId: b!.customerId, amountCents: b!.amountCents, orderId: b!.orderId });
+          return r.ok ? r : reply.code(409).send(r);
+        } finally {
+          release();
+        }
       }
       const r = await fn(db, {
         merchantId,
@@ -586,7 +648,7 @@ export async function buildApp({ config, store, db, catalog, catalogAdmin, print
      * Add many members from a file. Each row is {name, email, phone, credit} (credit in dollars). A person who is already
      * a member (same email or phone) is left alone and gets no credit, so sending the same file twice changes nothing.
      */
-    app.post<{ Body: { rows?: Array<{ name?: unknown; email?: unknown; phone?: unknown; credit?: unknown }> } }>("/api/members/import", { preHandler: needs("wallet.refund") }, async (req, reply) => {
+    app.post<{ Body: { source?: string; rows?: Array<{ name?: unknown; email?: unknown; phone?: unknown; credit?: unknown }> } }>("/api/members/import", { preHandler: needs("wallet.refund") }, async (req, reply) => {
       const rows = req.body?.rows;
       if (!Array.isArray(rows) || rows.length === 0) return reply.code(400).send({ error: "rows[] required" });
       if (rows.length > 1000) return reply.code(400).send({ error: "too_many_rows", max: 1000 });
@@ -603,12 +665,12 @@ export async function buildApp({ config, store, db, catalog, catalogAdmin, print
         if (!m.created) { existed++; results.push({ row: i + 1, status: "exists" }); continue; }
         created++;
         if (cents > 0) {
-          await topUp(db, { merchantId, customerId: m.member.id, amountCents: cents, idempotencyKey: `open:${m.member.id}`, deviceId: req.device!.id, outletId: config.outletName, staffId: req.staff!.id, note: "Opening credit (import)" });
+          await topUp(db, { merchantId, customerId: m.member.id, amountCents: cents, idempotencyKey: `open:${m.member.id}`, deviceId: req.device!.id, outletId: config.outletName, staffId: req.staff!.id, note: `Opening credit (import${req.body?.source ? `: ${String(req.body.source).slice(0, 80)}` : ""})` });
           credited += cents;
         }
         results.push({ row: i + 1, status: "created", creditCents: cents });
       }
-      await audit(db, merchantId, req.staff!.id, "member.import", { rows: rows.length, created, existed, invalid, creditedCents: credited });
+      await audit(db, merchantId, req.staff!.id, "member.import", { source: req.body?.source ?? null, rows: rows.length, created, existed, invalid, creditedCents: credited });
       return { created, existed, invalid, creditedCents: credited, results };
     });
 

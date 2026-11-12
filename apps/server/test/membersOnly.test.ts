@@ -53,7 +53,7 @@ const phoneIn = async (phone: string) => {
   await call("/api/shop/auth/phone/simulate", { body: { phone, code: s.json.code }, device: "" });
   return (await call(`/api/shop/auth/phone/${s.json.id}`, { device: "" })).json as { token: string; member: { id: string } };
 };
-const order = (token: string | undefined, o: object = {}) => call("/api/shop/orders", { staff: token, device: "", body: { channelId: "take-away", items: [{ productId: "kaya-toast", qty: 2 }], ...o } });
+const order = (token: string | undefined, o: object = {}) => call("/api/shop/orders", { staff: token, device: "", body: { channelId: "take-away", items: [{ productId: "kaya-toast", qty: 2 }], ...((o as { payWithCredit?: boolean }).payWithCredit ? { idempotencyKey: `k-${++ip}-${Math.random().toString(36).slice(2)}` } : {}), ...o } });
 
 describe("members-only shop: phone sign-in and credit only", () => {
   it("says so, and switches email and Google sign-in off", async () => {

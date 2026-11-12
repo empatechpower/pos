@@ -347,7 +347,7 @@ function UploadMembers({ onDone }: { onDone: () => void }) {
     const total = { created: 0, existed: 0, invalid: 0, creditedCents: 0, bad: [] as Array<{ row: number; why: string }> };
     for (let i = 0; i < rows.length; i += 500) {
       const chunk = rows.slice(i, i + 500);
-      const r = await staffFetch("/api/members/import", { body: { rows: chunk } });
+      const r = await staffFetch("/api/members/import", { body: { rows: chunk, source: file } });
       if ("problem" in r) { setBusy(false); setResult(total); return setProblem(`${r.problem} ${i} of ${rows.length} rows were done; sending the file again is safe, people already added are skipped.`); }
       if (!r.res.ok) { setBusy(false); setResult(total); return setProblem(`The server refused part of the file (error ${r.res.status}). ${i} of ${rows.length} rows were done; sending it again is safe.`); }
       const j = (await r.res.json()) as { created: number; existed: number; invalid: number; creditedCents: number; results: Array<{ row: number; status: string; why?: string }> };

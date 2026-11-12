@@ -183,6 +183,31 @@ const photo = (p: { id: string; imageVersion?: number }) => (p.imageVersion ? `/
 const cardPrice = (m: MenuEntry) => formatMoney(priceRange(m.priceCents, m.options)[0]);
 
 /** The customer's own ordering page: no sign-in, no device set-up. Public by design. */
+const PURCHASE_KEY = "pos.purchase";
+/** One key per checkout attempt. Tapping Pay again after a timeout reuses it, so the shop answers with the first result and never debits twice. */
+function purchaseKey(sig: string): string {
+  try {
+    const cur = JSON.parse(localStorage.getItem(PURCHASE_KEY) ?? "null") as { sig: string; key: string } | null;
+    if (cur && cur.sig === sig) return cur.key;
+  } catch {
+    /* start a new one */
+  }
+  const key = (globalThis.crypto?.randomUUID?.() ?? `${Date.now().toString(36)}${Math.random().toString(36).slice(2, 12)}`).replace(/[^\w-]/g, "");
+  try {
+    localStorage.setItem(PURCHASE_KEY, JSON.stringify({ sig, key }));
+  } catch {
+    /* kept in memory only for this attempt */
+  }
+  return key;
+}
+const clearPurchaseKey = () => {
+  try {
+    localStorage.removeItem(PURCHASE_KEY);
+  } catch {
+    /* nothing to clear */
+  }
+};
+
 const BAG_KEY = "pos.shopBag";
 /** The unsent bag and table survive a reload or an interrupted visit for a few hours, then are forgotten. */
 function loadBag(): { bag: BagLine[]; spot: string } | null {
@@ -467,11 +492,12 @@ function Menu({ info, catalog, config, loginError }: { info: Info; catalog: Cata
       const res = await fetch("/api/shop/orders", {
         method: "POST",
         headers: { "content-type": "application/json", ...(member ? { authorization: `Bearer ${localStorage.getItem(LS_MEMBER) ?? ""}` } : {}) },
-        body: JSON.stringify({ channelId, items, customerName: name, customerPhone: phone, spot, expectedTotalCents: agreed ?? total, ...(payMethod === "credit" && member ? { payWithCredit: true } : {}), ...(pointsAsk ? { usePoints: reqPts ?? "max" } : {}), ...(chosen && chosenOk ? { couponId: chosen.id } : {}) }),
+        body: JSON.stringify({ channelId, items, customerName: name, customerPhone: phone, spot, expectedTotalCents: agreed ?? total, ...(payMethod === "credit" && member ? { payWithCredit: true, idempotencyKey: purchaseKey(JSON.stringify({ channelId, items, spot, m: member.id })) } : {}), ...(pointsAsk ? { usePoints: reqPts ?? "max" } : {}), ...(chosen && chosenOk ? { couponId: chosen.id } : {}) }),
       });
       const j = (await res.json().catch(() => ({}))) as { orderId?: string; error?: string; totalCents?: number };
       if (res.ok && j.orderId) {
         localStorage.setItem(LS_LAST, j.orderId);
+        clearPurchaseKey();
         saveBag([], ""); // the order is placed: do not bring this bag back
         if (payMethod === "credit") void loadMember(); // the balance has gone down
         if (payMethod === "card" || payMethod === "paynow") {
@@ -489,6 +515,11 @@ function Menu({ info, catalog, config, loginError }: { info: Info; catalog: Cata
       } else if (res.status === 409 && j.error === "price_changed") {
         setAgreed(j.totalCents ?? null);
         setNote(`Prices changed while you were ordering. The new total is ${formatMoney(j.totalCents ?? 0)}. Tap Pay again to confirm.`);
+      } else if (j.error === "purchase_in_progress") {
+        setNote(tx("Your order is still being placed. Please wait a moment, then tap Pay again. You will not be charged twice."));
+      } else if (j.error === "idempotency_key_reused") {
+        clearPurchaseKey();
+        setNote(tx("Something changed on your order. Please check it and tap Pay again."));
       } else if (j.error === "not_enough_credit") {
         void loadMember();
         setNote(tx("Not enough credit: {amt} available.", { amt: formatMoney((j as { balanceCents?: number }).balanceCents ?? 0) }));
@@ -510,7 +541,7 @@ function Menu({ info, catalog, config, loginError }: { info: Info; catalog: Cata
         setNote(tx("We couldn't place your order. Please try again, or order at the counter."));
       }
     } catch {
-      setNote(tx("No connection. Your order was not sent. Please try again."));
+      setNote(tx("We lost the connection, so we cannot tell if your order went through. Tap Pay again: you will not be charged twice."));
     } finally {
       setBusy(false);
     }
