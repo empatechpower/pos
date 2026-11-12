@@ -1265,6 +1265,9 @@ function Menu({ info, catalog, config, loginError }: { info: Info; catalog: Cata
 const COUNTRIES: Array<[string, string, string]> = [
   ["65", "SG", "Singapore"], ["60", "MY", "Malaysia"], ["62", "ID", "Indonesia"], ["66", "TH", "Thailand"], ["63", "PH", "Philippines"], ["84", "VN", "Vietnam"],
   ["852", "HK", "Hong Kong"], ["86", "CN", "China"], ["91", "IN", "India"], ["61", "AU", "Australia"], ["44", "GB", "United Kingdom"], ["1", "US", "United States / Canada"], ["81", "JP", "Japan"], ["82", "KR", "South Korea"],
+  ["234", "NG", "Nigeria"], ["233", "GH", "Ghana"], ["254", "KE", "Kenya"], ["27", "ZA", "South Africa"], ["20", "EG", "Egypt"], ["971", "AE", "United Arab Emirates"], ["966", "SA", "Saudi Arabia"], ["90", "TR", "Turkey"],
+  ["92", "PK", "Pakistan"], ["880", "BD", "Bangladesh"], ["94", "LK", "Sri Lanka"], ["977", "NP", "Nepal"], ["673", "BN", "Brunei"], ["855", "KH", "Cambodia"], ["95", "MM", "Myanmar"], ["856", "LA", "Laos"], ["886", "TW", "Taiwan"], ["853", "MO", "Macau"],
+  ["64", "NZ", "New Zealand"], ["49", "DE", "Germany"], ["33", "FR", "France"], ["39", "IT", "Italy"], ["34", "ES", "Spain"], ["31", "NL", "Netherlands"], ["353", "IE", "Ireland"], ["7", "RU", "Russia"], ["55", "BR", "Brazil"], ["52", "MX", "Mexico"],
 ];
 
 /** The prototype's Welcome screen: Google, Microsoft, email, phone (by text message) or guest. */
