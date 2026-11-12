@@ -1,4 +1,4 @@
-# Rezein Print Hub (Android app)
+# Rezein (Android app)
 
 A small Android app that does what `apps/web/public/hub.mjs` does: it fetches print jobs from the shop's server and writes
 them to the shop's network printers (ESC/POS, port 9100). It runs as a background service, starts again after the tablet
@@ -10,11 +10,11 @@ restarts, and shows whether it is connected and what it printed.
    by WhatsApp, Drive, email or USB.
 2. Open the file. Android asks to allow installing apps from this source (Chrome, Files, WhatsApp...): allow it.
    If Play Protect says the app is "not verified", choose **Install anyway**. That is normal for an app outside the store.
-3. Open **Rezein Print Hub**. Allow notifications when asked.
+3. Open **Rezein**. Allow notifications when asked.
 4. Type the shop address and a one-time enrollment code (from a manager; it lasts 15 minutes) and press **Link this tablet**.
 5. Press **Keep it running in the background** and choose **Allow**. This stops Android putting the hub to sleep.
 6. Enter a printer's IP address and press **Print a test page**. Paper should come out and cut.
-7. In the POS, open **Printers**, add the printer (IP, port 9100), and the banner at the top says **Print hub online**.
+7. In the POS, open **Printers**, add the printer (IP, port 9100), and the banner at the top says **Rezein online**.
 
 Keep the tablet plugged in and on the same Wi-Fi as the printers.
 

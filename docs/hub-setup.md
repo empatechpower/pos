@@ -1,4 +1,4 @@
-# Print hub: setup on an Android tablet (no app store needed)
+# Rezein: setup on an Android tablet (no app store needed)
 
 **Easiest: the Android app.** On the tablet, open `https://YOUR-SHOP-ADDRESS/rezein-hub.apk`, install it (allow "install unknown apps", and choose "Install anyway" if Play Protect warns), then follow [android-hub/README.md](../android-hub/README.md). The rest of this page is the **Termux** alternative, which needs no APK.
 
@@ -25,7 +25,7 @@ It must stay on and on the **same Wi-Fi/network as the printers**.
    ```
    Paper should come out and cut. Do this for the receipt printer and the kitchen printer.
 5. In the POS, open **Printers**, add each printer (name, IP address, port 9100, receipt or kitchen), and press **Test page**.
-   The top of the Printers screen says **Print hub online** when the hub is running.
+   The top of the Printers screen says **Rezein online** when the hub is running.
 
 ## 2. Start it, and keep it running
 
@@ -46,7 +46,7 @@ Leave Termux open. The loop starts the hub again if it ever stops. Then:
 
 | What you see | What it means |
 |---|---|
-| Printers screen says **Print hub offline** | The tablet is off, asleep, offline, or Termux was closed. Open Termux and start it again. Orders wait and print when it is back. |
+| Printers screen says **Rezein offline** | The tablet is off, asleep, offline, or Termux was closed. Open Termux and start it again. Orders wait and print when it is back. |
 | `test` says "Could not print" | The printer is off, the IP address is wrong, or the tablet is on a different network (guest Wi-Fi?). |
 | Job shows **Failed** | The printer was unreachable. Check it, then press Retry on the Printers screen. |
 | Job shows **Unconfirmed** | The connection broke after sending. Look at the printer: reprint only if nothing came out. |

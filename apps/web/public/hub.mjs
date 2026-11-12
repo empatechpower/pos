@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /**
- * Rezein print hub. One file, no installs: needs only Node 18 or newer.
+ * Rezein. One file, no installs: needs only Node 18 or newer.
  *
  *   node hub.mjs setup <shop-address> <enrollment-code> ["Kitchen tablet"]   (once, to link this device)
  *   node hub.mjs test <printer-ip> [port]                                    (send a test page straight to a printer)
@@ -48,7 +48,7 @@ export const sendRaw = (host, port, bytes) =>
 export const testPage = () =>
   Buffer.concat([
     Buffer.from([0x1b, 0x40]),
-    Buffer.from(`Rezein print hub\nTest page ${new Date().toLocaleString("en-GB")}\nIf you can read this, printing works.\n\n\n\n`, "ascii"),
+    Buffer.from(`Rezein\nTest page ${new Date().toLocaleString("en-GB")}\nIf you can read this, printing works.\n\n\n\n`, "ascii"),
     Buffer.from([0x1d, 0x56, 0x42, 0x00]),
   ]);
 
@@ -101,8 +101,8 @@ async function deliver(baseUrl, token, jobs, send) {
 
 /** One pass: claim jobs, send them (different printers at the same time), report. */
 export async function runOnce({ baseUrl, token, send = sendRaw }) {
-  const res = await fetch(`${baseUrl}/api/print/claim`, { method: "POST", headers: { "content-type": "application/json", "x-device-token": token }, body: JSON.stringify({ limit: 10 }) });
-  if (res.status === 401) throw Object.assign(new Error("this hub is not linked (or was removed). Run setup again."), { removed: true });
+  const res = await fetch(`${baseUrl}/api/print/claim`, { method: "POST", headers: { "content-type": "application/json", "x-device-token": token }, body: JSON.stringify({ limit: 25 }) });
+  if (res.status === 401) throw Object.assign(new Error("Rezein is not linked (or was removed). Run setup again."), { removed: true });
   if (!res.ok) throw new Error(`the server answered ${res.status}`);
   const { jobs } = await res.json();
   const byPrinter = new Map();
@@ -154,7 +154,7 @@ async function run() {
   if (!c) return console.error("Not linked yet. Run:  node hub.mjs setup <shop-address> <enrollment-code>");
   process.on("uncaughtException", (e) => { console.error("crashed:", e); process.exit(1); }); // the restart script brings it back
   process.on("unhandledRejection", (e) => { console.error("crashed:", e); process.exit(1); });
-  log(`Rezein print hub ${VERSION} running as "${c.name}" for ${c.baseUrl}. Leave this open.`);
+  log(`Rezein ${VERSION} running as "${c.name}" for ${c.baseUrl}. Leave this open.`);
   let online = null;
   let wait = 0;
   for (;;) {

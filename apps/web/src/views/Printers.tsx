@@ -127,11 +127,11 @@ export function Printers({ catalog }: { catalog: Catalog }) {
       <h2>Printers</h2>
       {msg && <div className="flash">{msg}</div>}
       {hubs.length === 0 ? (
-        <div className="flash warn">No print hub has connected yet, so nothing can print. Set one up (see the setup guide), then it shows here.</div>
+        <div className="flash warn">Rezein has not connected yet, so nothing can print. Install Rezein on the tablet (see the setup guide), then it shows here.</div>
       ) : liveHubs.length === 0 ? (
-        <div className="flash warn">Print hub offline: {hubs[0]!.d.name} was last seen {ago(hubs[0]!.secs)} ago. Orders will wait and print when it is back. Check the tablet is on, charged and online, and that the hub is still running.</div>
+        <div className="flash warn">Rezein offline: {hubs[0]!.d.name} was last seen {ago(hubs[0]!.secs)} ago. Orders will wait and print when it is back. Check the tablet is on, charged and online, and that the hub is still running.</div>
       ) : (
-        <div className="flash">Print hub online: {liveHubs.map((h) => h.d.name).join(", ")}.</div>
+        <div className="flash">Rezein online: {liveHubs.map((h) => h.d.name).join(", ")}.</div>
       )}
       {unconfirmed.length > 0 && (
         <div className="flash warn">{unconfirmed.length} print job{unconfirmed.length > 1 ? "s" : ""} unconfirmed: the printer may already have printed {unconfirmed.length > 1 ? "them" : "it"}. Look at the printer, then press Reprint only if nothing came out.</div>
@@ -211,7 +211,7 @@ export function Printers({ catalog }: { catalog: Catalog }) {
           <label className="field">
             Delivered by
             <select value={editing.agentDeviceId ?? ""} onChange={(e) => set({ agentDeviceId: e.target.value || null })}>
-              <option value="">Any hub or print agent</option>
+              <option value="">Any Rezein device</option>
               {devices.map((d) => <option key={d.id} value={d.id}>{d.name}</option>)}
             </select>
           </label>

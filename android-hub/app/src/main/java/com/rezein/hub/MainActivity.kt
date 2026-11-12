@@ -79,7 +79,7 @@ class MainActivity : Activity() {
 
     private fun buildScreen() {
         val root = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; setPadding(dp(20), dp(20), dp(20), dp(20)) }
-        root.addView(text("Rezein print hub", 24f, true))
+        root.addView(text("Rezein", 24f, true))
 
         // ---- link this tablet to the shop (once)
         setupGroup = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
@@ -131,7 +131,7 @@ class MainActivity : Activity() {
         linkButton.isEnabled = false
         linkMessage.text = "Linking..."
         Thread {
-            val name = deviceName.text.toString().trim().ifEmpty { "Print hub" }
+            val name = deviceName.text.toString().trim().ifEmpty { "Rezein" }
             val result = Enroll.link(a, c, name)
             runOnUiThread {
                 linkButton.isEnabled = true

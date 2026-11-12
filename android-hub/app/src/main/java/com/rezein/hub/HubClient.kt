@@ -60,7 +60,7 @@ class SocketSender : Sender {
 fun testPage(): ByteArray {
     val out = ByteArrayOutputStream()
     out.write(byteArrayOf(0x1b, 0x40))
-    out.write("Rezein print hub\nTest page ${java.text.SimpleDateFormat("dd/MM/yyyy HH:mm").format(java.util.Date())}\nIf you can read this, printing works.\n\n\n\n".toByteArray(Charsets.US_ASCII))
+    out.write("Rezein\nTest page ${java.text.SimpleDateFormat("dd/MM/yyyy HH:mm").format(java.util.Date())}\nIf you can read this, printing works.\n\n\n\n".toByteArray(Charsets.US_ASCII))
     out.write(byteArrayOf(0x1d, 0x56, 0x42, 0x00))
     return out.toByteArray()
 }
@@ -99,7 +99,7 @@ class HubClient(
     private val http = Http(baseUrl.trimEnd('/'))
 
     fun claim(): List<Job> {
-        val r = http.post("/api/print/claim", token, JSONObject().put("limit", 10))
+        val r = http.post("/api/print/claim", token, JSONObject().put("limit", 25))
         if (r.status == 401) throw NotLinked()
         if (r.status !in 200..299) throw Exception("the server answered ${r.status}")
         val arr: JSONArray = JSONObject(r.body).getJSONArray("jobs")

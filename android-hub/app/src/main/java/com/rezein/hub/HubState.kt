@@ -9,7 +9,7 @@ class Config(context: Context) {
 
     val baseUrl: String? get() = prefs.getString("baseUrl", null)
     val token: String? get() = prefs.getString("token", null)
-    val name: String get() = prefs.getString("name", "Print hub") ?: "Print hub"
+    val name: String get() = prefs.getString("name", "Rezein") ?: "Rezein"
     val isLinked: Boolean get() = baseUrl != null && token != null
 
     /** Whether the hub should be running (so it comes back after a restart). */

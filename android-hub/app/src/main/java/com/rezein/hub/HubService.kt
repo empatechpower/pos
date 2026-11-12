@@ -101,7 +101,7 @@ class HubService : Service() {
     private fun createChannel() {
         if (Build.VERSION.SDK_INT >= 26) {
             val nm = getSystemService(NotificationManager::class.java)
-            nm.createNotificationChannel(NotificationChannel(CHANNEL, "Print hub", NotificationManager.IMPORTANCE_LOW))
+            nm.createNotificationChannel(NotificationChannel(CHANNEL, "Rezein", NotificationManager.IMPORTANCE_LOW))
         }
     }
 
@@ -109,7 +109,7 @@ class HubService : Service() {
         val open = PendingIntent.getActivity(this, 0, Intent(this, MainActivity::class.java), PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT)
         val text = "${HubState.summary()}. Printed ${HubState.printed}" + (if (HubState.failed > 0) ", ${HubState.failed} failed" else "")
         return Notification.Builder(this, CHANNEL)
-            .setContentTitle("Rezein print hub")
+            .setContentTitle("Rezein")
             .setContentText(text)
             .setSmallIcon(android.R.drawable.stat_notify_sync)
             .setOngoing(true)
