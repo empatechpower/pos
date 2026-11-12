@@ -43,6 +43,7 @@ class MainActivity : Activity() {
     private lateinit var detail: TextView
     private lateinit var toggle: Button
     private lateinit var battery: Button
+    private lateinit var smsButton: Button
     private lateinit var printerIp: EditText
     private lateinit var log: TextView
 
@@ -99,10 +100,11 @@ class MainActivity : Activity() {
         toggle = button("Stop") { toggleRunning() }
         battery = button("Keep it running in the background") { allowBackground() }
         printerIp = field("Printer address, e.g. 192.168.1.50", InputType.TYPE_CLASS_TEXT)
+        smsButton = button("Allow reading texts (for customer sign-in)") { requestPermissions(arrayOf(android.Manifest.permission.RECEIVE_SMS), 7) }
         val testButton = button("Print a test page") { testPrint() }
         log = text("", 12f).apply { typeface = Typeface.MONOSPACE }
         val unlink = button("Unlink this tablet") { unlink() }
-        listOf(status, detail, toggle, battery, text("Check a printer is reachable from this tablet:"), printerIp, testButton, text("Recent activity", 14f, true), log, unlink).forEach { statusGroup.addView(it) }
+        listOf(status, detail, toggle, battery, smsButton, text("Check a printer is reachable from this tablet:"), printerIp, testButton, text("Recent activity", 14f, true), log, unlink).forEach { statusGroup.addView(it) }
         root.addView(statusGroup)
 
         setContentView(ScrollView(this).apply { addView(root) })
@@ -121,6 +123,8 @@ class MainActivity : Activity() {
         val pm = getSystemService(POWER_SERVICE) as PowerManager
         val allowed = pm.isIgnoringBatteryOptimizations(packageName)
         battery.visibility = if (allowed) View.GONE else View.VISIBLE
+        val smsAllowed = checkSelfPermission(android.Manifest.permission.RECEIVE_SMS) == android.content.pm.PackageManager.PERMISSION_GRANTED
+        smsButton.visibility = if (smsAllowed) View.GONE else View.VISIBLE
         log.text = HubState.recent().joinToString("\n")
     }
 

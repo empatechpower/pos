@@ -10,7 +10,7 @@ export interface Integrations {
   publicUrl: string;
   google?: { clientId: string; clientSecret: string };
   microsoft?: { clientId: string; clientSecret: string };
-  /** Reverse-SMS sign-in: the number customers text, and the secret the SMS provider's webhook must present. */
+  /** Reverse-SMS sign-in: the number customers text, and the secret the SMS provider's webhook must present (empty when only the Rezein app on a tablet receives the texts). */
   sms?: { number: string; webhookSecret: string };
   stripe?: { secretKey: string; webhookSecret: string };
   /** The Telegram bot staff use to manage prices. The webhook secret proves a message really came from Telegram. */
@@ -27,7 +27,8 @@ export function loadIntegrations(env: NodeJS.ProcessEnv): Integrations {
     publicUrl: (env.PUBLIC_URL ?? "http://localhost:5173").replace(/\/+$/, ""),
     google: pair(env.GOOGLE_CLIENT_ID, env.GOOGLE_CLIENT_SECRET),
     microsoft: pair(env.MICROSOFT_CLIENT_ID, env.MICROSOFT_CLIENT_SECRET),
-    sms: env.SMS_RECEIVE_NUMBER && env.SMS_WEBHOOK_SECRET ? { number: env.SMS_RECEIVE_NUMBER, webhookSecret: env.SMS_WEBHOOK_SECRET } : undefined,
+    // The number customers text. Texts reach us from the Rezein app on a tablet with a SIM in it (no secret needed), or from an SMS provider's webhook (needs the secret).
+    sms: env.SMS_RECEIVE_NUMBER?.trim() ? { number: env.SMS_RECEIVE_NUMBER.trim(), webhookSecret: env.SMS_WEBHOOK_SECRET?.trim() ?? "" } : undefined,
     telegram: env.TELEGRAM_BOT_TOKEN?.trim() && env.TELEGRAM_WEBHOOK_SECRET?.trim() ? { token: env.TELEGRAM_BOT_TOKEN.trim().replace(/^bot/i, ""), webhookSecret: env.TELEGRAM_WEBHOOK_SECRET.trim() } : undefined,
     mail: env.RESEND_API_KEY && env.MAIL_FROM ? { apiKey: env.RESEND_API_KEY, from: env.MAIL_FROM } : undefined,
     stripe: env.STRIPE_SECRET_KEY && env.STRIPE_WEBHOOK_SECRET ? { secretKey: env.STRIPE_SECRET_KEY, webhookSecret: env.STRIPE_WEBHOOK_SECRET } : undefined,

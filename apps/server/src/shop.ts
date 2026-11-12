@@ -323,7 +323,7 @@ export function registerShop(app: FastifyInstance, d: ShopDeps) {
     app.register(async (scope) => {
       scope.addContentTypeParser("application/x-www-form-urlencoded", { parseAs: "string" }, (_r, body, done) => done(null, Object.fromEntries(new URLSearchParams(String(body)))));
       scope.post<{ Querystring: { secret?: string }; Body: { From?: string; Body?: string } }>("/api/shop/auth/phone/inbound", async (req, reply) => {
-        if (!integ.sms || !sameSecret(String(req.query.secret ?? ""), integ.sms.webhookSecret)) return reply.code(403).send({ error: "forbidden" });
+        if (!integ.sms || !integ.sms.webhookSecret || !sameSecret(String(req.query.secret ?? ""), integ.sms.webhookSecret)) return reply.code(403).send({ error: "forbidden" });
         const from = digitsOf(req.body?.From);
         const ok = from.length >= 8 && (await members.matchSms(from, String(req.body?.Body ?? "")));
         if (ok) console.log(`[sms sign-in] verified ${from.slice(0, 4)}…`);

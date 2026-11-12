@@ -236,6 +236,21 @@ describe("phone sign-in by text message", () => {
     expect((await call(`/api/shop/auth/phone/${s.json.id}`)).status).toBe(410);
   });
 
+  it("signs a customer in when the tablet's SIM receives their text and Rezein forwards it", async () => {
+    const s = await call("/api/shop/auth/phone/start", { body: { phone: "6587771111" } });
+    // Only a linked device may forward texts.
+    expect((await call("/api/print/sms", { body: { from: "+6587771111", body: s.json.code } })).status).toBe(401);
+    // A wrong sender or wrong code proves nothing.
+    expect((await call("/api/print/sms", { device: till.token, body: { from: "+6599990000", body: s.json.code } })).json.matched).toBe(false);
+    expect((await call("/api/print/sms", { device: till.token, body: { from: "+6587771111", body: "000000" } })).json.matched).toBe(false);
+    expect((await call(`/api/shop/auth/phone/${s.json.id}`)).json.state).toBe("pending");
+    const hit = await call("/api/print/sms", { device: till.token, body: { from: "+6587771111", body: `${s.json.code}` } });
+    expect(hit.json.matched).toBe(true);
+    expect((await call(`/api/shop/auth/phone/${s.json.id}`)).json.state).toBe("verified");
+    // The same text again opens nothing.
+    expect((await call("/api/print/sms", { device: till.token, body: { from: "+6587771111", body: `${s.json.code}` } })).json.matched).toBe(false);
+  });
+
   it("expires, and starting again retires the older code", async () => {
     const a = await call("/api/shop/auth/phone/start", { body: { phone: "6583334444" } });
     const b = await call("/api/shop/auth/phone/start", { body: { phone: "6583334444" } });

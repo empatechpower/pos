@@ -51,6 +51,7 @@ class HubClientTest {
     private lateinit var server: MiniHttp
     private lateinit var base: String
     private val reports = CopyOnWriteArrayList<Triple<String, String, String>>() // job id, outcome, body
+    private val texts = java.util.concurrent.CopyOnWriteArrayList<String>()
     private val pending = CopyOnWriteArrayList<JSONObject>()
     private var claimStatus = 200
     private var enrollStatus = 200
@@ -68,6 +69,7 @@ class HubClientTest {
                     reports.add(Triple(parts[4], parts[5], body))
                     Pair(200, "{}")
                 }
+                path == "/api/print/sms" -> { texts.add(body); Pair(200, "{\"matched\":true}") }
                 path == "/api/devices/enroll" -> {
                     val code = JSONObject(body).getString("code")
                     if (enrollStatus != 200) Pair(enrollStatus, "{}") else if (code == "GOOD") Pair(200, JSONObject().put("token", "tok123").put("deviceId", "d1").toString()) else Pair(401, "{}")
@@ -134,6 +136,13 @@ class HubClientTest {
         client { _, _, _ -> throw AmbiguousDelivery("connection broke while printing") }.runOnce()
         val body = JSONObject(reports.first { it.first == "j1" }.third)
         assertTrue(body.getBoolean("ambiguous"))
+    }
+
+    @Test fun passesAReceivedTextToTheShopWithItsSenderAndCode() {
+        assertTrue(client().forwardSms("+6591112222", "482913"))
+        val sent = JSONObject(texts.single())
+        assertEquals("+6591112222", sent.getString("from"))
+        assertEquals("482913", sent.getString("body"))
     }
 
     @Test(expected = NotLinked::class) fun saysSoWhenTheShopNoLongerKnowsThisDevice() {

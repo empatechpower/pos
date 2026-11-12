@@ -110,6 +110,13 @@ class HubClient(
         }
     }
 
+    /** Pass on a text this tablet received. The shop checks whether it is a customer's sign-in code. Returns true when it was accepted. */
+    fun forwardSms(from: String, body: String): Boolean {
+        val r = http.post("/api/print/sms", token, JSONObject().put("from", from).put("body", body))
+        if (r.status == 401) throw NotLinked()
+        return r.status in 200..299
+    }
+
     /** Tell the server how a job went. A lost report leaves the job leased; the server then parks it as unconfirmed. */
     fun report(jobId: String, outcome: String, error: String? = null, ambiguous: Boolean = false): Boolean {
         val body = if (outcome == "failed") JSONObject().put("error", error ?: "unknown error").also { if (ambiguous) it.put("ambiguous", true) } else null

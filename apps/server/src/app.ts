@@ -390,6 +390,19 @@ export async function buildApp({ config, store, db, catalog, catalogAdmin, print
   }
 
 
+  /**
+   * The Rezein app on a tablet with a SIM forwards each text it receives. A customer proves their phone by texting the
+   * code the page showed them; when the sender's number and the code match an open challenge, they are signed in.
+   */
+  app.post<{ Body: { from?: string; body?: string } }>("/api/print/sms", { preHandler: needsDevice }, async (req) => {
+    const from = String(req.body?.from ?? "").replace(/\D/g, "");
+    if (!members || from.length < 8 || from.length > 15) return { matched: false };
+    const matched = await members.matchSms(from, String(req.body?.body ?? "").slice(0, 200));
+    if (matched) console.log(`[sms sign-in] verified ${from.slice(0, 4)}… via ${req.device!.id}`);
+    return { matched };
+  });
+
+
   // ---- printers and the print queue -------------------------------------------------------
 
   if (print) {
