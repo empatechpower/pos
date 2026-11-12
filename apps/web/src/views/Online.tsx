@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { formatMoney, newId, optionLines, orderTotals, confirmedPaid, type BusinessConfig } from "@pos/core";
-import { useStaff } from "../auth";
+import { staffFetch, useStaff } from "../auth";
 import { record, deviceId } from "../db";
 import { useOrders } from "../hooks";
 import { spend } from "../wallet";
@@ -23,9 +23,24 @@ export function Online({ config, online }: { config: BusinessConfig; online: boo
     await record(id, { type: "StageSet", stage: "cancelled" });
   }
 
-  async function payCredit(id: string, customer: string, cents: number) {
-    if (!customer || busy) return;
+  /** The member whose credit pays: the order's own member, or whoever the staff member finds by phone or email. */
+  async function findMember(memberId: string | undefined, typed: string): Promise<{ id: string; name: string | null } | string> {
+    if (memberId) return { id: memberId, name: null };
+    if (!typed) return "Enter the member's phone number or email first.";
+    const r = await staffFetch(`/api/members?q=${encodeURIComponent(typed)}`);
+    if ("problem" in r) return r.problem;
+    const j = (await r.res.json().catch(() => ({ members: [] }))) as { members: Array<{ id: string; name: string | null; email: string | null; phone: string | null }> };
+    if (j.members.length === 0) return `No member found for "${typed}". Add them under Manager > Members first.`;
+    if (j.members.length > 1) return `More than one member matches "${typed}". Type their full phone number or email.`;
+    return { id: j.members[0]!.id, name: j.members[0]!.name };
+  }
+
+  async function payCredit(id: string, typed: string, cents: number, memberId?: string) {
+    if (busy) return;
     setBusy(id);
+    const who = await findMember(memberId, typed);
+    if (typeof who === "string") { setBusy(null); return setMsg(who); }
+    const customer = who.id;
     const paymentId = newId();
     const r = await spend(customer, cents, `online:${paymentId}`, id, deviceId());
     setBusy(null);
@@ -57,8 +72,8 @@ export function Online({ config, online }: { config: BusinessConfig; online: boo
           ) : owing > 0 ? (
             <>
               <button className="primary sm" onClick={() => void record(o.orderId, { type: "PaymentRecorded", paymentId: newId(), method: "cash", amountCents: owing, confirmed: true })}>Cash {formatMoney(owing)}</button>
-              <input className="credit-id" aria-label="Customer for credit" placeholder="customer" value={credit[o.orderId] ?? (o.customerPhone?.replace(/\s|-/g, "") ?? "")} onChange={(e) => setCredit({ ...credit, [o.orderId]: e.target.value.trim() })} />
-              <button className="secondary sm" disabled={!staff || !online || busy === o.orderId} title={!staff ? "Staff sign-in required" : !online ? "Credit needs a connection" : ""} onClick={() => void payCredit(o.orderId, credit[o.orderId] ?? o.customerPhone?.replace(/\s|-/g, "") ?? "", owing)}>Use credit</button>
+              {!o.memberId && <input className="credit-id" aria-label="Member phone or email" placeholder="member phone or email" value={credit[o.orderId] ?? (o.customerPhone?.replace(/\s|-/g, "") ?? "")} onChange={(e) => setCredit({ ...credit, [o.orderId]: e.target.value.trim() })} />}
+              <button className="secondary sm" disabled={!staff || !online || busy === o.orderId} title={!staff ? "Staff sign-in required" : !online ? "Credit needs a connection" : ""} onClick={() => void payCredit(o.orderId, credit[o.orderId] ?? o.customerPhone?.replace(/\s|-/g, "") ?? "", owing, o.memberId)}>Pay with member credit</button>
             </>
           ) : (
             <span className="muted">Paid</span>

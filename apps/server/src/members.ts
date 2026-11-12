@@ -40,6 +40,21 @@ export const normaliseEmail = (s: unknown): string | null => {
 };
 
 /**
+ * A phone number in the one form the whole system uses: "+" and the country code and the number, digits only
+ * (what phone sign-in stores). A bare 8-digit Singapore number gets +65. Null when it cannot be a phone number.
+ */
+export const normalisePhone = (s: unknown): string | null => {
+  if (typeof s !== "string") return null;
+  let t = s.trim().replace(/[\s().-]/g, "");
+  if (!t) return null;
+  if (t.startsWith("00")) t = `+${t.slice(2)}`;
+  if (t.startsWith("+")) return /^\+[1-9]\d{7,14}$/.test(t) ? t : null;
+  if (/^[3689]\d{7}$/.test(t)) return `+65${t}`;
+  if (/^65[3689]\d{7}$/.test(t)) return `+${t}`;
+  return null;
+};
+
+/**
  * Customer accounts. Sign-in is an emailed 6-digit code (single use, 10 minutes, 5 tries). There is no mail
  * service wired up yet, so the code is handed to `deliver`: the server logs it and, outside production, returns it.
  */
@@ -85,6 +100,31 @@ export class MemberStore {
     const m = await this.db.query("SELECT * FROM members WHERE merchant_id=$1 AND email=$2", [this.merchantId, email]);
     const member = await this.welcome(toMember(m.rows[0]));
     return { token: await this.openSession(member.id), member, created };
+  }
+
+  /**
+   * Staff add a member by hand or from a file. The member can then sign in with that email (or, for a phone-only member,
+   * that phone) and finds their account and credit waiting. Someone already there (same email or phone) is not changed.
+   */
+  async createByStaff(p: { name?: string | null; email?: string | null; phone?: string | null }): Promise<{ ok: true; member: Member; created: boolean } | { ok: false; error: "need_phone_or_email" | "bad_email" | "bad_phone" }> {
+    const rawEmail = typeof p.email === "string" ? p.email.trim() : "";
+    const rawPhone = typeof p.phone === "string" ? p.phone.trim() : "";
+    const email = rawEmail ? normaliseEmail(rawEmail) : null;
+    const phone = rawPhone ? normalisePhone(rawPhone) : null;
+    if (rawEmail && !email) return { ok: false, error: "bad_email" };
+    if (rawPhone && !phone) return { ok: false, error: "bad_phone" };
+    if (!email && !phone) return { ok: false, error: "need_phone_or_email" };
+    const existing = email
+      ? (await this.db.query("SELECT * FROM members WHERE merchant_id=$1 AND email=$2", [this.merchantId, email])).rows[0]
+      : undefined;
+    const byPhone = !existing && phone ? (await this.db.query("SELECT * FROM members WHERE merchant_id=$1 AND phone=$2 ORDER BY created_at LIMIT 1", [this.merchantId, phone])).rows[0] : undefined;
+    if (existing || byPhone) return { ok: true, member: toMember(existing ?? byPhone), created: false };
+    const ins = await this.db.query("INSERT INTO members (merchant_id, email, name, phone) VALUES ($1,$2,$3,$4) ON CONFLICT (merchant_id, email) DO NOTHING RETURNING *", [this.merchantId, email, p.name?.trim().slice(0, 40) || null, phone]);
+    if (!ins.rows[0]) {
+      const again = (await this.db.query("SELECT * FROM members WHERE merchant_id=$1 AND email=$2", [this.merchantId, email])).rows[0];
+      return { ok: true, member: toMember(again), created: false };
+    }
+    return { ok: true, member: await this.welcome(toMember(ins.rows[0])), created: true };
   }
 
   /** Welcome points and voucher, once: the entries have fixed keys, so a second sign-in finds them already there. */

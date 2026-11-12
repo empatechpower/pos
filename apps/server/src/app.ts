@@ -121,7 +121,12 @@ export async function buildApp({ config, store, db, catalog, catalogAdmin, print
       const o = reduceOrder(id, await store.eventsForOrder(id));
       if (!o?.memberId) continue;
       if (shopStatus(o, config) === "ready") await tellReady(o);
-      if (o.stage === "cancelled") await members!.reverseForOrder(id);
+      if (o.stage === "cancelled") {
+        // Credit the customer paid with comes back when the order is called off. One refund per order, whatever happens twice.
+        const credit = o.payments.filter((p) => p.confirmed && p.method === "credit" && p.paymentId === `credit:${id}`).reduce((n, p) => n + p.amountCents, 0);
+        if (credit > 0 && db) await refund(db, { merchantId, customerId: o.memberId, amountCents: credit, idempotencyKey: `cancel-refund:${id}`, orderId: id, deviceId: "shop", outletId: config.outletName, note: "Order cancelled" });
+        await members!.reverseForOrder(id);
+      }
       else if (isFullyPaid(o, config)) {
         if (config.rewards.pointsEnabled) await members!.earnForOrder(id, confirmedPaid(o), config.rewards.earnPointsPerDollar);
         await members!.stampForOrder(id, confirmedPaid(o), config.rewards.stampCard);
@@ -499,6 +504,51 @@ export async function buildApp({ config, store, db, catalog, catalogAdmin, print
         total: total.rows[0].n as number,
         members: r.rows.map((m) => ({ id: m.id as string, name: m.name as string | null, email: m.email as string | null, phone: m.phone as string | null, points: Number(m.points_balance), creditCents: Number(m.credit_cents), joinedAt: m.created_at as Date })),
       };
+    });
+
+    /** Add one member by hand, optionally with opening credit. An email or a phone number is needed so they can sign in. */
+    app.post<{ Body: { name?: string; email?: string; phone?: string; creditCents?: number } }>("/api/members", { preHandler: needs("wallet.topup") }, async (req, reply) => {
+      const b = req.body ?? {};
+      const credit = b.creditCents === undefined || b.creditCents === null ? 0 : b.creditCents;
+      if (!Number.isSafeInteger(credit) || credit < 0 || credit > 1_000_000) return reply.code(400).send({ error: "creditCents must be a whole number of cents, zero or more" });
+      if (credit > 0 && req.staff!.role === "cashier" && credit > CASHIER_TOPUP_LIMIT_CENTS) return reply.code(403).send({ error: "over_limit", limitCents: CASHIER_TOPUP_LIMIT_CENTS });
+      const r = await members.createByStaff({ name: b.name, email: b.email, phone: b.phone });
+      if (!r.ok) return reply.code(400).send({ error: r.error });
+      if (r.created) {
+        await audit(db, merchantId, req.staff!.id, "member.create", { memberId: r.member.id, creditCents: credit });
+        if (credit > 0) await topUp(db, { merchantId, customerId: r.member.id, amountCents: credit, idempotencyKey: `open:${r.member.id}`, deviceId: req.device!.id, outletId: config.outletName, staffId: req.staff!.id, note: "Opening credit" });
+      }
+      return { created: r.created, member: { id: r.member.id, name: r.member.name, email: r.member.email, phone: r.member.phone }, creditCents: await balanceOf(db, merchantId, r.member.id) };
+    });
+
+    /**
+     * Add many members from a file. Each row is {name, email, phone, credit} (credit in dollars). A person who is already
+     * a member (same email or phone) is left alone and gets no credit, so sending the same file twice changes nothing.
+     */
+    app.post<{ Body: { rows?: Array<{ name?: unknown; email?: unknown; phone?: unknown; credit?: unknown }> } }>("/api/members/import", { preHandler: needs("wallet.refund") }, async (req, reply) => {
+      const rows = req.body?.rows;
+      if (!Array.isArray(rows) || rows.length === 0) return reply.code(400).send({ error: "rows[] required" });
+      if (rows.length > 1000) return reply.code(400).send({ error: "too_many_rows", max: 1000 });
+      const results: Array<{ row: number; status: "created" | "exists" | "invalid"; why?: string; creditCents?: number }> = [];
+      let created = 0, existed = 0, invalid = 0, credited = 0;
+      for (let i = 0; i < rows.length; i++) {
+        const r = rows[i] ?? {};
+        const rawCredit = r.credit === undefined || r.credit === null ? "" : String(r.credit).trim().replace(/^s?\$/i, "").replace(/[,\s]/g, "");
+        const dollars = rawCredit === "" ? 0 : Number(rawCredit);
+        const cents = Math.round(dollars * 100);
+        if (!Number.isFinite(dollars) || cents < 0 || cents > 1_000_000) { invalid++; results.push({ row: i + 1, status: "invalid", why: "credit is not a valid amount" }); continue; }
+        const m = await members.createByStaff({ name: typeof r.name === "string" ? r.name : null, email: typeof r.email === "string" ? r.email : null, phone: typeof r.phone === "string" || typeof r.phone === "number" ? String(r.phone) : null });
+        if (!m.ok) { invalid++; results.push({ row: i + 1, status: "invalid", why: m.error === "need_phone_or_email" ? "needs an email or a phone number" : m.error === "bad_email" ? "the email looks wrong" : "the phone number looks wrong" }); continue; }
+        if (!m.created) { existed++; results.push({ row: i + 1, status: "exists" }); continue; }
+        created++;
+        if (cents > 0) {
+          await topUp(db, { merchantId, customerId: m.member.id, amountCents: cents, idempotencyKey: `open:${m.member.id}`, deviceId: req.device!.id, outletId: config.outletName, staffId: req.staff!.id, note: "Opening credit (import)" });
+          credited += cents;
+        }
+        results.push({ row: i + 1, status: "created", creditCents: cents });
+      }
+      await audit(db, merchantId, req.staff!.id, "member.import", { rows: rows.length, created, existed, invalid, creditedCents: credited });
+      return { created, existed, invalid, creditedCents: credited, results };
     });
 
     /** Add or take away reward points by hand. Managers and owners only; a reason is required and the change is audited. */

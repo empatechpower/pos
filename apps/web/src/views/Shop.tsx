@@ -64,6 +64,8 @@ interface MemberView {
   phone: string | null;
   pointsBalance: number;
   prefs?: { orderUpdates: boolean; promos: boolean };
+  /** Prepaid credit the member can pay with, in cents. */
+  creditCents?: number;
 }
 const params = () => new URLSearchParams(location.hash.split("?")[1] ?? "");
 const orderIdFromHash = () => /^#\/shop\/order\/([\w-]+)/.exec(location.hash)?.[1] ?? null;
@@ -260,6 +262,7 @@ function Menu({ info, catalog, config, loginError }: { info: Info; catalog: Cata
   const [channelId, setChannelId] = useState(channels.find((c) => c.id === wanted)?.id ?? (table ? channels.find((c) => c.kind === "dine_in")?.id : undefined) ?? channels[0]?.id ?? "");
   const [category, setCategory] = useState("All");
   const [search, setSearch] = useState<string | null>(null);
+  const [searchCleared, setSearchCleared] = useState(false); // the × was pressed: the next category tap closes the empty bar
   const [bag, setBag] = useState<BagLine[]>([]);
   const [picking, setPicking] = useState<MenuEntry | null>(null);
   const [name, setName] = useState("");
@@ -283,7 +286,7 @@ function Menu({ info, catalog, config, loginError }: { info: Info; catalog: Cata
   const [guestForm, setGuestForm] = useState(false);
   const [acctPanel, setAcctPanel] = useState<null | "profile" | "help" | "notif" | "prefs">(null);
   const [langOpen, setLangOpen] = useState(false);
-  const [payMethod, setPayMethod] = useState<"counter" | "card" | "paynow">("counter");
+  const [payMethod, setPayMethod] = useState<"counter" | "card" | "paynow" | "credit">("counter");
   const [history, setHistory] = useState<PastOrder[] | null>(null);
   const [editName, setEditName] = useState("");
   const [editPhone, setEditPhone] = useState("");
@@ -313,8 +316,8 @@ function Menu({ info, catalog, config, loginError }: { info: Info; catalog: Cata
     if (!t) return setMember(null);
     const r = await fetch("/api/shop/me", { headers: { authorization: `Bearer ${t}` } }).catch(() => null);
     if (r?.ok) {
-      const j = (await r.json()) as { member: MemberView; coupons?: CouponView[]; stamps?: StampView | null };
-      setMember(j.member);
+      const j = (await r.json()) as { member: MemberView; creditCents?: number; coupons?: CouponView[]; stamps?: StampView | null };
+      setMember({ ...j.member, creditCents: j.creditCents ?? 0 });
       setCoupons(j.coupons ?? []);
       setStamps(j.stamps ?? null);
       setName((n) => n || j.member.name || "");
@@ -380,9 +383,13 @@ function Menu({ info, catalog, config, loginError }: { info: Info; catalog: Cata
     });
   }, [byId]);
 
+  useEffect(() => { if (screen === "payment" && member && (member.creditCents ?? 0) >= shownTotal && payMethod === "counter") setPayMethod("credit"); }, [screen]); // eslint-disable-line react-hooks/exhaustive-deps
   useEffect(() => { if (!usePoints) { setPointsPts(null); setPEdit(false); setPEditAmt(false); } }, [usePoints]);
   const items = bag.map((l) => ({ productId: l.productId, qty: l.qty, options: l.selection }));
   const count = bag.reduce((n, l) => n + l.qty, 0);
+  // Rewards (points, coupons, stamps) can be switched off for a shop. Then none of their screens or wording shows.
+  const rewardsOn = config.rewards.pointsEnabled || config.rewards.welcomeVoucherCents > 0 || config.rewards.stampCard.enabled;
+  const credit = member?.creditCents ?? 0;
   const canUsePoints = !!member && config.rewards.pointsEnabled && member.pointsBalance >= config.pricing.minPointsRedeem;
   const chosen = coupons.find((c) => c.id === couponId) ?? null;
   const preview = items.length ? quoteOrder(catalog, config, ctx, items, null, null) : null;
@@ -429,12 +436,13 @@ function Menu({ info, catalog, config, loginError }: { info: Info; catalog: Cata
       const res = await fetch("/api/shop/orders", {
         method: "POST",
         headers: { "content-type": "application/json", ...(member ? { authorization: `Bearer ${localStorage.getItem(LS_MEMBER) ?? ""}` } : {}) },
-        body: JSON.stringify({ channelId, items, customerName: name, customerPhone: phone, spot, expectedTotalCents: agreed ?? total, ...(pointsAsk ? { usePoints: reqPts ?? "max" } : {}), ...(chosen && chosenOk ? { couponId: chosen.id } : {}) }),
+        body: JSON.stringify({ channelId, items, customerName: name, customerPhone: phone, spot, expectedTotalCents: agreed ?? total, ...(payMethod === "credit" && member ? { payWithCredit: true } : {}), ...(pointsAsk ? { usePoints: reqPts ?? "max" } : {}), ...(chosen && chosenOk ? { couponId: chosen.id } : {}) }),
       });
       const j = (await res.json().catch(() => ({}))) as { orderId?: string; error?: string; totalCents?: number };
       if (res.ok && j.orderId) {
         localStorage.setItem(LS_LAST, j.orderId);
-        if (payMethod !== "counter") {
+        if (payMethod === "credit") void loadMember(); // the balance has gone down
+        if (payMethod === "card" || payMethod === "paynow") {
           // The order exists; now send the customer to the card / PayNow page. If that is unavailable they land on the
           // order's page, which offers to pay again or to pay at the counter.
           const pr = await fetch(`/api/shop/orders/${j.orderId}/pay`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ method: payMethod }) })
@@ -449,6 +457,11 @@ function Menu({ info, catalog, config, loginError }: { info: Info; catalog: Cata
       } else if (res.status === 409 && j.error === "price_changed") {
         setAgreed(j.totalCents ?? null);
         setNote(`Prices changed while you were ordering. The new total is ${formatMoney(j.totalCents ?? 0)}. Tap Pay again to confirm.`);
+      } else if (j.error === "not_enough_credit") {
+        void loadMember();
+        setNote(tx("Not enough credit: {amt} available.", { amt: formatMoney((j as { balanceCents?: number }).balanceCents ?? 0) }));
+      } else if (j.error === "sign_in_to_use_credit") {
+        setNote(tx("Sign in to pay with your member credit."));
       } else if (res.status === 429) {
         setNote(tx("Too many orders from this device. Please wait a few minutes or order at the counter."));
       } else if (j.error === "coupon_not_available" || j.error === "coupon_not_eligible") {
@@ -497,9 +510,11 @@ function Menu({ info, catalog, config, loginError }: { info: Info; catalog: Cata
           </button>
         )}
         {member ? (
-          config.rewards.pointsEnabled && <span className="shop-pts">{member.pointsBalance.toLocaleString()} points</span>
-        ) : (
+          rewardsOn ? (config.rewards.pointsEnabled && <span className="shop-pts">{member.pointsBalance.toLocaleString()} points</span>) : <span className="shop-pts">{formatMoney(credit)} {tx("credit")}</span>
+        ) : rewardsOn ? (
           <button className="shop-pts link" onClick={() => setScreen("login")}>{t("signUpNow", "Sign up now")}<br />&amp; get {config.rewards.welcomePoints} points</button>
+        ) : (
+          <button className="shop-pts link" onClick={() => setScreen("login")}>{t("signInW", "Sign in")}<br />{tx("to pay with credit")}</button>
         )}
         <span className="shop-outlet"><Icon name="pin" size={13} />{info.outletName}</span>
       </div>
@@ -554,14 +569,14 @@ function Menu({ info, catalog, config, loginError }: { info: Info; catalog: Cata
       <h3>{t("detailsW", "Details")}</h3>
       <div className="sum-row"><span className="k">{t("outletW", "Outlet")}</span><span className="v">{info.outletName}</span></div>
       <div className="sum-row"><span className="k">{t("modeW", "Mode")}</span><span className="v">{channel?.name}{dine ? ` · ${spot || tx("no table yet")}` : ` · ${tx("Pickup counter")}`}</span></div>
-      <div className="sum-row"><span className="k">{t("memberW", "Member")}</span><span className="v">{member ? `${who} · ${member.pointsBalance.toLocaleString()} points` : "Guest"}</span></div>
+      <div className="sum-row"><span className="k">{t("memberW", "Member")}</span><span className="v">{member ? (rewardsOn ? `${who} · ${member.pointsBalance.toLocaleString()} points` : `${who} · ${formatMoney(credit)} ${tx("credit")}`) : "Guest"}</span></div>
       {phone && <div className="sum-row"><span className="k">{t("phoneW", "Phone")}</span><span className="v">{phone}</span></div>}
     </div>
   );
 
   const nav = (
     <nav className="shop-nav" aria-label="Sections">
-      {([["order", "basket", screen !== "order" && count > 0 && navActive === "order" ? tx("Add More") : t("order", "Order")], ["rewards", "gift", t("rewards", "Rewards")], ["account", "user", t("account", "Account")]] as const).map(([id, ic, label]) => (
+      {([["order", "basket", screen !== "order" && count > 0 && navActive === "order" ? tx("Add More") : t("order", "Order")], ...(rewardsOn ? [["rewards", "gift", t("rewards", "Rewards")] as const] : []), ["account", "user", t("account", "Account")]] as const).map(([id, ic, label]) => (
         <button key={id} aria-current={navActive === id ? "page" : undefined} onClick={() => setScreen(id)}><Icon name={ic} size={20} /><span>{label}</span></button>
       ))}
     </nav>
@@ -597,7 +612,7 @@ function Menu({ info, catalog, config, loginError }: { info: Info; catalog: Cata
         {coupons.map((c) => {
           const ok = itemsSubtotal >= c.minSpendCents;
           return (
-            <label key={c.id} className={`shop-coupon ${ok ? "" : tx("off")}`}>
+            <label key={c.id} className={`shop-coupon ${ok ? "" : "off"}`}>
               <input type="radio" name="coupon" disabled={!ok} checked={couponId === c.id} onChange={() => { setCouponId(c.id); setAgreed(null); }} onClick={() => couponId === c.id && setCouponId(null)} />
               <span>
                 {c.title}
@@ -655,10 +670,16 @@ function Menu({ info, catalog, config, loginError }: { info: Info; catalog: Cata
           </>
         )}
         <div className="shop-chips">
-          <button className={`search ${search !== null ? "on" : ""}`} aria-label={tx("Search the menu")} aria-expanded={search !== null} onClick={() => setSearch((s) => (s === null ? "" : null))}><Icon name="search" size={18} /></button>
-          {categories.map((c) => <button key={c} className={c === category ? "on" : ""} onClick={() => setCategory(c)}>{c === "All" ? t("all", "All") : tx(c)}</button>)}
+          <button className={`search ${search !== null ? "on" : ""}`} aria-label={tx("Search the menu")} aria-expanded={search !== null} onClick={() => { setSearchCleared(false); setSearch((s) => (s === null ? "" : null)); }}><Icon name="search" size={18} /></button>
+          {categories.map((c) => <button key={c} className={c === category ? "on" : ""} onClick={() => { setCategory(c); if (searchCleared && search !== null && !search.trim()) { setSearch(null); setSearchCleared(false); } }}>{c === "All" ? t("all", "All") : tx(c)}</button>)}
         </div>
-        {search !== null && <input className="shop-search" autoFocus placeholder={tx("Search the menu")} value={search} onChange={(e) => setSearch(e.target.value)} />}
+        {search !== null && (
+          <div className="search-bar">
+            <Icon name="search" size={17} />
+            <input className="search-input" type="search" autoFocus autoComplete="off" enterKeyHint="search" placeholder={tx("Search the menu")} aria-label={tx("Search the menu")} value={search} onChange={(e) => { setSearch(e.target.value); setSearchCleared(false); }} />
+            {search !== "" && <button className="search-clear" aria-label={`${tx("Search the menu")}: ${t("clear", "Clear")}`} onClick={() => { setSearch(""); setSearchCleared(true); }}>&times;</button>}
+          </div>
+        )}
         {noteEl}
         <div className="shop-list">
           {shown.length === 0 && <p className="shop-msg">{tx("Nothing matches.")}</p>}
@@ -870,12 +891,13 @@ function Menu({ info, catalog, config, loginError }: { info: Info; catalog: Cata
                   <div className="member-main">
                     <div className="name">{who}</div>
                     {member.phone && <div className="acct-phone">{member.phone}</div>}
+                    <div className="pts-stack"><span className="pts-line"><b>{formatMoney(credit)}</b><span>{tx("credit")}</span></span></div>
                     {config.rewards.pointsEnabled && <div className="pts-stack"><span className="pts-line"><b>{member.pointsBalance.toLocaleString()}</b><span>{t("points", "points")}</span></span><span className="pts-worth">{tx("{amt} worth", { amt: formatMoney(member.pointsBalance) })}</span></div>}
                   </div>
                 ) : (
                   <div className="member-main">
                     <div className="name">{t("guestW", "Guest")}</div>
-                    <div className="pts-stack"><span className="pts-line" style={{ fontSize: 14, lineHeight: "18px", fontWeight: 600 }}>{earnPts > 0 ? tx("Sign up to earn {n} points on this order", { n: earnPts.toLocaleString() }) : tx("Sign up to earn points on this order")}</span></div>
+                    <div className="pts-stack"><span className="pts-line" style={{ fontSize: 14, lineHeight: "18px", fontWeight: 600 }}>{!rewardsOn ? tx("Sign in to pay with your member credit") : earnPts > 0 ? tx("Sign up to earn {n} points on this order", { n: earnPts.toLocaleString() }) : tx("Sign up to earn points on this order")}</span></div>
                     <button className="history" onClick={() => setScreen("login")}>{t("signUpBtn", "Sign up")} <Icon name="chevR" size={14} /></button>
                   </div>
                 )}
@@ -992,8 +1014,8 @@ function Menu({ info, catalog, config, loginError }: { info: Info; catalog: Cata
         })}
         {quote?.ok && bag.length > 0 && (
           <>
-            <div className="reward-head">{t("applyReward", "Apply a reward")}</div>
-            {member ? (
+            {rewardsOn && <div className="reward-head">{t("applyReward", "Apply a reward")}</div>}
+            {!rewardsOn ? null : member ? (
               <div className="reward-slots">{rewardSlots(true)}</div>
             ) : (
               <div className="reward-slots">
@@ -1013,10 +1035,10 @@ function Menu({ info, catalog, config, loginError }: { info: Info; catalog: Cata
               {quote.priced.bcrs > 0 && <div className="row"><span>{t("bcrsDeposit", "BCRS Deposit")}</span><span className="v">{formatMoney(quote.priced.bcrs)}</span></div>}
               <div className="row grand"><span>{t("total", "Total")}</span><span className="v">{formatMoney(shownTotal)}</span></div>
             </div>
-            <div className="stamp-note"><span style={{ display: "flex", color: "var(--ink)" }}><Icon name="gift" size={27} /></span><span><span className="t">{t("stampNoteT", "1 stamp after confirmed payment")}</span><br /><span className="d">{tx("You'll earn 1 stamp for this order.")}</span></span></div>
+            {rewardsOn && <div className="stamp-note"><span style={{ display: "flex", color: "var(--ink)" }}><Icon name="gift" size={27} /></span><span><span className="t">{t("stampNoteT", "1 stamp after confirmed payment")}</span><br /><span className="d">{tx("You'll earn 1 stamp for this order.")}</span></span></div>}
           </>
         )}
-        <button className={`review-cta ${bag.length === 0 ? tx("off") : ""}`} disabled={bag.length === 0 || !quote?.ok} onClick={() => setScreen("summary")}>
+        <button className={`review-cta ${bag.length === 0 ? "off" : ""}`} disabled={bag.length === 0 || !quote?.ok} onClick={() => setScreen("summary")}>
           <Icon name="bag" size={19} /><span>{tx(count === 1 ? "Review order · {n} item" : "Review order · {n} items", { n: count })}</span><span className="div" /><span>{formatMoney(shownTotal)}</span><Icon name="arrowR" size={19} />
         </button>
       </div>
@@ -1037,8 +1059,8 @@ function Menu({ info, catalog, config, loginError }: { info: Info; catalog: Cata
           {totalsRows(quote)}
         </div>
         <div className="e2e-card">
-          <h3>{tx("Voucher & payment")}</h3>
-          <button className="sum-link-row" onClick={() => setWallet(true)}><span className="sl-ic"><Icon name="ticket" size={21} /></span><span className="sl-t">{t("voucher", "Voucher")}<span className="sl-d">{tx("Coupons & vouchers from your wallet")}</span></span><span className="sl-v">{chosen && chosenOk ? chosen.title : "None applied"}</span><span className="chev"><Icon name="chevR" size={16} /></span></button>
+          <h3>{rewardsOn ? tx("Voucher & payment") : t("payMethodW", "Payment method")}</h3>
+          {rewardsOn && <button className="sum-link-row" onClick={() => setWallet(true)}><span className="sl-ic"><Icon name="ticket" size={21} /></span><span className="sl-t">{t("voucher", "Voucher")}<span className="sl-d">{tx("Coupons & vouchers from your wallet")}</span></span><span className="sl-v">{chosen && chosenOk ? chosen.title : "None applied"}</span><span className="chev"><Icon name="chevR" size={16} /></span></button>}
           <button className="sum-link-row" onClick={() => setScreen("payment")}><span className="sl-ic"><Icon name="card" size={21} /></span><span className="sl-t">{t("payMethodW", "Payment method")}<span className="sl-d">{tx("Chosen at the payment step")}</span></span><span className="sl-v">{t("chooseLater", "Choose later")}</span><span className="chev"><Icon name="chevR" size={16} /></span></button>
           <div className="sum-link-row" style={{ cursor: "default" }}><span className="sl-ic"><Icon name="pin" size={21} /></span><span className="sl-t">{dine ? `${channel?.name} · ${spot || tx("no table yet")}` : `${channel?.name} · Pickup counter`}<span className="sl-d">{info.outletName}</span></span></div>
         </div>
@@ -1062,8 +1084,8 @@ function Menu({ info, catalog, config, loginError }: { info: Info; catalog: Cata
             {!member && <button className="e2e-cta" disabled={!phoneOk} onClick={() => { setGuestOk(true); setGuestForm(false); }}><span>{t("continueW", "Continue")}</span><Icon name="arrowR" size={19} /></button>}
           </div>
         )}
-        {!member && guestOk && <p className="e2e-note">{t("guestNoPoints", "Continuing as guest — no points will be earned on this order.")}</p>}
-        <button className={`e2e-cta ${canOrder && (!dine || !!spot) ? "" : tx("off")}`} disabled={!canOrder || (dine && !spot)} onClick={() => setScreen("checkout")}>
+        {rewardsOn && !member && guestOk && <p className="e2e-note">{t("guestNoPoints", "Continuing as guest — no points will be earned on this order.")}</p>}
+        <button className={`e2e-cta ${canOrder && (!dine || !!spot) ? "" : "off"}`} disabled={!canOrder || (dine && !spot)} onClick={() => setScreen("checkout")}>
           <span>{tx(count === 1 ? "Order Now · {n} item" : "Order Now · {n} items", { n: count })}</span><span>{formatMoney(shownTotal)}</span>
         </button>
         {!canOrder && <p className="e2e-sub">{member ? "Add your phone number to place this order." : "Tap Sign up, or Check out as guest, to place this order."}</p>}
@@ -1101,6 +1123,16 @@ function Menu({ info, catalog, config, loginError }: { info: Info; catalog: Cata
             {back("Back to order summary", "summary")}
             {noteEl}
             <div className="e2e-card"><h3>{t("totalToPay", "Total to pay")}</h3><div className="sum-row grand" style={{ border: 0, margin: 0, padding: 0 }}><span className="k">{t("total", "Total")}</span><span className="v">{formatMoney(shownTotal)}</span></div></div>
+            {member && (() => {
+              const enough = credit >= shownTotal;
+              return (
+                <button className="pay-opt" aria-pressed={payMethod === "credit"} disabled={!enough} style={enough ? undefined : { opacity: 0.6 }} onClick={() => setPayMethod("credit")}>
+                  <span style={{ display: "flex", color: "var(--orange-dark)" }}><Icon name="stack" size={24} /></span>
+                  <span className="pt"><b>{tx("Member credit")}</b><span>{enough ? tx("{amt} available. Paid now, and sent straight to the kitchen.", { amt: formatMoney(credit) }) : tx("Not enough credit: {amt} available.", { amt: formatMoney(credit) })}</span></span>
+                  {enough && <span className="radio" />}
+                </button>
+              );
+            })()}
             {([["card", "Card", "Debit or credit card.", "card"], ["paynow", "PayNow", "Pay with PayNow QR.", "stack"]] as const).map(([m, title, desc, ic]) => {
               const on = info.payments.online;
               return (
@@ -1112,7 +1144,7 @@ function Menu({ info, catalog, config, loginError }: { info: Info; catalog: Cata
               );
             })}
             <button className="pay-opt" aria-pressed={payMethod === "counter"} onClick={() => setPayMethod("counter")}><span style={{ display: "flex", color: "var(--orange-dark)" }}><Icon name="ticket" size={24} /></span><span className="pt"><b>{info.paymentTiming === "prepay" ? "Pay at the counter" : "Cash on pickup"}</b><span>{info.paymentTiming === "prepay" ? "Quote your number at the counter. We start your order once it is paid." : "Pay at the counter when you collect."}</span></span><span className="radio" /></button>
-            <button className="e2e-cta" onClick={() => void place()}><span>{payMethod === "counter" ? "Place order" : "Pay"} · {formatMoney(shownTotal)}</span><Icon name="arrowR" size={19} /></button>
+            <button className="e2e-cta" onClick={() => void place()}><span>{payMethod === "counter" ? "Place order" : payMethod === "credit" ? tx("Pay with credit") : "Pay"} · {formatMoney(shownTotal)}</span><Icon name="arrowR" size={19} /></button>
           </>
         )}
       </div>
@@ -1291,7 +1323,7 @@ function Login({ info, welcome, loginError, onGuest, onDone }: { info: Info; wel
                 <div className="e2e-field"><label htmlFor="em-email">{t("emailW", "Email")}</label><input className="e2e-input" id="em-email" type="email" inputMode="email" value={email} maxLength={120} placeholder="you@example.com" autoComplete="email" onChange={(e) => setEmail(e.target.value)} /></div>
                 {err && <p className="login-err" role="alert">{err}</p>}
                 <button className="e2e-cta" disabled={busy || !email.includes("@")} onClick={() => void start()}><span>{busy ? "Sending…" : "Send OTP"}</span><Icon name="arrowR" size={19} /></button>
-                <p className="e2e-note">{tx("We'll send a one-time code to your email so you can enter it back here.")}{mode === "signup" ? tx(" New members get {n} points.", { n: welcome }) : ""}</p>
+                <p className="e2e-note">{tx("We'll send a one-time code to your email so you can enter it back here.")}{mode === "signup" && welcome > 0 ? tx(" New members get {n} points.", { n: welcome }) : ""}</p>
               </div>
             </>
           )}

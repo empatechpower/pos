@@ -83,4 +83,18 @@ Open `https://YOUR-SHOP-ADDRESS/#/manager` on a computer or tablet, sign in with
   **Add credit** tops up a member (cashiers up to S$200 at a time; managers and owners more). **Adjust points** (managers and owners only)
   adds or takes points and needs a reason; both are recorded with who did it.
 
+**Members and credit (this version has rewards switched off)**
+
+- **Rewards are off** by default: no points, coupons, stamps or welcome gifts, and none of their screens show. (Set `REWARDS=on` in the server settings to bring them back.)
+- **Add a member:** Manager > Members > **Add a member**. Give a phone number or an email (so they can sign in), a name, and optional opening credit.
+- **Upload a list:** Manager > Members > **Upload a list**. A CSV with the columns `name, phone, email, credit` (credit in dollars). Use
+  **Download a template** to get one. People already there are skipped and get no extra credit, so uploading the same file twice is safe.
+  Rows that can't be used are listed with the reason.
+- **Top up credit:** on a member's row, **Add credit**.
+- **Customers pay with credit** in the shop: they sign in, and on the Payment screen **Member credit** is chosen for them when they have enough.
+  The order is then paid and accepted at once and goes straight to the kitchen printer. If staff cancel it, the credit goes back to the member once.
+- **Staff can take credit at the counter** from the **Online** screen with **Pay with member credit** (it finds the member by phone or email).
+- A member signs in with the email or phone you entered, and finds their credit waiting. For email sign-in the code is shown in Render's Logs until
+  an email service is connected.
+
 The first time, the browser must be enrolled as a device (Devices page, or a code from the command line), and then staff sign in.

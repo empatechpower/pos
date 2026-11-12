@@ -27,7 +27,7 @@ export function Manager({ config }: { config: BusinessConfig }) {
             <button className={tab === "orders" ? "primary sm" : "secondary sm"} onClick={() => setTab("orders")}>Transactions</button>
             <button className={tab === "members" ? "primary sm" : "secondary sm"} onClick={() => setTab("members")}>Members</button>
           </div>
-          {tab === "orders" ? <Transactions config={config} /> : <Members canAdjustPoints={staff.role !== "cashier"} />}
+          {tab === "orders" ? <Transactions config={config} /> : <Members canAdjustPoints={staff.role !== "cashier"} canImport={staff.role !== "cashier"} rewardsOn={config.rewards.pointsEnabled} />}
         </>
       )}
     </div>
@@ -127,11 +127,12 @@ interface MemberRow {
   joinedAt: string;
 }
 
-function Members({ canAdjustPoints }: { canAdjustPoints: boolean }) {
+function Members({ canAdjustPoints, canImport, rewardsOn }: { canAdjustPoints: boolean; canImport: boolean; rewardsOn: boolean }) {
   const [q, setQ] = useState("");
   const [rows, setRows] = useState<MemberRow[] | null>(null);
   const [total, setTotal] = useState(0);
   const [open, setOpen] = useState<{ id: string; kind: "credit" | "points" } | null>(null);
+  const [panel, setPanel] = useState<null | "add" | "upload">(null);
   const [msg, setMsg] = useState<string | null>(null);
   const seq = useRef(0);
 
@@ -153,6 +154,12 @@ function Members({ canAdjustPoints }: { canAdjustPoints: boolean }) {
 
   return (
     <>
+      <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginBottom: 10 }}>
+        <button className={panel === "add" ? "primary sm" : "secondary sm"} onClick={() => setPanel(panel === "add" ? null : "add")}>Add a member</button>
+        {canImport && <button className={panel === "upload" ? "primary sm" : "secondary sm"} onClick={() => setPanel(panel === "upload" ? null : "upload")}>Upload a list</button>}
+      </div>
+      {panel === "add" && <AddMember onDone={(text) => { setMsg(text); setPanel(null); void load(q.trim()); }} />}
+      {panel === "upload" && canImport && <UploadMembers onDone={() => void load(q.trim())} />}
       <input value={q} onChange={(e) => setQ(e.target.value)} placeholder="Search by name, email or phone" style={{ width: "100%", marginBottom: 10 }} />
       {msg && <div className="flash">{msg}</div>}
       <p className="muted">{rows === null ? "Loading…" : q ? `${rows.length} found` : `${total} member${total === 1 ? "" : "s"}${total > rows.length ? ` (newest ${rows.length} shown; search to find others)` : ""}`}</p>
@@ -166,12 +173,12 @@ function Members({ canAdjustPoints }: { canAdjustPoints: boolean }) {
             </div>
             <div style={{ textAlign: "right" }}>
               <div>Credit <b>{formatMoney(m.creditCents)}</b></div>
-              <div>Points <b>{m.points.toLocaleString()}</b></div>
+              {rewardsOn && <div>Points <b>{m.points.toLocaleString()}</b></div>}
             </div>
           </div>
           <div style={{ display: "flex", gap: 8, marginTop: 8 }}>
             <button className="secondary sm" onClick={() => setOpen(open?.id === m.id && open.kind === "credit" ? null : { id: m.id, kind: "credit" })}>Add credit</button>
-            {canAdjustPoints && <button className="secondary sm" onClick={() => setOpen(open?.id === m.id && open.kind === "points" ? null : { id: m.id, kind: "points" })}>Adjust points</button>}
+            {rewardsOn && canAdjustPoints && <button className="secondary sm" onClick={() => setOpen(open?.id === m.id && open.kind === "points" ? null : { id: m.id, kind: "points" })}>Adjust points</button>}
           </div>
           {open?.id === m.id && open.kind === "credit" && <CreditForm member={m} onDone={(t) => { setMsg(t); setOpen(null); void load(q.trim()); }} />}
           {open?.id === m.id && open.kind === "points" && <PointsForm member={m} onDone={(t) => { setMsg(t); setOpen(null); void load(q.trim()); }} />}
@@ -240,6 +247,145 @@ function PointsForm({ member, onDone }: { member: MemberRow; onDone: (message: s
         <input value={note} onChange={(e) => setNote(e.target.value)} maxLength={120} placeholder="Reason (required)" style={{ flex: 1, minWidth: 160 }} />
         <button className="primary sm" disabled={busy || !ok} onClick={() => void save()}>Save</button>
       </div>
+    </div>
+  );
+}
+
+// ---- adding and importing members -------------------------------------------------------------
+
+const WHY: Record<string, string> = { need_phone_or_email: "Add an email or a phone number so they can sign in.", bad_email: "That email looks wrong.", bad_phone: "That phone number looks wrong. Use 8 digits, or include the country code." };
+
+function AddMember({ onDone }: { onDone: (message: string) => void }) {
+  const [f, setF] = useState({ name: "", phone: "", email: "", credit: "" });
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState<string | null>(null);
+  const cents = f.credit.trim() === "" ? 0 : Math.round(Number(f.credit.replace(/^s?\$/i, "")) * 100);
+  const bad = !Number.isFinite(cents) || cents < 0;
+
+  async function add() {
+    if (busy || bad) return;
+    setBusy(true);
+    setErr(null);
+    const r = await staffFetch("/api/members", { body: { name: f.name, phone: f.phone, email: f.email, creditCents: cents } });
+    setBusy(false);
+    if ("problem" in r) return setErr(r.problem);
+    const j = (await r.res.json().catch(() => ({}))) as { error?: string; created?: boolean; member?: { name: string | null; phone: string | null; email: string | null }; creditCents?: number };
+    if (r.res.status === 403) return setErr("Cashiers can add up to S$200 of opening credit. Ask a manager for more.");
+    if (!r.res.ok) return setErr(WHY[j.error ?? ""] ?? "Could not add that member. Nothing was changed.");
+    const who = j.member?.name || j.member?.email || j.member?.phone || "the member";
+    onDone(j.created ? `Added ${who}${cents > 0 ? ` with ${formatMoney(cents)} credit` : ""}.` : `${who} is already a member (credit ${formatMoney(j.creditCents ?? 0)}). Nothing was changed. Use "Add credit" on their row to top up.`);
+  }
+  return (
+    <div className="tab" style={{ display: "block", marginBottom: 10 }}>
+      <b>New member</b>
+      {err && <div className="flash warn">{err}</div>}
+      <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginTop: 6 }}>
+        <input value={f.name} onChange={(e) => setF({ ...f, name: e.target.value })} placeholder="Name" maxLength={40} style={{ flex: 1, minWidth: 140 }} />
+        <input value={f.phone} onChange={(e) => setF({ ...f, phone: e.target.value })} placeholder="Phone, e.g. 9123 4567" inputMode="tel" style={{ flex: 1, minWidth: 140 }} />
+        <input value={f.email} onChange={(e) => setF({ ...f, email: e.target.value })} placeholder="Email" inputMode="email" style={{ flex: 1, minWidth: 160 }} />
+        <input value={f.credit} onChange={(e) => setF({ ...f, credit: e.target.value })} placeholder="Opening credit S$" inputMode="decimal" style={{ width: 130 }} />
+        <button className="primary sm" disabled={busy || bad || (!f.phone.trim() && !f.email.trim())} onClick={() => void add()}>Add</button>
+      </div>
+      <p className="muted" style={{ fontSize: 13, margin: "6px 0 0" }}>An email or a phone number is needed. The member signs in with it and finds their credit waiting.</p>
+    </div>
+  );
+}
+
+/** A small CSV reader: quoted fields, commas inside quotes, and the byte-order mark Excel adds. */
+function parseCsv(text: string): string[][] {
+  const rows: string[][] = [];
+  let row: string[] = [], cell = "", quoted = false;
+  const t = text.replace(/^\uFEFF/, "");
+  for (let i = 0; i < t.length; i++) {
+    const c = t[i]!;
+    if (quoted) {
+      if (c === '"' && t[i + 1] === '"') { cell += '"'; i++; } else if (c === '"') quoted = false; else cell += c;
+    } else if (c === '"') quoted = true;
+    else if (c === "," || c === ";" || c === "\t") { row.push(cell); cell = ""; }
+    else if (c === "\n" || c === "\r") { if (c === "\r" && t[i + 1] === "\n") i++; row.push(cell); cell = ""; if (row.some((x) => x.trim())) rows.push(row); row = []; }
+    else cell += c;
+  }
+  row.push(cell);
+  if (row.some((x) => x.trim())) rows.push(row);
+  return rows;
+}
+
+const HEADS: Record<string, string> = { name: "name", fullname: "name", customer: "name", phone: "phone", mobile: "phone", contact: "phone", tel: "phone", email: "email", mail: "email", credit: "credit", balance: "credit", amount: "credit", topup: "credit" };
+
+function UploadMembers({ onDone }: { onDone: () => void }) {
+  const [rows, setRows] = useState<Array<{ name: string; phone: string; email: string; credit: string }> | null>(null);
+  const [file, setFile] = useState("");
+  const [problem, setProblem] = useState<string | null>(null);
+  const [busy, setBusy] = useState(false);
+  const [result, setResult] = useState<{ created: number; existed: number; invalid: number; creditedCents: number; bad: Array<{ row: number; why: string }> } | null>(null);
+
+  async function pick(f: File | undefined) {
+    setRows(null); setResult(null); setProblem(null);
+    if (!f) return;
+    setFile(f.name);
+    const parsed = parseCsv(await f.text());
+    if (parsed.length < 2) return setProblem("That file has no members in it. The first row must be the column names: name, phone, email, credit.");
+    const cols = parsed[0]!.map((h) => HEADS[h.trim().toLowerCase().replace(/[^a-z]/g, "")]);
+    if (!cols.includes("email") && !cols.includes("phone")) return setProblem("I can't find an email or phone column. The first row must be the column names: name, phone, email, credit.");
+    const out = parsed.slice(1).map((r) => {
+      const o = { name: "", phone: "", email: "", credit: "" };
+      cols.forEach((k, i) => { if (k) (o as Record<string, string>)[k] = (r[i] ?? "").trim(); });
+      return o;
+    });
+    if (out.length > 5000) return setProblem("That's more than 5,000 rows. Please split the file.");
+    setRows(out);
+  }
+
+  async function send() {
+    if (!rows || busy) return;
+    setBusy(true); setProblem(null);
+    const total = { created: 0, existed: 0, invalid: 0, creditedCents: 0, bad: [] as Array<{ row: number; why: string }> };
+    for (let i = 0; i < rows.length; i += 500) {
+      const chunk = rows.slice(i, i + 500);
+      const r = await staffFetch("/api/members/import", { body: { rows: chunk } });
+      if ("problem" in r) { setBusy(false); setResult(total); return setProblem(`${r.problem} ${i} of ${rows.length} rows were done; sending the file again is safe, people already added are skipped.`); }
+      if (!r.res.ok) { setBusy(false); setResult(total); return setProblem(`The server refused part of the file (error ${r.res.status}). ${i} of ${rows.length} rows were done; sending it again is safe.`); }
+      const j = (await r.res.json()) as { created: number; existed: number; invalid: number; creditedCents: number; results: Array<{ row: number; status: string; why?: string }> };
+      total.created += j.created; total.existed += j.existed; total.invalid += j.invalid; total.creditedCents += j.creditedCents;
+      for (const x of j.results) if (x.status === "invalid") total.bad.push({ row: i + x.row + 1, why: x.why ?? "invalid" }); // +1: the header row
+    }
+    setBusy(false);
+    setResult(total);
+    setRows(null);
+    onDone();
+  }
+
+  function template() {
+    const blob = new Blob(["name,phone,email,credit\nMei Lin,9123 4567,mei@example.com,50\nAlex Tan,8123 4567,,20.50\n"], { type: "text/csv" });
+    const a = document.createElement("a");
+    a.href = URL.createObjectURL(blob);
+    a.download = "members-template.csv";
+    a.click();
+    URL.revokeObjectURL(a.href);
+  }
+
+  return (
+    <div className="tab" style={{ display: "block", marginBottom: 10 }}>
+      <b>Upload a list of members</b>
+      <p className="muted" style={{ fontSize: 13, margin: "4px 0 8px" }}>A CSV file (save from Excel or Google Sheets as CSV) with the columns <b>name, phone, email, credit</b>. Each person needs a phone or an email. Credit is in dollars. People who are already members are skipped, so uploading the same file twice is safe.</p>
+      <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center" }}>
+        <label className="secondary sm filebtn">Choose a file<input type="file" accept=".csv,text/csv" hidden onChange={(e) => { void pick(e.target.files?.[0]); e.target.value = ""; }} /></label>
+        <button className="secondary sm" onClick={template}>Download a template</button>
+        {file && <span className="muted">{file}</span>}
+      </div>
+      {problem && <div className="flash warn" style={{ marginTop: 8 }}>{problem}</div>}
+      {rows && (
+        <div style={{ marginTop: 8 }}>
+          <div>{rows.length} row{rows.length === 1 ? "" : "s"} found. First: {rows.slice(0, 3).map((r) => r.name || r.email || r.phone).join(", ")}{rows.length > 3 ? "…" : ""}</div>
+          <button className="primary sm" disabled={busy} onClick={() => void send()} style={{ marginTop: 6 }}>{busy ? "Adding…" : `Add ${rows.length} member${rows.length === 1 ? "" : "s"}`}</button>
+        </div>
+      )}
+      {result && (
+        <div className="flash" style={{ marginTop: 8 }}>
+          Added <b>{result.created}</b> ({formatMoney(result.creditedCents)} credit given) · already members <b>{result.existed}</b> · not added <b>{result.invalid}</b>
+          {result.bad.length > 0 && <ul style={{ margin: "6px 0 0", paddingLeft: 18 }}>{result.bad.slice(0, 20).map((b) => <li key={b.row}>Row {b.row}: {b.why}</li>)}{result.bad.length > 20 && <li>…and {result.bad.length - 20} more</li>}</ul>}
+        </div>
+      )}
     </div>
   );
 }

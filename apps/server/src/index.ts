@@ -18,6 +18,8 @@ const dataFile = fileURLToPath(new URL("../data/events.json", import.meta.url));
 // Which mode this deployment runs in. Change via POS_MODE=restaurant|delivery|fastServe.
 const mode = (process.env.POS_MODE ?? "fastServe") as keyof typeof PRESETS;
 const config = PRESETS[mode]("bailey-patch", "Bailey & Patch", "Enabling Village");
+// Rewards (points, coupons, stamps, welcome gifts) are off unless REWARDS=on. Members and prepaid credit work either way.
+if (process.env.REWARDS !== "on") config.rewards = { ...config.rewards, pointsEnabled: false, welcomePoints: 0, welcomeVoucherCents: 0, stampCard: { ...config.rewards.stampCard, enabled: false } };
 
 // Postgres when DATABASE_URL is set; otherwise the JSON file, so local development needs nothing.
 const db = process.env.DATABASE_URL ? createPool(process.env.DATABASE_URL) : null;

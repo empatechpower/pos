@@ -1764,5 +1764,77 @@ export const PHRASES: Record<string, string[]> = {
   "Choisir {x}",
   "{x} wählen",
   "{x} ஐத் தேர்ந்தெடு"
+ ],
+ "credit": [
+  "kredit",
+  "kredit",
+  "余额",
+  "クレジット",
+  "crédit",
+  "Guthaben",
+  "கிரெடிட்"
+ ],
+ "to pay with credit": [
+  "untuk bayar dengan kredit",
+  "untuk bayar dengan kredit",
+  "以使用余额付款",
+  "クレジットで支払う",
+  "pour payer avec le crédit",
+  "um mit Guthaben zu zahlen",
+  "கிரெடிட்டில் செலுத்த"
+ ],
+ "Member credit": [
+  "Kredit ahli",
+  "Kredit anggota",
+  "会员余额",
+  "会員クレジット",
+  "Crédit membre",
+  "Mitgliedsguthaben",
+  "உறுப்பினர் கிரெடிட்"
+ ],
+ "{amt} available. Paid now, and sent straight to the kitchen.": [
+  "{amt} tersedia. Dibayar sekarang dan terus dihantar ke dapur.",
+  "{amt} tersedia. Dibayar sekarang dan langsung dikirim ke dapur.",
+  "可用 {amt}。立即支付并直接送到厨房。",
+  "{amt}利用可能。今すぐ支払い、そのままキッチンへ送られます。",
+  "{amt} disponible. Payé maintenant et envoyé directement en cuisine.",
+  "{amt} verfügbar. Sofort bezahlt und direkt an die Küche gesendet.",
+  "{amt} உள்ளது. இப்போதே செலுத்தப்பட்டு நேரடியாக சமையலறைக்குச் செல்லும்."
+ ],
+ "Not enough credit: {amt} available.": [
+  "Kredit tidak mencukupi: {amt} tersedia.",
+  "Kredit tidak cukup: tersedia {amt}.",
+  "余额不足：可用 {amt}。",
+  "クレジットが足りません：{amt}利用可能。",
+  "Crédit insuffisant : {amt} disponible.",
+  "Nicht genug Guthaben: {amt} verfügbar.",
+  "போதிய கிரெடிட் இல்லை: {amt} உள்ளது."
+ ],
+ "Pay with credit": [
+  "Bayar dengan kredit",
+  "Bayar dengan kredit",
+  "用余额支付",
+  "クレジットで支払う",
+  "Payer avec le crédit",
+  "Mit Guthaben bezahlen",
+  "கிரெடிட்டில் செலுத்து"
+ ],
+ "Sign in to pay with your member credit": [
+  "Log masuk untuk bayar dengan kredit ahli anda",
+  "Masuk untuk membayar dengan kredit anggota Anda",
+  "登录后使用会员余额付款",
+  "サインインして会員クレジットで支払う",
+  "Connectez-vous pour payer avec votre crédit membre",
+  "Melden Sie sich an, um mit Ihrem Mitgliedsguthaben zu zahlen",
+  "உங்கள் உறுப்பினர் கிரெடிட்டில் செலுத்த உள்நுழையவும்"
+ ],
+ "Sign in to pay with your member credit.": [
+  "Log masuk untuk bayar dengan kredit ahli anda.",
+  "Masuk untuk membayar dengan kredit anggota Anda.",
+  "登录后使用会员余额付款。",
+  "サインインして会員クレジットで支払ってください。",
+  "Connectez-vous pour payer avec votre crédit membre.",
+  "Melden Sie sich an, um mit Ihrem Mitgliedsguthaben zu zahlen.",
+  "உங்கள் உறுப்பினர் கிரெடிட்டில் செலுத்த உள்நுழையவும்."
  ]
 };

@@ -4,6 +4,7 @@ import { audit, type Permission } from "./auth.js";
 import type { BrandStore } from "./brand.js";
 import type { CatalogStore, PgCatalogStore } from "./catalog.js";
 import type { Db } from "./db/pool.js";
+import { balanceOf, refund as refundCredit, spend as spendCredit } from "./ledger.js";
 import { FailureLimiter } from "./rateLimit.js";
 import { normaliseEmail, type MemberStore } from "./members.js";
 import { authorizeUrl, createStripeCheckout, createStripeRefund, fetchProfile, sendMail, newState, newVerifier, sameSecret, verifyStripeSignature, type Integrations, type OAuthProvider } from "./integrations.js";
@@ -218,7 +219,7 @@ export function registerShop(app: FastifyInstance, d: ShopDeps) {
     app.get("/api/shop/me", async (req, reply) => {
       const m = await members.fromToken(bearer(req));
       if (!m) return reply.code(401).send({ error: "not_signed_in" });
-      return { member: m, history: await members.history(m.id, 20), coupons: await members.coupons(m.id), stamps: d.config.rewards.stampCard.enabled ? { ...(await members.stamps(m.id)), target: d.config.rewards.stampCard.target, rewardTitle: d.config.rewards.stampCard.rewardTitle, minPaidCents: d.config.rewards.stampCard.minPaidCents } : null, pointsEnabled: d.config.rewards.pointsEnabled };
+      return { member: m, creditCents: await balanceOf(d.db, merchantId, m.id), history: await members.history(m.id, 20), coupons: await members.coupons(m.id), stamps: d.config.rewards.stampCard.enabled ? { ...(await members.stamps(m.id)), target: d.config.rewards.stampCard.target, rewardTitle: d.config.rewards.stampCard.rewardTitle, minPaidCents: d.config.rewards.stampCard.minPaidCents } : null, pointsEnabled: d.config.rewards.pointsEnabled };
     });
 
     app.post("/api/shop/auth/logout", async (req) => {
@@ -348,6 +349,8 @@ export function registerShop(app: FastifyInstance, d: ShopDeps) {
     usePoints?: number | "max";
     /** A coupon from the member's wallet. Needs a signed-in member. */
     couponId?: string;
+    /** Pay the whole order from the member's prepaid credit. Needs a signed-in member. The order is then paid and accepted at once. */
+    payWithCredit?: boolean;
   }
 
   /** A customer places an order. Held for staff to accept; nothing reaches the kitchen yet. */
@@ -387,20 +390,29 @@ export function registerShop(app: FastifyInstance, d: ShopDeps) {
 
     // The minimum spend is on the items subtotal only (before service charge, tax and deposits).
     if (coupon && quote.priced.couponIneligible) return reply.code(400).send({ error: "coupon_not_eligible", shortfallCents: coupon.minSpendCents - quote.priced.subtotal });
+    if (b.payWithCredit && !member) return reply.code(401).send({ error: "sign_in_to_use_credit" });
     const orderId = newId();
     return serially(async () => {
     const taken = await activeQueueNumbers(d.db, merchantId);
     const queueNumber = collectionNumber(phone, taken) ?? (await nextOnlineNumber(d.db, merchantId));
     const ts = Date.now();
+    // Credit first: if it is short, nothing else has been touched. Taken in one step that cannot go below zero.
+    const creditCents = b.payWithCredit && member ? quote.priced.total : 0;
+    if (creditCents > 0) {
+      const paid = await spendCredit(d.db, { merchantId, customerId: member!.id, amountCents: creditCents, idempotencyKey: `credit-order:${orderId}`, orderId, deviceId: SHOP_DEVICE, outletId: d.config.outletName, note: "Order paid with credit" });
+      if (!paid.ok) return reply.code(409).send({ error: "not_enough_credit", balanceCents: paid.balanceCents, neededCents: creditCents });
+    }
+    const giveCreditBack = () => (creditCents > 0 ? refundCredit(d.db, { merchantId, customerId: member!.id, amountCents: creditCents, idempotencyKey: `credit-back:${orderId}`, orderId, deviceId: SHOP_DEVICE, outletId: d.config.outletName, note: "Order not placed" }) : Promise.resolve());
     const pointsUsed = quote.priced.pointsUsed;
     if (member && pointsUsed > 0) {
       // Spent before the order exists, atomically: two orders cannot spend the same points.
       const spent = await members!.post(member.id, "redeem", -pointsUsed, `redeem:${orderId}`, { orderId });
-      if (!spent) return reply.code(409).send({ error: "not_enough_points", balance: (await members!.byId(member.id))?.pointsBalance ?? 0 });
+      if (!spent) { await giveCreditBack(); return reply.code(409).send({ error: "not_enough_points", balance: (await members!.byId(member.id))?.pointsBalance ?? 0 }); }
     }
     const couponUsed = !!coupon && quote.priced.couponDiscount > 0;
     if (member && coupon && couponUsed && !(await members!.useCoupon(member.id, coupon.id, orderId))) {
       if (pointsUsed > 0) await members!.post(member.id, "refund", pointsUsed, `refund:${orderId}`, { orderId });
+      await giveCreditBack();
       return reply.code(409).send({ error: "coupon_not_available" });
     }
     if (member) await members!.linkOrder(orderId, member.id, pointsUsed);
@@ -423,9 +435,16 @@ export function registerShop(app: FastifyInstance, d: ShopDeps) {
       ...(couponUsed ? [mk({ type: "CouponApplied", title: coupon!.title, amountCents: coupon!.amountCents, minSpendCents: coupon!.minSpendCents })] : []),
       ...(pointsUsed > 0 ? [mk({ type: "PointsRedeemed", points: pointsUsed })] : []),
       ...quote.lines.map((l) => mk({ type: "ItemAdded", lineId: newId(), productId: l.productId, name: l.name, unitCents: l.unitCents, qty: l.qty, pointsExempt: l.pointsExempt, options: l.options.length ? l.options : undefined })),
+      // Paid with the member's credit: the order is paid and accepted at once, so it goes straight to the kitchen.
+      ...(creditCents > 0 ? [mk({ type: "OrderAccepted" }), mk({ type: "PaymentRecorded", paymentId: `credit:${orderId}`, method: "credit", amountCents: creditCents, confirmed: true })] : []),
     ];
-    await d.ingest(events);
-    return { orderId, queueNumber, totalCents: quote.priced.total, pointsUsed, couponDiscountCents: quote.priced.couponDiscount, status: "received" };
+    try {
+      await d.ingest(events);
+    } catch (err) {
+      await giveCreditBack(); // the order was not recorded, so the customer keeps their credit
+      throw err;
+    }
+    return { orderId, queueNumber, totalCents: quote.priced.total, pointsUsed, couponDiscountCents: quote.priced.couponDiscount, paidWithCreditCents: creditCents, creditBalanceCents: member ? await balanceOf(d.db, merchantId, member.id) : undefined, status: creditCents > 0 ? "queued" : "received" };
     });
   });
 
