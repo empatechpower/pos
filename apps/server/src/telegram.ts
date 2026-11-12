@@ -89,7 +89,10 @@ export async function setupTelegramWebhook(integ: Integrations, log: (m: string)
     });
     return;
    } catch (e) {
-    const cause = e instanceof Error && e.cause instanceof Error ? ` (${e.cause.message})` : "";
+    const c = (e instanceof Error ? e.cause : undefined) as (Error & { code?: string; errors?: (Error & { code?: string })[] }) | undefined;
+    const why = [c?.name, c?.code, c?.message, ...(c?.errors ?? []).map((x) => `${x.code ?? x.name}: ${x.message}`)].filter(Boolean).join(" | ");
+    const shape = /^\d{6,}:[A-Za-z0-9_-]{30,}$/.test(t.token) ? "token looks well-formed" : "token does NOT look like 123456:ABC... (check for stray characters)";
+    const cause = ` (${why || "no detail from the network layer"}; ${shape})`;
     log(`[telegram] setup attempt ${attempt} failed: ${e instanceof Error ? e.message : e}${cause}`);
     if (attempt < 4) await new Promise((r) => setTimeout(r, attempt * 5000));
    }
