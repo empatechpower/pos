@@ -115,6 +115,13 @@ export function registerShop(app: FastifyInstance, d: ShopDeps) {
   };
 
   const tables = parseTables(process.env.SHOP_TABLES);
+  // Members only: phone sign-in is the only way in, and every online order is paid from the member's credit.
+  const membersOnly = /^(1|true|yes)$/i.test(process.env.SHOP_MEMBERS_ONLY ?? "");
+  if (membersOnly) {
+    app.addHook("onRequest", async (req, reply) => {
+      if (/^\/api\/shop\/auth\/(email|oauth)\//.test(req.url)) return reply.code(404).send({ error: "not_available" });
+    });
+  }
   /** The number customers text to sign in: the SIM of a tablet running Rezein right now, else the server's own setting. */
   const smsNumber = async () => (await liveSmsNumber(d.db, merchantId)) ?? integ.sms?.number ?? null;
   /** Everything the ordering page needs to dress itself. Public. */
@@ -130,6 +137,7 @@ export function registerShop(app: FastifyInstance, d: ShopDeps) {
       paymentTiming: d.config.paymentTiming,
       // With a table list set, ordering is dine-in only, one fixed list of tables.
       tables,
+      membersOnly,
       channels: cat.channels.filter((c) => c.active && (!tables.length || c.kind === "dine_in")).map((c) => ({ id: c.id, name: c.name, kind: c.kind })),
       brand: await brandPayload(),
       // What this deployment can do beyond email sign-in and paying at the counter. The page enables only these.
@@ -398,6 +406,10 @@ export function registerShop(app: FastifyInstance, d: ShopDeps) {
 
     const cat = await d.catalog.load();
     const member = members ? await members.fromToken(bearer(req)) : null;
+    if (membersOnly) {
+      if (!member) return reply.code(401).send({ error: "sign_in_to_order" });
+      if (!b.payWithCredit) return reply.code(400).send({ error: "pay_with_credit" });
+    }
     let pointsAsk: { balance: number; requested: number | null } | null = null;
     if (b.usePoints !== undefined && b.usePoints !== 0) {
       if (!member || !d.config.rewards.pointsEnabled) return reply.code(401).send({ error: "sign_in_to_use_points" });

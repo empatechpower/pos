@@ -595,6 +595,24 @@ export const PHRASES: Record<string, string[]> = {
   "Tisch wählen",
   "உங்கள் மேசையைத் தேர்ந்தெடுக்கவும்"
  ],
+ "Sign in with your phone to order": [
+  "Log masuk dengan telefon anda untuk memesan",
+  "Masuk dengan ponsel Anda untuk memesan",
+  "请用手机号登录后下单",
+  "電話番号でサインインして注文",
+  "Connectez-vous avec votre téléphone pour commander",
+  "Mit Ihrer Telefonnummer anmelden, um zu bestellen",
+  "ஆர்டர் செய்ய உங்கள் தொலைபேசி மூலம் உள்நுழையவும்"
+ ],
+ "Your credit is not enough for this order. Please top up at the counter.": [
+  "Kredit anda tidak mencukupi untuk pesanan ini. Sila tambah nilai di kaunter.",
+  "Kredit Anda tidak cukup untuk pesanan ini. Silakan isi ulang di kasir.",
+  "您的余额不足以支付此订单，请到柜台充值。",
+  "クレジット残高が不足しています。カウンターでチャージしてください。",
+  "Votre crédit est insuffisant pour cette commande. Veuillez le recharger au comptoir.",
+  "Ihr Guthaben reicht für diese Bestellung nicht aus. Bitte am Tresen aufladen.",
+  "இந்த ஆர்டருக்கு உங்கள் கிரெடிட் போதாது. கவுண்டரில் டாப் அப் செய்யவும்."
+ ],
  "in bag": [
   "dalam beg",
   "di tas",

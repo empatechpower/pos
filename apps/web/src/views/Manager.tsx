@@ -311,7 +311,7 @@ function parseCsv(text: string): string[][] {
   return rows;
 }
 
-const HEADS: Record<string, string> = { name: "name", fullname: "name", customer: "name", phone: "phone", mobile: "phone", contact: "phone", tel: "phone", email: "email", mail: "email", credit: "credit", balance: "credit", amount: "credit", topup: "credit" };
+const HEADS: Record<string, string> = { name: "name", membername: "name", customername: "name", phonenumber: "phone", mobilenumber: "phone", contactnumber: "phone", memberphone: "phone", creditamount: "credit", credits: "credit", fullname: "name", customer: "name", phone: "phone", mobile: "phone", contact: "phone", tel: "phone", email: "email", mail: "email", credit: "credit", balance: "credit", amount: "credit", topup: "credit" };
 
 function UploadMembers({ onDone }: { onDone: () => void }) {
   const [rows, setRows] = useState<Array<{ name: string; phone: string; email: string; credit: string }> | null>(null);

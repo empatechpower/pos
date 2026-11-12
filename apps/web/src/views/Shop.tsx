@@ -10,6 +10,8 @@ interface Info {
   paymentTiming: string;
   /** The shop's tables ("Table 1", ...). When present, ordering is dine-in only and the table must be one of these. */
   tables?: string[];
+  /** Members only: phone sign-in is the only way in, and an order is paid from member credit. */
+  membersOnly?: boolean;
   /** Opening hours and a phone number, when the shop has set them. */
   contact?: { phone?: string; hours?: string };
   channels: Array<{ id: string; name: string; kind: string }>;
@@ -315,7 +317,7 @@ function Menu({ info, catalog, config, loginError }: { info: Info; catalog: Cata
   const [guestForm, setGuestForm] = useState(false);
   const [acctPanel, setAcctPanel] = useState<null | "profile" | "help" | "notif" | "prefs">(null);
   const [langOpen, setLangOpen] = useState(false);
-  const [payMethod, setPayMethod] = useState<"counter" | "card" | "paynow" | "credit">("counter");
+  const [payMethod, setPayMethod] = useState<"counter" | "card" | "paynow" | "credit">(info.membersOnly ? "credit" : "counter");
   const [history, setHistory] = useState<PastOrder[] | null>(null);
   const [editName, setEditName] = useState("");
   const [editPhone, setEditPhone] = useState("");
@@ -521,7 +523,7 @@ function Menu({ info, catalog, config, loginError }: { info: Info; catalog: Cata
   const dine = channel?.kind === "dine_in";
   const spotText = dine ? spot || tx("Add table") : tx("Pickup counter");
   const who = member ? member.name || (member.email ?? member.phone ?? "Member").split("@")[0] : t("guestW", "Guest");
-  const canOrder = !!quote?.ok && (!!member || guestOk) && phoneOk;
+  const canOrder = !!quote?.ok && (!!member || (!info.membersOnly && guestOk)) && phoneOk;
   const navActive = screen === "rewards" ? "rewards" : screen === "account" ? "account" : "order";
 
   /* ---- shared pieces ---- */
@@ -1110,13 +1112,16 @@ function Menu({ info, catalog, config, loginError }: { info: Info; catalog: Cata
             )}
           </div></div>
         )}
-        {!member && (
+        {!member && info.membersOnly && (
+          <button className="e2e-cta" onClick={() => setScreen("login")}><span>{tx("Sign in with your phone to order")}</span><Icon name="arrowR" size={19} /></button>
+        )}
+        {!member && !info.membersOnly && (
           <div className="summary-guest-row" role="group" aria-label={tx("Sign up or check out as guest")}>
             <button className="summary-signup-btn" onClick={() => setScreen("login")}><span>{t("signUpBtn", "Sign up")}</span></button>
             <button className="summary-guest-btn" aria-pressed={guestOk} onClick={() => setGuestForm(true)}><span>{t("checkoutGuest", "Check out as guest")}</span></button>
           </div>
         )}
-        {(member ? !phoneOk : guestForm) && (
+        {(member ? !phoneOk : !info.membersOnly && guestForm) && (
           <div className="e2e-card guest-inline">
             <h3>{t("beforeOrder", "Before you order")}</h3>
             <p className="e2e-sub" style={{ textAlign: "left", margin: 0 }}>{tx("Enter your phone number to place this order. For takeaway, your")} <b>{tx("collection number comes from this number")}</b> {tx("— watch for it on the counter screen.")}</p>
@@ -1175,7 +1180,8 @@ function Menu({ info, catalog, config, loginError }: { info: Info; catalog: Cata
                 </button>
               );
             })()}
-            {([["card", "Card", "Debit or credit card.", "card"], ["paynow", "PayNow", "Pay with PayNow QR.", "stack"]] as const).map(([m, title, desc, ic]) => {
+            {info.membersOnly && member && credit < shownTotal && <p className="e2e-note" role="alert">{tx("Your credit is not enough for this order. Please top up at the counter.")}</p>}
+            {!info.membersOnly && ([["card", "Card", "Debit or credit card.", "card"], ["paynow", "PayNow", "Pay with PayNow QR.", "stack"]] as const).map(([m, title, desc, ic]) => {
               const on = info.payments.online;
               return (
                 <button key={m} className="pay-opt" aria-pressed={on && payMethod === m} disabled={!on} style={on ? undefined : { opacity: 0.5 }} onClick={() => setPayMethod(m)}>
@@ -1185,8 +1191,8 @@ function Menu({ info, catalog, config, loginError }: { info: Info; catalog: Cata
                 </button>
               );
             })}
-            <button className="pay-opt" aria-pressed={payMethod === "counter"} onClick={() => setPayMethod("counter")}><span style={{ display: "flex", color: "var(--orange-dark)" }}><Icon name="ticket" size={24} /></span><span className="pt"><b>{info.paymentTiming === "prepay" ? "Pay at the counter" : "Cash on pickup"}</b><span>{info.paymentTiming === "prepay" ? "Quote your number at the counter. We start your order once it is paid." : "Pay at the counter when you collect."}</span></span><span className="radio" /></button>
-            <button className={`e2e-cta ${canOrder && (!dine || !!spot) ? "" : "off"}`} disabled={!canOrder || (dine && !spot)} onClick={() => void place()}><span>{payMethod === "counter" ? "Place order" : payMethod === "credit" ? tx("Pay with credit") : "Pay"} · {formatMoney(shownTotal)}</span><Icon name="arrowR" size={19} /></button>
+            {!info.membersOnly && <button className="pay-opt" aria-pressed={payMethod === "counter"} onClick={() => setPayMethod("counter")}><span style={{ display: "flex", color: "var(--orange-dark)" }}><Icon name="ticket" size={24} /></span><span className="pt"><b>{info.paymentTiming === "prepay" ? "Pay at the counter" : "Cash on pickup"}</b><span>{info.paymentTiming === "prepay" ? "Quote your number at the counter. We start your order once it is paid." : "Pay at the counter when you collect."}</span></span><span className="radio" /></button>}
+            <button className={`e2e-cta ${canOrder && (!dine || !!spot) ? "" : "off"}`} disabled={!canOrder || (dine && !spot) || (!!info.membersOnly && credit < shownTotal)} onClick={() => void place()}><span>{payMethod === "counter" ? "Place order" : payMethod === "credit" ? tx("Pay with credit") : "Pay"} · {formatMoney(shownTotal)}</span><Icon name="arrowR" size={19} /></button>
           </>
         )}
       </div>
@@ -1342,14 +1348,18 @@ function Login({ info, welcome, loginError, onGuest, onDone }: { info: Info; wel
           <p className="e2e-sub">Sign in to order at {info.name} · {info.outletName}</p>
           {view === "home" && (
             <>
+              {!info.membersOnly && (
               <div className="login-icons" role="group" aria-label={tx("Sign-in options")}>
                 <button className="login-icon-btn" onClick={() => provider("google", google, "Google")} aria-label={tx("Continue with Google")}><span className="g-mark">G</span><span className="li-cap">Google</span></button>
                 <button className="login-icon-btn" onClick={() => provider("microsoft", microsoft, "Microsoft")} aria-label={tx("Continue with Microsoft")}><span className="ms-grid"><i style={{ background: "#f25022" }} /><i style={{ background: "#7fba00" }} /><i style={{ background: "#00a4ef" }} /><i style={{ background: "#ffb900" }} /></span><span className="li-cap">Microsoft</span></button>
                 <button className="login-icon-btn" onClick={() => { setErr(null); setView("email"); }} aria-label={tx("Continue with email")}><span className="li-mail"><Icon name="mail" size={26} /></span><span className="li-cap">{t("emailW", "Email")}</span></button>
               </div>
+              )}
               <button className="login-btn" style={{ marginTop: 12 }} onClick={() => (phoneOn ? (setErr(null), setView("phone")) : setErr(tx("Phone sign-in isn't set up for this shop yet. Please use Email, or continue as guest.")))}><span className="lb-ic" style={{ color: "var(--orange-dark)" }}><Icon name="phone" size={24} /></span><span>{t("phoneNumT", "Phone number")}<span className="lb-sub">{t("phoneSub", "Verify by sending an SMS from your phone")}</span></span></button>
               {err && <p className="login-err" role="alert">{err}</p>}
+              {!info.membersOnly && (
               <button className="login-btn" style={{ marginTop: 12 }} onClick={onGuest}><span className="lb-ic" style={{ color: "var(--orange-dark)" }}><Icon name="bag" size={24} /></span><span>{t("guestCta", "Continue as guest")}<span className="lb-sub">{tx("Browse & order as guest — sign-up (or guest checkout) is asked at Order Summary")}</span></span></button>
+              )}
             </>
           )}
           {view === "email" && (
