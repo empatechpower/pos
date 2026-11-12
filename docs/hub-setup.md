@@ -1,5 +1,7 @@
 # Print hub: setup on an Android tablet (no app store needed)
 
+**Easiest: the Android app.** On the tablet, open `https://YOUR-SHOP-ADDRESS/rezein-hub.apk`, install it (allow "install unknown apps", and choose "Install anyway" if Play Protect warns), then follow [android-hub/README.md](../android-hub/README.md). The rest of this page is the **Termux** alternative, which needs no APK.
+
 The hub is one small file, `hub.mjs`. It runs inside **Termux** (a free terminal app for Android), fetches print jobs
 from the shop's server and sends them to the network printers (Epson-compatible, ESC/POS, port 9100).
 It must stay on and on the **same Wi-Fi/network as the printers**.

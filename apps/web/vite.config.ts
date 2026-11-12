@@ -17,7 +17,7 @@ export default defineConfig({
         theme_color: "#EA7016",
         icons: [],
       },
-      workbox: { navigateFallback: "/index.html", navigateFallbackDenylist: [/^\/hub\.mjs$/, /^\/api\//], globPatterns: ["**/*.{js,css,html,svg,png,woff2}"] },
+      workbox: { navigateFallback: "/index.html", navigateFallbackDenylist: [/^\/hub\.mjs$/, /\.apk$/, /^\/api\//], globPatterns: ["**/*.{js,css,html,svg,png,woff2}"] },
     }),
   ],
   server: { port: 5173, proxy: { "/api": "http://localhost:8787" } },
