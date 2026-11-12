@@ -9,6 +9,7 @@ import { Credit } from "./views/Credit";
 import { Devices } from "./views/Devices";
 import { Enroll } from "./views/Enroll";
 import { Login } from "./views/Login";
+import { Manager } from "./views/Manager";
 import { Online } from "./views/Online";
 import { Shop } from "./views/Shop";
 import { Orders } from "./views/Orders";
@@ -18,10 +19,10 @@ import { Kitchen } from "./views/Kitchen";
 import { Pos } from "./views/Pos";
 import { Queue } from "./views/Queue";
 
-type Route = "pos" | "kitchen" | "queue" | "credit" | "login" | "devices" | "prices" | "printers" | "orders" | "online" | "shop";
+type Route = "pos" | "kitchen" | "queue" | "credit" | "login" | "devices" | "prices" | "printers" | "orders" | "online" | "shop" | "manager";
 const routeFromHash = (): Route => {
   const h = location.hash.replace("#/", "").split("?")[0]!.split("/")[0]!;
-  return h === "kitchen" || h === "queue" || h === "credit" || h === "login" || h === "devices" || h === "prices" || h === "printers" || h === "orders" || h === "online" || h === "shop" ? h : "pos";
+  return h === "kitchen" || h === "queue" || h === "credit" || h === "login" || h === "devices" || h === "prices" || h === "printers" || h === "orders" || h === "online" || h === "shop" || h === "manager" ? h : "pos";
 };
 
 export function App() {
@@ -69,6 +70,7 @@ export function App() {
           <a href="#/online" className={route === "online" ? "on" : ""}>Online{newOnline > 0 ? <b className="dot">{newOnline}</b> : null}</a>
           <a href="#/credit" className={route === "credit" ? "on" : ""}>Credit</a>
           {staff && staff.role !== "cashier" && catalog && <a href="#/printers" className={route === "printers" ? "on" : ""}>Printers{failedJobs > 0 ? <b className="dot">{failedJobs}</b> : null}</a>}
+          {device.required && staff && <a href="#/manager" className={route === "manager" ? "on" : ""}>Manager</a>}
           {device.required && staff && <a href="#/orders" className={route === "orders" ? "on" : ""}>Orders</a>}
           {staff && staff.role !== "cashier" && catalog && <a href="#/prices" className={route === "prices" ? "on" : ""}>Prices</a>}
           {device.required && staff && staff.role !== "cashier" && <a href="#/devices" className={route === "devices" ? "on" : ""}>Devices</a>}
@@ -110,6 +112,8 @@ export function App() {
           <Online config={config} online={connected} />
         ) : route === "printers" ? (
           <Printers catalog={catalog} />
+        ) : route === "manager" ? (
+          <Manager config={config} />
         ) : route === "orders" ? (
           <Orders config={config} />
         ) : route === "prices" ? (

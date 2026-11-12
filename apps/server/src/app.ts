@@ -5,7 +5,7 @@ import { CASHIER_TOPUP_LIMIT_CENTS, audit, authenticate, can, createStaff, login
 import type { CatalogStore, ChangeResult, PgCatalogStore } from "./catalog.js";
 import type { Db } from "./db/pool.js";
 import { balanceOf, refund, spend, topUp } from "./ledger.js";
-import { authenticateDevice, createEnrollmentCode, enroll, issueStreamTicket, listDevices, redeemStreamTicket, revokeDevice, type Device } from "./devices.js";
+import { authenticateDevice, createEnrollmentCode, enroll, markPrintPoll, issueStreamTicket, listDevices, redeemStreamTicket, revokeDevice, type Device } from "./devices.js";
 import { BrandStore } from "./brand.js";
 import { PrintStore, validatePrinter, type Printer } from "./print.js";
 import { registerShop } from "./shop.js";
@@ -419,6 +419,7 @@ export async function buildApp({ config, store, db, catalog, catalogAdmin, print
     const agent = { preHandler: needsDevice };
 
     app.post<{ Body: { limit?: number } }>("/api/print/claim", agent, async (req) => {
+      if (db) await markPrintPoll(db, req.device!.id);
       const jobs = await queue.claim(req.device!.id, Math.min(Math.max(1, Number(req.body?.limit) || 10), 25));
       return {
         jobs: jobs.map((j) => ({
@@ -477,6 +478,39 @@ export async function buildApp({ config, store, db, catalog, catalogAdmin, print
         await audit(db, merchantId, staff.id, `wallet.${path}`, { customerId: b!.customerId, amountCents: b!.amountCents, orderId: b!.orderId });
       }
       return r.ok ? r : reply.code(409).send(r);
+    });
+  }
+
+  // ---- members, for the shop's own staff -----------------------------------------------------
+  // A member's prepaid credit is the wallet whose customer id is the member's id, so the existing top-up, spend and
+  // refund routes above manage it. These two routes list members with both balances and adjust reward points.
+  if (members) {
+    app.get<{ Querystring: { q?: string } }>("/api/members", { preHandler: needs("wallet.read") }, async (req) => {
+      const q = String(req.query.q ?? "").trim().slice(0, 60);
+      const r = await db.query(
+        `SELECT m.id, m.name, m.email, m.phone, m.points_balance, m.created_at, COALESCE(w.balance_cents, 0) AS credit_cents
+           FROM members m LEFT JOIN wallets w ON w.merchant_id = m.merchant_id AND w.customer_id = m.id::text
+          WHERE m.merchant_id = $1 AND ($2 = '' OR m.name ILIKE $3 OR m.email ILIKE $3 OR m.phone ILIKE $3)
+          ORDER BY m.created_at DESC LIMIT 50`,
+        [merchantId, q, `%${q.replace(/[%_\\]/g, "")}%`],
+      );
+      const total = await db.query("SELECT count(*)::int AS n FROM members WHERE merchant_id = $1", [merchantId]);
+      return {
+        total: total.rows[0].n as number,
+        members: r.rows.map((m) => ({ id: m.id as string, name: m.name as string | null, email: m.email as string | null, phone: m.phone as string | null, points: Number(m.points_balance), creditCents: Number(m.credit_cents), joinedAt: m.created_at as Date })),
+      };
+    });
+
+    /** Add or take away reward points by hand. Managers and owners only; a reason is required and the change is audited. */
+    app.post<{ Params: { id: string }; Body: { points?: number; note?: string; idempotencyKey?: string } }>("/api/members/:id/points", { preHandler: needs("wallet.refund") }, async (req, reply) => {
+      const { points, idempotencyKey } = req.body ?? {};
+      const note = String(req.body?.note ?? "").trim().slice(0, 120);
+      if (!Number.isSafeInteger(points) || points === 0 || Math.abs(points!) > 1_000_000 || !idempotencyKey || !note) return reply.code(400).send({ error: "points (a whole number, not zero), a reason and idempotencyKey are required" });
+      if (!(await members.byId(req.params.id))) return reply.code(404).send({ error: "member_not_found" });
+      const r = await members.post(req.params.id, "adjust", points!, `staff-adjust-${idempotencyKey}`, { note: `${req.staff!.name}: ${note}` });
+      if (!r) return reply.code(409).send({ error: "not_enough_points" });
+      if (!r.replayed) await audit(db, merchantId, req.staff!.id, "member.points", { memberId: req.params.id, points, note });
+      return { balance: r.balance, replayed: r.replayed };
     });
   }
 

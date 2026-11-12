@@ -32,6 +32,7 @@ interface DeviceRow {
   id: string;
   name: string;
   active: boolean;
+  last_print_poll_at: string | null;
 }
 
 type Kind = "receipt" | "kitchen" | "both" | "label";
@@ -110,6 +111,10 @@ export function Printers({ catalog }: { catalog: Catalog }) {
     void load();
   }
 
+  // A print hub checks in every couple of seconds. Quiet for more than 20 seconds means it is not running or cannot reach us.
+  const hubs = devices.filter((d) => d.last_print_poll_at).map((d) => ({ d, secs: Math.max(0, Math.round((Date.now() - new Date(d.last_print_poll_at!).getTime()) / 1000)) }));
+  const liveHubs = hubs.filter((h) => h.secs <= 20);
+  const ago = (s: number) => (s < 90 ? `${s}s` : s < 5400 ? `${Math.round(s / 60)} min` : `${Math.round(s / 3600)} h`);
   const failed = jobs.filter((j) => j.status === "failed");
   const unconfirmed = jobs.filter((j) => j.status === "unconfirmed");
   const nameOf = (id: string) => printers.find((p) => p.id === id)?.name ?? id;
@@ -121,6 +126,13 @@ export function Printers({ catalog }: { catalog: Catalog }) {
     <div className="credit prices">
       <h2>Printers</h2>
       {msg && <div className="flash">{msg}</div>}
+      {hubs.length === 0 ? (
+        <div className="flash warn">No print hub has connected yet, so nothing can print. Set one up (see the setup guide), then it shows here.</div>
+      ) : liveHubs.length === 0 ? (
+        <div className="flash warn">Print hub offline: {hubs[0]!.d.name} was last seen {ago(hubs[0]!.secs)} ago. Orders will wait and print when it is back. Check the tablet is on, charged and online, and that the hub is still running.</div>
+      ) : (
+        <div className="flash">Print hub online: {liveHubs.map((h) => h.d.name).join(", ")}.</div>
+      )}
       {unconfirmed.length > 0 && (
         <div className="flash warn">{unconfirmed.length} print job{unconfirmed.length > 1 ? "s" : ""} unconfirmed: the printer may already have printed {unconfirmed.length > 1 ? "them" : "it"}. Look at the printer, then press Reprint only if nothing came out.</div>
       )}

@@ -75,11 +75,14 @@ export async function authenticateDevice(db: Db, token: string | undefined): Pro
 
 export async function listDevices(db: Db, merchantId: string) {
   const r = await db.query(
-    "SELECT id, name, outlet_id, active, created_at, last_seen_at FROM devices WHERE merchant_id=$1 ORDER BY created_at",
+    "SELECT id, name, outlet_id, active, created_at, last_seen_at, last_print_poll_at FROM devices WHERE merchant_id=$1 ORDER BY created_at",
     [merchantId],
   );
   return r.rows;
 }
+
+/** A device asking for print jobs is a print hub that is alive. */
+export const markPrintPoll = (db: Db, deviceId: string) => db.query("UPDATE devices SET last_print_poll_at = now() WHERE id=$1", [deviceId]).then(() => undefined);
 
 export async function revokeDevice(db: Db, merchantId: string, deviceId: string): Promise<boolean> {
   const r = await db.query("UPDATE devices SET active=false WHERE id=$1 AND merchant_id=$2 AND active", [deviceId, merchantId]);
