@@ -322,8 +322,16 @@ function Menu({ info, catalog, config, loginError }: { info: Info; catalog: Cata
   // A table's own link (…?table=12) fixes the table: the customer cannot move it to another.
   const linkTable = tableList.find((x) => x === `Table ${Number(table.replace(/^table\s*/i, ""))}`);
   const tableLocked = !!linkTable;
+  // Changing only the part after # does not reload the page, so keep the table in step with the link.
+  const [, bumpLink] = useState(0);
+  useEffect(() => {
+    const f = () => bumpLink((n) => n + 1);
+    window.addEventListener("hashchange", f);
+    return () => window.removeEventListener("hashchange", f);
+  }, []);
   const [spot, setSpot] = useState(linkTable ?? (tableList.length ? (tableList.includes(saved?.spot ?? "") ? saved!.spot : "") : table || saved?.spot || ""));
   const [tableEdit, setTableEdit] = useState(false);
+  useEffect(() => { if (linkTable) setSpot(linkTable); }, [linkTable]);
   useEffect(() => saveBag(bag, spot), [bag, spot]);
   const [busy, setBusy] = useState(false);
   const [note, setNote] = useState<string | null>(null);
