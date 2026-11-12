@@ -16,7 +16,7 @@ const newKey = () => (globalThis.crypto?.randomUUID ? globalThis.crypto.randomUU
 /** Staff page for the shop: every order and payment, and the members' points and prepaid credit. No till. */
 export function Manager({ config }: { config: BusinessConfig }) {
   const staff = useStaff();
-  const [tab, setTab] = useState<"orders" | "members" | "telegram">("orders");
+  const [tab, setTab] = useState<"orders" | "members" | "telegram" | "books">("orders");
   return (
     <div className="credit prices">
       <h2>Manager</h2>
@@ -27,9 +27,10 @@ export function Manager({ config }: { config: BusinessConfig }) {
           <div className="seg" style={{ margin: "4px 0 12px" }}>
             <button className={tab === "orders" ? "on" : ""} aria-pressed={tab === "orders"} onClick={() => setTab("orders")}>Transactions</button>
             <button className={tab === "members" ? "on" : ""} aria-pressed={tab === "members"} onClick={() => setTab("members")}>Members</button>
+            {staff.role !== "cashier" && <button className={tab === "books" ? "on" : ""} aria-pressed={tab === "books"} onClick={() => setTab("books")}>Books</button>}
             {staff.role !== "cashier" && <button className={tab === "telegram" ? "on" : ""} aria-pressed={tab === "telegram"} onClick={() => setTab("telegram")}>Telegram</button>}
           </div>
-          {tab === "orders" ? <Transactions config={config} /> : tab === "telegram" ? <TelegramPanel /> : <Members canAdjustPoints={staff.role !== "cashier"} canImport={staff.role !== "cashier"} rewardsOn={config.rewards.pointsEnabled} />}
+          {tab === "orders" ? <Transactions config={config} /> : tab === "books" ? <Books /> : tab === "telegram" ? <TelegramPanel /> : <Members canAdjustPoints={staff.role !== "cashier"} canImport={staff.role !== "cashier"} rewardsOn={config.rewards.pointsEnabled} />}
         </>
       )}
     </div>
@@ -452,6 +453,40 @@ function TelegramPanel() {
           <button className="secondary sm" onClick={() => void unlink(l.telegramId)}>Disconnect</button>
         </div>
       ))}
+    </div>
+  );
+}
+
+type Recon = { openingCents: number; creditsCents: number; debitsCents: number; reversalsCents: number; adjustmentsCents: number; closingCents: number; wallets: number; entries: number; balanced: boolean; mismatchedWallets: Array<{ customerId: string; storedCents: number; rebuiltCents: number }> };
+
+/** The credit books: opening + credits - debits + reversals must equal what the wallets hold now. */
+function Books() {
+  const [r, setR] = useState<Recon | null>(null);
+  const [msg, setMsg] = useState<string | null>(null);
+  const load = useCallback(async () => {
+    setMsg(null);
+    const x = await staffFetch("/api/wallet/reconciliation");
+    if ("problem" in x) return setMsg(x.problem);
+    if (!x.res.ok) return setMsg("Could not load the books.");
+    setR((await x.res.json()) as Recon);
+  }, []);
+  useEffect(() => void load(), [load]);
+  if (!r) return <p className="muted">{msg ?? "Loading…"}</p>;
+  const row = (label: string, cents: number, note?: string) => (
+    <div className="sum-row"><span className="k">{label}{note && <span className="muted"> {note}</span>}</span><span className="v">{formatMoney(cents)}</span></div>
+  );
+  return (
+    <div className="tab" style={{ display: "block" }}>
+      <div className={`flash ${r.balanced ? "" : "warn"}`}>{r.balanced ? "The books balance." : "The books do NOT balance. Stop and do not correct anything by hand. Send this screen to the developer."}</div>
+      {row("Opening balances", r.openingCents, "(imported once)")}
+      {row("Other credits added", r.creditsCents, "(top-ups)")}
+      {row("Debits", r.debitsCents, "(orders paid with credit)")}
+      {row("Reversals", r.reversalsCents, "(refunds)")}
+      {r.adjustmentsCents !== 0 && row("Adjustments", r.adjustmentsCents)}
+      <div className="sum-row grand"><span className="k">Closing (what members hold now)</span><span className="v">{formatMoney(r.closingCents)}</span></div>
+      <p className="muted" style={{ fontSize: 13 }}>{r.wallets} wallets · {r.entries} entries. Opening + credits + debits + reversals = closing. Debits are shown as negative amounts.</p>
+      {r.mismatchedWallets.length > 0 && <div className="flash warn">{r.mismatchedWallets.length} wallet(s) do not match their own entries.</div>}
+      <button className="secondary sm" onClick={() => void load()}>Check again</button>
     </div>
   );
 }
