@@ -550,6 +550,24 @@ export const PHRASES: Record<string, string[]> = {
   "Mitglieder sammeln bei jeder Bestellung Punkte und lösen sie für Rabatt ein. Kostenlos registrieren.",
   "உறுப்பினர்கள் ஒவ்வொரு ஆர்டருக்கும் புள்ளிகள் பெற்று தள்ளுபடிக்குப் பயன்படுத்தலாம். இலவசமாகப் பதிவு செய்யுங்கள்."
  ],
+ "& get {n} points": [
+  "& dapat {n} mata",
+  "& dapat {n} poin",
+  "& 获得 {n} 积分",
+  "& {n}ポイント獲得",
+  "& gagnez {n} points",
+  "& {n} Punkte sichern",
+  "& {n} புள்ளிகள் பெறுங்கள்"
+ ],
+ "in bag": [
+  "dalam beg",
+  "di tas",
+  "已在购物袋",
+  "バッグに入っています",
+  "dans le panier",
+  "in der Tasche",
+  "பையில்"
+ ],
  "Sign up to earn {n} points on this order": [
   "Daftar untuk dapat {n} mata bagi pesanan ini",
   "Daftar untuk dapat {n} poin dari pesanan ini",

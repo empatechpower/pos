@@ -177,6 +177,25 @@ const photo = (p: { id: string; imageVersion?: number }) => (p.imageVersion ? `/
 const cardPrice = (m: MenuEntry) => formatMoney(priceRange(m.priceCents, m.options)[0]);
 
 /** The customer's own ordering page: no sign-in, no device set-up. Public by design. */
+const BAG_KEY = "pos.shopBag";
+/** The unsent bag and table survive a reload or an interrupted visit for a few hours, then are forgotten. */
+function loadBag(): { bag: BagLine[]; spot: string } | null {
+  try {
+    const j = JSON.parse(localStorage.getItem(BAG_KEY) ?? "null") as { at: number; bag: BagLine[]; spot: string } | null;
+    return j && Date.now() - j.at < 4 * 3600_000 && Array.isArray(j.bag) ? { bag: j.bag, spot: j.spot ?? "" } : null;
+  } catch {
+    return null;
+  }
+}
+function saveBag(bag: BagLine[], spot: string) {
+  try {
+    if (!bag.length && !spot) localStorage.removeItem(BAG_KEY);
+    else localStorage.setItem(BAG_KEY, JSON.stringify({ at: Date.now(), bag, spot }));
+  } catch {
+    /* private window or storage full: the bag simply is not kept */
+  }
+}
+
 export function Shop() {
   useLang(); // re-render everything below when the language changes
   const [info, setInfo] = useState<Info | null>(null);
@@ -263,12 +282,14 @@ function Menu({ info, catalog, config, loginError }: { info: Info; catalog: Cata
   const [category, setCategory] = useState("All");
   const [search, setSearch] = useState<string | null>(null);
   const [searchCleared, setSearchCleared] = useState(false); // the × was pressed: the next category tap closes the empty bar
-  const [bag, setBag] = useState<BagLine[]>([]);
+  const saved = useRef(loadBag()).current;
+  const [bag, setBag] = useState<BagLine[]>(saved?.bag ?? []);
   const [picking, setPicking] = useState<MenuEntry | null>(null);
   const [name, setName] = useState("");
   const [phone, setPhone] = useState("");
-  const [spot, setSpot] = useState(table);
+  const [spot, setSpot] = useState(table || saved?.spot || "");
   const [tableEdit, setTableEdit] = useState(false);
+  useEffect(() => saveBag(bag, spot), [bag, spot]);
   const [busy, setBusy] = useState(false);
   const [note, setNote] = useState<string | null>(null);
   const [agreed, setAgreed] = useState<number | null>(null);
@@ -441,6 +462,7 @@ function Menu({ info, catalog, config, loginError }: { info: Info; catalog: Cata
       const j = (await res.json().catch(() => ({}))) as { orderId?: string; error?: string; totalCents?: number };
       if (res.ok && j.orderId) {
         localStorage.setItem(LS_LAST, j.orderId);
+        saveBag([], ""); // the order is placed: do not bring this bag back
         if (payMethod === "credit") void loadMember(); // the balance has gone down
         if (payMethod === "card" || payMethod === "paynow") {
           // The order exists; now send the customer to the card / PayNow page. If that is unavailable they land on the
@@ -512,7 +534,7 @@ function Menu({ info, catalog, config, loginError }: { info: Info; catalog: Cata
         {member ? (
           rewardsOn ? (config.rewards.pointsEnabled && <span className="shop-pts">{member.pointsBalance.toLocaleString()} points</span>) : <span className="shop-pts">{formatMoney(credit)} {tx("credit")}</span>
         ) : rewardsOn ? (
-          <button className="shop-pts link" onClick={() => setScreen("login")}>{t("signUpNow", "Sign up now")}<br />&amp; get {config.rewards.welcomePoints} points</button>
+          <button className="shop-pts link" onClick={() => setScreen("login")}>{t("signUpNow", "Sign up now")}<br />{tx("& get {n} points", { n: config.rewards.welcomePoints })}</button>
         ) : (
           <button className="shop-pts link" onClick={() => setScreen("login")}>{t("signInW", "Sign in")}<br />{tx("to pay with credit")}</button>
         )}
@@ -691,7 +713,7 @@ function Menu({ info, catalog, config, loginError }: { info: Info; catalog: Cata
               <div key={m.id} className={`sc ${n ? "in" : ""} ${m.soldOut ? "out" : ""}`}>
                 <div className="sc-photo">
                   {img ? <img src={img} alt="" loading="lazy" /> : <span className="sc-noimg" />}
-                  {n > 0 && <span className="sc-badge">×{n} in bag</span>}
+                  {n > 0 && <span className="sc-badge">×{n} {tx("in bag")}</span>}
                 </div>
                 <div className="sc-main">
                   <b>{m.name}</b>
@@ -1065,7 +1087,7 @@ function Menu({ info, catalog, config, loginError }: { info: Info; catalog: Cata
           <div className="sum-link-row" style={{ cursor: "default" }}><span className="sl-ic"><Icon name="pin" size={21} /></span><span className="sl-t">{dine ? `${channel?.name} · ${spot || tx("no table yet")}` : `${channel?.name} · Pickup counter`}<span className="sl-d">{info.outletName}</span></span></div>
         </div>
         {detailsCard}
-        {dine && !spot && (
+        {dine && (
           <div className="e2e-card"><h3>{t("typeTableW", "Table")}</h3><div className="e2e-field"><label htmlFor="sum-table">{tx("Table number")}</label><input className="e2e-input" id="sum-table" value={spot} maxLength={30} placeholder={tx("e.g. Table 12")} onChange={(e) => setSpot(e.target.value)} /></div></div>
         )}
         {!member && (
@@ -1144,7 +1166,7 @@ function Menu({ info, catalog, config, loginError }: { info: Info; catalog: Cata
               );
             })}
             <button className="pay-opt" aria-pressed={payMethod === "counter"} onClick={() => setPayMethod("counter")}><span style={{ display: "flex", color: "var(--orange-dark)" }}><Icon name="ticket" size={24} /></span><span className="pt"><b>{info.paymentTiming === "prepay" ? "Pay at the counter" : "Cash on pickup"}</b><span>{info.paymentTiming === "prepay" ? "Quote your number at the counter. We start your order once it is paid." : "Pay at the counter when you collect."}</span></span><span className="radio" /></button>
-            <button className="e2e-cta" onClick={() => void place()}><span>{payMethod === "counter" ? "Place order" : payMethod === "credit" ? tx("Pay with credit") : "Pay"} · {formatMoney(shownTotal)}</span><Icon name="arrowR" size={19} /></button>
+            <button className={`e2e-cta ${canOrder && (!dine || !!spot) ? "" : "off"}`} disabled={!canOrder || (dine && !spot)} onClick={() => void place()}><span>{payMethod === "counter" ? "Place order" : payMethod === "credit" ? tx("Pay with credit") : "Pay"} · {formatMoney(shownTotal)}</span><Icon name="arrowR" size={19} /></button>
           </>
         )}
       </div>
