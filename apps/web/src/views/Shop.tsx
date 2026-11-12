@@ -8,6 +8,8 @@ interface Info {
   name: string;
   outletName: string;
   paymentTiming: string;
+  /** Opening hours and a phone number, when the shop has set them. */
+  contact?: { phone?: string; hours?: string };
   channels: Array<{ id: string; name: string; kind: string }>;
   brand: { primary: string; accent: string; ink: string; logoUrl: string | null; heroUrl: string | null; tagline: string | null; promoTitle: string | null; promoBody: string | null };
   /** What this shop can do beyond email sign-in and paying at the counter. */
@@ -562,9 +564,9 @@ function Menu({ info, catalog, config, loginError }: { info: Info; catalog: Cata
       <div className="sum-row"><span className="k">{t("itemsSubtotal", "Items subtotal")}</span><span className="v">{formatMoney(q2.priced.subtotal)}</span></div>
       {q2.priced.couponDiscount > 0 && <div className="sum-row neg"><span className="k">{chosen?.title ?? "Coupon / voucher"}</span><span className="v">−{formatMoney(q2.priced.couponDiscount)}</span></div>}
       {q2.priced.pointsDiscount > 0 && <div className="sum-row neg"><span className="k">Points · {q2.priced.pointsUsed.toLocaleString()} pts</span><span className="v">−{formatMoney(q2.priced.pointsDiscount)}</span></div>}
-      {q2.priced.service > 0 && <div className="sum-row"><span className="k">{t("pmService", "Service charge")}</span><span className="v">{formatMoney(q2.priced.service)}</span></div>}
+      {q2.priced.service > 0 && <div className="sum-row"><span className="k">{t("pmService", "Service charge")} ({Math.round(config.pricing.serviceRate * 1000) / 10}%)</span><span className="v">{formatMoney(q2.priced.service)}</span></div>}
       {q2.priced.gst > 0 && <div className="sum-row"><span className="k">GST</span><span className="v">{formatMoney(q2.priced.gst)}</span></div>}
-      {q2.priced.bcrs > 0 && <div className="sum-row"><span className="k">{t("bcrsDeposit", "BCRS Deposit")}</span><span className="v">{formatMoney(q2.priced.bcrs)}</span></div>}
+      {q2.priced.bcrs > 0 && <div className="sum-row"><span className="k">{t("bcrsDeposit", "BCRS Deposit")} ({tx("+{n}c each", { n: config.pricing.bcrsDepositCents })})</span><span className="v">{formatMoney(q2.priced.bcrs)}</span></div>}
       <div className="sum-row grand"><span className="k">{t("total", "Total")}</span><span className="v">{formatMoney(shownTotal)}</span></div>
     </>
   );
@@ -901,6 +903,8 @@ function Menu({ info, catalog, config, loginError }: { info: Info; catalog: Cata
               <div className="sum-row"><span className="k">{t("outletW", "Outlet")}</span><span className="v">{info.name} · {info.outletName}</span></div>
               <div className="sum-row" style={{ display: "block" }}><span className="k" style={{ fontWeight: 700, color: "var(--ink)" }}>{tx("How do I collect my order?")}</span><span className="ad" style={{ display: "block", marginTop: 2, fontSize: 12 }}>{tx("Your collection number is the last 5 digits of the phone number you ordered with. Watch for it on the counter screen.")}</span></div>
               <div className="sum-row" style={{ display: "block" }}><span className="k" style={{ fontWeight: 700, color: "var(--ink)" }}>{t("helpQ2", "How do points work?")}</span><span className="ad" style={{ display: "block", marginTop: 2, fontSize: 12 }}>{tx("Members earn points on every order. 100 points = S$1 off a later order — apply points in the Bag before you check out.")}</span></div>
+              {info.contact?.hours && <div className="sum-row"><span className="k">{tx("Opening hours")}</span><span className="v">{info.contact.hours}</span></div>}
+              {info.contact?.phone && <div className="sum-row"><span className="k">{tx("Call us")}</span><span className="v"><a href={`tel:${info.contact.phone.replace(/[^+\d]/g, "")}`}>{info.contact.phone}</a></span></div>}
               <p className="e2e-note">{tx("Still need help? Please ask at the counter and we will sort it out.")}</p>
             </div>
           </>
@@ -1052,9 +1056,9 @@ function Menu({ info, catalog, config, loginError }: { info: Info; catalog: Cata
               <div className="row"><span>{t("subtotal", "Subtotal")}</span><span className="v">{formatMoney(quote.priced.subtotal)}</span></div>
               {quote.priced.couponDiscount > 0 && <div className="row coupon"><span>{chosen?.title ?? "Coupon"}</span><span className="v">−{formatMoney(quote.priced.couponDiscount)}</span></div>}
               {quote.priced.pointsDiscount > 0 && <div className="row coupon"><span>Points · {quote.priced.pointsUsed.toLocaleString()} pts</span><span className="v">−{formatMoney(quote.priced.pointsDiscount)}</span></div>}
-              {quote.priced.service > 0 && <div className="row"><span>{t("pmService", "Service charge")}</span><span className="v">{formatMoney(quote.priced.service)}</span></div>}
+              {quote.priced.service > 0 && <div className="row"><span>{t("pmService", "Service charge")} ({Math.round(config.pricing.serviceRate * 1000) / 10}%)</span><span className="v">{formatMoney(quote.priced.service)}</span></div>}
               {quote.priced.gst > 0 && <div className="row"><span>GST</span><span className="v">{formatMoney(quote.priced.gst)}</span></div>}
-              {quote.priced.bcrs > 0 && <div className="row"><span>{t("bcrsDeposit", "BCRS Deposit")}</span><span className="v">{formatMoney(quote.priced.bcrs)}</span></div>}
+              {quote.priced.bcrs > 0 && <div className="row"><span>{t("bcrsDeposit", "BCRS Deposit")} ({tx("+{n}c each", { n: config.pricing.bcrsDepositCents })})</span><span className="v">{formatMoney(quote.priced.bcrs)}</span></div>}
               <div className="row grand"><span>{t("total", "Total")}</span><span className="v">{formatMoney(shownTotal)}</span></div>
             </div>
             {rewardsOn && <div className="stamp-note"><span style={{ display: "flex", color: "var(--ink)" }}><Icon name="gift" size={27} /></span><span><span className="t">{t("stampNoteT", "1 stamp after confirmed payment")}</span><br /><span className="d">{tx("You'll earn 1 stamp for this order.")}</span></span></div>}

@@ -559,6 +559,33 @@ export const PHRASES: Record<string, string[]> = {
   "& {n} Punkte sichern",
   "& {n} புள்ளிகள் பெறுங்கள்"
  ],
+ "+{n}c each": [
+  "+{n}c setiap satu",
+  "+{n}c per buah",
+  "每件 +{n} 分",
+  "1点につき+{n}セント",
+  "+{n} c l'unité",
+  "+{n} c pro Stück",
+  "ஒவ்வொன்றுக்கும் +{n}c"
+ ],
+ "Opening hours": [
+  "Waktu operasi",
+  "Jam buka",
+  "营业时间",
+  "営業時間",
+  "Horaires d'ouverture",
+  "Öffnungszeiten",
+  "திறந்திருக்கும் நேரம்"
+ ],
+ "Call us": [
+  "Hubungi kami",
+  "Hubungi kami",
+  "致电我们",
+  "お電話ください",
+  "Appelez-nous",
+  "Rufen Sie uns an",
+  "எங்களை அழைக்கவும்"
+ ],
  "in bag": [
   "dalam beg",
   "di tas",

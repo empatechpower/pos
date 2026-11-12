@@ -109,6 +109,8 @@ export function registerShop(app: FastifyInstance, d: ShopDeps) {
     return {
       name: d.config.name,
       outletName: d.config.outletName,
+      // Set OUTLET_HOURS (e.g. "Daily 8am-9pm") and OUTLET_PHONE on the server to show them under Help & support.
+      contact: process.env.OUTLET_HOURS || process.env.OUTLET_PHONE ? { hours: process.env.OUTLET_HOURS?.trim() || undefined, phone: process.env.OUTLET_PHONE?.trim() || undefined } : undefined,
       paymentTiming: d.config.paymentTiming,
       channels: cat.channels.filter((c) => c.active).map((c) => ({ id: c.id, name: c.name, kind: c.kind })),
       brand: await brandPayload(),
