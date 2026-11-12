@@ -586,6 +586,15 @@ export const PHRASES: Record<string, string[]> = {
   "Rufen Sie uns an",
   "எங்களை அழைக்கவும்"
  ],
+ "Choose your table": [
+  "Pilih meja anda",
+  "Pilih meja Anda",
+  "请选择您的桌号",
+  "テーブルを選択",
+  "Choisissez votre table",
+  "Tisch wählen",
+  "உங்கள் மேசையைத் தேர்ந்தெடுக்கவும்"
+ ],
  "in bag": [
   "dalam beg",
   "di tas",

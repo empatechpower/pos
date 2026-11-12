@@ -8,6 +8,8 @@ interface Info {
   name: string;
   outletName: string;
   paymentTiming: string;
+  /** The shop's tables ("Table 1", ...). When present, ordering is dine-in only and the table must be one of these. */
+  tables?: string[];
   /** Opening hours and a phone number, when the shop has set them. */
   contact?: { phone?: string; hours?: string };
   channels: Array<{ id: string; name: string; kind: string }>;
@@ -289,7 +291,11 @@ function Menu({ info, catalog, config, loginError }: { info: Info; catalog: Cata
   const [picking, setPicking] = useState<MenuEntry | null>(null);
   const [name, setName] = useState("");
   const [phone, setPhone] = useState("");
-  const [spot, setSpot] = useState(table || saved?.spot || "");
+  const tableList = info.tables ?? [];
+  // A table's own link (…?table=12) fixes the table: the customer cannot move it to another.
+  const linkTable = tableList.find((x) => x === `Table ${Number(table.replace(/^table\s*/i, ""))}`);
+  const tableLocked = !!linkTable;
+  const [spot, setSpot] = useState(linkTable ?? (tableList.length ? (tableList.includes(saved?.spot ?? "") ? saved!.spot : "") : table || saved?.spot || ""));
   const [tableEdit, setTableEdit] = useState(false);
   useEffect(() => saveBag(bag, spot), [bag, spot]);
   const [busy, setBusy] = useState(false);
@@ -529,7 +535,7 @@ function Menu({ info, catalog, config, loginError }: { info: Info; catalog: Cata
       <div className="shop-logo">{b.logoUrl ? <img src={b.logoUrl} alt={info.name} /> : <b>{info.name}</b>}</div>
       <div className="shop-meta">
         {dine && !noSpot && (
-          <button className={`shop-table ${spot ? "on" : ""}`} onClick={() => setTableEdit((v) => !v)} aria-label="Change table">
+          <button className={`shop-table ${spot ? "on" : ""}`} disabled={tableLocked} style={tableLocked ? { opacity: 1, cursor: "default" } : undefined} onClick={() => setTableEdit((v) => !v)} aria-label={tableLocked ? spot : "Change table"}>
             <Icon name="table" size={16} />{spot || tx("Add table")}
           </button>
         )}
@@ -544,7 +550,7 @@ function Menu({ info, catalog, config, loginError }: { info: Info; catalog: Cata
       </div>
     </header>
   );
-  const seg = (
+  const seg = channels.length < 2 ? null : (
     <div className="shop-seg">
       {channels.map((c) => <button key={c.id} className={c.id === channelId ? "on" : ""} onClick={() => { setChannelId(c.id); setAgreed(null); }}><Icon name={channelIcon(c.kind)} size={19} />{c.kind === "dine_in" ? t("dineIn", c.name) : c.kind === "takeaway" ? t("takeAway", c.name) : c.name}</button>)}
     </div>
@@ -671,8 +677,12 @@ function Menu({ info, catalog, config, loginError }: { info: Info; catalog: Cata
     <>
       <div className="shop-fixedhead" ref={headRef}>
         {header(false)}
-        {tableEdit && dine && (
+        {tableEdit && dine && !tableLocked && (
+          tableList.length ? (
+            <div className="shop-tableedit"><select autoFocus value={spot} onChange={(e) => { setSpot(e.target.value); setTableEdit(false); }}><option value="">{tx("Choose your table")}</option>{tableList.map((x) => <option key={x}>{x}</option>)}</select></div>
+          ) : (
           <div className="shop-tableedit"><input autoFocus value={spot} maxLength={30} placeholder={tx("e.g. Table 12")} onChange={(e) => setSpot(e.target.value)} onKeyDown={(e) => e.key === "Enter" && setTableEdit(false)} /><button onClick={() => setTableEdit(false)}>{t("done", "Done")}</button></div>
+          )
         )}
         {seg}
       </div>
@@ -1091,8 +1101,14 @@ function Menu({ info, catalog, config, loginError }: { info: Info; catalog: Cata
           <div className="sum-link-row" style={{ cursor: "default" }}><span className="sl-ic"><Icon name="pin" size={21} /></span><span className="sl-t">{dine ? `${channel?.name} · ${spot || tx("no table yet")}` : `${channel?.name} · Pickup counter`}<span className="sl-d">{info.outletName}</span></span></div>
         </div>
         {detailsCard}
-        {dine && (
-          <div className="e2e-card"><h3>{t("typeTableW", "Table")}</h3><div className="e2e-field"><label htmlFor="sum-table">{tx("Table number")}</label><input className="e2e-input" id="sum-table" value={spot} maxLength={30} placeholder={tx("e.g. Table 12")} onChange={(e) => setSpot(e.target.value)} /></div></div>
+        {dine && !tableLocked && (
+          <div className="e2e-card"><h3>{t("typeTableW", "Table")}</h3><div className="e2e-field"><label htmlFor="sum-table">{tx("Table number")}</label>
+            {tableList.length ? (
+              <select className="e2e-input" id="sum-table" value={spot} onChange={(e) => setSpot(e.target.value)}><option value="">{tx("Choose your table")}</option>{tableList.map((x) => <option key={x}>{x}</option>)}</select>
+            ) : (
+              <input className="e2e-input" id="sum-table" value={spot} maxLength={30} placeholder={tx("e.g. Table 12")} onChange={(e) => setSpot(e.target.value)} />
+            )}
+          </div></div>
         )}
         {!member && (
           <div className="summary-guest-row" role="group" aria-label={tx("Sign up or check out as guest")}>

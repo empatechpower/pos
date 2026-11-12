@@ -16,5 +16,8 @@
     "dev:db": "npm run db -w @pos/server",
     "dev:server:pg": "npm run dev:pg -w @pos/server",
     "cli": "npm run cli:pg -w @pos/server --"
+  },
+  "devDependencies": {
+    "qrcode": "^1.5.4"
   }
 }

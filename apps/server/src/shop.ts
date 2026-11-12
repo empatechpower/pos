@@ -57,6 +57,17 @@ async function activeQueueNumbers(db: Db, merchantId: string): Promise<Set<strin
   return new Set(r.rows.map((x) => x.q as string));
 }
 
+/** "1-26,31,32,33" -> ["Table 1", ..., "Table 26", "Table 31", ...]. Empty or unset means any table text is accepted. */
+export function parseTables(text: string | undefined): string[] {
+  const out: string[] = [];
+  for (const part of (text ?? "").split(",").map((x) => x.trim()).filter(Boolean)) {
+    const m = /^(\d{1,3})\s*-\s*(\d{1,3})$/.exec(part);
+    if (m) for (let n = Number(m[1]); n <= Number(m[2]) && n - Number(m[1]) < 500; n++) out.push(`Table ${n}`);
+    else if (/^\d{1,3}$/.test(part)) out.push(`Table ${Number(part)}`);
+  }
+  return [...new Set(out)];
+}
+
 /** One at a time, so two customers with the same phone digits cannot both be given the same number. */
 let numbering: Promise<unknown> = Promise.resolve();
 const serially = <T>(fn: () => Promise<T>): Promise<T> => {
@@ -102,6 +113,7 @@ export function registerShop(app: FastifyInstance, d: ShopDeps) {
     };
   };
 
+  const tables = parseTables(process.env.SHOP_TABLES);
   /** Everything the ordering page needs to dress itself. Public. */
   app.get("/api/shop/info", async (req, reply) => {
     if (limited(readLimit, req, reply)) return;
@@ -112,7 +124,9 @@ export function registerShop(app: FastifyInstance, d: ShopDeps) {
       // Set OUTLET_HOURS (e.g. "Daily 8am-9pm") and OUTLET_PHONE on the server to show them under Help & support.
       contact: process.env.OUTLET_HOURS || process.env.OUTLET_PHONE ? { hours: process.env.OUTLET_HOURS?.trim() || undefined, phone: process.env.OUTLET_PHONE?.trim() || undefined } : undefined,
       paymentTiming: d.config.paymentTiming,
-      channels: cat.channels.filter((c) => c.active).map((c) => ({ id: c.id, name: c.name, kind: c.kind })),
+      // With a table list set, ordering is dine-in only, one fixed list of tables.
+      tables,
+      channels: cat.channels.filter((c) => c.active && (!tables.length || c.kind === "dine_in")).map((c) => ({ id: c.id, name: c.name, kind: c.kind })),
       brand: await brandPayload(),
       // What this deployment can do beyond email sign-in and paying at the counter. The page enables only these.
       auth: { google: !!integ.google && !!d.members, microsoft: !!integ.microsoft && !!d.members, phone: !!d.members && (integ.sms ? { number: integ.sms.number } : showCodes ? { number: "+65 8000 0000", simulated: true } : null) },
@@ -367,6 +381,13 @@ export function registerShop(app: FastifyInstance, d: ShopDeps) {
       options: (Array.isArray(i?.options) ? i.options.slice(0, 40) : []).map((o) => ({ groupId: String(o?.groupId ?? ""), choiceId: String(o?.choiceId ?? ""), qty: o?.qty === undefined ? undefined : Number(o.qty) })),
     }));
 
+    // Dine-in only, at one of the shop's own tables, when a table list is set.
+    let table: string | undefined;
+    if (tables.length) {
+      const wanted = String(b.spot ?? "").trim().replace(/^table\s*/i, "");
+      table = tables.find((x) => x === `Table ${Number(wanted)}`);
+      if (!/^\d{1,3}$/.test(wanted) || !table) return reply.code(400).send({ error: "choose your table" });
+    }
     const phone = clean(b.customerPhone, 20);
     if (phone && !/^[+\d][\d\s-]{5,19}$/.test(phone)) return reply.code(400).send({ error: "phone number looks wrong" });
 
@@ -384,6 +405,7 @@ export function registerShop(app: FastifyInstance, d: ShopDeps) {
       coupon = await members!.coupon(member.id, String(b.couponId));
       if (!coupon) return reply.code(400).send({ error: "coupon_not_available" });
     }
+    if (tables.length && cat.channels.find((c) => c.id === b.channelId)?.kind !== "dine_in") return reply.code(400).send({ error: "this shop takes dine-in orders only" });
     const quote = quoteOrder(cat, d.config, { outletId: d.config.outletName, channelId: b.channelId }, items, pointsAsk, coupon ? { amountCents: coupon.amountCents, minSpendCents: coupon.minSpendCents } : null);
     if (!quote.ok) return reply.code(400).send({ error: quote.error, productId: quote.productId });
     if (b.expectedTotalCents !== undefined && b.expectedTotalCents !== quote.priced.total) {
@@ -431,7 +453,7 @@ export function registerShop(app: FastifyInstance, d: ShopDeps) {
         customerName: clean(b.customerName, 40),
         customerPhone: phone,
         memberId: member?.id,
-        spot: quote.channel.kind === "dine_in" ? clean(b.spot, 30)?.replace(/[^\w #-]/g, "") : undefined,
+        spot: quote.channel.kind === "dine_in" ? table ?? clean(b.spot, 30)?.replace(/[^\w #-]/g, "") : undefined,
         queueNumber,
       }),
       ...(couponUsed ? [mk({ type: "CouponApplied", title: coupon!.title, amountCents: coupon!.amountCents, minSpendCents: coupon!.minSpendCents })] : []),
