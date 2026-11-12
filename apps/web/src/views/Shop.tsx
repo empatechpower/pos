@@ -133,7 +133,7 @@ function SwipeRow({ children, onRemove, label }: { children: ReactNode; onRemove
     if (s.mode === "?") {
       if (Math.max(Math.abs(dx), Math.abs(dy)) < 6) return;
       s.mode = Math.abs(dx) > Math.abs(dy) ? "h" : "v";
-      if (s.mode === "h") (e.currentTarget as HTMLElement).setPointerCapture(e.pointerId);
+      if (s.mode === "h") { try { (e.currentTarget as HTMLElement).setPointerCapture(e.pointerId); } catch { /* the drag still works without capture */ } }
     }
     if (s.mode !== "h") return;
     moved.current = true;
@@ -666,7 +666,7 @@ function Menu({ info, catalog, config, loginError }: { info: Info; catalog: Cata
             const n = inBag(m.id);
             const img = photo(m);
             const hasOpts = !!m.options?.length;
-            return (
+            const card = (
               <div key={m.id} className={`sc ${n ? "in" : ""} ${m.soldOut ? "out" : ""}`}>
                 <div className="sc-photo">
                   {img ? <img src={img} alt="" loading="lazy" /> : <span className="sc-noimg" />}
@@ -688,6 +688,8 @@ function Menu({ info, catalog, config, loginError }: { info: Info; catalog: Cata
                 )}
               </div>
             );
+            // An item that is already in the bag slides left to take it out, like the prototype. That removes every variant of it.
+            return n > 0 ? <SwipeRow key={m.id} label={m.name} onRemove={() => { setBag((cur) => cur.filter((x) => x.productId !== m.id)); setAgreed(null); }}>{card}</SwipeRow> : card;
           })}
         </div>
       </div>

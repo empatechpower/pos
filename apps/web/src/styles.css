@@ -373,3 +373,12 @@ main { flex: 1; padding: 14px 16px; }
 .shop-headwrap { position: sticky; top: 0; z-index: 8; }
 .shop .swipe-shell { background: transparent; }
 .shop .swipe-shell.is-swiped, .shop .swipe-shell.is-dragging { background: var(--red); }
+
+/* Item cards on the Order screen slide like bag cards. A finger can only drag them sideways if the browser leaves
+   horizontal movement to us, so the cards (not just what is inside them) say so. */
+.shop .swipe-shell, .shop .swipe-shell > * { touch-action: pan-y; }
+.shop .swipe-shell > .sc { margin-top: 0; position: relative; z-index: 1; transition: transform .18s ease; will-change: transform; }
+.shop .swipe-shell.is-swiped > .sc { transform: translateX(-84px); }
+.shop .swipe-shell.is-dragging > .sc { transition: none !important; }
+.shop .swipe-shell.has-x > .sc { transform: translateX(var(--sx, 0px)); }
+.shop .swipe-shell > .sc .sc-act button, .shop .swipe-shell > .sc .sc-act { touch-action: manipulation; }
