@@ -464,6 +464,12 @@ export async function buildApp({ config, store, db, catalog, catalogAdmin, print
       return ok ? { ok: true } : reply.code(404).send({ error: "not_a_failed_job" });
     });
 
+    /** The print state of some orders, for the badge on each order card. Any staff member may look. */
+    app.get<{ Querystring: { ids?: string } }>("/api/print/order-status", { preHandler: needs("print.reprint") }, async (req) => {
+      const ids = String(req.query.ids ?? "").split(",").map((x) => x.trim()).filter(Boolean).slice(0, 100);
+      return { statuses: await queue.statusForOrders(ids) };
+    });
+
     /** Any staff member can ask for a receipt (or a kitchen ticket) again. */
     app.post<{ Body: { orderId?: string; docType?: "receipt" | "kitchen"; printerId?: string } }>("/api/print/reprint", { preHandler: needs("print.reprint") }, async (req, reply) => {
       const { orderId, docType, printerId } = req.body ?? {};

@@ -4,6 +4,7 @@ import { staffFetch, useStaff } from "../auth";
 import { record, deviceId } from "../db";
 import { useOrders } from "../hooks";
 import { spend } from "../wallet";
+import { PrintBadge, usePrintStatus } from "./PrintBadge";
 
 const timeOf = (ms: number) => new Date(ms).toLocaleTimeString("en-GB", { hour: "2-digit", minute: "2-digit", timeZone: "Asia/Singapore" });
 
@@ -17,6 +18,17 @@ export function Online({ config, online }: { config: BusinessConfig; online: boo
 
   const fresh = orders.filter((o) => !o.acceptedAt && o.stage !== "cancelled").sort((a, b) => a.openedAt - b.openedAt);
   const active = orders.filter((o) => o.acceptedAt && o.stage !== "completed" && o.stage !== "cancelled").sort((a, b) => a.openedAt - b.openedAt);
+
+  const printState = usePrintStatus([...fresh, ...active].map((o) => o.orderId), !!staff);
+
+  /** Ask for the kitchen ticket again (the printer may be back, or the first one never came out). */
+  async function reprint(orderId: string) {
+    const r = await staffFetch("/api/print/reprint", { body: { orderId, docType: "kitchen" } });
+    if ("problem" in r) return setMsg(r.problem);
+    if (r.res.ok) return setMsg("Kitchen ticket sent again.");
+    const code = ((await r.res.json().catch(() => ({}))) as { error?: string }).error;
+    setMsg(code === "no_printer_for_this" ? "No kitchen printer is set up for that order. Add one under Printers." : "Could not send that ticket. Try again.");
+  }
 
   async function reject(id: string, q?: string) {
     if (!window.confirm(`Turn down order ${q ?? ""}? The customer will see it as cancelled.`)) return;
@@ -61,6 +73,7 @@ export function Online({ config, online }: { config: BusinessConfig; online: boo
         <div>
           <b>{o.queueNumber}</b> <span className="muted">· {o.channelName}{o.spot ? ` · ${o.spot}` : ""} · {timeOf(o.openedAt)} · {formatMoney(t)}</span>
           <div>{o.customerName ?? "No name"}{o.customerPhone ? ` · ${o.customerPhone}` : ""}</div>
+          <PrintBadge s={printState[o.orderId]} onReprint={() => void reprint(o.orderId)} />
           <div className="muted">{o.lines.filter((l) => l.qty > 0).map((l) => `${l.qty} × ${l.name}${l.options?.length ? ` (${optionLines(l.options).join(", ")})` : ""}`).join(", ")}</div>
         </div>
         <div className="tabr">

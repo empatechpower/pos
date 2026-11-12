@@ -276,6 +276,28 @@ export class PrintStore {
     return (r.rowCount ?? 0) > 0;
   }
 
+  /**
+   * Where each order's tickets stand, for a badge on the order. Looks at the latest job for each ticket and printer, so a
+   * ticket that failed and was then reprinted successfully counts as printed. Orders with no jobs are left out.
+   */
+  async statusForOrders(orderIds: string[]): Promise<Record<string, { state: "printed" | "waiting" | "failed" | "unconfirmed"; error?: string }>> {
+    if (!orderIds.length) return {};
+    const r = await this.db.query(
+      `SELECT DISTINCT ON (order_id, doc_type, printer_id) order_id, status, last_error
+       FROM print_jobs WHERE merchant_id=$1 AND order_id = ANY($2::text[])
+       ORDER BY order_id, doc_type, printer_id, created_at DESC`,
+      [this.merchantId, orderIds],
+    );
+    const rank = { printed: 0, waiting: 1, unconfirmed: 2, failed: 3 } as const;
+    const out: Record<string, { state: keyof typeof rank; error?: string }> = {};
+    for (const row of r.rows) {
+      const state = row.status === "done" ? "printed" : row.status === "failed" ? "failed" : row.status === "unconfirmed" ? "unconfirmed" : "waiting";
+      const cur = out[row.order_id];
+      if (!cur || rank[state] > rank[cur.state]) out[row.order_id] = { state, ...(state === "failed" || state === "unconfirmed" ? { error: String(row.last_error ?? "").slice(0, 160) } : {}) };
+    }
+    return out;
+  }
+
   async listJobs(status?: string, limit = 100) {
     const r = await this.db.query(
       "SELECT id, printer_id, doc_type, order_id, title, status, attempts, last_error, created_at, updated_at FROM print_jobs WHERE merchant_id=$1 AND ($2::text IS NULL OR status=$2) ORDER BY created_at DESC LIMIT $3",

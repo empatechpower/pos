@@ -124,6 +124,32 @@ describe("the print hub (hub.mjs, as shipped)", () => {
     expect(Buffer.concat(got).toString("latin1")).toContain("PRINTER TEST");
   });
 
+  it("tells each order how its tickets stand: printed, waiting, not printed or to be checked", async () => {
+    const add = (order: string, status: string, doc = "kitchen", when = "now()") =>
+      db.query("INSERT INTO print_jobs (merchant_id, outlet_id, printer_id, doc_type, order_id, dedupe_key, payload, status, last_error, created_at) VALUES ('bp','EV','hub-a',$1,$2,$3,'\\x00',$4,$5," + when + ")", [doc, order, `${order}:${doc}:${status}:${Math.random()}`, status, status === "failed" || status === "unconfirmed" ? "cannot reach printer" : null]);
+    await add("st-done", "done");
+    await add("st-wait", "queued");
+    await add("st-fail", "failed");
+    await add("st-unc", "unconfirmed");
+    // A ticket that failed and was then reprinted fine counts as printed.
+    await add("st-fixed", "failed", "kitchen", "now() - interval '1 minute'");
+    await add("st-fixed", "done");
+    // Any ticket failing makes the order need attention, even if its receipt printed.
+    await add("st-mixed", "done", "receipt");
+    await add("st-mixed", "failed", "kitchen");
+    const r = await call("/api/print/order-status?ids=st-done,st-wait,st-fail,st-unc,st-fixed,st-mixed,st-none", { staff: mgr, device: till.token });
+    expect(r.status).toBe(200);
+    const st = r.json.statuses;
+    expect(st["st-done"].state).toBe("printed");
+    expect(st["st-wait"].state).toBe("waiting");
+    expect(st["st-fail"]).toMatchObject({ state: "failed", error: "cannot reach printer" });
+    expect(st["st-unc"].state).toBe("unconfirmed");
+    expect(st["st-fixed"].state).toBe("printed");
+    expect(st["st-mixed"].state).toBe("failed");
+    expect(st["st-none"]).toBeUndefined();
+    expect((await call("/api/print/order-status?ids=st-done", { device: till.token })).status).toBe(401);
+  });
+
   it("says plainly when it has been removed from the shop's devices", async () => {
     await expect(hubMod.runOnce({ baseUrl: base, token: "not-a-real-token" })).rejects.toMatchObject({ removed: true });
   });

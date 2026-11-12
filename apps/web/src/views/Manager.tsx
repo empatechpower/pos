@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { confirmedPaid, formatMoney, isFullyPaid, orderTotals, type BusinessConfig, type OrderState } from "@pos/core";
 import { staffFetch, useStaff } from "../auth";
 import { useOrders } from "../hooks";
+import { PrintBadge, usePrintStatus } from "./PrintBadge";
 
 const TZ = "Asia/Singapore";
 const dayKey = (ms: number) => new Date(ms).toLocaleDateString("en-CA", { timeZone: TZ });
@@ -63,6 +64,8 @@ function Transactions({ config }: { config: BusinessConfig }) {
   for (const o of live) for (const p of o.payments) if (p.confirmed) byMethod.set(p.method, (byMethod.get(p.method) ?? 0) + p.amountCents);
   const cancelled = shown.length - live.length;
 
+  const printState = usePrintStatus(shown.map((o) => o.orderId), true);
+
   async function kitchen(o: OrderState) {
     setMsg(null);
     const r = await staffFetch("/api/print/reprint", { body: { orderId: o.orderId, docType: "kitchen" } });
@@ -104,6 +107,7 @@ function Transactions({ config }: { config: BusinessConfig }) {
                 {items} item{items === 1 ? "" : "s"} · {STAGE[o.stage] ?? o.stage} · <b style={{ color: state === "Paid" ? "inherit" : undefined }}>{state}</b>{methods && ` (${methods})`}
                 {(o.customerName || o.customerPhone) && ` · ${[o.customerName, o.customerPhone].filter(Boolean).join(" ")}`}
               </div>
+              <PrintBadge s={printState[o.orderId]} onReprint={() => void kitchen(o)} />
             </div>
             <div className="tabr">
               <b>{formatMoney(total)}</b>
