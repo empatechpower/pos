@@ -25,6 +25,8 @@ Every change is written to the audit log as made via Telegram.
 
 **Skipping the link code for the owner.** Set `TELEGRAM_ADMIN_IDS` on the server to one or more Telegram user ids (numbers, separated by commas). A named account is linked to the owner's staff login the first time it messages the bot, so `/manager` works straight away. To find an id, message @userinfobot in Telegram. Only the owner's own account should be listed, because the link opens the owner's pages.
 
+**Giving a customer or helper manager access.** Set `TELEGRAM_MANAGER_IDS` to their Telegram user id (numbers, separated by commas). They get a separate manager login called "Telegram manager" (never the owner's), created the first time they message the bot, with a random PIN that nobody knows, so it works only through Telegram. A manager can manage prices, products, orders, printers and member credit, but not staff. Remove the id from the setting to take the access away; also disconnect them under Manager, Telegram.
+
 Disconnect someone from the same Telegram tab. Only linked people with the catalogue permission can use the bot; anyone else is ignored. Group chats are ignored.
 
 ## Notes

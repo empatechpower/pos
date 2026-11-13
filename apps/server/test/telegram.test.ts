@@ -30,7 +30,7 @@ const fakeFetch = (async (url: string | URL, init?: RequestInit) => {
   sent.push({ method, body: JSON.parse(String(init?.body ?? "{}")) });
   return new Response(JSON.stringify({ ok: true, result: method === "getMe" ? { username: "rezein_test_bot" } : {} }));
 }) as typeof fetch;
-const integrations: Integrations = { publicUrl: "https://shop.example", telegram: { token: "TOK", webhookSecret: "hook-secret", adminIds: ["777"] }, fetch: fakeFetch };
+const integrations: Integrations = { publicUrl: "https://shop.example", telegram: { token: "TOK", webhookSecret: "hook-secret", adminIds: ["777"], managerIds: ["555"] }, fetch: fakeFetch };
 
 async function call(method: string, url: string, o: { body?: object; staff?: string; device?: string | null; headers?: Record<string, string> } = {}) {
   const res = await fetch(base + url, {
@@ -353,3 +353,21 @@ describe("opening the staff pages from Telegram", () => {
     expect(buttons(r.said[0]).some((b) => b.url)).toBe(false);
   });
 });
+
+describe("a customer given manager access through Telegram", () => {
+  it("gets a manager login, never the owner's, and can open the pages and change a price", async () => {
+    const r = await say(555, "/prices");
+    const code = buttons(r.said[0]).find((b) => b.url)!.url!.split("code=")[1]!;
+    const redeemed = await call("POST", "/api/telegram/redeem", { body: { code }, device: null });
+    expect(redeemed.status).toBe(200);
+    expect(redeemed.json.staff).toMatchObject({ code: "TGMGR", role: "manager" });
+    expect(redeemed.json.to).toBe("prices");
+    // The same login is reused, not made again, and its PIN is not one anybody has.
+    await say(555, "/manager");
+    expect((await db.query("SELECT count(*)::int AS n FROM staff WHERE code='TGMGR'")).rows[0].n).toBe(1);
+    expect((await call("POST", "/api/auth/login", { body: { code: "TGMGR", pin: "123456" } })).status).toBe(401);
+    // It can use the bot like any manager.
+    expect((await say(555, "/pricebooks")).said[0].text).toMatch(/Pricebooks/);
+  });
+});
+

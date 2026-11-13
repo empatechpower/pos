@@ -1,7 +1,7 @@
-import { createHash, randomBytes } from "node:crypto";
+import { createHash, randomBytes, randomInt } from "node:crypto";
 import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
 import { formatMoney, type Catalog, type ChannelKind, type Product } from "@pos/core";
-import { audit, can, startSessionFor, type Permission } from "./auth.js";
+import { audit, can, createStaff, startSessionFor, type Permission } from "./auth.js";
 import type { PgCatalogStore } from "./catalog.js";
 import type { Db } from "./db/pool.js";
 import { createLinkedDevice } from "./devices.js";
@@ -157,6 +157,21 @@ export function registerTelegram(app: FastifyInstance, d: TelegramDeps): void {
         await audit(d.db, d.merchantId, owner.rows[0].id, "telegram.autolink", { telegramId });
         return { staffId: owner.rows[0].id, name: owner.rows[0].name, role: owner.rows[0].role };
       }
+    }
+    // A Telegram account named in TELEGRAM_MANAGER_IDS gets a manager login of its own (never the owner's): it can manage prices,
+    // products, orders and printers, but cannot manage staff. The login has a random PIN nobody knows, so it works only through Telegram.
+    if (t?.managerIds?.includes(String(telegramId))) {
+      let mgr = (await d.db.query("SELECT id, name, role FROM staff WHERE merchant_id=$1 AND code='TGMGR' AND role='manager' AND active", [d.merchantId])).rows[0];
+      if (!mgr) {
+        const made = await createStaff(d.db, { merchantId: d.merchantId, code: "TGMGR", name: "Telegram manager", role: "manager", pin: String(randomInt(10_000_000, 100_000_000)) });
+        mgr = { id: made.id, name: made.name, role: made.role };
+      }
+      await d.db.query(
+        "INSERT INTO telegram_links (merchant_id, telegram_id, chat_id, staff_id, name) VALUES ($1,$2,$2,$3,$4) ON CONFLICT (merchant_id, telegram_id) DO UPDATE SET staff_id=EXCLUDED.staff_id",
+        [d.merchantId, telegramId, mgr.id, "manager (by Telegram id)"],
+      );
+      await audit(d.db, d.merchantId, mgr.id, "telegram.autolink", { telegramId, role: "manager" });
+      return { staffId: mgr.id, name: mgr.name, role: mgr.role };
     }
     return null;
   };
