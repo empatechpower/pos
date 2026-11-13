@@ -43,7 +43,7 @@ const toPrinter = (r: Record<string, any>): Printer => ({
   drawer: r.drawer, raster: !!r.raster, labelWidthMm: r.label_width_mm, labelHeightMm: r.label_height_mm, dpi: r.dpi === 300 ? 300 : 203,
   connection: r.connection, agentDeviceId: r.agent_device_id, active: r.active,
   cutMode: r.cut_mode === "unit" || r.cut_mode === "category" ? r.cut_mode : "grouped",
-  showQueue: r.show_queue !== false,
+  showQueue: r.show_queue === true,
 });
 
 /** Receipt and kitchen printers speak ESC/POS; label printers speak ZPL or EPL. Checked before saving. */
@@ -114,7 +114,7 @@ export class PrintStore {
        ON CONFLICT (merchant_id,id) DO UPDATE SET name=EXCLUDED.name, outlet_id=EXCLUDED.outlet_id, language=EXCLUDED.language, roles=EXCLUDED.roles,
          categories=EXCLUDED.categories, width_chars=EXCLUDED.width_chars, drawer=EXCLUDED.drawer, raster=EXCLUDED.raster, label_width_mm=EXCLUDED.label_width_mm,
          label_height_mm=EXCLUDED.label_height_mm, dpi=EXCLUDED.dpi, connection=EXCLUDED.connection, agent_device_id=EXCLUDED.agent_device_id, active=EXCLUDED.active, cut_mode=EXCLUDED.cut_mode, show_queue=EXCLUDED.show_queue`,
-      [this.merchantId, p.id, p.name, p.outletId, p.language, p.roles, p.categories, p.widthChars, p.drawer, !!p.raster, p.labelWidthMm, p.labelHeightMm, p.dpi, JSON.stringify(p.connection), p.agentDeviceId, p.active, p.cutMode ?? "grouped", p.showQueue !== false],
+      [this.merchantId, p.id, p.name, p.outletId, p.language, p.roles, p.categories, p.widthChars, p.drawer, !!p.raster, p.labelWidthMm, p.labelHeightMm, p.dpi, JSON.stringify(p.connection), p.agentDeviceId, p.active, p.cutMode ?? "grouped", p.showQueue === true],
     );
   }
 

@@ -63,7 +63,8 @@ function capture() {
   const send: Sender = async (host, port, bytes) => void got.push({ host, port, bytes, text: bytes.toString("latin1") });
   return { got, send };
 }
-const printerBody = (o: object) => ({ name: "Printer", language: "escpos", roles: ["receipt"], connection: { host: "10.0.0.5", port: 9100 }, ...o });
+// The queue number is off unless a printer asks for it, so most of these tests ask for it, to look at it.
+const printerBody = (o: object) => ({ name: "Printer", language: "escpos", roles: ["receipt"], showQueue: true, connection: { host: "10.0.0.5", port: 9100 }, ...o });
 const setPrinter = (id: string, body: object) => call(`/api/printers/${id}`, { method: "PUT", body, staff: mgr, device: till.token });
 const agent = (send: Sender, deviceToken = hub.token) => runAgentOnce({ baseUrl: base, deviceToken, send });
 
@@ -294,6 +295,22 @@ describe("how a kitchen printer cuts its tickets", () => {
     expect(drinks.text).toContain("2 x Milo");
     expect(drinks.text).toContain("1 x Milo");
     expect(drinks.text).not.toContain("Kaya");
+  });
+
+  it("the queue number is off by default: a printer added without the setting leaves it off, and one that asks for it prints it", async () => {
+    await call("/api/printers/qdef", { method: "PUT", body: { name: "Default", language: "escpos", roles: ["kitchen"], connection: { host: "10.0.0.9", port: 9100 } }, staff: mgr, device: till.token });
+    await setPrinter("qon", printerBody({ name: "Asks", roles: ["kitchen"], connection: { host: "10.0.0.10", port: 9100 } }));
+    const list = (await call("/api/printers", { staff: mgr, device: till.token })).json.printers as Array<{ id: string; showQueue: boolean }>;
+    expect(list.find((x) => x.id === "qdef")!.showQueue).toBe(false);
+    expect(list.find((x) => x.id === "qon")!.showQueue).toBe(true);
+    const o = withChoices(newId(), "A406", [{ id: "kaya-toast", name: "Kaya Toast", qty: 1 }]);
+    await push(o.events);
+    const { got, send } = capture();
+    await drain(send);
+    expect(got.find((g) => g.host === "10.0.0.9" && g.text.includes("Kaya Toast"))!.text).not.toContain("A406");
+    expect(got.find((g) => g.host === "10.0.0.10" && g.text.includes("Kaya Toast"))!.text).toContain("A406");
+    await setPrinter("qdef", printerBody({ name: "Default", roles: ["kitchen"], connection: { host: "10.0.0.9", port: 9100 }, active: false }));
+    await setPrinter("qon", printerBody({ name: "Asks", roles: ["kitchen"], connection: { host: "10.0.0.10", port: 9100 }, active: false }));
   });
 
   it("a printer can be set to leave the queue number off its tickets", async () => {

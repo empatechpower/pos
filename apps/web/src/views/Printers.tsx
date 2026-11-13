@@ -43,7 +43,7 @@ const kindOf = (p: Printer): Kind => (p.roles.includes("label") ? "label" : p.ro
 const rolesOf = (k: Kind): Printer["roles"] => (k === "both" ? ["receipt", "kitchen"] : [k]);
 const slug = (s: string) => s.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "").slice(0, 32);
 
-const blank = (): Printer => ({ id: "", name: "", language: "escpos", roles: ["receipt"], categories: [], widthChars: 42, drawer: false, raster: false, labelWidthMm: null, labelHeightMm: null, dpi: 203, connection: { host: "", port: 9100 }, agentDeviceId: null, active: true, cutMode: "grouped", showQueue: true });
+const blank = (): Printer => ({ id: "", name: "", language: "escpos", roles: ["receipt"], categories: [], widthChars: 42, drawer: false, raster: false, labelWidthMm: null, labelHeightMm: null, dpi: 203, connection: { host: "", port: 9100 }, agentDeviceId: null, active: true, cutMode: "grouped", showQueue: false });
 
 const STATUS: Record<Job["status"], string> = { queued: "Waiting", leased: "Printing", done: "Printed", failed: "Failed", unconfirmed: "Unconfirmed" };
 const timeOf = (iso: string) => new Date(iso).toLocaleTimeString("en-GB", { hour: "2-digit", minute: "2-digit", timeZone: "Asia/Singapore" });
@@ -212,7 +212,7 @@ export function Printers({ catalog }: { catalog: Catalog }) {
           )}
           {(kind === "kitchen" || kind === "receipt" || kind === "both") && (
             <label className="inline">
-              <input type="checkbox" checked={editing.showQueue !== false} onChange={(e) => set({ showQueue: e.target.checked })} /> Print the queue number (untick to leave it off this printer's tickets)
+              <input type="checkbox" checked={editing.showQueue === true} onChange={(e) => set({ showQueue: e.target.checked })} /> Print the queue number (off by default)
             </label>
           )}
           {(kind === "kitchen" || kind === "both") && (

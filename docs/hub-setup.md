@@ -111,7 +111,7 @@ Each cut is its own print job with its own cut of the paper, so a slow or failed
 
 ## Leaving the queue number off a printer
 
-Under Printers, edit a kitchen or receipt printer and untick **Print the queue number**. Its tickets then show the table and the customer's name (if any) but not the queue number. The queue number is the last 4 digits of the customer's phone, so people can answer to it; it is still used on the customer's own screen and on labels.
+The queue number is **off by default** on every printer: tickets show the table and the customer's name (if any), without it. To print it on a printer, edit that kitchen or receipt printer under Printers and tick **Print the queue number**. The queue number is the last 4 digits of the customer's phone, so people can answer to it; it is still used on the customer's own screen and on labels.
 
 ## When the order is "Ready to serve"
 
