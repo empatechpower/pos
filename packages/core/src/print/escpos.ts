@@ -30,7 +30,7 @@ export function encodeEscPos(doc: Doc, opts: EscPosOptions): Uint8Array {
   for (const b of doc.blocks) {
     switch (b.t) {
       case "text": {
-        const size = b.size ?? 1;
+        const size = Math.round(b.size ?? 1); // a printer's own text comes in whole multiples only; 1.4 is for the drawn (raster) text
         setAlign(b.align ?? "left");
         bytes(ESC, 0x45, b.bold ? 1 : 0, ESC, 0x2d, b.underline ? 1 : 0, GS, 0x21, ((size - 1) << 4) | (size - 1));
         // A double-width character takes two columns, so wrap to the narrower line.

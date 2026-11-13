@@ -92,9 +92,9 @@ export function kitchenTicket(order: OrderState, ctx: PrintContext, opts: Kitche
   if (order.customerName) b.push({ t: "text", text: order.customerName, align: "center", bold: true });
   b.push({ t: "rule" });
   for (const l of lines) {
-    // The item is big but not bold; its choices (Hot, Iced, Big) are bold and as big, so they stand out.
-    b.push({ t: "text", text: `${l.qty} x ${l.name}`, size: 2 });
-    for (const o of optionLines(l.options)) b.push({ t: "text", text: `- ${o}`, bold: true, size: 2 });
+    // The item is big and bold. Its choices (Hot, Iced, Big) are plain and smaller. A customer's special request stays big and bold so it is not missed.
+    b.push({ t: "text", text: `${l.qty} x ${l.name}`, bold: true, size: 2 });
+    for (const o of optionLines(l.options)) b.push(o.startsWith("Note: ") ? { t: "text", text: `- ${o}`, bold: true, size: 2 } : { t: "text", text: `- ${o}`, size: 1.4 });
   }
   b.push({ t: "rule" }, { t: "text", text: printedAt(ctx.now, ctx.timeZone) }, { t: "feed", n: 3 }, { t: "cut" });
   return { blocks: b };

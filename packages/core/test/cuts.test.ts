@@ -50,7 +50,7 @@ describe("kitchen cuts", () => {
 });
 
 describe("how a kitchen ticket looks", () => {
-  it("the customer name is small, the item is big but not bold, and its choices are bold and as big as the item", () => {
+  it("the customer name is small, the item is big and bold, and its choices are plain and smaller", () => {
     const order = reduceOrder("o", [{ id: "e1", orderId: "o", deviceId: "d", ts: 1, seq: 1, type: "OrderOpened", fulfilment: "dine_in", spot: "Table 21", queueNumber: "7198", customerName: "The Wi-Fi Herl" } as OrderEvent])!;
     const doc = kitchenTicket(order, { merchantName: "B", outletName: "O", now: 0, timeZone: "Asia/Singapore" } as never, { lines: [line("a", "milo", 1, opt("Hot"))], showQueue: false });
     const text = doc.blocks.filter((b): b is Extract<(typeof doc.blocks)[number], { t: "text" }> => b.t === "text");
@@ -58,8 +58,9 @@ describe("how a kitchen ticket looks", () => {
     expect(by("Wi-Fi").size ?? 1).toBe(1);
     expect(by("Table 21").size).toBe(2);
     expect(by("1 x MILO").size).toBe(2);
-    expect(by("1 x MILO").bold ?? false).toBe(false);
-    expect(by("- Hot")).toMatchObject({ size: 2, bold: true });
+    expect(by("1 x MILO").bold).toBe(true);
+    expect(by("- Hot").size).toBe(1.4);
+    expect(by("- Hot").bold ?? false).toBe(false);
   });
 });
 

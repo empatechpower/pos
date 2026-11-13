@@ -15,7 +15,7 @@ export interface Bitmap {
 
 export interface TextStyle {
   bold?: boolean;
-  size?: 1 | 2 | 3;
+  size?: 1 | 1.4 | 2 | 3;
   align?: "left" | "center" | "right";
   underline?: boolean;
 }

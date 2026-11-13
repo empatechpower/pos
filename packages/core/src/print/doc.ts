@@ -3,7 +3,7 @@
  * bytes for a particular printer language. Width is in characters of the printer's normal font.
  */
 export type Block =
-  | { t: "text"; text: string; align?: "left" | "center" | "right"; bold?: boolean; size?: 1 | 2 | 3; underline?: boolean }
+  | { t: "text"; text: string; align?: "left" | "center" | "right"; bold?: boolean; size?: 1 | 1.4 | 2 | 3; underline?: boolean }
   | { t: "cols"; left: string; right: string; bold?: boolean }
   | { t: "rule"; ch?: "-" | "=" }
   | { t: "feed"; n: number }

@@ -49,8 +49,7 @@ export function OptionSheet({ name, description, photoUrl, baseCents, groups, in
     <div className="opt-back" role="dialog" aria-label={`${tx("Customise")} ${name}`}>
       <div className="opt-sheet">
         <div className="opt-head">
-          <button className="opt-x" onClick={onClose} aria-label="Back">‹</button>
-          <b>{tx("Customise")}</b>
+          <button className="opt-x" onClick={onClose} aria-label={tx("Back")}><span aria-hidden>‹</span> {tx("Back")}</button>
         </div>
         <div className="opt-body">
           {photoUrl && <img className="opt-photo" src={photoUrl} alt="" />}
@@ -75,7 +74,7 @@ export function OptionSheet({ name, description, photoUrl, baseCents, groups, in
                           className={on ? "on" : ""}
                           disabled={c.soldOut || (g.kind === "multi" && !on && full)}
                           aria-pressed={on}
-                          onClick={() => (g.kind === "single" ? pickOne(g, c.id) : toggle(g, c.id))}
+                          onClick={() => (g.kind === "single" && (g.required || !on) ? pickOne(g, c.id) : toggle(g, c.id))} // an optional choose-one can be tapped again to clear it
                         >
                           <span>{c.name}</span>
                           {c.soldOut ? <small>{tx("Sold out")}</small> : c.priceCents > 0 ? <small>+{formatMoney(c.priceCents)}</small> : null}
