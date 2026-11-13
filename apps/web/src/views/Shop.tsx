@@ -336,6 +336,7 @@ function Menu({ info, catalog, config, loginError }: { info: Info; catalog: Cata
   const saved = useRef(loadBag()).current;
   const [bag, setBag] = useState<BagLine[]>(saved?.bag ?? []);
   const [picking, setPicking] = useState<MenuEntry | null>(null);
+  const [editing, setEditing] = useState<BagLine | null>(null);
   const [name, setName] = useState("");
   const [phone, setPhone] = useState("");
   const tableList = info.tables ?? [];
@@ -512,6 +513,20 @@ function Menu({ info, catalog, config, loginError }: { info: Info; catalog: Cata
       if (qty <= 0) return cur.filter((l) => l.key !== key);
       const next = Math.min(20, qty);
       return have ? cur.map((l) => (l.key === key ? { ...l, qty: next } : l)) : [...cur, { key, productId: m.id, qty: next, selection, ...(note ? { note } : {}) }];
+    });
+    setAgreed(null);
+  };
+  // Change a line's choices or note in place: it keeps its quantity, and joins another line if it now matches one.
+  const editLine = (old: BagLine, m: MenuEntry, selection: ChosenOptionInput[], rawNote: string) => {
+    const r = resolveOptions(m.options, selection);
+    if (!r.ok) return;
+    const note = cleanNote(rawNote);
+    const key = `${m.id}#${r.key}${note ? `#${note}` : ""}`;
+    setBag((cur) => {
+      const rest = cur.filter((x) => x.key !== old.key);
+      const same = rest.find((x) => x.key === key);
+      if (same) return rest.map((x) => (x.key === key ? { ...x, qty: Math.min(20, x.qty + old.qty) } : x));
+      return cur.map((x) => (x.key === old.key ? { key, productId: m.id, qty: old.qty, selection, ...(note ? { note } : {}) } : x));
     });
     setAgreed(null);
   };
@@ -1114,7 +1129,7 @@ function Menu({ info, catalog, config, loginError }: { info: Info; catalog: Cata
                 {v.note && <p className="bag-desc bag-note">{v.note}</p>}
                 <div className="bag-pricerow">{formatMoney(v.lineCents)}</div>
               </div>
-              <div className="sc-act"><span className="sc-step"><button className="minus" aria-label={`Fewer ${v.m.name}`} onClick={() => bump(l, -1)}>−</button><b>{l.qty}</b><button className="plus" aria-label={`More ${v.m.name}`} onClick={() => bump(l, 1)}>+</button></span></div>
+              <div className="sc-act sc-act-col"><button className="sc-edit" aria-label={`Edit ${v.m.name}`} onClick={() => setEditing(l)}>{t("edit", "Edit")}</button><span className="sc-step"><button className="minus" aria-label={`Fewer ${v.m.name}`} onClick={() => bump(l, -1)}>−</button><b>{l.qty}</b><button className="plus" aria-label={`More ${v.m.name}`} onClick={() => bump(l, 1)}>+</button></span></div>
             </div>
             </SwipeRow>
           );
@@ -1316,6 +1331,24 @@ function Menu({ info, catalog, config, loginError }: { info: Info; catalog: Cata
           onAdd={(sel, note) => { addLine(picking, sel, 1, note); setPicking(null); }}
         />
       )}
+      {editing && byId.get(editing.productId) && (() => {
+        const em = byId.get(editing.productId)!;
+        return (
+          <OptionSheet
+            notes
+            cta={tx("Save changes")}
+            name={em.name}
+            description={em.description}
+            photoUrl={photo(em)}
+            baseCents={em.priceCents}
+            groups={em.options ?? []}
+            initial={editing.selection}
+            initialNote={editing.note ?? ""}
+            onClose={() => setEditing(null)}
+            onAdd={(sel, note) => { editLine(editing, em, sel, note); setEditing(null); }}
+          />
+        );
+      })()}
       {nav}
     </>
   );

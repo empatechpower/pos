@@ -11,6 +11,8 @@ interface Props {
   groups: OptionGroup[];
   /** Start from this selection (e.g. when editing); otherwise the defaults. */
   initial?: ChosenOptionInput[];
+  /** Start the Special request box with this text (when editing). */
+  initialNote?: string;
   cta?: string;
   /** Show the free-text Special request box (the customer shop; not the till). */
   notes?: boolean;
@@ -25,9 +27,9 @@ const countOf = (sel: ChosenOptionInput[], g: string, c: string) => sel.filter((
  * The customise screen: choose-one groups as pills, "pick any" as toggles, extras as steppers. The total and
  * the Add button follow the same rules the server applies, so what is shown is what is charged.
  */
-export function OptionSheet({ name, description, photoUrl, baseCents, groups, initial, cta = "Add to bag", notes, onAdd, onClose }: Props) {
+export function OptionSheet({ name, description, photoUrl, baseCents, groups, initial, initialNote, cta = "Add to bag", notes, onAdd, onClose }: Props) {
   const [sel, setSel] = useState<ChosenOptionInput[]>(initial ?? defaultSelection(groups));
-  const [note, setNote] = useState("");
+  const [note, setNote] = useState(initialNote ?? "");
   const r = useMemo(() => resolveOptions(groups, sel), [groups, sel]);
   const total = baseCents + (r.ok ? r.extraCents : 0);
   const missing = !r.ok && r.error === "missing_required" ? groups.find((g) => g.id === r.groupId)?.name : null;

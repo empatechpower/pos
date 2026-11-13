@@ -212,6 +212,8 @@ main { flex: 1; padding: 14px 16px; }
 .sc-act { display: flex; align-items: center; justify-content: flex-end; }
 .sc-add { width: 45px; height: 45px; border-radius: 50%; border: 0; background: var(--accent); color: var(--accent-ink); font-size: 26px; line-height: 1; box-shadow: 0 2px 10px rgba(234,112,22,.28); cursor: pointer; }
 .sc-add:active, .sc-step button:active { transform: scale(.93); }
+.sc-act-col { flex-direction: column; gap: 6px; }
+.sc-edit { border: 1.5px solid var(--accent); background: #fff; color: #b85c0a; border-radius: 999px; padding: 3px 12px; font-size: 12px; font-weight: 700; cursor: pointer; touch-action: manipulation; }
 .sc-step { display: flex; flex-direction: column; align-items: center; gap: 1px; width: 40px; padding: 3px 2px; border-radius: 999px; border: 1.5px solid var(--accent); background: #fff; }
 .sc-step b { font-size: 14px; line-height: 16px; font-weight: 800; font-variant-numeric: tabular-nums; }
 .sc-step button { width: 26px; height: 25px; border-radius: 50%; border: 0; padding: 0; font-size: 15px; font-weight: 700; line-height: 1; cursor: pointer; }
