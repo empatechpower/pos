@@ -89,11 +89,12 @@ export function kitchenTicket(order: OrderState, ctx: PrintContext, opts: Kitche
   b.push({ t: "text", text: where(order), align: "center", bold: true, size: 2 });
   // Who the order is for (by name), so the runner can find that person even if they have moved tables.
   // The phone number is never printed. The name is printed only when there is one, otherwise the line is left out.
-  if (order.customerName) b.push({ t: "text", text: order.customerName, align: "center", bold: true, size: 2 });
+  if (order.customerName) b.push({ t: "text", text: order.customerName, align: "center", bold: true });
   b.push({ t: "rule" });
   for (const l of lines) {
-    b.push({ t: "text", text: `${l.qty} x ${l.name}`, bold: true, size: 2 });
-    for (const o of optionLines(l.options)) b.push({ t: "text", text: `- ${o}`, bold: true });
+    // The item is big but not bold; its choices (Hot, Iced, Big) are bold and as big, so they stand out.
+    b.push({ t: "text", text: `${l.qty} x ${l.name}`, size: 2 });
+    for (const o of optionLines(l.options)) b.push({ t: "text", text: `- ${o}`, bold: true, size: 2 });
   }
   b.push({ t: "rule" }, { t: "text", text: printedAt(ctx.now, ctx.timeZone) }, { t: "feed", n: 3 }, { t: "cut" });
   return { blocks: b };
