@@ -124,7 +124,12 @@ export function Prices({ catalog, outletId }: { catalog: Catalog; outletId: stri
           const own = book.prices[p.id];
           return (
             <div className="pricerow" key={p.id}>
-              <span className="nm">{p.name}{p.soldOut ? <i className="muted"> · sold out</i> : null}</span>
+              <span className="nm">{p.name}{p.soldOut ? <i className="muted"> · sold out</i> : null}{" "}
+                <button className="secondary sm" aria-label={`Rename ${p.name}`} title="Change the item's name" onClick={() => {
+                  const name = window.prompt("New name for this item", p.name)?.trim();
+                  if (name && name !== p.name) void send("POST", "products", { id: p.id, name, category: p.category, pointsExempt: p.pointsExempt, soldOut: p.soldOut }, `Renamed to ${name}.`);
+                }}>Rename</button>
+              </span>
               <input
                 inputMode="decimal"
                 placeholder={own === undefined ? "—" : (own / 100).toFixed(2)}
