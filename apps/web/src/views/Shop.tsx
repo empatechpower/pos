@@ -319,9 +319,10 @@ function Menu({ info, catalog, config, loginError }: { info: Info; catalog: Cata
   const [name, setName] = useState("");
   const [phone, setPhone] = useState("");
   const tableList = info.tables ?? [];
-  // A table's own link (…?table=12) fixes the table: the customer cannot move it to another.
+  // A table's own link (…?table=12) sets the starting table.
   const linkTable = tableList.find((x) => x === `Table ${Number(table.replace(/^table\s*/i, ""))}`);
-  const tableLocked = !!linkTable;
+  // The link sets the starting table; the customer can still pick another (they may have moved seats). The server accepts only real tables.
+  const tableLocked = false;
   // Changing only the part after # does not reload the page, so keep the table in step with the link.
   const [, bumpLink] = useState(0);
   useEffect(() => {
