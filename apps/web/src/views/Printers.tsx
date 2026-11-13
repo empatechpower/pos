@@ -18,6 +18,7 @@ interface Printer {
   agentDeviceId: string | null;
   active: boolean;
   cutMode?: "grouped" | "unit" | "category";
+  showQueue?: boolean;
 }
 interface Job {
   id: string;
@@ -42,7 +43,7 @@ const kindOf = (p: Printer): Kind => (p.roles.includes("label") ? "label" : p.ro
 const rolesOf = (k: Kind): Printer["roles"] => (k === "both" ? ["receipt", "kitchen"] : [k]);
 const slug = (s: string) => s.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "").slice(0, 32);
 
-const blank = (): Printer => ({ id: "", name: "", language: "escpos", roles: ["receipt"], categories: [], widthChars: 42, drawer: false, raster: false, labelWidthMm: null, labelHeightMm: null, dpi: 203, connection: { host: "", port: 9100 }, agentDeviceId: null, active: true, cutMode: "grouped" });
+const blank = (): Printer => ({ id: "", name: "", language: "escpos", roles: ["receipt"], categories: [], widthChars: 42, drawer: false, raster: false, labelWidthMm: null, labelHeightMm: null, dpi: 203, connection: { host: "", port: 9100 }, agentDeviceId: null, active: true, cutMode: "grouped", showQueue: true });
 
 const STATUS: Record<Job["status"], string> = { queued: "Waiting", leased: "Printing", done: "Printed", failed: "Failed", unconfirmed: "Unconfirmed" };
 const timeOf = (iso: string) => new Date(iso).toLocaleTimeString("en-GB", { hour: "2-digit", minute: "2-digit", timeZone: "Asia/Singapore" });
@@ -208,6 +209,11 @@ export function Printers({ catalog }: { catalog: Catalog }) {
                 </label>
               ))}
             </fieldset>
+          )}
+          {(kind === "kitchen" || kind === "receipt" || kind === "both") && (
+            <label className="inline">
+              <input type="checkbox" checked={editing.showQueue !== false} onChange={(e) => set({ showQueue: e.target.checked })} /> Print the queue number (untick to leave it off this printer's tickets)
+            </label>
           )}
           {(kind === "kitchen" || kind === "both") && (
             <label className="field">

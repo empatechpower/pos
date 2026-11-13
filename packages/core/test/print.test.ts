@@ -237,3 +237,17 @@ describe("kitchen ticket: who it is for", () => {
     expect(none).not.toContain("undefined");
   });
 });
+
+describe("leaving the queue number off", () => {
+  const ctx = { merchantName: "B", outletName: "O", now: NOW, timeZone: "Asia/Singapore" } as never;
+  const dine = { id: "dine", name: "Dine in", service: true, kind: "dine_in" as const };
+  it("the kitchen ticket and the receipt show the queue number by default and omit it when told", () => {
+    const o = order({ channel: dine, spot: "Table 9", pay: "all" });
+    expect(plainText(kitchenTicket(o, ctx), 42).join("\n")).toContain("A007");
+    expect(plainText(kitchenTicket(o, ctx, { showQueue: false }), 42).join("\n")).not.toContain("A007");
+    expect(plainText(kitchenTicket(o, ctx, { showQueue: false }), 42).join("\n")).toContain("Table 9");
+    expect(plainText(receipt(o, config, ctx), 42).join("\n")).toContain("Order A007");
+    expect(plainText(receipt(o, config, ctx, { showQueue: false }), 42).join("\n")).not.toContain("A007");
+  });
+});
+

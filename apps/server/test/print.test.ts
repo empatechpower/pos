@@ -289,6 +289,20 @@ describe("how a kitchen printer cuts its tickets", () => {
     expect(drinks.text).not.toContain("Kaya");
   });
 
+  it("a printer can be set to leave the queue number off its tickets", async () => {
+    await setPrinter("cuts", printerBody({ name: "Cuts", roles: ["kitchen"], showQueue: false, connection: { host: "10.0.0.8", port: 9100 } }));
+    const o = withChoices(newId(), "A405", [{ id: "kaya-toast", name: "Kaya Toast", qty: 1 }]);
+    await push(o.events);
+    const { got, send } = capture();
+    await agent(send);
+    const mine = got.find((g) => g.host === "10.0.0.8" && g.text.includes("Kaya Toast"))!;
+    expect(mine.text).not.toContain("A405");
+    expect(got.some((g) => g.host === "10.0.0.6" && g.text.includes("A405"))).toBe(true); // a printer that was not changed still shows it
+    const list = (await call("/api/printers", { staff: mgr, device: till.token })).json.printers as Array<{ id: string; showQueue: boolean }>;
+    expect(list.find((x) => x.id === "cuts")!.showQueue).toBe(false);
+    await setPrinter("cuts", printerBody({ name: "Cuts", roles: ["kitchen"], cutMode: "category", connection: { host: "10.0.0.8", port: 9100 } }));
+  });
+
   it("the setting is validated and saved, and a reprint follows it", async () => {
     expect((await setPrinter("cuts", printerBody({ roles: ["kitchen"], cutMode: "everything" }))).status).toBe(400);
     const list = (await call("/api/printers", { staff: mgr, device: till.token })).json.printers as Array<{ id: string; cutMode: string }>;

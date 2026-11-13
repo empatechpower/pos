@@ -84,18 +84,18 @@ describe("the shop front", () => {
 });
 
 describe("placing an order", () => {
-  it("with a phone number the collection number is its last 3 digits; a clash gets A, B; a freed number is reused", async () => {
+  it("with a phone number the collection number is its last 4 digits; a clash gets A, B; a freed number is reused", async () => {
     const mk = (phone: string) => order({ channelId: "take-away", items: [kaya()], customerPhone: phone });
     const a = await mk("+65 9333 6666");
-    expect(a.json.queueNumber).toBe("666");
+    expect(a.json.queueNumber).toBe("6666");
     const b = await mk("+65 9333 6666");
-    expect(b.json.queueNumber).toBe("666A");
+    expect(b.json.queueNumber).toBe("6666A");
     const c = await mk("+65 9333 6666");
-    expect(c.json.queueNumber).toBe("666B");
+    expect(c.json.queueNumber).toBe("6666B");
     // order a completes: its number is free again
     await tillPush(a.json.orderId, { type: "StageSet", stage: "completed" });
     const d = await mk("+65 9333 6666");
-    expect(d.json.queueNumber).toBe("666");
+    expect(d.json.queueNumber).toBe("6666");
   });
 
   it("without a phone number it falls back to the daily W number", async () => {
@@ -106,7 +106,7 @@ describe("placing an order", () => {
   it("is created from the server's prices, held for staff, and numbered from the phone", async () => {
     const r = await order({ channelId: "take-away", items: [kaya(2)], customerName: "Sam", customerPhone: "9123 4567" });
     expect(r.status).toBe(200);
-    expect(r.json).toMatchObject({ queueNumber: "567", totalCents: 400, status: "received" });
+    expect(r.json).toMatchObject({ queueNumber: "4567", totalCents: 400, status: "received" });
     const o = reduceOrder(r.json.orderId, await events(r.json.orderId))!;
     expect(o).toMatchObject({ source: "online", channelName: "Take away", customerName: "Sam", customerPhone: "9123 4567" });
     expect(o.lines).toHaveLength(1);

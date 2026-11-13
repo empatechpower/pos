@@ -26,13 +26,13 @@ const where = (o: OrderState) => (o.fulfilment === "dine_in" ? o.spot ?? o.chann
 const liveLines = (o: OrderState) => o.lines.filter((l) => l.qty > 0);
 
 /** Customer receipt. Prices come from the order itself (frozen when it was placed), never today's catalog. */
-export function receipt(order: OrderState, config: BusinessConfig, ctx: PrintContext): Doc {
+export function receipt(order: OrderState, config: BusinessConfig, ctx: PrintContext, opts: { showQueue?: boolean } = {}): Doc {
   const t = orderTotals(order, config);
   const b: Block[] = [
     { t: "text", text: ctx.merchantName, align: "center", bold: true, size: 2 },
     { t: "text", text: ctx.outletName, align: "center" },
     { t: "rule" },
-    { t: "cols", left: order.queueNumber ? `Order ${order.queueNumber}` : "Order", right: where(order) },
+    { t: "cols", left: order.queueNumber && opts.showQueue !== false ? `Order ${order.queueNumber}` : "Order", right: where(order) },
     { t: "text", text: stamp(ctx.now, ctx.timeZone) },
     { t: "rule" },
   ];
@@ -51,7 +51,7 @@ export function receipt(order: OrderState, config: BusinessConfig, ctx: PrintCon
   for (const p of order.payments.filter((x) => x.confirmed)) b.push({ t: "cols", left: METHOD[p.method] ?? p.method, right: formatMoney(p.amountCents) });
   const owing = t.total - confirmedPaid(order);
   if (owing > 0) b.push({ t: "cols", left: "Balance due", right: formatMoney(owing), bold: true });
-  if (order.queueNumber) b.push({ t: "text", text: order.queueNumber, align: "center", bold: true, size: 3 });
+  if (order.queueNumber && opts.showQueue !== false) b.push({ t: "text", text: order.queueNumber, align: "center", bold: true, size: 3 });
   for (const f of ctx.footer ?? ["Thank you"]) b.push({ t: "text", text: f, align: "center" });
   b.push({ t: "feed", n: 3 }, { t: "cut" });
   return { blocks: b };
@@ -65,6 +65,8 @@ export interface KitchenOptions {
   lines?: OrderLine[];
   /** True when this ticket adds to an order already sent to the kitchen. */
   addOn?: boolean;
+  /** Print the big queue number at the top. On unless set to false. */
+  showQueue?: boolean;
 }
 
 /** Kitchen/bar ticket: big queue number and big items, no prices. */
@@ -72,10 +74,8 @@ export function kitchenTicket(order: OrderState, ctx: PrintContext, opts: Kitche
   const lines = (opts.lines ?? liveLines(order)).filter((l) => l.qty > 0);
   const b: Block[] = [];
   if (opts.addOn) b.push({ t: "text", text: "*** ADD-ON ***", align: "center", bold: true });
-  b.push(
-    { t: "text", text: order.queueNumber ?? "-", align: "center", bold: true, size: 3 },
-    { t: "text", text: where(order), align: "center", bold: true, size: 2 },
-  );
+  if (opts.showQueue !== false) b.push({ t: "text", text: order.queueNumber ?? "-", align: "center", bold: true, size: 3 });
+  b.push({ t: "text", text: where(order), align: "center", bold: true, size: 2 });
   // Who the order is for (by name), so the runner can find that person even if they have moved tables.
   // The phone number is never printed. The name is printed only when there is one, otherwise the line is left out.
   if (order.customerName) b.push({ t: "text", text: order.customerName, align: "center", bold: true, size: 2 });
