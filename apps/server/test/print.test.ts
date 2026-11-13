@@ -254,7 +254,7 @@ describe("how a kitchen printer cuts its tickets", () => {
   /** Deliver everything waiting: one pass takes only a batch of jobs, and earlier tests may have left some. */
   const drain = async (send: Sender) => {
     for (let i = 0; i < 8; i++) {
-      const r = await drain(send);
+      const r = await agent(send);
       if (!r.delivered && !r.failed) break;
     }
   };
