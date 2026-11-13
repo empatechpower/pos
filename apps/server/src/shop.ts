@@ -138,6 +138,9 @@ export function registerShop(app: FastifyInstance, d: ShopDeps) {
       name: d.config.name,
       outletName: d.config.outletName,
       // Set OUTLET_HOURS (e.g. "Daily 8am-9pm") and OUTLET_PHONE on the server to show them under Help & support.
+      // Shown at the top of the order details on the staff Online page. Set OUTLET_ADDRESS and GST_REG_NO on the server.
+      address: process.env.OUTLET_ADDRESS?.trim() || undefined,
+      gstRegNo: process.env.GST_REG_NO?.trim() || undefined,
       contact: process.env.OUTLET_HOURS || process.env.OUTLET_PHONE ? { hours: process.env.OUTLET_HOURS?.trim() || undefined, phone: process.env.OUTLET_PHONE?.trim() || undefined } : undefined,
       paymentTiming: d.config.paymentTiming,
       // With a table list set, ordering is dine-in only, one fixed list of tables.

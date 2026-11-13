@@ -6,6 +6,7 @@ import { useOrders } from "../hooks";
 import { spend } from "../wallet";
 import { PrintBadge, usePrintStatus } from "./PrintBadge";
 import { PendingSignIns } from "./PendingSignIns";
+import { OrderDetails } from "./OrderDetails";
 
 const timeOf = (ms: number) => new Date(ms).toLocaleTimeString("en-GB", { hour: "2-digit", minute: "2-digit", timeZone: "Asia/Singapore" });
 
@@ -16,6 +17,7 @@ export function Online({ config, online }: { config: BusinessConfig; online: boo
   const [msg, setMsg] = useState<string | null>(null);
   const [credit, setCredit] = useState<Record<string, string>>({});
   const [busy, setBusy] = useState<string | null>(null);
+  const [detail, setDetail] = useState<string | null>(null);
 
   const fresh = orders.filter((o) => !o.acceptedAt && o.stage !== "cancelled").sort((a, b) => a.openedAt - b.openedAt);
   const active = orders.filter((o) => o.acceptedAt && o.stage !== "completed" && o.stage !== "cancelled").sort((a, b) => a.openedAt - b.openedAt);
@@ -70,7 +72,8 @@ export function Online({ config, online }: { config: BusinessConfig; online: boo
     const t = orderTotals(o, config).total;
     const owing = t - confirmedPaid(o);
     return (
-      <div className="tab online" key={o.orderId}>
+      <div key={o.orderId}>
+      <div className="tab online">
         <div>
           <b>{o.queueNumber}</b> <span className="muted">· {o.channelName}{o.spot ? ` · ${o.spot}` : ""} · {timeOf(o.openedAt)} · {formatMoney(t)}</span>
           <div>{o.customerName ?? "No name"}{o.customerPhone ? ` · ${o.customerPhone}` : ""}</div>
@@ -92,7 +95,10 @@ export function Online({ config, online }: { config: BusinessConfig; online: boo
           ) : (
             <span className="muted">Paid</span>
           )}
+          <button className="secondary sm" aria-expanded={detail === o.orderId} onClick={() => setDetail(detail === o.orderId ? null : o.orderId)}>{detail === o.orderId ? "Hide details" : "Details"}</button>
         </div>
+      </div>
+      {detail === o.orderId && <OrderDetails order={o} config={config} />}
       </div>
     );
   };

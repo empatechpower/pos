@@ -411,3 +411,21 @@ main { flex: 1; padding: 14px 16px; }
 html .shop .scroll-body, html .shop .e2e-scroll { overflow-y: visible; overflow-x: clip; overscroll-behavior: auto; }
 
 .shop .sum-topbar { display: flex; justify-content: space-between; align-items: center; }
+
+/* The details of one order on the staff Online page. */
+.order-details { margin: -4px 0 12px; padding: 14px; border: 1px solid var(--line, #e7d9bf); border-radius: 12px; background: #fff; }
+.order-details .od-head { display: flex; gap: 12px; align-items: flex-start; justify-content: space-between; flex-wrap: wrap; }
+.order-details .od-title { font-weight: 700; font-size: 17px; }
+.order-details .od-total { margin-left: auto; text-align: right; }
+.order-details .od-total b { font-size: 26px; }
+.order-details .od-card { margin: 12px 0; padding: 10px 0; border-top: 1px solid #eee; border-bottom: 1px solid #eee; }
+.order-details .od-row { display: flex; justify-content: space-between; gap: 12px; padding: 3px 0; font-size: 14px; }
+.order-details .od-k { color: #6f6455; }
+.order-details .od-v { font-weight: 600; text-align: right; }
+.order-details .od-items { width: 100%; border-collapse: collapse; font-size: 14px; }
+.order-details .od-items th { text-align: left; color: #6f6455; font-weight: 500; padding: 4px 6px 4px 0; }
+.order-details .od-items th:nth-child(n+3), .order-details .od-items td:nth-child(n+3) { text-align: right; }
+.order-details .od-items td { padding: 6px 6px 6px 0; vertical-align: top; border-top: 1px solid #f0e8da; }
+.order-details .od-sums { margin-top: 10px; border-top: 1px solid #eee; padding-top: 8px; }
+.order-details .od-grand { font-weight: 800; font-size: 16px; }
+.order-details .od-due { color: #c0392b; font-weight: 700; }

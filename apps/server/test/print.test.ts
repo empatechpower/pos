@@ -251,6 +251,13 @@ describe("how a kitchen printer cuts its tickets", () => {
     o.events.push(o.mk({ type: "PaymentRecorded", paymentId: `pay-${Math.random()}`, method: "credit", amountCents: items.reduce((t, i) => t + 200 * i.qty, 0), confirmed: true }));
     return o;
   };
+  /** Deliver everything waiting: one pass takes only a batch of jobs, and earlier tests may have left some. */
+  const drain = async (send: Sender) => {
+    for (let i = 0; i < 8; i++) {
+      const r = await drain(send);
+      if (!r.delivered && !r.failed) break;
+    }
+  };
   const cutsOn = async (orderId: string, printerId: string) => (await jobsFor(orderId)).filter((j) => j.printer_id === printerId && j.doc_type === "kitchen");
 
   it("by default 2 x Milo (iced) is one cut, and Milo (iced) with Milo (hot) is two", async () => {
@@ -262,7 +269,7 @@ describe("how a kitchen printer cuts its tickets", () => {
     await push(diff.events);
     expect(await cutsOn(diff.orderId, "cuts")).toHaveLength(2);
     const { got, send } = capture();
-    await agent(send);
+    await drain(send);
     const mine = got.filter((g) => g.host === "10.0.0.8");
     expect(mine.some((g) => g.text.includes("2 x Milo") && g.text.includes("- Iced"))).toBe(true);
     expect(mine.some((g) => g.text.includes("1 x Milo") && g.text.includes("- Hot"))).toBe(true);
@@ -282,7 +289,7 @@ describe("how a kitchen printer cuts its tickets", () => {
     const cuts = await cutsOn(o.orderId, "cuts");
     expect(cuts).toHaveLength(2); // drinks together, toast on its own
     const { got, send } = capture();
-    await agent(send);
+    await drain(send);
     const drinks = got.find((g) => g.host === "10.0.0.8" && g.text.includes("A404") && g.text.includes("Milo"))!;
     expect(drinks.text).toContain("2 x Milo");
     expect(drinks.text).toContain("1 x Milo");
@@ -294,7 +301,7 @@ describe("how a kitchen printer cuts its tickets", () => {
     const o = withChoices(newId(), "A405", [{ id: "kaya-toast", name: "Kaya Toast", qty: 1 }]);
     await push(o.events);
     const { got, send } = capture();
-    await agent(send);
+    await drain(send);
     const mine = got.find((g) => g.host === "10.0.0.8" && g.text.includes("Kaya Toast"))!;
     expect(mine.text).not.toContain("A405");
     expect(got.some((g) => g.host === "10.0.0.6" && g.text.includes("A405"))).toBe(true); // a printer that was not changed still shows it

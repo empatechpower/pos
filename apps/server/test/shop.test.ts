@@ -81,6 +81,18 @@ describe("the shop front", () => {
     expect(r.json.brand).toMatchObject({ primary: "#ea7016", logoUrl: null });
     expect(JSON.stringify(r.json)).not.toMatch(/token|pin|secret/i);
   });
+
+  it("gives the address and GST number set on the server, for the order details", async () => {
+    expect((await call("/api/shop/info")).json.address).toBeUndefined();
+    process.env.OUTLET_ADDRESS = "20 Lengkok Bahru, Singapore 159053";
+    process.env.GST_REG_NO = "M12345678X";
+    try {
+      expect((await call("/api/shop/info")).json).toMatchObject({ address: "20 Lengkok Bahru, Singapore 159053", gstRegNo: "M12345678X" });
+    } finally {
+      delete process.env.OUTLET_ADDRESS;
+      delete process.env.GST_REG_NO;
+    }
+  });
 });
 
 describe("placing an order", () => {
