@@ -94,10 +94,42 @@ const encLabel = (p: Printer, l: Label): Buffer =>
  * through leased → done/failed by a delivery agent. Nothing is lost if the printer is off: the job
  * stays queued and is retried with growing delays until it succeeds or runs out of attempts.
  */
+/** After a job is delivered, how long the printer is left alone: this plus one second per 8000 bytes sent, at most the cap. */
+const MIN_SETTLE_SECONDS = 1;
+const MAX_SETTLE_SECONDS = 12;
+const BYTES_PER_SETTLE_SECOND = 8000;
+
+const CLAIM_SPACED = `UPDATE print_jobs j SET status='leased', leased_until = now() + make_interval(secs => $4), attempts = j.attempts + 1, updated_at = now()
+       WHERE j.status='queued' AND j.id IN (
+         SELECT id FROM (
+           -- One job per printer at a time, and only once the previous one has had time to print. A printer is
+           -- still working through a big picture-style ticket after the bytes are sent; a second connection
+           -- arriving then mixes the two tickets into one page of garbage.
+           SELECT DISTINCT ON (j2.printer_id) j2.id, j2.created_at FROM print_jobs j2 JOIN printers p ON p.merchant_id=j2.merchant_id AND p.id=j2.printer_id
+           WHERE j2.merchant_id=$1 AND p.active AND (p.agent_device_id IS NULL OR p.agent_device_id=$2)
+             AND j2.status='queued' AND j2.next_attempt_at <= now()
+             AND NOT EXISTS (
+               SELECT 1 FROM print_jobs b WHERE b.merchant_id=j2.merchant_id AND b.printer_id=j2.printer_id
+                 AND ((b.status='leased' AND b.leased_until > now())
+                   OR (b.status='done' AND b.updated_at > now() - make_interval(secs => LEAST(${MAX_SETTLE_SECONDS}, ${MIN_SETTLE_SECONDS} + octet_length(b.payload) / ${BYTES_PER_SETTLE_SECOND}.0))))
+             )
+           ORDER BY j2.printer_id, j2.created_at) one
+         ORDER BY created_at LIMIT $3)
+       RETURNING j.*`;
+const CLAIM_ALL = `UPDATE print_jobs j SET status='leased', leased_until = now() + make_interval(secs => $4), attempts = j.attempts + 1, updated_at = now()
+       WHERE j.id IN (
+         SELECT j2.id FROM print_jobs j2 JOIN printers p ON p.merchant_id=j2.merchant_id AND p.id=j2.printer_id
+         WHERE j2.merchant_id=$1 AND p.active AND (p.agent_device_id IS NULL OR p.agent_device_id=$2)
+           AND j2.status='queued' AND j2.next_attempt_at <= now()
+         ORDER BY j2.created_at LIMIT $3 FOR UPDATE OF j2 SKIP LOCKED)
+       RETURNING j.*`;
+
 export class PrintStore {
   constructor(
     private readonly db: Db,
     private readonly merchantId: string,
+    /** Hand a printer one job at a time, leaving it time to print. Off only in tests, which deliver everything in one go. */
+    private readonly spaced = process.env.PRINT_PACING !== "off",
   ) {}
 
   // ---- printers ---------------------------------------------------------------------------
@@ -243,16 +275,7 @@ export class PrintStore {
        WHERE merchant_id=$1 AND status='leased' AND leased_until < now()`,
       [this.merchantId],
     );
-    const r = await this.db.query(
-      `UPDATE print_jobs j SET status='leased', leased_until = now() + make_interval(secs => $4), attempts = j.attempts + 1, updated_at = now()
-       WHERE j.id IN (
-         SELECT j2.id FROM print_jobs j2 JOIN printers p ON p.merchant_id=j2.merchant_id AND p.id=j2.printer_id
-         WHERE j2.merchant_id=$1 AND p.active AND (p.agent_device_id IS NULL OR p.agent_device_id=$2)
-           AND j2.status='queued' AND j2.next_attempt_at <= now()
-         ORDER BY j2.created_at LIMIT $3 FOR UPDATE OF j2 SKIP LOCKED)
-       RETURNING j.*`,
-      [this.merchantId, agentDeviceId, limit, LEASE_SECONDS],
-    );
+    const r = await this.db.query(this.spaced ? CLAIM_SPACED : CLAIM_ALL, [this.merchantId, agentDeviceId, limit, LEASE_SECONDS]);
     const printers = new Map((await this.listPrinters()).map((p) => [p.id, p]));
     return r.rows
       .sort((a, b) => +new Date(a.created_at) - +new Date(b.created_at))

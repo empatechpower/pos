@@ -10,7 +10,7 @@ import type { Bitmap, RasterRenderer, TextStyle } from "@pos/core";
 GlobalFonts.loadFontsFromDir(fileURLToPath(new URL("../fonts/", import.meta.url)));
 if (process.env.PRINT_FONT_DIR) GlobalFonts.loadFontsFromDir(process.env.PRINT_FONT_DIR);
 
-const FAMILY = "Noto Sans CJK SC, Noto Sans Tamil, PingFang SC, Hiragino Sans GB, Heiti SC, Arial Unicode MS, DejaVu Sans, sans-serif";
+const FAMILY = "Noto Sans SC, Noto Sans CJK SC, Noto Sans Tamil, PingFang SC, Hiragino Sans GB, Heiti SC, Arial Unicode MS, DejaVu Sans, sans-serif";
 const BASE_PX = 22; // roughly the height of the printer's own normal font at 203 dpi
 const LEADING = 1.25;
 

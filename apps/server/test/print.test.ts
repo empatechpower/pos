@@ -457,6 +457,24 @@ describe("delivery: retries, leases, competition", () => {
     await queue().markDone(again[0]!.id);
   });
 
+  it("a printer is handed one job at a time, and left to finish printing before the next (two tickets sent back to back mix on paper)", async () => {
+    await fresh();
+    await db.query("UPDATE print_jobs SET updated_at = now() - interval '1 hour' WHERE status='done'"); // earlier tests' prints are long finished
+    // Two tickets waiting for the same printer.
+    await push(orderEvents([{ id: "kopi", name: "Coffee", qty: 1 }], { queue: "A405", pay: "cash" }).events);
+    await push(orderEvents([{ id: "kopi", name: "Coffee", qty: 1 }], { queue: "A406", pay: "cash" }).events);
+    const spaced = new PrintStore(db, "bp", true);
+    const first = await spaced.claim(hub.id, 10);
+    expect(first).toHaveLength(1); // not both at once
+    expect(await spaced.claim(hub.id, 10)).toHaveLength(0); // the first is still out with the hub
+    await spaced.markDone(first[0]!.id);
+    expect(await spaced.claim(hub.id, 10)).toHaveLength(0); // just printed: give the printer a moment
+    await db.query("UPDATE print_jobs SET updated_at = now() - interval '20 seconds' WHERE id=$1", [first[0]!.id]);
+    const next = await spaced.claim(hub.id, 10);
+    expect(next).toHaveLength(1);
+    await spaced.markDone(next[0]!.id);
+  });
+
   it("a failure after the printer connection was made is parked as unconfirmed, not retried", async () => {
     await fresh();
     await push(orderEvents([{ id: "kopi", name: "Coffee", qty: 1 }], { queue: "A404", pay: "cash" }).events);
