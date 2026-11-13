@@ -323,6 +323,13 @@ function Menu({ info, catalog, config, loginError }: { info: Info; catalog: Cata
   const linkTable = tableList.find((x) => x === `Table ${Number(table.replace(/^table\s*/i, ""))}`);
   // The link sets the starting table; the customer can still pick another (they may have moved seats). The server accepts only real tables.
   const tableLocked = false;
+  /** Moving to a different table asks first. The order is the customer's own either way: it never joins another person's order at that table. */
+  const changeTable = (to: string): boolean => {
+    if (!to || to === spot) return true;
+    if (spot && !window.confirm(tx("Move to {t}? Your order will be sent to {t}.", { t: to }))) return false;
+    setSpot(to);
+    return true;
+  };
   // Changing only the part after # does not reload the page, so keep the table in step with the link.
   const [, bumpLink] = useState(0);
   useEffect(() => {
@@ -721,7 +728,7 @@ function Menu({ info, catalog, config, loginError }: { info: Info; catalog: Cata
         {header(false)}
         {tableEdit && dine && !tableLocked && (
           tableList.length ? (
-            <div className="shop-tableedit"><select autoFocus value={spot} onChange={(e) => { setSpot(e.target.value); setTableEdit(false); }}><option value="">{tx("Choose your table")}</option>{tableList.map((x) => <option key={x}>{x}</option>)}</select></div>
+            <div className="shop-tableedit"><select autoFocus value={spot} onChange={(e) => { if (changeTable(e.target.value)) setTableEdit(false); }}><option value="">{tx("Choose your table")}</option>{tableList.map((x) => <option key={x}>{x}</option>)}</select></div>
           ) : (
           <div className="shop-tableedit"><input autoFocus value={spot} maxLength={30} placeholder={tx("e.g. Table 12")} onChange={(e) => setSpot(e.target.value)} onKeyDown={(e) => e.key === "Enter" && setTableEdit(false)} /><button onClick={() => setTableEdit(false)}>{t("done", "Done")}</button></div>
           )
@@ -1150,7 +1157,7 @@ function Menu({ info, catalog, config, loginError }: { info: Info; catalog: Cata
         {dine && !tableLocked && (
           <div className="e2e-card"><h3>{t("typeTableW", "Table")}</h3><div className="e2e-field"><label htmlFor="sum-table">{tx("Table number")}</label>
             {tableList.length ? (
-              <select className="e2e-input" id="sum-table" value={spot} onChange={(e) => setSpot(e.target.value)}><option value="">{tx("Choose your table")}</option>{tableList.map((x) => <option key={x}>{x}</option>)}</select>
+              <select className="e2e-input" id="sum-table" value={spot} onChange={(e) => { changeTable(e.target.value); }}><option value="">{tx("Choose your table")}</option>{tableList.map((x) => <option key={x}>{x}</option>)}</select>
             ) : (
               <input className="e2e-input" id="sum-table" value={spot} maxLength={30} placeholder={tx("e.g. Table 12")} onChange={(e) => setSpot(e.target.value)} />
             )}

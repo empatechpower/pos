@@ -685,6 +685,15 @@ export const PHRASES: Record<string, string[]> = {
   "Wählen Sie Ihren Tisch, um fortzufahren.",
   "தொடர உங்கள் மேசையைத் தேர்ந்தெடுக்கவும்."
  ],
+ "Move to {t}? Your order will be sent to {t}.": [
+  "Pindah ke {t}? Pesanan anda akan dihantar ke {t}.",
+  "Pindah ke {t}? Pesanan Anda akan dikirim ke {t}.",
+  "换到 {t}？您的订单将送到 {t}。",
+  "{t} に移動しますか？注文は {t} に届けられます。",
+  "Changer pour {t} ? Votre commande sera envoyée à {t}.",
+  "Zu {t} wechseln? Ihre Bestellung geht an {t}.",
+  "{t} க்கு மாற வேண்டுமா? உங்கள் ஆர்டர் {t} க்கு அனுப்பப்படும்."
+ ],
  "in bag": [
   "dalam beg",
   "di tas",
