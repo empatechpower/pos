@@ -37,6 +37,7 @@ export function Prices({ catalog, outletId }: { catalog: Catalog; outletId: stri
   const [newKind, setNewKind] = useState<ChannelKind>("delivery");
   const [brand, setBrand] = useState<Brand | null>(null);
   const [find, setFind] = useState("");
+  const [renaming, setRenaming] = useState<{ id: string; name: string } | null>(null);
   useEffect(() => {
     void fetch("/api/brand").then(async (r) => r.ok && setBrand((await r.json()) as Brand));
   }, []);
@@ -125,10 +126,9 @@ export function Prices({ catalog, outletId }: { catalog: Catalog; outletId: stri
           return (
             <div className="pricerow" key={p.id}>
               <span className="nm">{p.name}{p.soldOut ? <i className="muted"> · sold out</i> : null}{" "}
-                <button className="secondary sm" aria-label={`Rename ${p.name}`} title="Change the item's name" onClick={() => {
-                  const name = window.prompt("New name for this item", p.name)?.trim();
-                  if (name && name !== p.name) void send("POST", "products", { id: p.id, name, category: p.category, pointsExempt: p.pointsExempt, soldOut: p.soldOut }, `Renamed to ${name}.`);
-                }}>Rename</button>
+                <button className="pencil" aria-label={`Rename ${p.name}`} title="Rename" onClick={() => setRenaming({ id: p.id, name: p.name })}>
+                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M12 20h9" /><path d="M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4Z" /></svg>
+                </button>
               </span>
               <input
                 inputMode="decimal"
@@ -165,6 +165,30 @@ export function Prices({ catalog, outletId }: { catalog: Catalog; outletId: stri
           );
         })}
       </div>
+
+      {renaming && (() => {
+        const p = catalog.products.find((x) => x.id === renaming.id);
+        if (!p) return null;
+        const name = renaming.name.trim();
+        const save = () => {
+          if (!name) return;
+          setRenaming(null);
+          if (name !== p.name) void send("POST", "products", { id: p.id, name, category: p.category, pointsExempt: p.pointsExempt, soldOut: p.soldOut }, `Renamed to ${name}.`);
+        };
+        return (
+          <div className="rn-back" onClick={() => setRenaming(null)}>
+            <div className="rn-modal" role="dialog" aria-modal="true" aria-label={`Rename ${p.name}`} onClick={(e) => e.stopPropagation()}>
+              <h3>Rename item</h3>
+              <p className="muted">Currently “{p.name}”. Its photo, options and prices stay as they are.</p>
+              <input autoFocus value={renaming.name} maxLength={120} aria-label="New name" onChange={(e) => setRenaming({ ...renaming, name: e.target.value })} onKeyDown={(e) => { if (e.key === "Enter") save(); if (e.key === "Escape") setRenaming(null); }} />
+              <div className="rn-actions">
+                <button className="secondary" onClick={() => setRenaming(null)}>Cancel</button>
+                <button className="primary" disabled={!name || name === p.name} onClick={save}>Save</button>
+              </div>
+            </div>
+          </div>
+        );
+      })()}
 
       <h3>Add an item</h3>
       <div className="row">
