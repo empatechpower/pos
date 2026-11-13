@@ -409,3 +409,5 @@ main { flex: 1; padding: 14px 16px; }
    they must not capture touch scrolling: with overflow:auto and overscroll-behavior:none they swallowed swipes that started on the
    content (Account, Order Summary), so those pages would not scroll on some phones. */
 html .shop .scroll-body, html .shop .e2e-scroll { overflow-y: visible; overflow-x: clip; overscroll-behavior: auto; }
+
+.shop .sum-topbar { display: flex; justify-content: space-between; align-items: center; }

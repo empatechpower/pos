@@ -1136,7 +1136,11 @@ function Menu({ info, catalog, config, loginError }: { info: Info; catalog: Cata
     <>
       {pageHead(tx("Order Summary"))}
       <div className="e2e-scroll shop-body">
-        {back("Back to bag", "bag")}
+        <div className="sum-topbar">
+          {back("Back to bag", "bag")}
+          {/* As in the prototype: a jump to the bottom, where the order is placed. */}
+          <button className="e2e-back" onClick={() => document.getElementById("sum-end")?.scrollIntoView({ behavior: "smooth", block: "center" })}>{tx("Checkout")} <Icon name="chevD" size={16} /></button>
+        </div>
         {noteEl}
         <div className="e2e-card">
           <h3>{t("itemsCardT", "Items")}</h3>
@@ -1183,6 +1187,7 @@ function Menu({ info, catalog, config, loginError }: { info: Info; catalog: Cata
           </div>
         )}
         {rewardsOn && !member && guestOk && <p className="e2e-note">{t("guestNoPoints", "Continuing as guest — no points will be earned on this order.")}</p>}
+        <div id="sum-end" />
         {info.membersOnly && member ? (
           <div className="pay-sticky">
             {noteEl}
