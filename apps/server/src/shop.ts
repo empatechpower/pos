@@ -352,7 +352,7 @@ export function registerShop(app: FastifyInstance, d: ShopDeps) {
      * It presents a secret in the address; without it nothing is accepted.
      */
     app.register(async (scope) => {
-      scope.addContentTypeParser("application/x-www-form-urlencoded", { parseAs: "string" }, (_r, body, done) => done(null, Object.fromEntries(new URLSearchParams(String(body)))));
+      // (The SMS provider posts a form; forms are read for every route, in app.ts.)
       scope.post<{ Querystring: { secret?: string }; Body: { From?: string; Body?: string } }>("/api/shop/auth/phone/inbound", async (req, reply) => {
         if (!integ.sms || !integ.sms.webhookSecret || !sameSecret(String(req.query.secret ?? ""), integ.sms.webhookSecret)) return reply.code(403).send({ error: "forbidden" });
         const from = digitsOf(req.body?.From);

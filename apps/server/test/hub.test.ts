@@ -150,6 +150,21 @@ describe("the print hub (hub.mjs, as shipped)", () => {
     expect((await call("/api/print/order-status?ids=st-done", { device: till.token })).status).toBe(401);
   });
 
+  it("accepts the 'done' report from Android, which labels an empty POST as a form", async () => {
+    const p = await fakePrinter();
+    await addPrinter("hub-form", p.port);
+    await testPrint("hub-form");
+    const claimed = (await call("/api/print/claim", { body: { limit: 25 }, device: hub.token })).json.jobs as Array<{ id: string; printer: { id: string } }>;
+    const mine = claimed.find((j) => j.printer.id === "hub-form")!;
+    expect(mine).toBeTruthy();
+    // Exactly what the Android app sent: a POST with a form content type and nothing in it.
+    const res = await fetch(`${base}/api/print/jobs/${mine.id}/done`, { method: "POST", headers: { "content-type": "application/x-www-form-urlencoded", "x-device-token": hub.token } });
+    expect(res.status).toBe(200);
+    const jobs = (await call("/api/print/jobs?status=done", { staff: mgr, device: till.token })).json.jobs as Array<{ id: string }>;
+    expect(jobs.some((j) => j.id === mine.id)).toBe(true);
+    for (const j of claimed.filter((x) => x.id !== mine.id)) await call(`/api/print/jobs/${j.id}/done`, { method: "POST", body: {}, device: hub.token });
+  });
+
   it("says plainly when it has been removed from the shop's devices", async () => {
     await expect(hubMod.runOnce({ baseUrl: base, token: "not-a-real-token" })).rejects.toMatchObject({ removed: true });
   });

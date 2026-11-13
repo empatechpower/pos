@@ -49,6 +49,10 @@ export async function buildApp({ config, store, db, catalog, catalogAdmin, print
   const app = Fastify({ logger, trustProxy });
   // Logo uploads arrive as raw image bytes.
   app.addContentTypeParser(["image/png", "image/jpeg", "image/webp"], { parseAs: "buffer", bodyLimit: 300 * 1024 + 1 }, (_req, body, done) => done(null, body));
+  // Android's HttpURLConnection labels every POST as a form ("application/x-www-form-urlencoded"), even with no body, which Fastify would
+  // refuse (415). The print app's "done" reports are exactly that, so they never arrived and every printed ticket stayed "unconfirmed".
+  // Forms are read as plain fields. Every route takes its credentials from headers, never cookies, so this opens nothing new.
+  app.addContentTypeParser("application/x-www-form-urlencoded", { parseAs: "string" }, (_req, body, done) => done(null, body ? Object.fromEntries(new URLSearchParams(String(body))) : {}));
   await app.register(cors, { origin: true });
   const merchantId = config.businessId;
 
