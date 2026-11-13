@@ -131,9 +131,11 @@ function SwipeRow({ children, onRemove, label }: { children: ReactNode; onRemove
   const g = useRef<{ id: number; x0: number; y0: number; wasOpen: boolean; mode: "?" | "h" | "v" } | null>(null);
   const moved = useRef(false);
   const down = (e: React.PointerEvent) => {
+    // Every new touch starts clean. (A finger-drag fires no click afterwards, so a leftover "moved" flag used to swallow the next tap,
+    // which was the first press on the bin: it needed two or three presses before the item was gone.)
+    moved.current = false;
     if ((e.target as HTMLElement).closest(".swipe-bin")) return;
     g.current = { id: e.pointerId, x0: e.clientX, y0: e.clientY, wasOpen: open, mode: "?" };
-    moved.current = false;
   };
   const move = (e: React.PointerEvent) => {
     const s = g.current;
@@ -157,6 +159,8 @@ function SwipeRow({ children, onRemove, label }: { children: ReactNode; onRemove
       const dx = e.clientX - s.x0;
       setOpen(s.wasOpen ? !(dx > 6) : dx < -6); // almost no distance needed: a slight slide is the intent
       setX(null);
+      // The click that may follow a mouse drag is swallowed once; if none follows (touch), forget the drag so the next tap is a real tap.
+      window.setTimeout(() => { moved.current = false; }, 80);
     }
   };
   return (
@@ -167,7 +171,7 @@ function SwipeRow({ children, onRemove, label }: { children: ReactNode; onRemove
       onPointerMove={move}
       onPointerUp={up}
       onPointerCancel={() => { g.current = null; setX(null); }}
-      onClickCapture={(e) => { if (moved.current) { e.stopPropagation(); e.preventDefault(); moved.current = false; } }}
+      onClickCapture={(e) => { if (moved.current && !(e.target as HTMLElement).closest(".swipe-bin")) { e.stopPropagation(); e.preventDefault(); moved.current = false; } }}
     >
       <button className="swipe-bin" tabIndex={open ? 0 : -1} aria-label={`${t("removeW", "Remove")} ${label}`} onClick={onRemove}><Icon name="trash" size={22} /><span>{t("bin", "Bin")}</span></button>
       {children}
