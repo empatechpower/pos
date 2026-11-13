@@ -22,6 +22,17 @@ export const stamp = (ms: number, timeZone = "Asia/Singapore") =>
     .format(new Date(ms))
     .replace(",", "");
 
+/** "Printed at: 13/11/2026, 5:19:34 PM": the date and time down to the second, shown at the bottom of a ticket. */
+export const printedAt = (ms: number, timeZone = "Asia/Singapore"): string => {
+  const parts = Object.fromEntries(
+    new Intl.DateTimeFormat("en-GB", { timeZone, day: "2-digit", month: "2-digit", year: "numeric", hour: "numeric", minute: "2-digit", second: "2-digit", hourCycle: "h23" })
+      .formatToParts(new Date(ms))
+      .map((p) => [p.type, p.value]),
+  ) as Record<string, string>;
+  const h = Number(parts.hour) % 24;
+  return `Printed at: ${parts.day}/${parts.month}/${parts.year}, ${h % 12 === 0 ? 12 : h % 12}:${parts.minute}:${parts.second} ${h < 12 ? "AM" : "PM"}`;
+};
+
 const where = (o: OrderState) => (o.fulfilment === "dine_in" ? o.spot ?? o.channelName : o.channelName) ?? (o.fulfilment === "takeaway" ? "Take away" : "Delivery");
 const liveLines = (o: OrderState) => o.lines.filter((l) => l.qty > 0);
 
@@ -33,7 +44,6 @@ export function receipt(order: OrderState, config: BusinessConfig, ctx: PrintCon
     { t: "text", text: ctx.outletName, align: "center" },
     { t: "rule" },
     { t: "cols", left: order.queueNumber && opts.showQueue !== false ? `Order ${order.queueNumber}` : "Order", right: where(order) },
-    { t: "text", text: stamp(ctx.now, ctx.timeZone) },
     { t: "rule" },
   ];
   for (const l of liveLines(order)) {
@@ -53,6 +63,7 @@ export function receipt(order: OrderState, config: BusinessConfig, ctx: PrintCon
   if (owing > 0) b.push({ t: "cols", left: "Balance due", right: formatMoney(owing), bold: true });
   if (order.queueNumber && opts.showQueue !== false) b.push({ t: "text", text: order.queueNumber, align: "center", bold: true, size: 3 });
   for (const f of ctx.footer ?? ["Thank you"]) b.push({ t: "text", text: f, align: "center" });
+  b.push({ t: "rule" }, { t: "text", text: printedAt(ctx.now, ctx.timeZone) });
   b.push({ t: "feed", n: 3 }, { t: "cut" });
   return { blocks: b };
 }
@@ -79,12 +90,12 @@ export function kitchenTicket(order: OrderState, ctx: PrintContext, opts: Kitche
   // Who the order is for (by name), so the runner can find that person even if they have moved tables.
   // The phone number is never printed. The name is printed only when there is one, otherwise the line is left out.
   if (order.customerName) b.push({ t: "text", text: order.customerName, align: "center", bold: true, size: 2 });
-  b.push({ t: "text", text: stamp(ctx.now, ctx.timeZone), align: "center" }, { t: "rule" });
+  b.push({ t: "rule" });
   for (const l of lines) {
     b.push({ t: "text", text: `${l.qty} x ${l.name}`, bold: true, size: 2 });
     for (const o of optionLines(l.options)) b.push({ t: "text", text: `- ${o}`, bold: true });
   }
-  b.push({ t: "rule" }, { t: "feed", n: 3 }, { t: "cut" });
+  b.push({ t: "rule" }, { t: "text", text: printedAt(ctx.now, ctx.timeZone) }, { t: "feed", n: 3 }, { t: "cut" });
   return { blocks: b };
 }
 

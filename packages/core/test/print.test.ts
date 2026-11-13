@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
-  PRESETS, columns, encodeEpl, encodeEscPos, encodeZpl, itemLabel, kitchenTicket, newId, plainText, receipt, reduceOrder, toAscii, withDrawer, wrap,
+  PRESETS, columns, encodeEpl, encodeEscPos, encodeZpl, itemLabel, kitchenTicket, newId, plainText, printedAt, receipt, reduceOrder, toAscii, withDrawer, wrap,
   type Doc, type Label, type OrderEvent, type OrderState,
 } from "../src/index.js";
 
@@ -121,7 +121,7 @@ describe("receipt and kitchen ticket", () => {
     expect(text).toContain("2 x Kaya Toast");
     expect(text).toContain("S$4.00");
     expect(text).toMatch(/TOTAL\s+S\$10\.90/);
-    expect(text).toContain("07/11/2026 12:05");
+    expect(text).toContain("Printed at: 07/11/2026, 12:05:00 PM");
     expect(text).toContain("Cash");
     expect(text).not.toContain("Balance due");
   });
@@ -248,6 +248,24 @@ describe("leaving the queue number off", () => {
     expect(plainText(kitchenTicket(o, ctx, { showQueue: false }), 42).join("\n")).toContain("Table 9");
     expect(plainText(receipt(o, config, ctx), 42).join("\n")).toContain("Order A007");
     expect(plainText(receipt(o, config, ctx, { showQueue: false }), 42).join("\n")).not.toContain("A007");
+  });
+});
+
+describe("Printed at, at the bottom", () => {
+  const ctx = { merchantName: "B", outletName: "O", now: Date.UTC(2026, 10, 13, 9, 19, 34), timeZone: "Asia/Singapore" } as never;
+  const dine = { id: "dine", name: "Dine in", service: true, kind: "dine_in" as const };
+  it("shows the date and time to the second, in Singapore time, with AM or PM", () => {
+    expect(printedAt(Date.UTC(2026, 10, 13, 9, 19, 34))).toBe("Printed at: 13/11/2026, 5:19:34 PM");
+    expect(printedAt(Date.UTC(2026, 10, 12, 16, 0, 5))).toBe("Printed at: 13/11/2026, 12:00:05 AM");
+    expect(printedAt(Date.UTC(2026, 10, 13, 4, 5, 9))).toBe("Printed at: 13/11/2026, 12:05:09 PM");
+  });
+  it("is the last line of a kitchen ticket and of a receipt, and no longer at the top", () => {
+    const k = plainText(kitchenTicket(order({ channel: dine, spot: "Table 14" }), ctx), 42).filter((l) => l.trim());
+    expect(k[k.length - 1]).toContain("Printed at: 13/11/2026, 5:19:34 PM");
+    expect(k.slice(0, 3).join(" ")).not.toContain("13/11/2026");
+    const r = plainText(receipt(order({ channel: dine, spot: "Table 14", pay: "all" }), config, ctx), 42).filter((l) => l.trim());
+    expect(r[r.length - 1]).toContain("Printed at: 13/11/2026, 5:19:34 PM");
+    expect(r.slice(0, 4).join(" ")).not.toContain("13/11/2026");
   });
 });
 
