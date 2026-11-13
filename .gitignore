@@ -4,3 +4,8 @@ dist
 .DS_Store
 apps/server/data/*.json
 apps/server/data/pg
+
+# member lists with personal data and credit: never commit
+Credit.xlsx
+members-upload.csv
+members-to-check.csv

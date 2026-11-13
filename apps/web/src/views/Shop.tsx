@@ -17,7 +17,7 @@ interface Info {
   channels: Array<{ id: string; name: string; kind: string }>;
   brand: { primary: string; accent: string; ink: string; logoUrl: string | null; heroUrl: string | null; tagline: string | null; promoTitle: string | null; promoBody: string | null };
   /** What this shop can do beyond email sign-in and paying at the counter. */
-  auth: { google: boolean; microsoft: boolean; phone: { number: string; simulated?: boolean; manual?: boolean } | null };
+  auth: { google: boolean; microsoft: boolean; phone: { number: string; simulated?: boolean; manual?: boolean; open?: boolean } | null };
   payments: { online: boolean; methods: string[] };
 }
 interface OrderView {
@@ -1367,6 +1367,13 @@ function Login({ info, welcome, loginError, onGuest, onDone }: { info: Info; wel
     setBusy(true);
     setErr(null);
     try {
+      if (info.auth.phone?.open) {
+        // Temporary open sign-in: the number is the key, with no text to send.
+        const o = await post("/api/shop/auth/phone/open", { phone: fullPhone });
+        const oj = (await o.json().catch(() => ({}))) as { token?: string };
+        if (o.ok && oj.token) return finish(oj.token);
+        return setErr(o.status === 429 ? "Too many tries. Please wait a few minutes." : tx("That number doesn't look right."));
+      }
       const r = await post("/api/shop/auth/phone/start", { phone: fullPhone });
       const j = (await r.json().catch(() => ({}))) as { id?: string; code?: string; to?: string | null; expiresInSeconds?: number };
       if (r.ok && j.id) {
@@ -1425,7 +1432,7 @@ function Login({ info, welcome, loginError, onGuest, onDone }: { info: Info; wel
                 <button className="login-icon-btn" onClick={() => { setErr(null); setView("email"); }} aria-label={tx("Continue with email")}><span className="li-mail"><Icon name="mail" size={26} /></span><span className="li-cap">{t("emailW", "Email")}</span></button>
               </div>
               )}
-              <button className="login-btn" style={{ marginTop: 12 }} onClick={() => (phoneOn ? (setErr(null), setView("phone")) : setErr(tx("Phone sign-in isn't set up for this shop yet. Please use Email, or continue as guest.")))}><span className="lb-ic" style={{ color: "var(--orange-dark)" }}><Icon name="phone" size={24} /></span><span>{t("phoneNumT", "Phone number")}<span className="lb-sub">{t("phoneSub", "Verify by sending an SMS from your phone")}</span></span></button>
+              <button className="login-btn" style={{ marginTop: 12 }} onClick={() => (phoneOn ? (setErr(null), setView("phone")) : setErr(tx("Phone sign-in isn't set up for this shop yet. Please use Email, or continue as guest.")))}><span className="lb-ic" style={{ color: "var(--orange-dark)" }}><Icon name="phone" size={24} /></span><span>{t("phoneNumT", "Phone number")}<span className="lb-sub">{info.auth.phone?.open ? tx("Enter your mobile number") : t("phoneSub", "Verify by sending an SMS from your phone")}</span></span></button>
               {err && <p className="login-err" role="alert">{err}</p>}
               {!info.membersOnly && (
               <button className="login-btn" style={{ marginTop: 12 }} onClick={onGuest}><span className="lb-ic" style={{ color: "var(--orange-dark)" }}><Icon name="bag" size={24} /></span><span>{t("guestCta", "Continue as guest")}<span className="lb-sub">{tx("Browse & order as guest — sign-up (or guest checkout) is asked at Order Summary")}</span></span></button>
@@ -1466,7 +1473,7 @@ function Login({ info, welcome, loginError, onGuest, onDone }: { info: Info; wel
               {back}
               <div className="e2e-card" style={{ marginTop: 2 }}>
                 <h3>{t("phoneNumT", "Phone number")}</h3>
-                <p className="e2e-sub" style={{ textAlign: "left", margin: 0 }}>{tx("We verify your number by having you send us a short text from it. No code is sent to you.")}</p>
+                {!info.auth.phone?.open && <p className="e2e-sub" style={{ textAlign: "left", margin: 0 }}>{tx("We verify your number by having you send us a short text from it. No code is sent to you.")}</p>}
                 <div className="e2e-field"><label htmlFor="ph-num">{t("mobileNum", "Mobile number")}</label>
                   <div className="phone-row">
                     <select className="cc-select" id="ph-cc" value={cc} aria-label="Country code" onChange={(e) => setCc(e.target.value)}>{COUNTRIES.map(([d, , n]) => <option key={n} value={d}>+{d} {n}</option>)}</select>

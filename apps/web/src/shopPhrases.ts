@@ -694,6 +694,15 @@ export const PHRASES: Record<string, string[]> = {
   "Zu {t} wechseln? Ihre Bestellung geht an {t}.",
   "{t} க்கு மாற வேண்டுமா? உங்கள் ஆர்டர் {t} க்கு அனுப்பப்படும்."
  ],
+ "Enter your mobile number": [
+  "Masukkan nombor mudah alih anda",
+  "Masukkan nomor ponsel Anda",
+  "输入您的手机号码",
+  "携帯電話番号を入力",
+  "Saisissez votre numéro de mobile",
+  "Geben Sie Ihre Handynummer ein",
+  "உங்கள் கைபேசி எண்ணை உள்ளிடவும்"
+ ],
  "in bag": [
   "dalam beg",
   "di tas",

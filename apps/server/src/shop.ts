@@ -118,6 +118,10 @@ export function registerShop(app: FastifyInstance, d: ShopDeps) {
   const tables = parseTables(process.env.SHOP_TABLES);
   // Members only: phone sign-in is the only way in, and every online order is paid from the member's credit.
   const membersOnly = /^(1|true|yes)$/i.test(process.env.SHOP_MEMBERS_ONLY ?? "");
+  // TEMPORARY, for one event: anyone who types a member's phone number is let in as that member, with no code. This lets anybody who knows
+  // a member's number spend that member's credit, so it is off unless SHOP_OPEN_SIGNIN=1, and must be switched off again afterwards.
+  const openSignin = /^(1|true|yes)$/i.test(process.env.SHOP_OPEN_SIGNIN ?? "");
+  if (openSignin) console.log("[security] SHOP_OPEN_SIGNIN is ON: phone numbers sign in with no code. Switch it off after the event.");
   if (membersOnly) {
     app.addHook("onRequest", async (req, reply) => {
       if (/^\/api\/shop\/auth\/(email|oauth)\//.test(req.url)) return reply.code(404).send({ error: "not_available" });
@@ -142,7 +146,7 @@ export function registerShop(app: FastifyInstance, d: ShopDeps) {
       channels: cat.channels.filter((c) => c.active && (!tables.length || c.kind === "dine_in")).map((c) => ({ id: c.id, name: c.name, kind: c.kind })),
       brand: await brandPayload(),
       // What this deployment can do beyond email sign-in and paying at the counter. The page enables only these.
-      auth: { google: !!integ.google && !!d.members, microsoft: !!integ.microsoft && !!d.members, phone: !!d.members && (smsTo ? { number: smsTo } : membersOnly ? { number: "", manual: true } : showCodes ? { number: "+65 8000 0000", simulated: true } : null) },
+      auth: { google: !!integ.google && !!d.members, microsoft: !!integ.microsoft && !!d.members, phone: !!d.members && (openSignin ? { number: "", open: true } : smsTo ? { number: smsTo } : membersOnly ? { number: "", manual: true } : showCodes ? { number: "+65 8000 0000", simulated: true } : null) },
       payments: { online: !!integ.stripe, methods: integ.stripe ? ["card", "paynow"] : [] },
     };
   });
@@ -306,6 +310,16 @@ export function registerShop(app: FastifyInstance, d: ShopDeps) {
     // ---- phone number, "reverse SMS": the customer texts us a code --------------------------------
     const SMS_SECONDS = 300;
     const digitsOf = (s: unknown) => String(s ?? "").replace(/\D/g, "");
+
+    app.post<{ Body: { phone?: string } }>("/api/shop/auth/phone/open", async (req, reply) => {
+      if (!openSignin) return reply.code(404).send({ error: "not_available" });
+      if (limited(authLimit, req, reply)) return;
+      const phone = digitsOf(req.body?.phone);
+      if (phone.length < 8 || phone.length > 15) return reply.code(400).send({ error: "phone number looks wrong" });
+      const r = await members.signInWithIdentity("phone", phone, { phone: `+${phone}` });
+      console.log(`[open sign-in] +${phone.slice(0, 4)}…${phone.slice(-2)} from ${req.ip} (${r.created ? "new member" : "existing member"})`);
+      return { token: r.token, member: r.member, created: r.created };
+    });
 
     app.post<{ Body: { phone?: string } }>("/api/shop/auth/phone/start", async (req, reply) => {
       if (limited(authLimit, req, reply)) return;
