@@ -207,10 +207,14 @@ export class MemberStore {
   }
 
   /** A text arrived: when its sender and code match an open challenge, that challenge is proven. */
-  async matchSms(fromDigits: string, body: string): Promise<boolean> {
-    const code = body.replace(/\D/g, "");
-    if (code.length !== 6) return false;
-    const r = await this.db.query("UPDATE sms_challenges SET verified_at = now() WHERE merchant_id=$1 AND phone=$2 AND code=$3 AND verified_at IS NULL AND expires_at > now() RETURNING id", [this.merchantId, fromDigits, code]);
+  async matchSms(fromDigits: string, body: string, partial = false): Promise<boolean> {
+    // The code is the one 6-digit number in the message (a plain "123456", or "my code is 123456").
+    const code = /(?<!\d)\d{6}(?!\d)/.exec(body)?.[0];
+    if (!code || (!/^\d+$/.test(fromDigits))) return false;
+    // A chat notification shows the sender as typed on the phone (often without the country code), so it is matched by its ending.
+    const r = partial
+      ? await this.db.query("UPDATE sms_challenges SET verified_at = now() WHERE merchant_id=$1 AND phone LIKE '%' || $2 AND code=$3 AND verified_at IS NULL AND expires_at > now() RETURNING id", [this.merchantId, fromDigits, code])
+      : await this.db.query("UPDATE sms_challenges SET verified_at = now() WHERE merchant_id=$1 AND phone=$2 AND code=$3 AND verified_at IS NULL AND expires_at > now() RETURNING id", [this.merchantId, fromDigits, code]);
     return (r.rowCount ?? 0) > 0;
   }
 

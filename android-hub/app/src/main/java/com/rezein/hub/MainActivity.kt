@@ -44,6 +44,7 @@ class MainActivity : Activity() {
     private lateinit var toggle: Button
     private lateinit var battery: Button
     private lateinit var smsButton: Button
+    private lateinit var chatButton: Button
     private lateinit var smsNumber: EditText
     private lateinit var smsSave: Button
     private lateinit var smsMessage: TextView
@@ -107,10 +108,11 @@ class MainActivity : Activity() {
         smsNumber = field("This tablet's phone number, e.g. +65 8799 6394", InputType.TYPE_CLASS_PHONE).apply { setText(config.smsNumber) }
         smsMessage = text("", 13f)
         smsSave = button("Save the number for customer sign-in") { saveSmsNumber() }
+        chatButton = button("Allow reading chat (RCS) messages") { startActivity(android.content.Intent(android.provider.Settings.ACTION_NOTIFICATION_LISTENER_SETTINGS)) }
         val testButton = button("Print a test page") { testPrint() }
         log = text("", 12f).apply { typeface = Typeface.MONOSPACE }
         val unlink = button("Disconnect from the shop") { unlink() }
-        listOf(status, detail, toggle, battery, text("Customer sign-in by text: the number of the SIM in this tablet is shown to customers, who text it a code.", 14f, true), smsNumber, smsSave, smsMessage, smsButton, text("Check a printer is reachable from this tablet:"), printerIp, testButton, text("Recent activity", 14f, true), log, unlink).forEach { statusGroup.addView(it) }
+        listOf(status, detail, toggle, battery, text("Customer sign-in by text: the number of the SIM in this tablet is shown to customers, who text it a code.", 14f, true), smsNumber, smsSave, smsMessage, smsButton, chatButton, text("Check a printer is reachable from this tablet:"), printerIp, testButton, text("Recent activity", 14f, true), log, unlink).forEach { statusGroup.addView(it) }
         root.addView(statusGroup)
 
         setContentView(ScrollView(this).apply { addView(root) })
@@ -131,6 +133,8 @@ class MainActivity : Activity() {
         battery.visibility = if (allowed) View.GONE else View.VISIBLE
         val smsAllowed = checkSelfPermission(android.Manifest.permission.RECEIVE_SMS) == android.content.pm.PackageManager.PERMISSION_GRANTED
         smsButton.visibility = if (smsAllowed) View.GONE else View.VISIBLE
+        val chatAllowed = (android.provider.Settings.Secure.getString(contentResolver, "enabled_notification_listeners") ?: "").contains(packageName)
+        chatButton.visibility = if (chatAllowed) View.GONE else View.VISIBLE
         log.text = HubState.recent().joinToString("\n")
     }
 

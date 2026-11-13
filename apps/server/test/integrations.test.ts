@@ -251,6 +251,20 @@ describe("phone sign-in by text message", () => {
     expect((await call("/api/print/sms", { device: till.token, body: { from: "+6587771111", body: `${s.json.code}` } })).json.matched).toBe(false);
   });
 
+  it("also signs in from a chat (RCS) notification, where the sender has no country code", async () => {
+    const s = await call("/api/shop/auth/phone/start", { body: { phone: "6587772222" } });
+    // The same text without the "partial" flag must not match a number shown without its country code.
+    expect((await call("/api/print/sms", { device: till.token, body: { from: "87772222", body: s.json.code } })).json.matched).toBe(false);
+    // A chat notification passes what the phone shows, flagged partial, and the code can sit inside a sentence.
+    expect((await call("/api/print/sms", { device: till.token, body: { from: "8777 2222", body: `my code is ${s.json.code}`, partial: true } })).json.matched).toBe(true);
+    expect((await call(`/api/shop/auth/phone/${s.json.id}`)).json.state).toBe("verified");
+    // A different number with the right code, or a too-short number, matches nothing.
+    const s2 = await call("/api/shop/auth/phone/start", { body: { phone: "6587773333" } });
+    expect((await call("/api/print/sms", { device: till.token, body: { from: "87774444", body: s2.json.code, partial: true } })).json.matched).toBe(false);
+    expect((await call("/api/print/sms", { device: till.token, body: { from: "3333", body: s2.json.code, partial: true } })).json.matched).toBe(false);
+    expect((await call("/api/print/sms", { device: till.token, body: { from: "87773333", body: s2.json.code, partial: true } })).json.matched).toBe(true);
+  });
+
   it("shows customers the number of the tablet that is running Rezein, with no server setting", async () => {
     expect((await call("/api/print/sms/number", { method: "PUT", body: { number: "12" } })).status).toBe(401);
     expect((await call("/api/print/sms/number", { method: "PUT", device: till.token, body: { number: "abc" } })).status).toBe(400);

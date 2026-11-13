@@ -47,3 +47,10 @@ The same app can receive the text a customer sends to sign in. Any SIM in the ta
 If the tablet is off, offline or Rezein is stopped, customers cannot sign in by text. Rezein shows "Text from … passed to the shop" in its activity list for each one it receives.
 
 If more than one tablet has a number saved, customers are shown the number of the one that checked in most recently. If no tablet is running Rezein, the shop falls back to a number set on the server with `SMS_RECEIVE_NUMBER`, if there is one.
+
+### Chat (RCS) messages
+
+Many phones now send messages between each other as chat (RCS) messages, not ordinary SMS, and Android does not pass those to apps that read SMS. Rezein also reads the Messages app's notification, so a sign-in code that arrives as a chat message still counts. Press **Allow reading chat (RCS) messages** in Rezein and switch Rezein on in the screen that opens (on Android 13 and newer, first allow restricted settings under Settings, Apps, Rezein, the three dots). Only the sender's number and a 6-digit code are used, and nothing is stored. A chat notification often shows the number without its country code, so the shop matches it by the end of the number together with the code. If both routes fire, the second one has no effect.
+
+You can also turn chat features off in the Messages app on the hub phone, so senders' phones use plain SMS.
+

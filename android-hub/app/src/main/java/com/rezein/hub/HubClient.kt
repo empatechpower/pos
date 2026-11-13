@@ -120,8 +120,8 @@ class HubClient(
     }
 
     /** Pass on a text this tablet received. The shop checks whether it is a customer's sign-in code. Returns true when it was accepted. */
-    fun forwardSms(from: String, body: String): Boolean {
-        val r = http.post("/api/print/sms", token, JSONObject().put("from", from).put("body", body))
+    fun forwardSms(from: String, body: String, partial: Boolean = false): Boolean {
+        val r = http.post("/api/print/sms", token, JSONObject().put("from", from).put("body", body).also { if (partial) it.put("partial", true) })
         if (r.status == 401) throw NotLinked()
         return r.status in 200..299
     }
