@@ -650,7 +650,7 @@ function Menu({ info, catalog, config, loginError }: { info: Info; catalog: Cata
     const m = byId.get(l.productId);
     const r = m ? resolveOptions(m.options, l.selection) : null;
     if (!m || !r?.ok) return null;
-    return { m, r, lineCents: (m.priceCents + r.extraCents) * l.qty, opts: [...optionLines(r.options), ...(l.note ? [`${tx("Special request")}: ${l.note}`] : [])].join(" · ") };
+    return { m, r, lineCents: (m.priceCents + r.extraCents) * l.qty, opts: optionLines(r.options).join(" · "), note: l.note ? `${tx("Special request")}: ${l.note}` : "" };
   };
   const itemRows = (thumbs: boolean) =>
     bag.map((l) => {
@@ -659,7 +659,7 @@ function Menu({ info, catalog, config, loginError }: { info: Info; catalog: Cata
       const img = photo(v.m) ?? b.heroUrl;
       return (
         <div className="sum-row" key={l.key}>
-          <span className="k with-thumb">{thumbs && img && <img className="status-thumb" src={img} alt="" />}<span>{v.m.name} × {l.qty}{v.opts && <small className="muted" style={{ display: "block" }}>{v.opts}</small>}</span></span>
+          <span className="k with-thumb">{thumbs && img && <img className="status-thumb" src={img} alt="" />}<span>{v.m.name} × {l.qty}{v.opts && <small className="muted" style={{ display: "block" }}>{v.opts}</small>}{v.note && <small className="muted" style={{ display: "block" }}>{v.note}</small>}</span></span>
           <span className="v">{formatMoney(v.lineCents)}</span>
         </div>
       );
@@ -1110,7 +1110,8 @@ function Menu({ info, catalog, config, loginError }: { info: Info; catalog: Cata
               {img ? <img className="bag-photo" src={img} alt={v.m.name} /> : <span className="bag-photo-ph"><Icon name="paw" size={26} /></span>}
               <div className="bag-copy2">
                 <h3 className="bag-name">{v.m.name}</h3>
-                <p className="bag-desc">{v.opts || v.m.description || v.m.category}</p>
+                {(v.opts || !v.note) && <p className="bag-desc">{v.opts || v.m.description || v.m.category}</p>}
+                {v.note && <p className="bag-desc bag-note">{v.note}</p>}
                 <div className="bag-pricerow">{formatMoney(v.lineCents)}</div>
               </div>
               <div className="sc-act"><span className="sc-step"><button className="minus" aria-label={`Fewer ${v.m.name}`} onClick={() => bump(l, -1)}>−</button><b>{l.qty}</b><button className="plus" aria-label={`More ${v.m.name}`} onClick={() => bump(l, 1)}>+</button></span></div>
