@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
-import { defaultSelection, formatMoney, menuFor, optionLines, priceRange, quoteOrder, readableOn, resolveOptions, type BusinessConfig, type Catalog, type ChosenOptionInput, type MenuEntry, type ShopStatus } from "@pos/core";
+import { cleanNote, defaultSelection, formatMoney, menuFor, optionLines, priceRange, quoteOrder, readableOn, resolveOptions, type BusinessConfig, type Catalog, type ChosenOptionInput, type MenuEntry, type ShopStatus } from "@pos/core";
 import { OptionSheet } from "./OptionSheet";
 import "../shopProto.css";
 import { LANGS, detectedLang, greeting, lang, langMode, setLangMode, shortLabel, t, tx, useLang } from "../shopI18n";
@@ -47,6 +47,8 @@ interface BagLine {
   productId: string;
   qty: number;
   selection: ChosenOptionInput[];
+  /** The customer's free-text request for the kitchen. */
+  note?: string;
 }
 
 const LS_LAST = "shop.lastOrder";
@@ -466,7 +468,7 @@ function Menu({ info, catalog, config, loginError }: { info: Info; catalog: Cata
 
   useEffect(() => { if (screen === "payment" && member && (member.creditCents ?? 0) >= shownTotal && payMethod === "counter") setPayMethod("credit"); }, [screen]); // eslint-disable-line react-hooks/exhaustive-deps
   useEffect(() => { if (!usePoints) { setPointsPts(null); setPEdit(false); setPEditAmt(false); } }, [usePoints]);
-  const items = bag.map((l) => ({ productId: l.productId, qty: l.qty, options: l.selection }));
+  const items = bag.map((l) => ({ productId: l.productId, qty: l.qty, options: l.selection, ...(l.note ? { note: l.note } : {}) }));
   const count = bag.reduce((n, l) => n + l.qty, 0);
   // Rewards (points, coupons, stamps) can be switched off for a shop. Then none of their screens or wording shows.
   const rewardsOn = config.rewards.pointsEnabled || config.rewards.welcomeVoucherCents > 0 || config.rewards.stampCard.enabled;
@@ -490,22 +492,23 @@ function Menu({ info, catalog, config, loginError }: { info: Info; catalog: Cata
   const inBag = (id: string) => bag.filter((l) => l.productId === id).reduce((n, l) => n + l.qty, 0);
   const earnPts = Math.floor((itemsSubtotal / 100) * config.rewards.earnPointsPerDollar);
 
-  const addLine = (m: MenuEntry, selection: ChosenOptionInput[], d = 1) => {
+  const addLine = (m: MenuEntry, selection: ChosenOptionInput[], d = 1, rawNote = "") => {
     const r = resolveOptions(m.options, selection);
     if (!r.ok) return;
-    const key = `${m.id}#${r.key}`;
+    const note = cleanNote(rawNote);
+    const key = `${m.id}#${r.key}${note ? `#${note}` : ""}`;
     setBag((cur) => {
       const have = cur.find((l) => l.key === key);
       const qty = (have?.qty ?? 0) + d;
       if (qty <= 0) return cur.filter((l) => l.key !== key);
       const next = Math.min(20, qty);
-      return have ? cur.map((l) => (l.key === key ? { ...l, qty: next } : l)) : [...cur, { key, productId: m.id, qty: next, selection }];
+      return have ? cur.map((l) => (l.key === key ? { ...l, qty: next } : l)) : [...cur, { key, productId: m.id, qty: next, selection, ...(note ? { note } : {}) }];
     });
     setAgreed(null);
   };
   const bump = (l: BagLine, d: number) => {
     const m = byId.get(l.productId);
-    if (m) addLine(m, l.selection, d);
+    if (m) addLine(m, l.selection, d, l.note);
   };
   const addSimple = (m: MenuEntry, d: number) => addLine(m, m.options?.length ? defaultSelection(m.options) : [], d);
 
@@ -638,7 +641,7 @@ function Menu({ info, catalog, config, loginError }: { info: Info; catalog: Cata
     const m = byId.get(l.productId);
     const r = m ? resolveOptions(m.options, l.selection) : null;
     if (!m || !r?.ok) return null;
-    return { m, r, lineCents: (m.priceCents + r.extraCents) * l.qty, opts: optionLines(r.options).join(" · ") };
+    return { m, r, lineCents: (m.priceCents + r.extraCents) * l.qty, opts: [...optionLines(r.options), ...(l.note ? [`${tx("Special request")}: ${l.note}`] : [])].join(" · ") };
   };
   const itemRows = (thumbs: boolean) =>
     bag.map((l) => {
@@ -778,14 +781,14 @@ function Menu({ info, catalog, config, loginError }: { info: Info; catalog: Cata
           {shown.map((m) => {
             const n = inBag(m.id);
             const img = photo(m);
-            const hasOpts = !!m.options?.length;
+            const hasOpts = !!m.options?.length || bag.some((l) => l.productId === m.id && !!l.note);
             const card = (
               <div key={m.id} className={`sc ${n ? "in" : ""} ${m.soldOut ? "out" : ""}`}>
-                <div className="sc-photo">
+                <div className="sc-photo" onClick={() => { if (!m.soldOut) setPicking(m); }}>
                   {img ? <img src={img} alt="" loading="lazy" /> : <span className="sc-noimg" />}
                   {n > 0 && <span className="sc-badge">×{n} {tx("in bag")}</span>}
                 </div>
-                <div className="sc-main">
+                <div className="sc-main" onClick={() => { if (!m.soldOut) setPicking(m); }}>
                   <b>{m.name}</b>
                   <span className="muted">{m.description ?? m.category}</span>
                   <span className="sc-price">{m.soldOut ? "Sold out" : cardPrice(m)}{!m.soldOut && /bcrs/i.test(m.name) && <em className="bcrs-badge"><Icon name="can" size={11} />+10c BCRS Deposit</em>}</span>
@@ -1293,13 +1296,14 @@ function Menu({ info, catalog, config, loginError }: { info: Info; catalog: Cata
       {langSheet}
       {picking && (
         <OptionSheet
+          notes
           name={picking.name}
           description={picking.description}
           photoUrl={photo(picking)}
           baseCents={picking.priceCents}
-          groups={picking.options!}
+          groups={picking.options ?? []}
           onClose={() => setPicking(null)}
-          onAdd={(sel) => { addLine(picking, sel); setPicking(null); }}
+          onAdd={(sel, note) => { addLine(picking, sel, 1, note); setPicking(null); }}
         />
       )}
       {nav}

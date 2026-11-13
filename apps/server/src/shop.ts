@@ -1,5 +1,5 @@
 import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
-import { collectionNumber, confirmedPaid, newId, optionLines, orderTotals, quoteOrder, reduceOrder, shopStatus, type BusinessConfig, type OrderEvent } from "@pos/core";
+import { cleanNote, collectionNumber, confirmedPaid, newId, optionLines, orderTotals, quoteOrder, reduceOrder, shopStatus, type BusinessConfig, type OrderEvent } from "@pos/core";
 import { audit, type Permission } from "./auth.js";
 import type { BrandStore } from "./brand.js";
 import type { CatalogStore, PgCatalogStore } from "./catalog.js";
@@ -386,7 +386,7 @@ export function registerShop(app: FastifyInstance, d: ShopDeps) {
 
   interface OrderBody {
     channelId?: string;
-    items?: Array<{ productId?: string; qty?: number; options?: Array<{ groupId?: string; choiceId?: string; qty?: number }> }>;
+    items?: Array<{ productId?: string; qty?: number; note?: string; options?: Array<{ groupId?: string; choiceId?: string; qty?: number }> }>;
     customerName?: string;
     customerPhone?: string;
     spot?: string;
@@ -410,6 +410,7 @@ export function registerShop(app: FastifyInstance, d: ShopDeps) {
     const items = b.items.map((i) => ({
       productId: String(i?.productId ?? ""),
       qty: Number(i?.qty),
+      note: cleanNote(i?.note),
       // Only ids and counts are read; any name or price a client sends here is ignored.
       options: (Array.isArray(i?.options) ? i.options.slice(0, 40) : []).map((o) => ({ groupId: String(o?.groupId ?? ""), choiceId: String(o?.choiceId ?? ""), qty: o?.qty === undefined ? undefined : Number(o.qty) })),
     }));
@@ -461,7 +462,7 @@ export function registerShop(app: FastifyInstance, d: ShopDeps) {
     if (b.payWithCredit && member) {
       const key = String(b.idempotencyKey ?? "");
       if (!/^[\w-]{8,64}$/.test(key)) return reply.code(400).send({ error: "idempotency_key_required" });
-      const hash = createHash("sha256").update(JSON.stringify({ m: member.id, c: b.channelId, i: items.map((x) => [x.productId, x.qty, x.options]), s: table ?? clean(b.spot, 30) ?? null, p: b.usePoints ?? null, k: b.couponId ?? null })).digest("hex");
+      const hash = createHash("sha256").update(JSON.stringify({ m: member.id, c: b.channelId, i: items.map((x) => [x.productId, x.qty, x.options, x.note]), s: table ?? clean(b.spot, 30) ?? null, p: b.usePoints ?? null, k: b.couponId ?? null })).digest("hex");
       const ins = await d.db.query("INSERT INTO purchase_requests (merchant_id, idem_key, request_hash, member_id, order_id) VALUES ($1,$2,$3,$4,$5) ON CONFLICT DO NOTHING", [merchantId, key, hash, member.id, orderId]);
       if (!ins.rowCount) {
         const ex = (await d.db.query("SELECT * FROM purchase_requests WHERE merchant_id=$1 AND idem_key=$2", [merchantId, key])).rows[0];

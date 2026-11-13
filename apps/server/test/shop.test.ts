@@ -125,6 +125,17 @@ describe("placing an order", () => {
     expect(visibleToKitchen(o, config)).toBe(false); // held until a member of staff accepts it
   });
 
+  it("carries a special request on the line, free of charge, for the kitchen ticket", async () => {
+    const r = await order({ channelId: "take-away", items: [{ ...kaya(1), note: "  no butter,\n extra crispy " }] });
+    expect(r.status).toBe(200);
+    expect(r.json.totalCents).toBe(200);
+    const l = reduceOrder(r.json.orderId, await events(r.json.orderId))!.lines[0]!;
+    expect(l.unitCents).toBe(200);
+    expect(l.options).toEqual([{ group: "Special request", name: "Note: no butter, extra crispy", qty: 1, priceCents: 0 }]);
+    const none = await order({ channelId: "take-away", items: [{ ...kaya(1), note: 123 }] });
+    expect(reduceOrder(none.json.orderId, await events(none.json.orderId))!.lines[0]!.options).toBeUndefined();
+  });
+
   it("ignores any price the customer sends", async () => {
     const r = await order({ channelId: "take-away", items: [{ ...kaya(1), unitCents: 1, priceCents: 1, price: 0 }], total: 1, totalCents: 1 });
     expect(r.json.totalCents).toBe(200);

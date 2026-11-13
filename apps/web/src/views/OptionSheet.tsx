@@ -1,6 +1,6 @@
 import { useMemo, useState } from "react";
 import { tx } from "../shopI18n";
-import { defaultSelection, formatMoney, resolveOptions, type ChosenOptionInput, type OptionGroup } from "@pos/core";
+import { MAX_NOTE, defaultSelection, formatMoney, resolveOptions, type ChosenOptionInput, type OptionGroup } from "@pos/core";
 
 interface Props {
   name: string;
@@ -12,7 +12,9 @@ interface Props {
   /** Start from this selection (e.g. when editing); otherwise the defaults. */
   initial?: ChosenOptionInput[];
   cta?: string;
-  onAdd: (selection: ChosenOptionInput[]) => void;
+  /** Show the free-text Special request box (the customer shop; not the till). */
+  notes?: boolean;
+  onAdd: (selection: ChosenOptionInput[], note: string) => void;
   onClose: () => void;
 }
 
@@ -23,8 +25,9 @@ const countOf = (sel: ChosenOptionInput[], g: string, c: string) => sel.filter((
  * The customise screen: choose-one groups as pills, "pick any" as toggles, extras as steppers. The total and
  * the Add button follow the same rules the server applies, so what is shown is what is charged.
  */
-export function OptionSheet({ name, description, photoUrl, baseCents, groups, initial, cta = "Add to bag", onAdd, onClose }: Props) {
+export function OptionSheet({ name, description, photoUrl, baseCents, groups, initial, cta = "Add to bag", notes, onAdd, onClose }: Props) {
   const [sel, setSel] = useState<ChosenOptionInput[]>(initial ?? defaultSelection(groups));
+  const [note, setNote] = useState("");
   const r = useMemo(() => resolveOptions(groups, sel), [groups, sel]);
   const total = baseCents + (r.ok ? r.extraCents : 0);
   const missing = !r.ok && r.error === "missing_required" ? groups.find((g) => g.id === r.groupId)?.name : null;
@@ -96,13 +99,17 @@ export function OptionSheet({ name, description, photoUrl, baseCents, groups, in
               </section>
             );
           })}
+          {notes && <section className="opt-group">
+            <div className="opt-gh"><b>{tx("Special request")}</b><span className="muted">{tx("Optional")}</span></div>
+            <textarea className="opt-note" rows={2} maxLength={MAX_NOTE} value={note} onChange={(e) => setNote(e.target.value)} aria-label={tx("Special request")} />
+          </section>}
         </div>
         <div className="opt-foot">
           <div>
             <small className="muted">{tx("Total")}</small>
             <div className="opt-total">{formatMoney(total)}</div>
           </div>
-          <button className="opt-cta" disabled={!r.ok} title={missing ? tx("Choose {x}", { x: missing }) : ""} onClick={() => r.ok && onAdd(sel)}>
+          <button className="opt-cta" disabled={!r.ok} title={missing ? tx("Choose {x}", { x: missing }) : ""} onClick={() => r.ok && onAdd(sel, note)}>
             {missing ? tx("Choose {x}", { x: missing }) : tx(cta)}
           </button>
         </div>

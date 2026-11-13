@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { PRESETS, orderTotals, contrastRatio, isHexColor, newId, quoteOrder, readableOn, reduceOrder, shopStatus, visibleToKitchen, type Catalog, type OrderEvent } from "../src/index.js";
+import { cleanNote, PRESETS, orderTotals, contrastRatio, isHexColor, newId, quoteOrder, readableOn, reduceOrder, shopStatus, visibleToKitchen, type Catalog, type OrderEvent } from "../src/index.js";
 
 const catalog = (): Catalog => ({
   version: 1,
@@ -153,5 +153,28 @@ describe("points on a quote and on an order", () => {
     ])!;
     expect(state.pointsRedeemed).toBe(300);
     expect(orderTotals(state, config).total).toBe(700);
+  });
+});
+
+describe("special request", () => {
+  it("is free, travels on the line as a Note option, and keeps different notes on separate lines", () => {
+    const q = quoteOrder(catalog(), config, ctx("take"), [
+      { productId: "kaya", qty: 1, note: "  no butter\n please " },
+      { productId: "kaya", qty: 1, note: "no butter please" },
+      { productId: "kaya", qty: 1 },
+    ]);
+    expect(q.ok).toBe(true);
+    if (!q.ok) return;
+    expect(q.lines).toHaveLength(2);
+    const noted = q.lines.find((l) => l.options.length)!;
+    expect(noted.qty).toBe(2);
+    expect(noted.unitCents).toBe(200);
+    expect(noted.options).toEqual([{ group: "Special request", name: "Note: no butter please", qty: 1, priceCents: 0 }]);
+  });
+  it("is tidied and capped", () => {
+    expect(cleanNote("a\u0000b\tc\n\nd")).toBe("a b c d");
+    expect(cleanNote("x".repeat(500))).toHaveLength(140);
+    expect(cleanNote(42)).toBe("");
+    expect(cleanNote("   ")).toBe("");
   });
 });

@@ -429,3 +429,7 @@ html .shop .scroll-body, html .shop .e2e-scroll { overflow-y: visible; overflow-
 .order-details .od-sums { margin-top: 10px; border-top: 1px solid #eee; padding-top: 8px; }
 .order-details .od-grand { font-weight: 800; font-size: 16px; }
 .order-details .od-due { color: #c0392b; font-weight: 700; }
+
+/* Special request: a plain free-text box at the bottom of the customise sheet */
+.opt-note { width: 100%; box-sizing: border-box; border: 1px solid #e3dccf; border-radius: 12px; padding: 10px 12px; font: inherit; font-size: 15px; background: #fff; resize: vertical; min-height: 64px; }
+.sc-photo, .sc-main { cursor: pointer; }

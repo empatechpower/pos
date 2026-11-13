@@ -17,6 +17,17 @@ export interface QuoteItem {
   productId: string;
   qty: number;
   options?: ChosenOptionInput[];
+  /** A free-text request for the kitchen ("no onions"). Costs nothing; it is printed on the ticket. */
+  note?: string;
+}
+
+export const MAX_NOTE = 140;
+
+/** One tidy line of at most 140 characters: control characters and line breaks become spaces. Empty when there is nothing to say. */
+export function cleanNote(raw: unknown): string {
+  if (typeof raw !== "string") return "";
+  // eslint-disable-next-line no-control-regex
+  return raw.replace(/[\u0000-\u001f\u007f\u2028\u2029]+/g, " ").replace(/\s+/g, " ").trim().slice(0, MAX_NOTE);
 }
 
 export type QuoteError = "unknown_channel" | "channel_off" | "empty" | "too_many_items" | "bad_quantity" | "unavailable" | OptionError;
@@ -57,11 +68,12 @@ export function quoteOrder(catalog: Catalog, config: BusinessConfig, ctx: PriceC
     if (!m || m.soldOut) return { ok: false, error: "unavailable", productId: it.productId };
     const r = resolveOptions(m.options, it.options);
     if (!r.ok) return { ok: false, error: r.error, productId: it.productId };
-    const key = `${it.productId}#${r.key}`;
+    const note = cleanNote(it.note);
+    const key = `${it.productId}#${r.key}#${note}`;
     const have = merged.get(key);
     const qty = (have?.qty ?? 0) + it.qty;
     if (qty > MAX_QTY) return { ok: false, error: "bad_quantity", productId: it.productId };
-    merged.set(key, { productId: it.productId, name: m.name, unitCents: m.priceCents + r.extraCents, qty, pointsExempt: m.pointsExempt, options: r.options });
+    merged.set(key, { productId: it.productId, name: m.name, unitCents: m.priceCents + r.extraCents, qty, pointsExempt: m.pointsExempt, options: note ? [...r.options, { group: "Special request", name: `Note: ${note}`, qty: 1, priceCents: 0 }] : r.options });
   }
   const lines = [...merged.values()];
   if (lines.length > MAX_LINES) return { ok: false, error: "too_many_items" };
