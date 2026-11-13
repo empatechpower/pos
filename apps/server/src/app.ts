@@ -379,6 +379,12 @@ export async function buildApp({ config, store, db, catalog, catalogAdmin, print
       return changed(req, reply, "default", () => cat.setDefaultPricebook(req.body!.pricebookId!));
     });
 
+    app.post<{ Body: { from?: string; to?: string } }>("/api/catalog/categories/rename", manage, async (req, reply) => {
+      const from = req.body?.from?.trim(), to = req.body?.to?.trim();
+      if (!from || !to) return bad(reply, "from and to are required");
+      return changed(req, reply, "category", () => cat.renameCategory(from, to));
+    });
+
     app.post<{ Body: { id?: string; name?: string; category?: string; soldOut?: boolean; pointsExempt?: boolean; priceCents?: number; description?: string; altName?: string; options?: OptionGroup[] } }>(
       "/api/catalog/products",
       manage,

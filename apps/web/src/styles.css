@@ -447,3 +447,7 @@ html .shop .scroll-body, html .shop .e2e-scroll { overflow-y: visible; overflow-
 .rn-actions { display: flex; justify-content: flex-end; gap: 8px; }
 .pricerow .pencil { display: inline-flex; align-items: center; justify-content: center; width: 26px; height: 26px; margin-left: 4px; padding: 0; vertical-align: middle; border: 0; border-radius: 6px; background: transparent; color: var(--text-2, #777); cursor: pointer; }
 .pricerow .pencil:hover { background: var(--line); color: inherit; }
+.catlist { margin: 10px 0; }
+.catlist summary { cursor: pointer; font-weight: 600; }
+.catrow { display: flex; align-items: center; justify-content: space-between; padding: 6px 2px; border-bottom: 1px solid var(--line, #ddd); }
+.catrow .pencil { background: none; border: 0; cursor: pointer; padding: 6px; color: inherit; }

@@ -32,6 +32,7 @@ export function Prices({ catalog, outletId }: { catalog: Catalog; outletId: stri
   const [bookId, setBookId] = useState(catalog.defaultPricebookId);
   const [msg, setMsg] = useState<string | null>(null);
   const [draft, setDraft] = useState<Record<string, string>>({});
+  const [renamingCat, setRenamingCat] = useState<{ from: string; to: string } | null>(null);
   const [newItem, setNewItem] = useState({ name: "", category: "", price: "" });
   const [newBook, setNewBook] = useState("");
   const [newKind, setNewKind] = useState<ChannelKind>("delivery");
@@ -119,6 +120,18 @@ export function Prices({ catalog, outletId }: { catalog: Catalog; outletId: stri
         )}
       </div>
 
+      <details className="catlist">
+        <summary>Categories ({new Set(catalog.products.map((p) => p.category)).size})</summary>
+        {[...new Set(catalog.products.map((p) => p.category))].map((c) => (
+          <div className="catrow" key={c}>
+            <span>{c} <i className="muted">· {catalog.products.filter((p) => p.category === c).length}</i></span>
+            <button className="pencil" aria-label={`Rename category ${c}`} title="Rename category" onClick={() => setRenamingCat({ from: c, to: c })}>
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M12 20h9" /><path d="M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4Z" /></svg>
+            </button>
+          </div>
+        ))}
+      </details>
+
       <div className="pricelist">
         <input className="findbox" placeholder={`Search ${catalog.products.length} items`} value={find} onChange={(e) => setFind(e.target.value)} aria-label="Search items" />
         {catalog.products.filter((p) => !find.trim() || `${p.name} ${p.category}`.toLowerCase().includes(find.trim().toLowerCase())).map((p) => {
@@ -165,6 +178,29 @@ export function Prices({ catalog, outletId }: { catalog: Catalog; outletId: stri
           );
         })}
       </div>
+
+      {renamingCat && (() => {
+        const to = renamingCat.to.trim();
+        const save = () => {
+          if (!to) return;
+          const from = renamingCat.from;
+          setRenamingCat(null);
+          if (to !== from) void send("POST", "categories/rename", { from, to }, `${from} is now ${to}.`);
+        };
+        return (
+          <div className="rn-back" onClick={() => setRenamingCat(null)}>
+            <div className="rn-modal" role="dialog" aria-modal="true" aria-label={`Rename category ${renamingCat.from}`} onClick={(e) => e.stopPropagation()}>
+              <h3>Rename category</h3>
+              <p className="muted">Every item in “{renamingCat.from}” moves to the new name. Printers set to this category keep printing it. Using an existing name merges the two.</p>
+              <input autoFocus value={renamingCat.to} maxLength={80} aria-label="New category name" onChange={(e) => setRenamingCat({ ...renamingCat, to: e.target.value })} onKeyDown={(e) => { if (e.key === "Enter") save(); if (e.key === "Escape") setRenamingCat(null); }} />
+              <div className="rn-actions">
+                <button className="secondary" onClick={() => setRenamingCat(null)}>Cancel</button>
+                <button className="primary" disabled={!to || to === renamingCat.from} onClick={save}>Save</button>
+              </div>
+            </div>
+          </div>
+        );
+      })()}
 
       {renaming && (() => {
         const p = catalog.products.find((x) => x.id === renaming.id);

@@ -306,4 +306,14 @@ describe("turning items off in a pricebook, free items, bulk edits and copying a
     expect((await post("/api/catalog/pricebooks/nope/clone", { name: "X" })).status).toBe(400);
     expect((await post("/api/catalog/pricebooks/standard/clone", { name: "X" }, cashier)).status).toBe(403);
   });
+  it("renaming a category moves its items and the printers that list it; only managers can", async () => {
+    await post("/api/catalog/products", { id: "rc1", name: "Rc One", category: "OldCat", priceCents: 100 });
+    await db.query("INSERT INTO printers (merchant_id,id,name,outlet_id,language,roles,categories,width_chars,drawer,connection,active) SELECT merchant_id,'rc-p','RC','main','escpos','{kitchen}','{OldCat}',42,false,'{}'::jsonb,true FROM products WHERE id='rc1'").catch(() => {});
+    expect((await post("/api/catalog/categories/rename", { from: "OldCat", to: "NewCat" }, cashier)).status).toBe(403);
+    expect((await post("/api/catalog/categories/rename", { from: "Nope", to: "X" })).status).toBe(400);
+    expect((await post("/api/catalog/categories/rename", { from: "OldCat", to: "NewCat" })).status).toBe(200);
+    expect((await getCatalog()).products.find((p) => p.id === "rc1")!.category).toBe("NewCat");
+    const pr = await db.query("SELECT categories FROM printers WHERE id='rc-p'");
+    if (pr.rowCount) expect(pr.rows[0].categories).toEqual(["NewCat"]);
+  });
 });

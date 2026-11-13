@@ -331,6 +331,17 @@ export class PgCatalogStore implements CatalogStore {
     });
   }
 
+  /** Rename a category: every item in it moves, and printers that list it keep printing it. Naming an existing category merges the two. */
+  renameCategory(from: string, to: string) {
+    return this.change(async (c) => {
+      const m = this.merchantId;
+      const r = await c.query("UPDATE products SET category=$3 WHERE merchant_id=$1 AND category=$2", [m, from, to]);
+      if (!r.rowCount) throw new ChangeError("category not found");
+      await c.query("UPDATE printers SET categories = array_replace(categories, $3, $2) WHERE merchant_id=$1 AND $3 = ANY(categories)", [m, to, from]);
+      return { from, to, items: r.rowCount };
+    });
+  }
+
   /** Replace an item's photo. PNG, JPEG or WebP up to 300 KB, checked by content, not by the label. */
   setImage(productId: string, bytes: Buffer) {
     return this.change(async (c) => {
