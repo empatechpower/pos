@@ -186,7 +186,10 @@ const channelIcon = (kind: string): keyof typeof ICONS => (kind === "dine_in" ? 
 
 const photo = (p: { id: string; imageVersion?: number }) => (p.imageVersion ? `/api/products/${p.id}/image?v=${p.imageVersion}` : null);
 // The card shows the plain lower price; Variants are chosen on the sheet (no ranges on cards).
-const cardPrice = (m: MenuEntry) => formatMoney(priceRange(m.priceCents, m.options)[0]);
+const cardPrice = (m: MenuEntry) => {
+  const [lo, hi] = priceRange(m.priceCents, m.options);
+  return lo === hi ? formatMoney(lo) : `From ${formatMoney(lo)}`;
+};
 
 /** The customer's own ordering page: no sign-in, no device set-up. Public by design. */
 const PURCHASE_KEY = "pos.purchase";
