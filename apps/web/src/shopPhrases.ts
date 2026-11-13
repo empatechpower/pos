@@ -712,14 +712,14 @@ export const PHRASES: Record<string, string[]> = {
   "Servierbereit!",
   "பரிமாறத் தயார்!"
  ],
- "Your order is ready and is being served to {t}.": [
-  "Pesanan anda sudah siap dan sedang dihidangkan ke {t}.",
-  "Pesanan Anda sudah siap dan sedang disajikan ke {t}.",
-  "您的订单已准备好，正送往 {t}。",
-  "ご注文の準備ができました。{t} にお運びします。",
-  "Votre commande est prête et est servie à {t}.",
-  "Ihre Bestellung ist fertig und wird zu {t} gebracht.",
-  "உங்கள் ஆர்டர் தயார், {t} க்கு பரிமாறப்படுகிறது."
+ "Your order is going to be served to {t}.": [
+  "Pesanan anda akan dihidangkan ke {t}.",
+  "Pesanan Anda akan disajikan ke {t}.",
+  "您的订单将送到 {t}。",
+  "ご注文は {t} にお運びします。",
+  "Votre commande va être servie à {t}.",
+  "Ihre Bestellung wird zu {t} gebracht.",
+  "உங்கள் ஆர்டர் {t} க்கு பரிமாறப்படும்."
  ],
  "in bag": [
   "dalam beg",

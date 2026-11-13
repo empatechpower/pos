@@ -89,7 +89,7 @@ const STATUS_TEXT: Record<ShopStatus, { title: string; body: (o: OrderView) => s
   awaiting_payment: { get title() { return tx("Accepted: please pay"); }, body: (o) => tx("Pay {amt} at the counter and quote your number. We start your order once it is paid.", { amt: formatMoney(o.totalCents - o.paidCents) }) },
   queued: { get title() { return tx("In the queue"); }, body: () => tx("Your order is paid and waiting to be made.") },
   preparing: { get title() { return tx("Being prepared"); }, body: () => tx("Your order is being made right now.") },
-  ready: { get title() { return tx("Ready to serve!"); }, body: (o) => (o.spot ? tx("Your order is ready and is being served to {t}.", { t: o.spot }) : tx("Please collect your order at the counter.")) },
+  ready: { get title() { return tx("Ready to serve!"); }, body: (o) => (o.spot ? tx("Your order is going to be served to {t}.", { t: o.spot }) : tx("Please collect your order at the counter.")) },
   completed: { get title() { return tx("Collected"); }, body: () => tx("Enjoy! Thank you for ordering.") },
   cancelled: { get title() { return tx("Order cancelled"); }, body: () => tx("The shop could not take this order. Please ask at the counter, or order again.") },
 };
@@ -1574,7 +1574,9 @@ function Status({ orderId, info }: { orderId: string; info: Info }) {
   const head = <div className="shop-headwrap"><h2 className="page-title" style={{ padding: "14px 16px 10px" }}>{t("orderStatusW", "Order status")}</h2></div>;
   if (!o) return <>{head}<div className="e2e-scroll shop-body"><button className="e2e-back" onClick={goBack}><Icon name="chevL" size={16} /> {tx("Back")}</button><p className="e2e-sub">{problem ?? "Loading your order…"}</p></div></>;
   const text = STATUS_TEXT[o.status];
-  const step = STEPS.indexOf(o.status);
+  // A collected order has finished every step; a ready one has finished the last (it shows a tick, with its message under it).
+  const step = o.status === "completed" ? STEPS.length : STEPS.indexOf(o.status);
+  const finished = o.status === "ready" || o.status === "completed";
   const cancelled = o.status === "cancelled";
   const paid = o.paidCents >= o.totalCents;
   return (
@@ -1597,10 +1599,11 @@ function Status({ orderId, info }: { orderId: string; info: Info }) {
           <div className="e2e-card">
             <div className="status-steps">
               {STEPS.map((s, idx) => {
-                const cls = idx < step ? "done" : idx === step ? "now" : "";
+                const isDone = idx < step || (finished && idx === step);
+                const cls = isDone ? "done" : idx === step ? "now" : "";
                 return (
                   <div key={s} className={`status-step ${cls}`}>
-                    <span className="dot">{idx < step ? "✓" : idx + 1}</span>
+                    <span className="dot">{isDone ? "✓" : idx + 1}</span>
                     <span><span className="st-t">{STATUS_TEXT[s].title.split(":")[0]}</span><br /><span className="st-d">{idx === step ? text.body(o) : idx < step ? t("done", "Done") : "—"}</span></span>
                   </div>
                 );
