@@ -94,6 +94,10 @@ export async function setupTelegramWebhook(integ: Integrations, log: (m: string)
       { command: "price", description: "Change one item's price" },
       { command: "off", description: "Switch an item off in a pricebook" },
       { command: "on", description: "Switch an item back on" },
+      { command: "manager", description: "Open the Manager page, signed in" },
+      { command: "online", description: "Open Online orders, signed in" },
+      { command: "printers", description: "Open Printers, signed in" },
+      { command: "prices", description: "Open Prices, signed in" },
       { command: "edit", description: "Open the web page to edit all items" },
       { command: "pricebooks", description: "List pricebooks and channels" },
       { command: "items", description: "Find an item and its prices" },
@@ -141,7 +145,20 @@ export function registerTelegram(app: FastifyInstance, d: TelegramDeps): void {
         WHERE l.merchant_id=$1 AND l.telegram_id=$2 AND s.active`,
       [d.merchantId, telegramId],
     );
-    return r.rows[0] ? { staffId: r.rows[0].id, name: r.rows[0].name, role: r.rows[0].role } : null;
+    if (r.rows[0]) return { staffId: r.rows[0].id, name: r.rows[0].name, role: r.rows[0].role };
+    // A Telegram account named in TELEGRAM_ADMIN_IDS is the owner's: it is linked to the owner's staff login the first time it speaks, so no code is needed.
+    if (t?.adminIds?.includes(String(telegramId))) {
+      const owner = await d.db.query("SELECT id, name, role FROM staff WHERE merchant_id=$1 AND role='owner' AND active ORDER BY created_at LIMIT 1", [d.merchantId]);
+      if (owner.rows[0]) {
+        await d.db.query(
+          "INSERT INTO telegram_links (merchant_id, telegram_id, chat_id, staff_id, name) VALUES ($1,$2,$2,$3,$4) ON CONFLICT (merchant_id, telegram_id) DO UPDATE SET staff_id=EXCLUDED.staff_id",
+          [d.merchantId, telegramId, owner.rows[0].id, "owner (by Telegram id)"],
+        );
+        await audit(d.db, d.merchantId, owner.rows[0].id, "telegram.autolink", { telegramId });
+        return { staffId: owner.rows[0].id, name: owner.rows[0].name, role: owner.rows[0].role };
+      }
+    }
+    return null;
   };
 
   const webCode = async (who: Who, target: string) => {
@@ -165,6 +182,7 @@ export function registerTelegram(app: FastifyInstance, d: TelegramDeps): void {
         `/price kaya toast 2.50 : change one item's price (I'll ask which pricebook)\n` +
         `/off teh : switch an item off in a pricebook (hidden online, greyed out on the till)\n` +
         `/on teh : switch it back on\n` +
+        `/manager, /online, /printers, /prices : a link that opens that page, already signed in (no code or PIN)\n` +
         `/edit : a link to a web page where you can edit every item at once\n` +
         `/pricebooks : list pricebooks and which channels use them\n` +
         `/items kaya : find an item and see its prices\n\n` +
@@ -327,6 +345,14 @@ export function registerTelegram(app: FastifyInstance, d: TelegramDeps): void {
           [{ text: "Take away", callback_data: `nk:${id}:takeaway` }],
           [{ text: "Delivery", callback_data: `nk:${id}:delivery` }],
         ]);
+      }
+      case "/manager":
+      case "/online":
+      case "/printers":
+      case "/prices": {
+        const page = cmd.slice(1);
+        const names: Record<string, string> = { manager: "Manager", online: "Online orders", printers: "Printers", prices: "Prices" };
+        return send(chatId, `Open ${names[page]}. The link signs you in on that browser, works once, and lasts ${WEB_MINUTES} minutes.`, [[{ text: `Open ${names[page]}`, url: await webCode(who, page) }]]);
       }
       case "/edit": {
         const open = async (bookId: string) => send(chatId, `Open the editor for ${bookName(cat, bookId)}. The link works once, for ${WEB_MINUTES} minutes.`, [[{ text: `Edit ${bookName(cat, bookId)}`, url: await webCode(who, `pricebook/${bookId}`) }]]);

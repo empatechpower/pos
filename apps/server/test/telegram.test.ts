@@ -30,7 +30,7 @@ const fakeFetch = (async (url: string | URL, init?: RequestInit) => {
   sent.push({ method, body: JSON.parse(String(init?.body ?? "{}")) });
   return new Response(JSON.stringify({ ok: true, result: method === "getMe" ? { username: "rezein_test_bot" } : {} }));
 }) as typeof fetch;
-const integrations: Integrations = { publicUrl: "https://shop.example", telegram: { token: "TOK", webhookSecret: "hook-secret" }, fetch: fakeFetch };
+const integrations: Integrations = { publicUrl: "https://shop.example", telegram: { token: "TOK", webhookSecret: "hook-secret", adminIds: ["777"] }, fetch: fakeFetch };
 
 async function call(method: string, url: string, o: { body?: object; staff?: string; device?: string | null; headers?: Record<string, string> } = {}) {
   const res = await fetch(base + url, {
@@ -74,6 +74,7 @@ beforeAll(async () => {
   device = (await enroll(db, "bp", (await createEnrollmentCode(db, { merchantId: "bp", outletId: "EV", createdBy: null })).code, "Laptop"))!.token;
   await createStaff(db, { merchantId: "bp", code: "MGR", name: "Max", role: "manager", pin: "222222" });
   await createStaff(db, { merchantId: "bp", code: "C1", name: "Cat", role: "cashier", pin: "3333" });
+  await createStaff(db, { merchantId: "bp", code: "OWN", name: "Olivia", role: "owner", pin: "999999" });
   mgr = (await call("POST", "/api/auth/login", { body: { code: "MGR", pin: "222222" } })).json.token;
   cashier = (await call("POST", "/api/auth/login", { body: { code: "C1", pin: "3333" } })).json.token;
 }, 120_000);
@@ -203,7 +204,7 @@ describe("changing prices from Telegram", () => {
 
   it("a stranger pressing a button changes nothing", async () => {
     const before = await getCatalog();
-    await press(777, "pp:nasi-lemak:standard:1");
+    await press(4242, "pp:nasi-lemak:standard:1");
     expect((await getCatalog()).version).toBe(before.version);
   });
 });
@@ -319,5 +320,36 @@ describe("setting up the webhook", () => {
     await setupTelegramWebhook({ publicUrl: "https://shop.example" }, () => {});
     await setupTelegramWebhook({ ...integrations, publicUrl: "http://localhost:5173" }, () => {});
     expect(sent).toEqual([]);
+  });
+});
+
+describe("opening the staff pages from Telegram", () => {
+  it("a Telegram account named as the owner's needs no link code, and opens a page already signed in", async () => {
+    const r = await say(777, "/manager");
+    expect(r.said).toHaveLength(1);
+    const url = buttons(r.said[0]).find((b) => b.url)?.url!;
+    expect(url).toMatch(/^https:\/\/shop\.example\/#\/tg\?code=[A-Z0-9]{8}$/);
+    const code = url.split("code=")[1]!;
+    const redeemed = await call("POST", "/api/telegram/redeem", { body: { code }, device: null });
+    expect(redeemed.status).toBe(200);
+    expect(redeemed.json.to).toBe("manager");
+    expect(redeemed.json.staff).toMatchObject({ code: "OWN", role: "owner" });
+    // One use only.
+    expect((await call("POST", "/api/telegram/redeem", { body: { code }, device: null })).status).toBe(401);
+    expect((await db.query("SELECT 1 FROM audit_log WHERE action='telegram.autolink'")).rowCount).toBeGreaterThan(0);
+  });
+
+  it("opens Online, Printers and Prices the same way", async () => {
+    for (const page of ["online", "printers", "prices"]) {
+      const r = await say(777, `/${page}`);
+      const code = buttons(r.said[0]).find((b) => b.url)!.url!.split("code=")[1]!;
+      expect((await call("POST", "/api/telegram/redeem", { body: { code }, device: null })).json.to).toBe(page);
+    }
+  });
+
+  it("anyone not named or linked gets no page", async () => {
+    const r = await say(888, "/manager");
+    expect(r.said).toHaveLength(1);
+    expect(buttons(r.said[0]).some((b) => b.url)).toBe(false);
   });
 });

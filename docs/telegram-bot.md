@@ -9,6 +9,7 @@ Send it these commands in a private chat (it asks follow-up questions with butto
 - `/newpricebook Grab`: copies everything from Dine in (prices and which items are off) into a new pricebook and a new channel with the same name. It asks what kind of channel it is (dine in, takeaway or delivery).
 - `/price latte 5.50`: changes one item's price. It asks which item if several match, and which pricebook (or all of them).
 - `/off cheesecake` / `/on cheesecake`: **Off** hides the item online and greys it out on the till. The price is kept. $0 is a real, sellable price.
+- `/manager`, `/online`, `/printers`, `/prices`: send a one-time link that opens that staff page already signed in, so the person needs no enrolment code or PIN. The link works once and lasts 10 minutes. Only people linked as manager or owner get one.
 - `/edit`: sends a one-time link to a page with every item in a table, for mass changes. Nothing is saved until you press **Save changes**, and it is all-or-nothing.
 
 Every change is written to the audit log as made via Telegram.
@@ -21,6 +22,8 @@ Every change is written to the audit log as made via Telegram.
    - `TELEGRAM_WEBHOOK_SECRET` = a long random string (for example 40 random letters and digits)
 3. Save. Render redeploys. On start the server registers its webhook with Telegram (`PUBLIC_URL` must be the public address, e.g. `https://demo.rezein.com`). The log shows `[telegram] webhook set to ...`.
 4. Sign in as manager or owner, open **Manager, Telegram**, press **Make a code**, then send `/link CODE` to the bot. The code works once and lasts 10 minutes.
+
+**Skipping the link code for the owner.** Set `TELEGRAM_ADMIN_IDS` on the server to one or more Telegram user ids (numbers, separated by commas). A named account is linked to the owner's staff login the first time it messages the bot, so `/manager` works straight away. To find an id, message @userinfobot in Telegram. Only the owner's own account should be listed, because the link opens the owner's pages.
 
 Disconnect someone from the same Telegram tab. Only linked people with the catalogue permission can use the bot; anyone else is ignored. Group chats are ignored.
 
