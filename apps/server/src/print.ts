@@ -1,6 +1,6 @@
 import {
-  encodeEpl, encodeEscPos, encodeEscPosRaster, encodeZpl, isFullyPaid, itemLabel, kitchenTicket, receipt, visibleToKitchen, withDrawer,
-  type BusinessConfig, type Catalog, type Doc, type Label, type OrderLine, type OrderState, type PrintContext, type PrinterLanguage,
+  encodeEpl, encodeEscPos, encodeEscPosRaster, encodeZpl, isFullyPaid, itemLabel, kitchenCuts, kitchenTicket, receipt, visibleToKitchen, withDrawer,
+  type BusinessConfig, type Catalog, type CutMode, type Doc, type Label, type OrderLine, type OrderState, type PrintContext, type PrinterLanguage,
 } from "@pos/core";
 import { createHash } from "node:crypto";
 import type pg from "pg";
@@ -27,6 +27,8 @@ export interface Printer {
   connection: { host: string; port: number };
   agentDeviceId: string | null;
   active: boolean;
+  /** How a kitchen printer cuts tickets: one per different item (default), one per single item, or one per category. */
+  cutMode: CutMode;
 }
 
 export const MAX_ATTEMPTS = 5;
@@ -38,6 +40,7 @@ const toPrinter = (r: Record<string, any>): Printer => ({
   id: r.id, name: r.name, outletId: r.outlet_id, language: r.language, roles: r.roles, categories: r.categories, widthChars: r.width_chars,
   drawer: r.drawer, raster: !!r.raster, labelWidthMm: r.label_width_mm, labelHeightMm: r.label_height_mm, dpi: r.dpi === 300 ? 300 : 203,
   connection: r.connection, agentDeviceId: r.agent_device_id, active: r.active,
+  cutMode: r.cut_mode === "unit" || r.cut_mode === "category" ? r.cut_mode : "grouped",
 });
 
 /** Receipt and kitchen printers speak ESC/POS; label printers speak ZPL or EPL. Checked before saving. */
@@ -55,6 +58,7 @@ export function validatePrinter(p: Partial<Printer>): string[] {
   if (lab && !(p.labelWidthMm && p.labelHeightMm)) problems.push("label printers need a label width and height in mm");
   if (!p.connection?.host || !Number.isInteger(p.connection.port) || p.connection.port < 1 || p.connection.port > 65535) problems.push("connection needs a host and a port");
   if (p.widthChars !== undefined && ![32, 42, 48].includes(p.widthChars)) problems.push("widthChars must be 32, 42 or 48");
+  if (p.cutMode !== undefined && !["grouped", "unit", "category"].includes(p.cutMode)) problems.push("cutMode must be grouped, unit or category");
   return problems;
 }
 
@@ -102,12 +106,12 @@ export class PrintStore {
 
   async savePrinter(p: Printer): Promise<void> {
     await this.db.query(
-      `INSERT INTO printers (merchant_id,id,name,outlet_id,language,roles,categories,width_chars,drawer,raster,label_width_mm,label_height_mm,dpi,connection,agent_device_id,active)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16)
+      `INSERT INTO printers (merchant_id,id,name,outlet_id,language,roles,categories,width_chars,drawer,raster,label_width_mm,label_height_mm,dpi,connection,agent_device_id,active,cut_mode)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17)
        ON CONFLICT (merchant_id,id) DO UPDATE SET name=EXCLUDED.name, outlet_id=EXCLUDED.outlet_id, language=EXCLUDED.language, roles=EXCLUDED.roles,
          categories=EXCLUDED.categories, width_chars=EXCLUDED.width_chars, drawer=EXCLUDED.drawer, raster=EXCLUDED.raster, label_width_mm=EXCLUDED.label_width_mm,
-         label_height_mm=EXCLUDED.label_height_mm, dpi=EXCLUDED.dpi, connection=EXCLUDED.connection, agent_device_id=EXCLUDED.agent_device_id, active=EXCLUDED.active`,
-      [this.merchantId, p.id, p.name, p.outletId, p.language, p.roles, p.categories, p.widthChars, p.drawer, !!p.raster, p.labelWidthMm, p.labelHeightMm, p.dpi, JSON.stringify(p.connection), p.agentDeviceId, p.active],
+         label_height_mm=EXCLUDED.label_height_mm, dpi=EXCLUDED.dpi, connection=EXCLUDED.connection, agent_device_id=EXCLUDED.agent_device_id, active=EXCLUDED.active, cut_mode=EXCLUDED.cut_mode`,
+      [this.merchantId, p.id, p.name, p.outletId, p.language, p.roles, p.categories, p.widthChars, p.drawer, !!p.raster, p.labelWidthMm, p.labelHeightMm, p.dpi, JSON.stringify(p.connection), p.agentDeviceId, p.active, p.cutMode ?? "grouped"],
     );
   }
 
@@ -165,7 +169,13 @@ export class PrintStore {
             if (!lines.length) continue;
             const key = `${docType}:${order.orderId}:${t.id}:${createHash("sha1").update(lines.map((l) => l.lineId).sort().join(",")).digest("hex").slice(0, 12)}`;
             if (docType === "kitchen") {
-              if (await this.insertJob(client, t, "kitchen", order.orderId, key, enc(t, kitchenTicket(order, ctx.print, { lines, addOn: sent.size > 0 })), title(order))) made++;
+              // One job (one cut) for each cut the printer's setting asks for, in order.
+              const cuts = kitchenCuts(lines, t.cutMode, (id) => category.get(id) ?? "");
+              for (let n = 0; n < cuts.length; n++) {
+                const cut = cuts[n]!;
+                const cutKey = `${docType}:${order.orderId}:${t.id}:${createHash("sha1").update(cut.lineIds.slice().sort().join(",") + "#" + n).digest("hex").slice(0, 12)}`;
+                if (await this.insertJob(client, t, "kitchen", order.orderId, cutKey, enc(t, kitchenTicket(order, ctx.print, { lines: cut.lines, addOn: sent.size > 0 })), title(order))) made++;
+              }
             } else {
               // one label per unit, in a single job so a roll never gets half an order
               const labels = lines.flatMap((l) => Array.from({ length: l.qty }, () => itemLabel(order, l, ctx.print, { widthMm: t.labelWidthMm ?? 50, heightMm: t.labelHeightMm ?? 30 })));
@@ -193,9 +203,14 @@ export class PrintStore {
   async reprint(order: OrderState, docType: "receipt" | "kitchen", ctx: EnqueueCtx, printerId?: string): Promise<number> {
     const printers = (await this.listPrinters()).filter((p) => p.active && p.roles.includes(docType) && (!printerId || p.id === printerId));
     let made = 0;
+    const category = new Map(ctx.catalog.products.map((x) => [x.id, x.category]));
     for (const p of printers) {
-      const doc = docType === "receipt" ? receipt(order, ctx.config, ctx.print) : kitchenTicket(order, ctx.print);
-      if (await this.insertJob(this.db, p, docType, order.orderId, `reprint:${docType}:${order.orderId}:${p.id}:${Date.now()}:${Math.random()}`, enc(p, doc), title(order) + " (reprint)")) made++;
+      const docs = docType === "receipt"
+        ? [receipt(order, ctx.config, ctx.print)]
+        : kitchenCuts(order.lines, p.cutMode, (id) => category.get(id) ?? "").map((c) => kitchenTicket(order, ctx.print, { lines: c.lines }));
+      for (const [n, doc] of docs.entries()) {
+        if (await this.insertJob(this.db, p, docType, order.orderId, `reprint:${docType}:${order.orderId}:${p.id}:${Date.now()}:${n}:${Math.random()}`, enc(p, doc), title(order) + " (reprint)")) made++;
+      }
     }
     return made;
   }

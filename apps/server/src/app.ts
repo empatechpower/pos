@@ -444,6 +444,7 @@ export async function buildApp({ config, store, db, catalog, catalogAdmin, print
         connection: b.connection as Printer["connection"],
         agentDeviceId: b.agentDeviceId ?? null,
         active: b.active !== false,
+        cutMode: (b.cutMode ?? "grouped") as Printer["cutMode"],
       };
       const problems = validatePrinter(p);
       if (problems.length) return reply.code(400).send({ error: "invalid_printer", problems });

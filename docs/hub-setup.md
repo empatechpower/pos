@@ -98,3 +98,14 @@ Open `https://YOUR-SHOP-ADDRESS/#/manager` on a computer or tablet, sign in with
   an email service is connected.
 
 The first time, the browser must be enrolled as a device (Devices page, or a code from the command line), and then staff sign in.
+
+## How a kitchen printer cuts its tickets
+
+Set per printer under Printers (kitchen printers only), "How tickets are cut":
+
+- **One cut for each different item** (the default). Identical items, meaning the same product with the same choices, are added together: 2 x Milo (iced) is one cut. Milo (iced) and Milo (hot) are different items, so they are two cuts and never share a line.
+- **One cut for every single item**, like a label: 2 x Milo (iced) is two cuts.
+- **One cut for each category.** Everything in a category goes on one ticket; identical items are added together, and the same item with different choices stays on its own line.
+
+Each cut is its own print job with its own cut of the paper, so a slow or failed cut can be retried on its own.
+

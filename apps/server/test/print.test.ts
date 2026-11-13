@@ -242,6 +242,61 @@ describe("routing to several printers", () => {
   });
 });
 
+describe("how a kitchen printer cuts its tickets", () => {
+  const withChoices = (orderId: string, queue: string, items: Array<{ id: string; name: string; qty: number; choice?: string }>) => {
+    const o = orderEvents([], { orderId, queue });
+    for (const it of items) {
+      o.events.push(o.mk({ type: "ItemAdded", lineId: `l-${it.id}-${it.choice ?? "x"}-${Math.random()}`, productId: it.id, name: it.name, unitCents: 200, qty: it.qty, options: it.choice ? [{ group: "Temperature", name: it.choice, qty: 1, priceCents: 0 }] : undefined }));
+    }
+    o.events.push(o.mk({ type: "PaymentRecorded", paymentId: `pay-${Math.random()}`, method: "credit", amountCents: items.reduce((t, i) => t + 200 * i.qty, 0), confirmed: true }));
+    return o;
+  };
+  const cutsOn = async (orderId: string, printerId: string) => (await jobsFor(orderId)).filter((j) => j.printer_id === printerId && j.doc_type === "kitchen");
+
+  it("by default 2 x Milo (iced) is one cut, and Milo (iced) with Milo (hot) is two", async () => {
+    await setPrinter("cuts", printerBody({ name: "Cuts", roles: ["kitchen"], connection: { host: "10.0.0.8", port: 9100 } }));
+    const same = withChoices(newId(), "A401", [{ id: "kopi", name: "Milo", qty: 2, choice: "Iced" }]);
+    await push(same.events);
+    expect(await cutsOn(same.orderId, "cuts")).toHaveLength(1);
+    const diff = withChoices(newId(), "A402", [{ id: "kopi", name: "Milo", qty: 1, choice: "Iced" }, { id: "kopi", name: "Milo", qty: 1, choice: "Hot" }]);
+    await push(diff.events);
+    expect(await cutsOn(diff.orderId, "cuts")).toHaveLength(2);
+    const { got, send } = capture();
+    await agent(send);
+    const mine = got.filter((g) => g.host === "10.0.0.8");
+    expect(mine.some((g) => g.text.includes("2 x Milo") && g.text.includes("- Iced"))).toBe(true);
+    expect(mine.some((g) => g.text.includes("1 x Milo") && g.text.includes("- Hot"))).toBe(true);
+  });
+
+  it("one cut for every single item, like a label", async () => {
+    await setPrinter("cuts", printerBody({ name: "Cuts", roles: ["kitchen"], cutMode: "unit", connection: { host: "10.0.0.8", port: 9100 } }));
+    const o = withChoices(newId(), "A403", [{ id: "kopi", name: "Milo", qty: 2, choice: "Iced" }, { id: "kaya-toast", name: "Kaya Toast", qty: 1 }]);
+    await push(o.events);
+    expect(await cutsOn(o.orderId, "cuts")).toHaveLength(3);
+  });
+
+  it("one cut for each category", async () => {
+    await setPrinter("cuts", printerBody({ name: "Cuts", roles: ["kitchen"], cutMode: "category", connection: { host: "10.0.0.8", port: 9100 } }));
+    const o = withChoices(newId(), "A404", [{ id: "kopi", name: "Milo", qty: 2, choice: "Iced" }, { id: "kopi", name: "Milo", qty: 1, choice: "Hot" }, { id: "kaya-toast", name: "Kaya Toast", qty: 1 }]);
+    await push(o.events);
+    const cuts = await cutsOn(o.orderId, "cuts");
+    expect(cuts).toHaveLength(2); // drinks together, toast on its own
+    const { got, send } = capture();
+    await agent(send);
+    const drinks = got.find((g) => g.host === "10.0.0.8" && g.text.includes("A404") && g.text.includes("Milo"))!;
+    expect(drinks.text).toContain("2 x Milo");
+    expect(drinks.text).toContain("1 x Milo");
+    expect(drinks.text).not.toContain("Kaya");
+  });
+
+  it("the setting is validated and saved, and a reprint follows it", async () => {
+    expect((await setPrinter("cuts", printerBody({ roles: ["kitchen"], cutMode: "everything" }))).status).toBe(400);
+    const list = (await call("/api/printers", { staff: mgr, device: till.token })).json.printers as Array<{ id: string; cutMode: string }>;
+    expect(list.find((x) => x.id === "cuts")!.cutMode).toBe("category");
+    await setPrinter("cuts", printerBody({ name: "Cuts", roles: ["kitchen"], connection: { host: "10.0.0.8", port: 9100 }, active: false }));
+  });
+});
+
 describe("delivery: retries, leases, competition", () => {
   const fresh = async () => {
     await db.query("UPDATE print_jobs SET status='done' WHERE status IN ('queued','leased')"); // clear earlier leftovers

@@ -88,6 +88,52 @@ export function kitchenTicket(order: OrderState, ctx: PrintContext, opts: Kitche
   return { blocks: b };
 }
 
+export type CutMode = "grouped" | "unit" | "category";
+export interface Cut {
+  /** What is printed on this cut. */
+  lines: OrderLine[];
+  /** Every order line this cut covers (several, when identical items were added together). */
+  lineIds: string[];
+}
+
+/**
+ * How a kitchen printer splits an order into cuts (separate tickets).
+ * Identical items (same product, same modifiers) are always added together: 2 x Milo (iced) is one line. Milo (iced) and Milo (hot)
+ * are different items and never share a line.
+ *   grouped  (default) one cut for each different item, so 2 x Milo (iced) is one cut and Milo (iced) + Milo (hot) are two
+ *   unit     one cut for every single item, like a label: 2 x Milo (iced) is two cuts
+ *   category one cut for each category, listing its items
+ */
+export function kitchenCuts(lines: readonly OrderLine[], mode: CutMode, categoryOf: (productId: string) => string): Cut[] {
+  const merged: Array<{ line: OrderLine; ids: string[] }> = [];
+  const at = new Map<string, number>();
+  for (const l of lines) {
+    if (l.qty <= 0) continue;
+    const key = `${l.productId}\u0000${optionLines(l.options).slice().sort().join("\u0001")}`;
+    const i = at.get(key);
+    if (i === undefined) {
+      at.set(key, merged.length);
+      merged.push({ line: { ...l }, ids: [l.lineId] });
+    } else {
+      merged[i]!.line = { ...merged[i]!.line, qty: merged[i]!.line.qty + l.qty };
+      merged[i]!.ids.push(l.lineId);
+    }
+  }
+  if (mode === "category") {
+    const groups = new Map<string, Cut>();
+    for (const m of merged) {
+      const c = categoryOf(m.line.productId);
+      const g = groups.get(c) ?? { lines: [], lineIds: [] };
+      g.lines.push(m.line);
+      g.lineIds.push(...m.ids);
+      groups.set(c, g);
+    }
+    return [...groups.values()];
+  }
+  if (mode === "unit") return merged.flatMap((m) => Array.from({ length: m.line.qty }, () => ({ lines: [{ ...m.line, qty: 1 }], lineIds: m.ids })));
+  return merged.map((m) => ({ lines: [m.line], lineIds: m.ids }));
+}
+
 /** One sticky label per unit (cup, bag), so each item is identifiable on the pass. */
 export function itemLabel(order: OrderState, line: OrderLine, ctx: PrintContext, size = { widthMm: 50, heightMm: 30 }): Label {
   return {
