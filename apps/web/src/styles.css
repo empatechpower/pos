@@ -396,3 +396,11 @@ main { flex: 1; padding: 14px 16px; }
 /* The Pay button on the order summary stays in view above the bottom bar, so it is never hidden below the fold. */
 .shop .pay-sticky { position: sticky; bottom: calc(66px + env(safe-area-inset-bottom)); z-index: 6; background: var(--page, #fffdf9); padding: 8px 0 4px; margin-top: 10px; }
 .shop .pay-sticky .e2e-cta { margin-top: 4px; }
+
+/* The table button gently pulses, as in the prototype, so customers notice and check which table the order is for. */
+@keyframes spotPulse { 0%, 100% { background: rgba(247, 241, 230, .55); color: #21252a; box-shadow: 0 0 0 0 rgba(33, 37, 42, 0); } 50% { background: #21252a; color: #fffefb; box-shadow: 0 0 0 5px rgba(33, 37, 42, .18); } }
+@keyframes spotIconPulse { 0%, 100% { color: #b85c0a; } 50% { color: #ffb066; } }
+.shop .shop-table { animation: spotPulse 3.2s ease-in-out infinite; }
+.shop .shop-table svg { animation: spotIconPulse 3.2s ease-in-out infinite; }
+@media (prefers-reduced-motion: reduce) { .shop .shop-table, .shop .shop-table svg { animation: none; } }
+.shop-tableedit select { flex: 1; padding: 10px 12px; border-radius: 12px; border: 1px solid var(--line); font: inherit; background: #fff; }
