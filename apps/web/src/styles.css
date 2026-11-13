@@ -404,3 +404,8 @@ main { flex: 1; padding: 14px 16px; }
 .shop .shop-table svg { animation: spotIconPulse 3.2s ease-in-out infinite; }
 @media (prefers-reduced-motion: reduce) { .shop .shop-table, .shop .shop-table svg { animation: none; } }
 .shop-tableedit select { flex: 1; padding: 10px 12px; border-radius: 12px; border: 1px solid var(--line); font: inherit; background: #fff; }
+
+/* These two wrappers came from the prototype, where they were the scrolling area of a fixed-height app. Here the page itself scrolls, so
+   they must not capture touch scrolling: with overflow:auto and overscroll-behavior:none they swallowed swipes that started on the
+   content (Account, Order Summary), so those pages would not scroll on some phones. */
+html .shop .scroll-body, html .shop .e2e-scroll { overflow-y: visible; overflow-x: clip; overscroll-behavior: auto; }
