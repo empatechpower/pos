@@ -91,6 +91,9 @@ describe("members-only shop: phone sign-in and credit only", () => {
     const r = await order(s.token, { payWithCredit: true });
     expect(r.status).toBe(200);
     expect((await call("/api/shop/me", { staff: s.token, device: "" })).json.creditCents).toBeLessThan(5000);
+    // The kitchen ticket names the customer, so a runner can find them even if they change tables.
+    const opened = await db.query("SELECT body FROM events WHERE order_id=$1 AND type='OrderOpened'", [r.json.orderId]);
+    expect(opened.rows[0].body).toMatchObject({ customerName: "Mei Lin", customerPhone: "+6591234567" });
   });
 
   it("when no hub phone is running, sign-in still works through a staff member's approval", async () => {

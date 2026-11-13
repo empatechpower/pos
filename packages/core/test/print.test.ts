@@ -7,12 +7,12 @@ import {
 const config = PRESETS.fastServe("b", "B", "O");
 const NOW = Date.UTC(2026, 10, 7, 4, 5); // 12:05 in Singapore
 
-function order(opts: { channel?: { id: string; name: string; service: boolean; kind: "dine_in" | "takeaway" }; pay?: number | "all"; spot?: string } = {}): OrderState {
+function order(opts: { channel?: { id: string; name: string; service: boolean; kind: "dine_in" | "takeaway" }; pay?: number | "all"; spot?: string; name?: string; phone?: string } = {}): OrderState {
   const orderId = newId();
   const ch = opts.channel ?? { id: "take", name: "Take away", service: false, kind: "takeaway" as const };
   const base = { orderId, deviceId: "A" };
   const ev: OrderEvent[] = [
-    { ...base, id: "e1", ts: 1, seq: 1, type: "OrderOpened", fulfilment: ch.kind, channelId: ch.id, channelName: ch.name, serviceCharge: ch.service, queueNumber: "A007", spot: opts.spot },
+    { ...base, id: "e1", ts: 1, seq: 1, type: "OrderOpened", fulfilment: ch.kind, channelId: ch.id, channelName: ch.name, serviceCharge: ch.service, queueNumber: "A007", spot: opts.spot, customerName: opts.name, customerPhone: opts.phone },
     { ...base, id: "e2", ts: 2, seq: 2, type: "ItemAdded", lineId: "l1", productId: "kaya", name: "Kaya Toast", unitCents: 200, qty: 2 },
     { ...base, id: "e3", ts: 3, seq: 3, type: "ItemAdded", lineId: "l2", productId: "nasi", name: "Nasi Lemak with Extra Fried Chicken Wing and Sambal", unitCents: 690, qty: 1 },
   ];
@@ -217,3 +217,21 @@ describe("labels", () => {
     expect(texts[1]).toBe("Kaya Toast");
   });
 });
+
+describe("kitchen ticket: who it is for", () => {
+  const ctx = { merchantName: "B", outletName: "O", now: NOW, timeZone: "Asia/Singapore" } as never;
+  const dine = { id: "dine", name: "Dine in", service: true, kind: "dine_in" as const };
+  it("prints the table with the customer's name and phone, so a runner can find them", () => {
+    const text = plainText(kitchenTicket(order({ channel: dine, spot: "Table 12", name: "Mei Lin", phone: "+6591234567" }), ctx), 42).join("\n");
+    expect(text).toContain("Table 12");
+    expect(text).toContain("Mei Lin");
+    expect(text).toContain("+6591234567");
+  });
+  it("prints just the phone when there is no name, and neither when there is neither", () => {
+    expect(plainText(kitchenTicket(order({ channel: dine, spot: "Table 3", phone: "+6598765432" }), ctx), 42).join("\n")).toContain("+6598765432");
+    const none = plainText(kitchenTicket(order({ channel: dine, spot: "Table 3" }), ctx), 42).join("\n");
+    expect(none).toContain("Table 3");
+    expect(none).not.toContain("undefined");
+  });
+});
+
