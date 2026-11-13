@@ -1,3 +1,4 @@
+import { fileURLToPath } from "node:url";
 import { createCanvas, GlobalFonts } from "@napi-rs/canvas";
 import type { Bitmap, RasterRenderer, TextStyle } from "@pos/core";
 
@@ -5,6 +6,8 @@ import type { Bitmap, RasterRenderer, TextStyle } from "@pos/core";
  * Draws receipt text with real fonts so any script prints. Fonts come from the machine; on a server that has
  * none, point PRINT_FONT_DIR at a folder holding e.g. Noto Sans CJK and Noto Sans Tamil.
  */
+// A Noto Sans SC (Chinese, also covers Latin) ships with the app, because a hosted server has no CJK font of its own.
+GlobalFonts.loadFontsFromDir(fileURLToPath(new URL("../fonts/", import.meta.url)));
 if (process.env.PRINT_FONT_DIR) GlobalFonts.loadFontsFromDir(process.env.PRINT_FONT_DIR);
 
 const FAMILY = "Noto Sans CJK SC, Noto Sans Tamil, PingFang SC, Hiragino Sans GB, Heiti SC, Arial Unicode MS, DejaVu Sans, sans-serif";
