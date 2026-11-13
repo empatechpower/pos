@@ -516,7 +516,7 @@ function Menu({ info, catalog, config, loginError }: { info: Info; catalog: Cata
       if (res.ok && j.orderId) {
         localStorage.setItem(LS_LAST, j.orderId);
         clearPurchaseKey();
-        saveBag([], ""); // the order is placed: do not bring this bag back
+        saveBag([], spot); // the order is placed: do not bring this bag back, but remember the table for the next order
         if (payMethod === "credit") void loadMember(); // the balance has gone down
         if (payMethod === "card" || payMethod === "paynow") {
           // The order exists; now send the customer to the card / PayNow page. If that is unavailable they land on the
