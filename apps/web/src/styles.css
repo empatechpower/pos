@@ -194,7 +194,7 @@ main { flex: 1; padding: 14px 16px; }
 .shop-chips::-webkit-scrollbar { display: none; }
 .shop-chips button { padding: 8px 12px; border-radius: 999px; border: 1.5px solid transparent; background: var(--beige); white-space: nowrap; font-weight: 600; font-size: 14px; color: #575046; cursor: pointer; }
 .shop-chips button.on { border-color: var(--accent); background: var(--soft); color: var(--text); }
-.shop-chips button.search { position: sticky; left: 11px; z-index: 1; display: flex; align-items: center; justify-content: center; flex: none; width: 36px; height: 36px; padding: 0; background: #fff; border-color: var(--accent); color: #b85c0a; box-shadow: 0 2px 8px rgba(120,80,20,.14); }
+.shop-chips button.search { position: sticky; left: 0; z-index: 1; display: flex; align-items: center; justify-content: center; flex: none; width: 36px; height: 36px; padding: 0; background: #fff; border-color: var(--accent); color: #b85c0a; box-shadow: 0 2px 8px rgba(120,80,20,.14); }
 .shop-chips button.search.on { background: var(--accent); color: var(--accent-ink); }
 .shop-search { margin: 0 0 8px; width: 100%; padding: 0 16px; height: 42px; border-radius: 999px; border: 1.5px solid var(--accent); font: inherit; font-size: 14.5px; }
 .shop-note { margin: 8px 0; }
