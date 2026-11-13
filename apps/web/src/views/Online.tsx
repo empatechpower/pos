@@ -95,6 +95,8 @@ export function Online({ config, online }: { config: BusinessConfig; online: boo
           ) : (
             <span className="muted">Paid</span>
           )}
+          {!isNew && o.stage !== "ready" && o.stage !== "completed" && <button className="secondary sm" title="Tell the customer it is ready to serve" onClick={() => void record(o.orderId, { type: "StageSet", stage: "ready" })}>Ready to serve</button>}
+          {!isNew && o.stage === "ready" && <button className="secondary sm" title="Served or collected: take it off this list" onClick={() => void record(o.orderId, { type: "StageSet", stage: "completed" })}>Done</button>}
           <button className="secondary sm" aria-expanded={detail === o.orderId} onClick={() => setDetail(detail === o.orderId ? null : o.orderId)}>{detail === o.orderId ? "Hide details" : "Details"}</button>
         </div>
       </div>
