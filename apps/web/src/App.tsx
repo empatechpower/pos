@@ -11,6 +11,7 @@ import { Enroll } from "./views/Enroll";
 import { Login } from "./views/Login";
 import { Manager } from "./views/Manager";
 import { Online } from "./views/Online";
+import { ErrorBoundary } from "./views/ErrorBoundary";
 import { Shop } from "./views/Shop";
 import { Orders } from "./views/Orders";
 import { Printers } from "./views/Printers";
@@ -50,7 +51,7 @@ export function App() {
   }, []);
 
   // The customer ordering page is public: no enrolment, no sign-in, none of the staff chrome.
-  if (route === "shop") return <Shop />;
+  if (route === "shop") return <ErrorBoundary><Shop /></ErrorBoundary>;
 
   // A one-time link from the Telegram bot: it enrols this browser and signs the person in, so it comes before the enrolment screen.
   if (route === "tg") return <TelegramSignIn />;
