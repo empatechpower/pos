@@ -4,7 +4,7 @@ import { confirmedPaid, isFullyPaid, menuFor, newId, reduceOrder, shopStatus, ty
 import { CASHIER_TOPUP_LIMIT_CENTS, audit, authenticate, can, createStaff, login, logout, recentAudit, type Permission, type Role, type Staff } from "./auth.js";
 import type { CatalogStore, ChangeResult, PgCatalogStore } from "./catalog.js";
 import type { Db } from "./db/pool.js";
-import { balanceOf, refund, spend, topUp } from "./ledger.js";
+import { adjustTo, balanceOf, refund, spend, topUp } from "./ledger.js";
 import { authenticateDevice, createEnrollmentCode, enroll, markPrintPoll, setSmsNumber, issueStreamTicket, listDevices, redeemStreamTicket, revokeDevice, type Device } from "./devices.js";
 import { BrandStore } from "./brand.js";
 import { PrintStore, validatePrinter, type Printer } from "./print.js";
@@ -686,6 +686,19 @@ export async function buildApp({ config, store, db, catalog, catalogAdmin, print
       return { ok: true };
     });
     app.post<{ Params: { id: string } }>("/api/members/pending-signins/:id/reject", { preHandler: needs("wallet.spend") }, async (req, reply) => ((await members.rejectSms(req.params.id)) ? { ok: true } : reply.code(404).send({ error: "not_waiting" })));
+
+    /** A manager corrects a member's credit to an exact amount. One adjustment entry for the difference, with the reason and who did it. */
+    app.post<{ Params: { id: string }; Body: { newBalanceCents?: number; reason?: string; idempotencyKey?: string } }>("/api/members/:id/credit-set", { preHandler: needs("wallet.refund") }, async (req, reply) => {
+      const { newBalanceCents, idempotencyKey } = req.body ?? {};
+      const reason = String(req.body?.reason ?? "").trim().slice(0, 120);
+      if (!Number.isSafeInteger(newBalanceCents) || (newBalanceCents as number) < 0 || (newBalanceCents as number) > 10_000_000 || !idempotencyKey || !reason) {
+        return reply.code(400).send({ error: "newBalanceCents (zero or more, in cents), a reason and an idempotencyKey are required" });
+      }
+      if (!/^[0-9a-f-]{36}$/i.test(req.params.id) || !(await members.byId(req.params.id))) return reply.code(404).send({ error: "member_not_found" });
+      const r = await adjustTo(db, { merchantId, customerId: req.params.id, targetCents: newBalanceCents as number, idempotencyKey, staffId: req.staff!.id, deviceId: req.device!.id, outletId: config.outletName, note: `${req.staff!.name}: ${reason}` });
+      if (r.changed && !r.replayed) await audit(db, merchantId, req.staff!.id, "member.credit_set", { memberId: req.params.id, deltaCents: r.deltaCents, balanceCents: r.balanceCents, reason });
+      return r;
+    });
 
     /** Add or take away reward points by hand. Managers and owners only; a reason is required and the change is audited. */
     app.post<{ Params: { id: string }; Body: { points?: number; note?: string; idempotencyKey?: string } }>("/api/members/:id/points", { preHandler: needs("wallet.refund") }, async (req, reply) => {

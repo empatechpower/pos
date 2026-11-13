@@ -139,7 +139,7 @@ function Members({ canAdjustPoints, canImport, rewardsOn }: { canAdjustPoints: b
   const [q, setQ] = useState("");
   const [rows, setRows] = useState<MemberRow[] | null>(null);
   const [total, setTotal] = useState(0);
-  const [open, setOpen] = useState<{ id: string; kind: "credit" | "points" } | null>(null);
+  const [open, setOpen] = useState<{ id: string; kind: "credit" | "creditedit" | "points" } | null>(null);
   const [panel, setPanel] = useState<null | "add" | "upload">(null);
   const [msg, setMsg] = useState<string | null>(null);
   const seq = useRef(0);
@@ -186,9 +186,11 @@ function Members({ canAdjustPoints, canImport, rewardsOn }: { canAdjustPoints: b
           </div>
           <div style={{ display: "flex", gap: 8, marginTop: 8 }}>
             <button className="secondary sm" onClick={() => setOpen(open?.id === m.id && open.kind === "credit" ? null : { id: m.id, kind: "credit" })}>Add credit</button>
+            {canAdjustPoints && <button className="secondary sm" onClick={() => setOpen(open?.id === m.id && open.kind === "creditedit" ? null : { id: m.id, kind: "creditedit" })}>Edit credit</button>}
             {rewardsOn && canAdjustPoints && <button className="secondary sm" onClick={() => setOpen(open?.id === m.id && open.kind === "points" ? null : { id: m.id, kind: "points" })}>Adjust points</button>}
           </div>
           {open?.id === m.id && open.kind === "credit" && <CreditForm member={m} onDone={(t) => { setMsg(t); setOpen(null); void load(q.trim()); }} />}
+          {open?.id === m.id && open.kind === "creditedit" && <CreditEditForm member={m} onDone={(t) => { setMsg(t); setOpen(null); void load(q.trim()); }} />}
           {open?.id === m.id && open.kind === "points" && <PointsForm member={m} onDone={(t) => { setMsg(t); setOpen(null); void load(q.trim()); }} />}
         </div>
       ))}
@@ -222,6 +224,42 @@ function CreditForm({ member, onDone }: { member: MemberRow; onDone: (message: s
         <input value={custom} onChange={(e) => setCustom(e.target.value)} inputMode="decimal" placeholder="Other S$" style={{ width: 90 }} />
         <button className="primary sm" disabled={busy || !(cents > 0)} onClick={() => void add(cents)}>Add</button>
       </div>
+    </div>
+  );
+}
+
+/** Set a member's credit to an exact amount (managers and owners). Recorded as an adjustment with the reason, never as an edit. */
+function CreditEditForm({ member, onDone }: { member: MemberRow; onDone: (message: string) => void }) {
+  const [amount, setAmount] = useState((member.creditCents / 100).toFixed(2));
+  const [reason, setReason] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState<string | null>(null);
+  const key = useRef(newKey());
+  const target = Math.round(Number(amount) * 100);
+  const valid = amount.trim() !== "" && Number.isFinite(target) && target >= 0 && target <= 10_000_000;
+  const delta = valid ? target - member.creditCents : 0;
+  const ok = valid && delta !== 0 && reason.trim().length > 0;
+
+  async function save() {
+    if (busy || !ok) return;
+    setBusy(true);
+    setErr(null);
+    const r = await staffFetch(`/api/members/${member.id}/credit-set`, { body: { newBalanceCents: target, reason: reason.trim(), idempotencyKey: key.current } });
+    setBusy(false);
+    if ("problem" in r) return setErr(r.problem);
+    if (!r.res.ok) return setErr("Could not change the credit. Nothing was changed.");
+    onDone(`${member.name || member.phone || member.email || "Member"} now has ${formatMoney(target)} credit (${delta > 0 ? "+" : "-"}${formatMoney(Math.abs(delta))}).`);
+  }
+  return (
+    <div style={{ marginTop: 8 }}>
+      {err && <div className="flash warn">{err}</div>}
+      <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center" }}>
+        <span className="muted">New balance S$</span>
+        <input value={amount} onChange={(e) => setAmount(e.target.value)} inputMode="decimal" style={{ width: 100 }} aria-label="New credit balance" />
+        <input value={reason} onChange={(e) => setReason(e.target.value)} maxLength={120} placeholder="Reason (required)" style={{ flex: 1, minWidth: 160 }} />
+        <button className="primary sm" disabled={busy || !ok} onClick={() => void save()}>Save</button>
+      </div>
+      {valid && delta !== 0 && <p className="muted" style={{ fontSize: 13, margin: "6px 0 0" }}>{formatMoney(member.creditCents)} → {formatMoney(target)} ({delta > 0 ? "+" : "-"}{formatMoney(Math.abs(delta))}). Recorded as an adjustment with your name and the reason.</p>}
     </div>
   );
 }

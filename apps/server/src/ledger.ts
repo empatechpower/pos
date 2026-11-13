@@ -110,3 +110,44 @@ export async function rebuildBalance(db: Db, merchantId: string, customerId: str
   );
   return Number(r.rows[0].s);
 }
+
+/**
+ * A manager sets a member's credit to an exact amount. It is recorded as one adjustment entry for the difference (never an edit of
+ * the balance), with the reason and who did it. The same key replays the same entry.
+ */
+export async function adjustTo(
+  db: Db,
+  i: { merchantId: string; customerId: string; targetCents: number; idempotencyKey: string; staffId: string; deviceId?: string; outletId?: string; note: string },
+): Promise<{ ok: true; deltaCents: number; balanceCents: number; replayed: boolean; changed: boolean }> {
+  if (!Number.isSafeInteger(i.targetCents) || i.targetCents < 0) throw new Error("targetCents must be a whole number of cents, zero or more");
+  const client = await db.connect();
+  try {
+    await client.query("BEGIN");
+    await client.query("INSERT INTO wallets (merchant_id, customer_id) VALUES ($1,$2) ON CONFLICT (merchant_id, customer_id) DO NOTHING", [i.merchantId, i.customerId]);
+    const w = await client.query("SELECT id, balance_cents FROM wallets WHERE merchant_id=$1 AND customer_id=$2 FOR UPDATE", [i.merchantId, i.customerId]);
+    const walletId = w.rows[0].id as string;
+    const balance = Number(w.rows[0].balance_cents);
+    const dup = await client.query("SELECT amount_cents, balance_after FROM ledger_entries WHERE wallet_id=$1 AND idempotency_key=$2", [walletId, i.idempotencyKey]);
+    if (dup.rowCount) {
+      await client.query("COMMIT");
+      return { ok: true, deltaCents: Number(dup.rows[0].amount_cents), balanceCents: Number(dup.rows[0].balance_after), replayed: true, changed: true };
+    }
+    const delta = i.targetCents - balance;
+    if (delta === 0) {
+      await client.query("COMMIT");
+      return { ok: true, deltaCents: 0, balanceCents: balance, replayed: false, changed: false };
+    }
+    await client.query(
+      `INSERT INTO ledger_entries (wallet_id, kind, amount_cents, balance_after, idempotency_key, outlet_id, device_id, note, staff_id) VALUES ($1,'adjust',$2,$3,$4,$5,$6,$7,$8)`,
+      [walletId, delta, i.targetCents, i.idempotencyKey, i.outletId ?? null, i.deviceId ?? null, i.note, i.staffId],
+    );
+    await client.query("UPDATE wallets SET balance_cents=$1 WHERE id=$2", [i.targetCents, walletId]);
+    await client.query("COMMIT");
+    return { ok: true, deltaCents: delta, balanceCents: i.targetCents, replayed: false, changed: true };
+  } catch (e) {
+    await client.query("ROLLBACK").catch(() => {});
+    throw e;
+  } finally {
+    client.release();
+  }
+}

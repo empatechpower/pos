@@ -196,3 +196,38 @@ describe("event release gates: refunds and the books", () => {
     expect(r.json.openingCents + r.json.creditsCents + r.json.debitsCents + r.json.reversalsCents + r.json.adjustmentsCents).toBe(r.json.closingCents);
   });
 });
+
+describe("correcting a member's credit by hand", () => {
+  it("a manager sets the balance to an exact amount, as one adjustment with a reason, and the books still balance", async () => {
+    const m = await member(100);
+    const set = (amount: number, key: string, reason = "Customer paid S$40 cash, not S$100") => call(`/api/members/${m.id}/credit-set`, { body: { newBalanceCents: amount, reason, idempotencyKey: key }, staff: mgr });
+    expect((await set(4000, "adj-0001")).json).toMatchObject({ ok: true, deltaCents: -6000, balanceCents: 4000, replayed: false });
+    expect(Number(await creditOf(m.id))).toBe(4000);
+    expect((await set(4000, "adj-0001")).json.replayed).toBe(true); // same key: same entry, not a second adjustment
+    expect(Number(await creditOf(m.id))).toBe(4000);
+    expect((await set(4000, "adj-0002")).json).toMatchObject({ changed: false, deltaCents: 0 }); // no change, no entry
+    expect((await set(7500, "adj-0003", "Top-up recorded late")).json.deltaCents).toBe(3500);
+    const rows = await db.query("SELECT kind, amount_cents, note, staff_id FROM ledger_entries e JOIN wallets w ON w.id=e.wallet_id WHERE w.customer_id=$1 AND e.kind='adjust' ORDER BY e.created_at", [m.id]);
+    expect(rows.rows.map((x) => Number(x.amount_cents))).toEqual([-6000, 3500]);
+    expect(rows.rows[0].note).toContain("Customer paid S$40 cash");
+    expect(rows.rows[0].staff_id).toBeTruthy();
+    expect((await db.query("SELECT 1 FROM audit_log WHERE action='member.credit_set'")).rowCount).toBeGreaterThan(0);
+    const books = await call("/api/wallet/reconciliation", { staff: mgr });
+    expect(books.json.balanced).toBe(true);
+    expect(books.json.adjustmentsCents).toBeLessThan(0 + 1000000);
+  });
+
+  it("needs a reason, a sensible amount, and a manager or owner", async () => {
+    const m = await member(10);
+    await createStaff(db, { merchantId: "bp", code: "C9", name: "Cy", role: "cashier", pin: "3333" });
+    const cashier = (await call("/api/auth/login", { body: { code: "C9", pin: "3333" } })).json.token;
+    const body = (o: object) => ({ newBalanceCents: 500, reason: "fix", idempotencyKey: `adj-x-${Math.random()}`, ...o });
+    expect((await call(`/api/members/${m.id}/credit-set`, { body: body({}), staff: cashier })).status).toBe(403);
+    expect((await call(`/api/members/${m.id}/credit-set`, { body: body({ reason: "  " }), staff: mgr })).status).toBe(400);
+    expect((await call(`/api/members/${m.id}/credit-set`, { body: body({ newBalanceCents: -1 }), staff: mgr })).status).toBe(400);
+    expect((await call(`/api/members/${m.id}/credit-set`, { body: body({ newBalanceCents: 12.5 }), staff: mgr })).status).toBe(400);
+    expect((await call("/api/members/no-such-member/credit-set", { body: body({}), staff: mgr })).status).toBe(404);
+    expect(Number(await creditOf(m.id))).toBe(1000);
+  });
+});
+
