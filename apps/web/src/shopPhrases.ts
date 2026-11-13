@@ -640,6 +640,24 @@ export const PHRASES: Record<string, string[]> = {
   "Die Verbindung ist abgebrochen, wir wissen nicht, ob Ihre Bestellung angekommen ist. Tippen Sie erneut auf Bezahlen: Sie werden nicht doppelt belastet.",
   "இணைப்பு துண்டிக்கப்பட்டதால் உங்கள் ஆர்டர் சென்றதா எனத் தெரியவில்லை. மீண்டும் செலுத்து என்பதைத் தட்டவும்: இரண்டு முறை கட்டணம் வசூலிக்கப்படாது."
  ],
+ "Texting is not available right now. Please ask a member of staff to approve you.": [
+  "Menghantar teks tidak tersedia sekarang. Sila minta kakitangan meluluskan anda.",
+  "Pengiriman teks sedang tidak tersedia. Silakan minta staf untuk menyetujui Anda.",
+  "目前无法发送短信。请让店员为您确认。",
+  "現在テキストは使えません。スタッフに承認を依頼してください。",
+  "L'envoi de SMS n'est pas disponible. Demandez à un membre du personnel de vous valider.",
+  "SMS ist gerade nicht verfügbar. Bitten Sie eine Mitarbeiterin oder einen Mitarbeiter um Freigabe.",
+  "தற்போது உரைச் செய்தி கிடைக்கவில்லை. ஊழியரிடம் ஒப்புதல் கேளுங்கள்."
+ ],
+ "Text not arriving? Ask a member of staff to approve you.": [
+  "Teks tidak sampai? Minta kakitangan meluluskan anda.",
+  "Teks tidak masuk? Minta staf untuk menyetujui Anda.",
+  "收不到短信？请让店员为您确认。",
+  "テキストが届きませんか？スタッフに承認を依頼してください。",
+  "Le SMS n'arrive pas ? Demandez à un membre du personnel de vous valider.",
+  "Keine SMS angekommen? Bitten Sie eine Mitarbeiterin oder einen Mitarbeiter um Freigabe.",
+  "உரைச் செய்தி வரவில்லையா? ஊழியரிடம் ஒப்புதல் கேளுங்கள்."
+ ],
  "in bag": [
   "dalam beg",
   "di tas",

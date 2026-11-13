@@ -142,7 +142,7 @@ export function registerShop(app: FastifyInstance, d: ShopDeps) {
       channels: cat.channels.filter((c) => c.active && (!tables.length || c.kind === "dine_in")).map((c) => ({ id: c.id, name: c.name, kind: c.kind })),
       brand: await brandPayload(),
       // What this deployment can do beyond email sign-in and paying at the counter. The page enables only these.
-      auth: { google: !!integ.google && !!d.members, microsoft: !!integ.microsoft && !!d.members, phone: !!d.members && (smsTo ? { number: smsTo } : showCodes ? { number: "+65 8000 0000", simulated: true } : null) },
+      auth: { google: !!integ.google && !!d.members, microsoft: !!integ.microsoft && !!d.members, phone: !!d.members && (smsTo ? { number: smsTo } : membersOnly ? { number: "", manual: true } : showCodes ? { number: "+65 8000 0000", simulated: true } : null) },
       payments: { online: !!integ.stripe, methods: integ.stripe ? ["card", "paynow"] : [] },
     };
   });
@@ -310,11 +310,11 @@ export function registerShop(app: FastifyInstance, d: ShopDeps) {
     app.post<{ Body: { phone?: string } }>("/api/shop/auth/phone/start", async (req, reply) => {
       if (limited(authLimit, req, reply)) return;
       const smsTo = await smsNumber();
-      if (!smsTo && !showCodes) return reply.code(404).send({ error: "provider_not_available" });
+      if (!smsTo && !showCodes && !membersOnly) return reply.code(404).send({ error: "provider_not_available" });
       const phone = digitsOf(req.body?.phone);
       if (phone.length < 8 || phone.length > 15) return reply.code(400).send({ error: "phone number looks wrong" });
       const c = await members.startSms(phone, SMS_SECONDS);
-      return { id: c.id, code: c.code, to: smsTo ?? "+65 8000 0000", expiresInSeconds: SMS_SECONDS };
+      return { id: c.id, code: c.code, to: smsTo ?? (membersOnly ? null : "+65 8000 0000"), expiresInSeconds: SMS_SECONDS };
     });
 
     /** The customer's browser asks whether the text has arrived. The session is handed over once. */

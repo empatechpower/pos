@@ -674,6 +674,19 @@ export async function buildApp({ config, store, db, catalog, catalogAdmin, print
       return { created, existed, invalid, creditedCents: credited, results };
     });
 
+    /**
+     * When the text does not arrive (the hub phone is off, the signal is bad), a staff member can approve a waiting
+     * sign-in after checking the person in front of them. Approving lets that person into the member's account and credit.
+     */
+    app.get("/api/members/pending-signins", { preHandler: needs("wallet.spend") }, async () => ({ pending: await members.pendingSms() }));
+    app.post<{ Params: { id: string } }>("/api/members/pending-signins/:id/approve", { preHandler: needs("wallet.spend") }, async (req, reply) => {
+      const phone = await members.approveSms(req.params.id);
+      if (!phone) return reply.code(404).send({ error: "not_waiting" });
+      await audit(db, merchantId, req.staff!.id, "signin.approve", { phone: `+${phone.slice(0, 4)}…${phone.slice(-2)}` });
+      return { ok: true };
+    });
+    app.post<{ Params: { id: string } }>("/api/members/pending-signins/:id/reject", { preHandler: needs("wallet.spend") }, async (req, reply) => ((await members.rejectSms(req.params.id)) ? { ok: true } : reply.code(404).send({ error: "not_waiting" })));
+
     /** Add or take away reward points by hand. Managers and owners only; a reason is required and the change is audited. */
     app.post<{ Params: { id: string }; Body: { points?: number; note?: string; idempotencyKey?: string } }>("/api/members/:id/points", { preHandler: needs("wallet.refund") }, async (req, reply) => {
       const { points, idempotencyKey } = req.body ?? {};

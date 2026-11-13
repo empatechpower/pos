@@ -3,6 +3,7 @@ import { confirmedPaid, formatMoney, isFullyPaid, orderTotals, type BusinessConf
 import { staffFetch, useStaff } from "../auth";
 import { useOrders } from "../hooks";
 import { PrintBadge, usePrintStatus } from "./PrintBadge";
+import { PendingSignIns } from "./PendingSignIns";
 
 const TZ = "Asia/Singapore";
 const dayKey = (ms: number) => new Date(ms).toLocaleDateString("en-CA", { timeZone: TZ });
@@ -30,6 +31,7 @@ export function Manager({ config }: { config: BusinessConfig }) {
             {staff.role !== "cashier" && <button className={tab === "books" ? "on" : ""} aria-pressed={tab === "books"} onClick={() => setTab("books")}>Books</button>}
             {staff.role !== "cashier" && <button className={tab === "telegram" ? "on" : ""} aria-pressed={tab === "telegram"} onClick={() => setTab("telegram")}>Telegram</button>}
           </div>
+          <PendingSignIns signedIn />
           {tab === "orders" ? <Transactions config={config} /> : tab === "books" ? <Books /> : tab === "telegram" ? <TelegramPanel /> : <Members canAdjustPoints={staff.role !== "cashier"} canImport={staff.role !== "cashier"} rewardsOn={config.rewards.pointsEnabled} />}
         </>
       )}

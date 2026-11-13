@@ -92,4 +92,35 @@ describe("members-only shop: phone sign-in and credit only", () => {
     expect(r.status).toBe(200);
     expect((await call("/api/shop/me", { staff: s.token, device: "" })).json.creditCents).toBeLessThan(5000);
   });
+
+  it("when no hub phone is running, sign-in still works through a staff member's approval", async () => {
+    const info = (await call("/api/shop/info", { device: "" })).json;
+    expect(info.auth.phone).toMatchObject({ manual: true });
+    const start = await call("/api/shop/auth/phone/start", { body: { phone: "6591234567" }, device: "" });
+    expect(start.status).toBe(200);
+    expect(start.json.to).toBeNull();
+    // Waiting, and only staff can see or approve it.
+    expect((await call("/api/members/pending-signins", { device: "" })).status).toBe(401);
+    const list = await call("/api/members/pending-signins", { staff: mgr });
+    const mine = list.json.pending.find((p: any) => p.id === start.json.id);
+    expect(mine).toMatchObject({ phone: "6591234567", name: "Mei Lin" });
+    expect(mine.creditCents).toBeGreaterThan(0);
+    expect((await call(`/api/shop/auth/phone/${start.json.id}`, { device: "" })).json.state).toBe("pending");
+    const ok = await call(`/api/members/pending-signins/${start.json.id}/approve`, { body: {}, staff: mgr });
+    expect(ok.status).toBe(200);
+    const done = await call(`/api/shop/auth/phone/${start.json.id}`, { device: "" });
+    expect(done.json.state).toBe("verified");
+    expect(done.json.token).toBeTruthy();
+    // It can only be approved once, and is then gone from the list.
+    expect((await call(`/api/members/pending-signins/${start.json.id}/approve`, { body: {}, staff: mgr })).status).toBe(404);
+    expect((await call("/api/members/pending-signins", { staff: mgr })).json.pending.some((p: any) => p.id === start.json.id)).toBe(false);
+    expect((await db.query("SELECT 1 FROM audit_log WHERE action='signin.approve'")).rowCount).toBeGreaterThan(0);
+  });
+
+  it("a staff member can turn a waiting sign-in down", async () => {
+    const start = await call("/api/shop/auth/phone/start", { body: { phone: "6598880000" }, device: "" });
+    expect((await call(`/api/members/pending-signins/${start.json.id}/reject`, { body: {}, staff: mgr })).status).toBe(200);
+    expect((await call(`/api/shop/auth/phone/${start.json.id}`, { device: "" })).json.state).toBe("expired");
+    expect((await call(`/api/members/pending-signins/${start.json.id}/approve`, { body: {}, staff: mgr })).status).toBe(404);
+  });
 });

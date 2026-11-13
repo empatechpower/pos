@@ -214,6 +214,31 @@ export class MemberStore {
     return (r.rowCount ?? 0) > 0;
   }
 
+  /** Sign-ins waiting for a text (or for a staff member to approve them), newest first. */
+  async pendingSms(): Promise<Array<{ id: string; phone: string; name: string | null; creditCents: number | null; secondsLeft: number }>> {
+    const r = await this.db.query(
+      `SELECT c.id, c.phone, m.name, w.balance_cents, GREATEST(0, EXTRACT(EPOCH FROM (c.expires_at - now()))) AS left
+       FROM sms_challenges c
+       LEFT JOIN members m ON m.merchant_id=c.merchant_id AND m.phone = '+' || c.phone
+       LEFT JOIN wallets w ON w.merchant_id=c.merchant_id AND w.customer_id = m.id::text
+       WHERE c.merchant_id=$1 AND c.verified_at IS NULL AND c.expires_at > now()
+       ORDER BY c.expires_at DESC LIMIT 30`,
+      [this.merchantId],
+    );
+    return r.rows.map((x) => ({ id: String(x.id), phone: x.phone as string, name: (x.name as string | null) ?? null, creditCents: x.balance_cents === null || x.balance_cents === undefined ? null : Number(x.balance_cents), secondsLeft: Math.floor(Number(x.left)) }));
+  }
+
+  /** A staff member has seen the person and vouches for the number: the waiting sign-in goes through as if the text had arrived. */
+  async approveSms(id: string): Promise<string | null> {
+    const r = await this.db.query("UPDATE sms_challenges SET verified_at = now() WHERE id::text=$1 AND merchant_id=$2 AND verified_at IS NULL AND expires_at > now() RETURNING phone", [id, this.merchantId]);
+    return r.rows[0]?.phone ?? null;
+  }
+
+  async rejectSms(id: string): Promise<boolean> {
+    const r = await this.db.query("UPDATE sms_challenges SET expires_at = now() WHERE id::text=$1 AND merchant_id=$2 AND verified_at IS NULL AND expires_at > now()", [id, this.merchantId]);
+    return (r.rowCount ?? 0) > 0;
+  }
+
   async smsStatus(id: string): Promise<{ state: "pending" | "verified" | "expired"; secondsLeft: number; phone: string; claimed: boolean } | null> {
     const r = await this.db.query("SELECT phone, verified_at, claimed, GREATEST(0, EXTRACT(EPOCH FROM (expires_at - now()))) AS left FROM sms_challenges WHERE id::text=$1 AND merchant_id=$2", [id, this.merchantId]);
     const x = r.rows[0];

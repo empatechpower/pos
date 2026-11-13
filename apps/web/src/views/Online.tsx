@@ -5,6 +5,7 @@ import { record, deviceId } from "../db";
 import { useOrders } from "../hooks";
 import { spend } from "../wallet";
 import { PrintBadge, usePrintStatus } from "./PrintBadge";
+import { PendingSignIns } from "./PendingSignIns";
 
 const timeOf = (ms: number) => new Date(ms).toLocaleTimeString("en-GB", { hour: "2-digit", minute: "2-digit", timeZone: "Asia/Singapore" });
 
@@ -99,6 +100,7 @@ export function Online({ config, online }: { config: BusinessConfig; online: boo
   return (
     <div className="credit prices wide">
       <h2>Online orders</h2>
+      <PendingSignIns signedIn={!!staff} />
       {msg && <div className="flash">{msg}</div>}
       <h3>New ({fresh.length})</h3>
       {fresh.length === 0 && <p className="muted">No new orders.</p>}

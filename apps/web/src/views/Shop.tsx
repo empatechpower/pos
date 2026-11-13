@@ -17,7 +17,7 @@ interface Info {
   channels: Array<{ id: string; name: string; kind: string }>;
   brand: { primary: string; accent: string; ink: string; logoUrl: string | null; heroUrl: string | null; tagline: string | null; promoTitle: string | null; promoBody: string | null };
   /** What this shop can do beyond email sign-in and paying at the counter. */
-  auth: { google: boolean; microsoft: boolean; phone: { number: string; simulated?: boolean } | null };
+  auth: { google: boolean; microsoft: boolean; phone: { number: string; simulated?: boolean; manual?: boolean } | null };
   payments: { online: boolean; methods: string[] };
 }
 interface OrderView {
@@ -1340,9 +1340,9 @@ function Login({ info, welcome, loginError, onGuest, onDone }: { info: Info; wel
     setErr(null);
     try {
       const r = await post("/api/shop/auth/phone/start", { phone: fullPhone });
-      const j = (await r.json().catch(() => ({}))) as { id?: string; code?: string; to?: string; expiresInSeconds?: number };
+      const j = (await r.json().catch(() => ({}))) as { id?: string; code?: string; to?: string | null; expiresInSeconds?: number };
       if (r.ok && j.id) {
-        setSms({ id: j.id, code: j.code!, to: j.to!, left: j.expiresInSeconds ?? 300 });
+        setSms({ id: j.id, code: j.code!, to: j.to ?? "", left: j.expiresInSeconds ?? 300 });
         setView("sms");
       } else setErr(r.status === 429 ? "Too many tries. Please wait a few minutes." : tx("That number doesn't look right."));
     } catch {
@@ -1456,12 +1456,13 @@ function Login({ info, welcome, loginError, onGuest, onDone }: { info: Info; wel
               <div className="e2e-card" style={{ marginTop: 2 }}>
                 <h3 style={{ textAlign: "center" }}>{tx("Verify by SMS")}</h3>
                 <p className="sms-step">{tx("1. Using the number")} <b>+{fullPhone}</b></p>
-                <p className="sms-step">{tx("2. Send the message")} <span className="sms-code">{sms.code}</span> to <b>{sms.to}</b></p>
+                {sms.to ? <p className="sms-step">{tx("2. Send the message")} <span className="sms-code">{sms.code}</span> to <b>{sms.to}</b></p> : <p className="sms-step">{tx("Texting is not available right now. Please ask a member of staff to approve you.")}</p>}
                 {sms.left > 0 ? (
                   <>
                     <p className="sms-exp">{tx("This code will expire in")} <span className="sms-count">{clock(sms.left)}</span></p>
-                    <a className="e2e-cta" style={{ textDecoration: "none" }} href={`sms:${sms.to.replace(/\s/g, "")}?&body=${sms.code}`}><span>{tx("Send from this device")}</span></a>
+                    {sms.to && <a className="e2e-cta" style={{ textDecoration: "none" }} href={`sms:${sms.to.replace(/\s/g, "")}?&body=${sms.code}`}><span>{tx("Send from this device")}</span></a>}
                     <p className="e2e-note">{tx("Waiting for your text… this page signs you in the moment it arrives.")}</p>
+                    <p className="e2e-note">{tx("Text not arriving? Ask a member of staff to approve you.")}</p>
                     {info.auth.phone?.simulated && (
                       <button className="login-btn" style={{ justifyContent: "center", marginTop: 10 }} onClick={() => void post("/api/shop/auth/phone/simulate", { phone: fullPhone, code: sms.code })}><span>Developer: pretend the text arrived</span></button>
                     )}
