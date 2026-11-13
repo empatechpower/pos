@@ -1138,7 +1138,11 @@ function Menu({ info, catalog, config, loginError }: { info: Info; catalog: Cata
         <div className="e2e-card">
           <h3>{rewardsOn ? tx("Voucher & payment") : t("payMethodW", "Payment method")}</h3>
           {rewardsOn && <button className="sum-link-row" onClick={() => setWallet(true)}><span className="sl-ic"><Icon name="ticket" size={21} /></span><span className="sl-t">{t("voucher", "Voucher")}<span className="sl-d">{tx("Coupons & vouchers from your wallet")}</span></span><span className="sl-v">{chosen && chosenOk ? chosen.title : "None applied"}</span><span className="chev"><Icon name="chevR" size={16} /></span></button>}
+          {info.membersOnly && member ? (
+            <div className="sum-link-row" style={{ cursor: "default" }}><span className="sl-ic"><Icon name="stack" size={21} /></span><span className="sl-t">{tx("Paying with member credit")}<span className="sl-d">{credit >= shownTotal ? tx("{a} now → {b} after this order", { a: formatMoney(credit), b: formatMoney(credit - shownTotal) }) : tx("Not enough credit: {amt} available.", { amt: formatMoney(credit) })}</span></span></div>
+          ) : (
           <button className="sum-link-row" onClick={() => setScreen("payment")}><span className="sl-ic"><Icon name="card" size={21} /></span><span className="sl-t">{t("payMethodW", "Payment method")}<span className="sl-d">{tx("Chosen at the payment step")}</span></span><span className="sl-v">{t("chooseLater", "Choose later")}</span><span className="chev"><Icon name="chevR" size={16} /></span></button>
+          )}
           <div className="sum-link-row" style={{ cursor: "default" }}><span className="sl-ic"><Icon name="pin" size={21} /></span><span className="sl-t">{dine ? `${channel?.name} · ${spot || tx("no table yet")}` : `${channel?.name} · Pickup counter`}<span className="sl-d">{info.outletName}</span></span></div>
         </div>
         {detailsCard}
@@ -1171,9 +1175,20 @@ function Menu({ info, catalog, config, loginError }: { info: Info; catalog: Cata
           </div>
         )}
         {rewardsOn && !member && guestOk && <p className="e2e-note">{t("guestNoPoints", "Continuing as guest — no points will be earned on this order.")}</p>}
+        {info.membersOnly && member ? (
+          <div className="pay-sticky">
+            {noteEl}
+            {dine && !spot && <p className="e2e-sub">{tx("Choose your table to continue.")}</p>}
+            {credit < shownTotal && <p className="e2e-sub">{tx("Your credit is not enough for this order. Please top up at the counter.")}</p>}
+            <button className={`e2e-cta ${canOrder && (!dine || !!spot) && credit >= shownTotal ? "" : "off"}`} disabled={!canOrder || (dine && !spot) || credit < shownTotal || busy} onClick={() => void place()}>
+              <span>{busy ? tx("Placing your order…") : tx("Pay with credit")}</span><span>{formatMoney(shownTotal)}</span>
+            </button>
+          </div>
+        ) : (
         <button className={`e2e-cta ${canOrder && (!dine || !!spot) ? "" : "off"}`} disabled={!canOrder || (dine && !spot)} onClick={() => setScreen("checkout")}>
           <span>{tx(count === 1 ? "Order Now · {n} item" : "Order Now · {n} items", { n: count })}</span><span>{formatMoney(shownTotal)}</span>
         </button>
+        )}
         {!canOrder && <p className="e2e-sub">{member ? "Add your phone number to place this order." : "Tap Sign up, or Check out as guest, to place this order."}</p>}
       </div>
     </>

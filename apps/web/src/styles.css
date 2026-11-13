@@ -392,3 +392,7 @@ main { flex: 1; padding: 14px 16px; }
 .shop .search-input::-webkit-search-cancel-button, .shop .search-input::-webkit-search-decoration { -webkit-appearance: none; display: none; }
 .shop .search-clear { flex: none; width: 30px; height: 30px; border-radius: 50%; border: 0; background: var(--selected, #fdeee0); color: var(--accent-dark, #b85c0a); font-size: 19px; line-height: 1; cursor: pointer; display: flex; align-items: center; justify-content: center; font-family: inherit; padding: 0; }
 .shop .search-clear:active { transform: scale(.92); }
+
+/* The Pay button on the order summary stays in view above the bottom bar, so it is never hidden below the fold. */
+.shop .pay-sticky { position: sticky; bottom: calc(66px + env(safe-area-inset-bottom)); z-index: 6; background: var(--page, #fffdf9); padding: 8px 0 4px; margin-top: 10px; }
+.shop .pay-sticky .e2e-cta { margin-top: 4px; }

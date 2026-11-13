@@ -658,6 +658,33 @@ export const PHRASES: Record<string, string[]> = {
   "Keine SMS angekommen? Bitten Sie eine Mitarbeiterin oder einen Mitarbeiter um Freigabe.",
   "உரைச் செய்தி வரவில்லையா? ஊழியரிடம் ஒப்புதல் கேளுங்கள்."
  ],
+ "Paying with member credit": [
+  "Bayar dengan kredit ahli",
+  "Bayar dengan kredit anggota",
+  "使用会员余额付款",
+  "メンバークレジットで支払い",
+  "Paiement avec le crédit membre",
+  "Bezahlung mit Mitgliedsguthaben",
+  "உறுப்பினர் கிரெடிட்டில் செலுத்துகிறீர்கள்"
+ ],
+ "{a} now → {b} after this order": [
+  "{a} sekarang → {b} selepas pesanan ini",
+  "{a} sekarang → {b} setelah pesanan ini",
+  "当前 {a} → 本单后 {b}",
+  "現在 {a} → 注文後 {b}",
+  "{a} actuellement → {b} après cette commande",
+  "{a} jetzt → {b} nach dieser Bestellung",
+  "இப்போது {a} → இந்த ஆர்டருக்குப் பிறகு {b}"
+ ],
+ "Choose your table to continue.": [
+  "Pilih meja anda untuk teruskan.",
+  "Pilih meja Anda untuk melanjutkan.",
+  "请先选择桌号再继续。",
+  "続けるにはテーブルを選択してください。",
+  "Choisissez votre table pour continuer.",
+  "Wählen Sie Ihren Tisch, um fortzufahren.",
+  "தொடர உங்கள் மேசையைத் தேர்ந்தெடுக்கவும்."
+ ],
  "in bag": [
   "dalam beg",
   "di tas",
