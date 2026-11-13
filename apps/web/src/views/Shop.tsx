@@ -132,6 +132,11 @@ function SwipeRow({ children, onRemove, label }: { children: ReactNode; onRemove
   const [x, setX] = useState<number | null>(null); // live offset while a finger or mouse is dragging
   const g = useRef<{ id: number; x0: number; y0: number; wasOpen: boolean; mode: "?" | "h" | "v" } | null>(null);
   const moved = useRef(false);
+  // The bin acts on the release of a press that began on it, rather than waiting for the browser's click. Some touch set-ups
+  // (e.g. a tablet in desktop mode) do not deliver that click on the first touch, which made the bin need two presses.
+  const binDown = useRef(false);
+  const binDone = useRef(false);
+  const removeOnce = () => { if (binDone.current) return; binDone.current = true; window.setTimeout(() => { binDone.current = false; }, 500); onRemove(); };
   const down = (e: React.PointerEvent) => {
     // Every new touch starts clean. (A finger-drag fires no click afterwards, so a leftover "moved" flag used to swallow the next tap,
     // which was the first press on the bin: it needed two or three presses before the item was gone.)
@@ -175,7 +180,11 @@ function SwipeRow({ children, onRemove, label }: { children: ReactNode; onRemove
       onPointerCancel={() => { g.current = null; setX(null); }}
       onClickCapture={(e) => { if (moved.current && !(e.target as HTMLElement).closest(".swipe-bin")) { e.stopPropagation(); e.preventDefault(); moved.current = false; } }}
     >
-      <button className="swipe-bin" tabIndex={open ? 0 : -1} aria-label={`${t("removeW", "Remove")} ${label}`} onClick={onRemove}><Icon name="trash" size={22} /><span>{t("bin", "Bin")}</span></button>
+      <button className="swipe-bin" tabIndex={open ? 0 : -1} aria-label={`${t("removeW", "Remove")} ${label}`}
+        onPointerDown={(e) => { e.stopPropagation(); moved.current = false; binDown.current = true; }}
+        onPointerUp={(e) => { e.stopPropagation(); if (binDown.current) { binDown.current = false; window.setTimeout(removeOnce, 120); } /* the normal click, when it comes, removes sooner */ }}
+        onPointerCancel={() => { binDown.current = false; }}
+        onClick={removeOnce}><Icon name="trash" size={22} /><span>{t("bin", "Bin")}</span></button>
       {children}
       <span className="swipe-hint" aria-hidden="true"><Icon name="chevL" size={12} /></span>
     </div>
