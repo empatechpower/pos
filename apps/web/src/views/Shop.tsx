@@ -89,7 +89,7 @@ const STATUS_TEXT: Record<ShopStatus, { title: string; body: (o: OrderView) => s
   awaiting_payment: { get title() { return tx("Accepted: please pay"); }, body: (o) => tx("Pay {amt} at the counter and quote your number. We start your order once it is paid.", { amt: formatMoney(o.totalCents - o.paidCents) }) },
   queued: { get title() { return tx("In the queue"); }, body: () => tx("Your order is paid and waiting to be made.") },
   preparing: { get title() { return tx("Being prepared"); }, body: () => tx("Your order is being made right now.") },
-  ready: { get title() { return tx("Ready!"); }, body: () => tx("Please collect your order at the counter.") },
+  ready: { get title() { return tx("Ready to serve!"); }, body: (o) => (o.spot ? tx("Your order is ready and is being served to {t}.", { t: o.spot }) : tx("Please collect your order at the counter.")) },
   completed: { get title() { return tx("Collected"); }, body: () => tx("Enjoy! Thank you for ordering.") },
   cancelled: { get title() { return tx("Order cancelled"); }, body: () => tx("The shop could not take this order. Please ask at the counter, or order again.") },
 };

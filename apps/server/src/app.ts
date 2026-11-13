@@ -501,7 +501,25 @@ export async function buildApp({ config, store, db, catalog, catalogAdmin, print
       };
     });
 
-    app.post<{ Params: { id: string } }>("/api/print/jobs/:id/done", agent, async (req, reply) => ((await queue.markDone(req.params.id)) ? { ok: true } : reply.code(404).send({ error: "not_leased" })));
+    /**
+     * Quick service: once the kitchen has really received every ticket of a paid online order, the order is ready to serve, and the
+     * customer's page says so. A printer that failed or is unconfirmed keeps the order in the queue until someone sorts it out.
+     */
+    async function readyWhenPrinted(orderId: string) {
+      if (config.paymentTiming !== "prepay" || !(await queue.kitchenFullyPrinted(orderId))) return;
+      const events = await store.eventsForOrder(orderId);
+      const order = reduceOrder(orderId, events);
+      if (!order || order.source !== "online" || !order.acceptedAt || ["preparing", "ready", "completed", "cancelled"].includes(order.stage)) return;
+      const seq = events.reduce((m, e) => Math.max(m, e.seq), 0) + 1;
+      await ingest([{ id: newId(), orderId, deviceId: "shop", ts: Date.now(), seq, type: "StageSet", stage: "ready" } as OrderEvent]);
+    }
+
+    app.post<{ Params: { id: string } }>("/api/print/jobs/:id/done", agent, async (req, reply) => {
+      if (!(await queue.markDone(req.params.id))) return reply.code(404).send({ error: "not_leased" });
+      const info = await queue.jobInfo(req.params.id);
+      if (info?.docType === "kitchen" && info.orderId) await readyWhenPrinted(info.orderId).catch((e) => console.error("[print] could not mark the order ready:", e instanceof Error ? e.message : e));
+      return { ok: true };
+    });
 
     app.post<{ Params: { id: string }; Body: { error?: string; ambiguous?: boolean } }>("/api/print/jobs/:id/failed", agent, async (req, reply) => {
       const r = await queue.markFailed(req.params.id, req.body?.error ?? "unknown error", req.body?.ambiguous === true);

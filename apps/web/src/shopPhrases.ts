@@ -703,6 +703,24 @@ export const PHRASES: Record<string, string[]> = {
   "Geben Sie Ihre Handynummer ein",
   "உங்கள் கைபேசி எண்ணை உள்ளிடவும்"
  ],
+ "Ready to serve!": [
+  "Sedia untuk dihidangkan!",
+  "Siap disajikan!",
+  "可以上菜了！",
+  "お届けできます！",
+  "Prêt à servir !",
+  "Servierbereit!",
+  "பரிமாறத் தயார்!"
+ ],
+ "Your order is ready and is being served to {t}.": [
+  "Pesanan anda sudah siap dan sedang dihidangkan ke {t}.",
+  "Pesanan Anda sudah siap dan sedang disajikan ke {t}.",
+  "您的订单已准备好，正送往 {t}。",
+  "ご注文の準備ができました。{t} にお運びします。",
+  "Votre commande est prête et est servie à {t}.",
+  "Ihre Bestellung ist fertig und wird zu {t} gebracht.",
+  "உங்கள் ஆர்டர் தயார், {t} க்கு பரிமாறப்படுகிறது."
+ ],
  "in bag": [
   "dalam beg",
   "di tas",

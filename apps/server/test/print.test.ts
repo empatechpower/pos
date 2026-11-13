@@ -318,6 +318,66 @@ describe("how a kitchen printer cuts its tickets", () => {
   });
 });
 
+describe("quick service: ready once the kitchen has the tickets", () => {
+  const online = (items: Array<{ id: string; name: string; qty: number }>, queue: string, o: { accepted?: boolean; pay?: boolean } = {}) => {
+    const x = orderEvents(items, { queue, pay: o.pay === false ? undefined : "credit" });
+    x.events[0].source = "online";
+    x.events[0].spot = "Table 19";
+    if (o.accepted !== false) x.events.splice(1, 0, x.mk({ type: "OrderAccepted" }));
+    return x;
+  };
+  const statusOf = async (orderId: string) => (await call(`/api/shop/orders/${orderId}`)).json.status as string;
+  /** Deliver waiting jobs one at a time, the way a slow printer would, until this order is ready (or nothing is left). */
+  const deliverOneByOne = async (orderId: string) => {
+    const seen: string[] = [];
+    for (let i = 0; i < 40; i++) {
+      const claim = (await call("/api/print/claim", { body: { limit: 1 }, device: hub.token })).json.jobs as Array<{ id: string }>;
+      if (!claim.length) break;
+      await call(`/api/print/jobs/${claim[0]!.id}/done`, { method: "POST", body: {}, device: hub.token });
+      seen.push(await statusOf(orderId));
+      if (seen[seen.length - 1] === "ready") break;
+    }
+    return seen;
+  };
+  const kitchenJobs = async (orderId: string) => (await jobsFor(orderId)).filter((j) => j.doc_type === "kitchen");
+
+  it("a paid, accepted online order goes from the queue to Ready to serve when its ticket is delivered", async () => {
+    const o = online([{ id: "kaya-toast", name: "Kaya Toast", qty: 1 }], "W601");
+    await push(o.events);
+    expect(await statusOf(o.orderId)).toBe("queued");
+    const seen = await deliverOneByOne(o.orderId);
+    expect(seen[seen.length - 1]).toBe("ready");
+  });
+
+  it("stays in the queue until every kitchen ticket has been delivered", async () => {
+    await setPrinter("cuts", printerBody({ name: "Cuts", roles: ["kitchen"], cutMode: "unit", connection: { host: "10.0.0.8", port: 9100 } }));
+    const o = online([{ id: "kaya-toast", name: "Kaya Toast", qty: 2 }], "W602");
+    await push(o.events);
+    expect((await kitchenJobs(o.orderId)).length).toBeGreaterThanOrEqual(2); // one ticket per unit on the "cuts" printer, and the others
+    const seen = await deliverOneByOne(o.orderId);
+    expect(seen[seen.length - 1]).toBe("ready");
+    expect(seen.slice(0, -1).every((x) => x === "queued")).toBe(true); // never ready while one of its tickets was still waiting
+    expect((await kitchenJobs(o.orderId)).every((j) => j.status === "done")).toBe(true);
+    await setPrinter("cuts", printerBody({ name: "Cuts", roles: ["kitchen"], connection: { host: "10.0.0.8", port: 9100 }, active: false }));
+  });
+
+  it("a ticket that failed keeps the order in the queue, and an order nobody has accepted is left alone", async () => {
+    const o = online([{ id: "kaya-toast", name: "Kaya Toast", qty: 1 }], "W603");
+    await push(o.events);
+    const claim = (await call("/api/print/claim", { body: { limit: 10 }, device: hub.token })).json.jobs as Array<{ id: string }>;
+    const mine = (await kitchenJobs(o.orderId)).filter((j) => claim.some((c) => c.id === j.id));
+    expect(mine.length).toBeGreaterThan(0);
+    await call(`/api/print/jobs/${mine[0]!.id}/failed`, { method: "POST", body: { error: "paper out" }, device: hub.token });
+    for (const c of claim.filter((c) => c.id !== mine[0]!.id)) await call(`/api/print/jobs/${c.id}/done`, { method: "POST", body: {}, device: hub.token });
+    expect(await statusOf(o.orderId)).toBe("queued");
+    await db.query("DELETE FROM print_jobs WHERE order_id=$1", [o.orderId]); // leave the queue as it was for the next tests
+    const u = online([{ id: "kaya-toast", name: "Kaya Toast", qty: 1 }], "W604", { accepted: false });
+    await push(u.events);
+    expect(await statusOf(u.orderId)).toBe("received");
+    await db.query("DELETE FROM print_jobs WHERE order_id=$1", [u.orderId]);
+  });
+});
+
 describe("delivery: retries, leases, competition", () => {
   const fresh = async () => {
     await db.query("UPDATE print_jobs SET status='done' WHERE status IN ('queued','leased')"); // clear earlier leftovers

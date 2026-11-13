@@ -264,6 +264,21 @@ export class PrintStore {
     return (r.rowCount ?? 0) > 0;
   }
 
+  /** Which order and kind of ticket a job is for. */
+  async jobInfo(jobId: string): Promise<{ orderId: string | null; docType: string } | null> {
+    const r = await this.db.query("SELECT order_id, doc_type FROM print_jobs WHERE merchant_id=$1 AND id=$2", [this.merchantId, jobId]);
+    return r.rows[0] ? { orderId: (r.rows[0].order_id as string | null) ?? null, docType: r.rows[0].doc_type as string } : null;
+  }
+
+  /** True when an order has kitchen tickets and every one of them has been delivered: none waiting, retrying, failed or unconfirmed. */
+  async kitchenFullyPrinted(orderId: string): Promise<boolean> {
+    const r = await this.db.query(
+      "SELECT count(*) FILTER (WHERE status='done')::int AS done, count(*) FILTER (WHERE status<>'done')::int AS open FROM print_jobs WHERE merchant_id=$1 AND order_id=$2 AND doc_type='kitchen'",
+      [this.merchantId, orderId],
+    );
+    return r.rows[0].done > 0 && r.rows[0].open === 0;
+  }
+
   /**
    * The agent could not deliver. Back to the queue with a delay, or failed for good after the last attempt.
    * `ambiguous` means the connection was made and then broke, so the printer may already have the bytes:

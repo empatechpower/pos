@@ -113,3 +113,7 @@ Each cut is its own print job with its own cut of the paper, so a slow or failed
 
 Under Printers, edit a kitchen or receipt printer and untick **Print the queue number**. Its tickets then show the table and the customer's name (if any) but not the queue number. The queue number is the last 4 digits of the customer's phone, so people can answer to it; it is still used on the customer's own screen and on labels.
 
+## When the order is "Ready to serve"
+
+In quick service (pay first), a paid online order moves by itself: Order sent, Accepted, In the queue, and then **Ready to serve!** the moment the kitchen printer has really received every kitchen ticket of the order. That is the end of the customer's journey. If one ticket fails or is unconfirmed (a printer off, out of paper), the order stays "In the queue" until someone presses Reprint on the Online page, so the customer is never told "ready" for food nobody has been asked to make. Receipts and labels do not hold an order back. Restaurant mode (pay after) is unchanged: staff mark orders ready by hand.
+
