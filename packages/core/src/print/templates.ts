@@ -76,9 +76,9 @@ export function kitchenTicket(order: OrderState, ctx: PrintContext, opts: Kitche
     { t: "text", text: order.queueNumber ?? "-", align: "center", bold: true, size: 3 },
     { t: "text", text: where(order), align: "center", bold: true, size: 2 },
   );
-  // Who the order is for, so the runner can find that person even if they have moved tables.
+  // Who the order is for (by name), so the runner can find that person even if they have moved tables.
+  // The phone number is never printed. The name is printed only when there is one, otherwise the line is left out.
   if (order.customerName) b.push({ t: "text", text: order.customerName, align: "center", bold: true, size: 2 });
-  if (order.customerPhone) b.push({ t: "text", text: order.customerPhone, align: "center", bold: true });
   b.push({ t: "text", text: stamp(ctx.now, ctx.timeZone), align: "center" }, { t: "rule" });
   for (const l of lines) {
     b.push({ t: "text", text: `${l.qty} x ${l.name}`, bold: true, size: 2 });

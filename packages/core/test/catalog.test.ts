@@ -138,7 +138,7 @@ describe("channels on orders", () => {
   it("a channel can switch the service charge on regardless of fulfilment", () => {
     const order = reduce(open({ channelId: "movie", channelName: "Movie Event", serviceCharge: true }));
     expect(order.channelName).toBe("Movie Event");
-    expect(orderTotals(order, config).service).toBe(90);
+    expect(orderTotals(order, config).service).toBe(80);
   });
 
   it("a channel can switch it off even for dine-in", () => {
@@ -149,9 +149,9 @@ describe("channels on orders", () => {
   it("orders from before channels still follow the old dine-in rule", () => {
     const dine = reduce(open({ fulfilment: "dine_in" }));
     const take = reduce(open({ fulfilment: "takeaway" }));
-    expect(orderTotals(dine, config).service).toBe(90);
+    expect(orderTotals(dine, config).service).toBe(80);
     expect(orderTotals(take, config).service).toBe(0);
-    expect(DEFAULT_PRICING.serviceRate).toBe(0.09);
+    expect(DEFAULT_PRICING.serviceRate).toBe(0.08);
   });
 
   it("other channels are recorded as take-away for older screens", () => {

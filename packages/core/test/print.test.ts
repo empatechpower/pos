@@ -128,7 +128,7 @@ describe("receipt and kitchen ticket", () => {
 
   it("shows the service charge only when the channel charges it", () => {
     const dine = { id: "dine", name: "Dine in", service: true, kind: "dine_in" as const };
-    expect(plainText(receipt(order({ channel: dine, spot: "Table 5" }), config, ctx), 42).join("\n")).toMatch(/Service charge\s+S\$0\.98/);
+    expect(plainText(receipt(order({ channel: dine, spot: "Table 5" }), config, ctx), 42).join("\n")).toMatch(/Service charge\s+S\$0\.87/);
     expect(plainText(receipt(order(), config, ctx), 42).join("\n")).not.toContain("Service charge");
   });
 
@@ -221,17 +221,19 @@ describe("labels", () => {
 describe("kitchen ticket: who it is for", () => {
   const ctx = { merchantName: "B", outletName: "O", now: NOW, timeZone: "Asia/Singapore" } as never;
   const dine = { id: "dine", name: "Dine in", service: true, kind: "dine_in" as const };
-  it("prints the table with the customer's name and phone, so a runner can find them", () => {
+  it("prints the table and the customer's name, so a runner can find them, but never the phone number", () => {
     const text = plainText(kitchenTicket(order({ channel: dine, spot: "Table 12", name: "Mei Lin", phone: "+6591234567" }), ctx), 42).join("\n");
     expect(text).toContain("Table 12");
     expect(text).toContain("Mei Lin");
-    expect(text).toContain("+6591234567");
+    expect(text).not.toContain("6591234567");
+    expect(text).not.toContain("+65");
   });
-  it("prints just the phone when there is no name, and neither when there is neither", () => {
-    expect(plainText(kitchenTicket(order({ channel: dine, spot: "Table 3", phone: "+6598765432" }), ctx), 42).join("\n")).toContain("+6598765432");
+  it("leaves the name line out when there is no name, and never prints the phone", () => {
+    const text = plainText(kitchenTicket(order({ channel: dine, spot: "Table 3", phone: "+6598765432" }), ctx), 42).join("\n");
+    expect(text).toContain("Table 3");
+    expect(text).not.toContain("6598765432");
+    expect(text).not.toContain("undefined");
     const none = plainText(kitchenTicket(order({ channel: dine, spot: "Table 3" }), ctx), 42).join("\n");
-    expect(none).toContain("Table 3");
     expect(none).not.toContain("undefined");
   });
 });
-

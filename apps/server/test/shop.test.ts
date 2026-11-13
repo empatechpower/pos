@@ -84,18 +84,18 @@ describe("the shop front", () => {
 });
 
 describe("placing an order", () => {
-  it("with a phone number the collection number is its last 5 digits; a clash gets A, B; a freed number is reused", async () => {
+  it("with a phone number the collection number is its last 3 digits; a clash gets A, B; a freed number is reused", async () => {
     const mk = (phone: string) => order({ channelId: "take-away", items: [kaya()], customerPhone: phone });
     const a = await mk("+65 9333 6666");
-    expect(a.json.queueNumber).toBe("36666");
+    expect(a.json.queueNumber).toBe("666");
     const b = await mk("+65 9333 6666");
-    expect(b.json.queueNumber).toBe("36666A");
+    expect(b.json.queueNumber).toBe("666A");
     const c = await mk("+65 9333 6666");
-    expect(c.json.queueNumber).toBe("36666B");
+    expect(c.json.queueNumber).toBe("666B");
     // order a completes: its number is free again
     await tillPush(a.json.orderId, { type: "StageSet", stage: "completed" });
     const d = await mk("+65 9333 6666");
-    expect(d.json.queueNumber).toBe("36666");
+    expect(d.json.queueNumber).toBe("666");
   });
 
   it("without a phone number it falls back to the daily W number", async () => {
@@ -106,7 +106,7 @@ describe("placing an order", () => {
   it("is created from the server's prices, held for staff, and numbered from the phone", async () => {
     const r = await order({ channelId: "take-away", items: [kaya(2)], customerName: "Sam", customerPhone: "9123 4567" });
     expect(r.status).toBe(200);
-    expect(r.json).toMatchObject({ queueNumber: "34567", totalCents: 400, status: "received" });
+    expect(r.json).toMatchObject({ queueNumber: "567", totalCents: 400, status: "received" });
     const o = reduceOrder(r.json.orderId, await events(r.json.orderId))!;
     expect(o).toMatchObject({ source: "online", channelName: "Take away", customerName: "Sam", customerPhone: "9123 4567" });
     expect(o.lines).toHaveLength(1);
@@ -121,9 +121,17 @@ describe("placing an order", () => {
 
   it("charges the channel's service charge and the channel's pricebook", async () => {
     const dine = await order({ channelId: "dine-in", items: [kaya(1)] });
-    expect(dine.json.totalCents).toBe(218); // 200 + 9%
+    expect(dine.json.totalCents).toBe(216); // 200 + 8%
     const grab = await order({ channelId: "grab", items: [kaya(1)] });
     expect(grab.json.totalCents).toBe(230); // Grab price, no service charge
+  });
+
+  it("the customer's order page and history keep showing the table, also after the order is closed", async () => {
+    const placed = await order({ channelId: "dine-in", items: [kaya(1)], spot: "Table 7" });
+    const id = placed.json.orderId;
+    expect((await call(`/api/shop/orders/${id}`)).json).toMatchObject({ channelName: "Dine in", spot: "Table 7" });
+    await call(`/api/shop/orders/${id}/cancel`, { method: "POST" });
+    expect((await call(`/api/shop/orders/${id}`)).json).toMatchObject({ status: "cancelled", spot: "Table 7" });
   });
 
   it("tells the customer when prices changed since they looked, and places nothing", async () => {

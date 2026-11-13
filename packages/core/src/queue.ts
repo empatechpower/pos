@@ -26,7 +26,7 @@ export function nextQueueCounter(deviceCode: string, issuedToday: readonly strin
 export function collectionNumber(phone: string | undefined, taken: ReadonlySet<string>): string | undefined {
   const digits = (phone ?? "").replace(/\D/g, "");
   if (digits.length < 8) return undefined;
-  const base = digits.slice(-5);
+  const base = digits.slice(-3);
   if (!taken.has(base)) return base;
   for (let i = 0; i < 26; i++) {
     const c = `${base}${String.fromCharCode(65 + i)}`;

@@ -375,7 +375,7 @@ export function registerShop(app: FastifyInstance, d: ShopDeps) {
       for (const { orderId, at } of await members.orderIds(m.id, 20)) {
         const o = reduceOrder(orderId, await d.store.eventsForOrder(orderId));
         if (!o) continue;
-        out.push({ orderId, at, queueNumber: o.queueNumber, status: shopStatus(o, d.config), channelName: o.channelName, itemCount: o.lines.reduce((n, l) => n + Math.max(0, l.qty), 0), totalCents: orderTotals(o, d.config).total });
+        out.push({ orderId, at, queueNumber: o.queueNumber, status: shopStatus(o, d.config), channelName: o.channelName, spot: o.spot, itemCount: o.lines.reduce((n, l) => n + Math.max(0, l.qty), 0), totalCents: orderTotals(o, d.config).total });
       }
       return { orders: out };
     });
@@ -483,7 +483,7 @@ export function registerShop(app: FastifyInstance, d: ShopDeps) {
     try {
     out = await serially(async () => {
     const taken = await activeQueueNumbers(d.db, merchantId);
-    const queueNumber = collectionNumber(phone, taken) ?? (await nextOnlineNumber(d.db, merchantId));
+    const queueNumber = collectionNumber(phone ?? member?.phone ?? undefined, taken) ?? (await nextOnlineNumber(d.db, merchantId));
     const ts = Date.now();
     // Credit first: if it is short, nothing else has been touched. Taken in one step that cannot go below zero.
     const creditCents = b.payWithCredit && member ? quote.priced.total : 0;
@@ -601,6 +601,7 @@ export function registerShop(app: FastifyInstance, d: ShopDeps) {
       queueNumber: order.queueNumber,
       status: shopStatus(order, d.config),
       channelName: order.channelName,
+      spot: order.spot,
       items: order.lines.filter((l) => l.qty > 0).map((l) => ({ name: l.name, qty: l.qty, unitCents: l.unitCents, options: optionLines(l.options) })),
       totalCents: total,
       paidCents: paid,

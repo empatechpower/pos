@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { payMineShares, shareProRata, splitEqual, tabRemaining, tabRewards, tabTotals, type TabLine } from "../src/index.js";
+import { DEFAULT_PRICING, payMineShares, shareProRata, splitEqual, tabRemaining, tabRewards, tabTotals, type TabLine } from "../src/index.js";
 
 // Spec 12.7 seed tab (test data): Alex Tornado 10.80 / Sam Kaya 2.00 + Coffee 2.20 / Guest Coke BCRS 2.50
 const seed: TabLine[] = [
@@ -8,7 +8,8 @@ const seed: TabLine[] = [
   { id: "3", name: "Coffee", unitCents: 220, qty: 1, owner: "sam" },
   { id: "4", name: "Coke Classic 320ml BCRS", unitCents: 250, qty: 1, owner: "guest" },
 ];
-const dine = { serviceCharge: true };
+// These are the prototype's worked examples, which use a 9% service charge; the shop itself now charges 8%.
+const dine = { serviceCharge: true, pricing: { ...DEFAULT_PRICING, serviceRate: 0.09 } };
 
 describe("tab totals", () => {
   it("seed tab: S$17.50 + S$1.58 service + S$0.10 BCRS = S$19.18", () => {

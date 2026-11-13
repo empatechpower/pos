@@ -9,9 +9,9 @@ const bag: PricedLine[] = [
 ];
 
 describe("priceOrder – spec numbers from the Bailey & Patch prototype", () => {
-  it("dine-in, GST off: S$7.40", () => {
+  it("dine-in, GST off: S$7.34 (8% service charge)", () => {
     const r = priceOrder({ lines: bag, fulfilment: "dine_in" });
-    expect(r).toMatchObject({ subtotal: 670, service: 60, gst: 0, bcrs: 10, total: 740 });
+    expect(r).toMatchObject({ subtotal: 670, service: 54, gst: 0, bcrs: 10, total: 734 });
   });
 
   it("take away has no service charge: S$6.80", () => {
@@ -19,9 +19,9 @@ describe("priceOrder – spec numbers from the Bailey & Patch prototype", () => 
     expect(r).toMatchObject({ service: 0, total: 680 });
   });
 
-  it("GST on, dine-in: S$8.06 (GST on items + service, not on the deposit)", () => {
+  it("GST on, dine-in: S$7.99 (GST on items + service, not on the deposit)", () => {
     const r = priceOrder({ lines: bag, fulfilment: "dine_in", config: { ...DEFAULT_PRICING, gstOn: true } });
-    expect(r).toMatchObject({ gst: 66, total: 806 });
+    expect(r).toMatchObject({ gst: 65, total: 799 });
   });
 
   it("GST on, take away: S$7.40", () => {
@@ -53,10 +53,10 @@ describe("coupons", () => {
     const r = priceOrder({ lines: bag, fulfilment: "dine_in", coupon });
     expect(r.couponDiscount).toBe(0);
     expect(r.couponIneligible).toBe(true);
-    expect(r.total).toBe(740);
+    expect(r.total).toBe(734);
   });
 
-  it("minimum spend counts items only: S$20.48 payable is NOT enough if items are S$18.70", () => {
+  it("minimum spend counts items only: S$20.30 payable is NOT enough if items are S$18.70", () => {
     const r = priceOrder({
       lines: [
         { name: "Mains", unitCents: 1870, qty: 1 },
@@ -65,9 +65,9 @@ describe("coupons", () => {
       fulfilment: "dine_in",
       coupon,
     });
-    expect(r.service).toBe(168);
+    expect(r.service).toBe(150);
     expect(r.bcrs).toBe(10);
-    expect(r.service + r.subtotal + r.bcrs).toBe(2048);
+    expect(r.service + r.subtotal + r.bcrs).toBe(2030);
     expect(r.couponDiscount).toBe(0);
   });
 
@@ -81,8 +81,8 @@ describe("coupons", () => {
 describe("points (100 points = S$1)", () => {
   it("redeem-all uses the whole deductible base, never below zero", () => {
     const r = priceOrder({ lines: bag, fulfilment: "dine_in", points: { balance: 6800, requested: null } });
-    expect(r.pointsUsed).toBe(740);
-    expect(r.pointsDiscount).toBe(740);
+    expect(r.pointsUsed).toBe(734);
+    expect(r.pointsDiscount).toBe(734);
     expect(r.total).toBe(0);
   });
 
@@ -101,13 +101,13 @@ describe("points (100 points = S$1)", () => {
     const low = priceOrder({ lines: bag, fulfilment: "dine_in", points: { balance: 6800, requested: 300 } });
     expect(low.pointsUsed).toBe(300);
     const high = priceOrder({ lines: bag, fulfilment: "dine_in", points: { balance: 6800, requested: 99999 } });
-    expect(high.pointsUsed).toBe(740);
+    expect(high.pointsUsed).toBe(734);
   });
 
   it("deposit toggle off leaves the deposit payable", () => {
     const cfg = { ...DEFAULT_PRICING, pointsDeduct: { ...DEFAULT_PRICING.pointsDeduct, deposit: false } };
     const r = priceOrder({ lines: bag, fulfilment: "dine_in", points: { balance: 6800, requested: null }, config: cfg });
-    expect(r.pointsUsed).toBe(730);
+    expect(r.pointsUsed).toBe(724);
     expect(r.total).toBe(10);
   });
 

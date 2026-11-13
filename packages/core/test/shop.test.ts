@@ -29,8 +29,8 @@ describe("quoteOrder", () => {
   it("prices from the catalog for the channel, with the channel's service charge", () => {
     const dine = quoteOrder(catalog(), config, ctx("dine"), [{ productId: "kaya", qty: 2 }, { productId: "kopi", qty: 1 }]);
     expect(dine.ok && dine.priced.subtotal).toBe(620);
-    expect(dine.ok && dine.priced.service).toBe(56); // 9% of 620, rounded
-    expect(dine.ok && dine.priced.total).toBe(676);
+    expect(dine.ok && dine.priced.service).toBe(50); // 8% of 620, rounded
+    expect(dine.ok && dine.priced.total).toBe(670);
     const grab = quoteOrder(catalog(), config, ctx("grab"), [{ productId: "kaya", qty: 2 }]);
     expect(grab.ok && grab.priced.total).toBe(460); // Grab price 230, no service
   });

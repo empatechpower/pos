@@ -25,6 +25,7 @@ interface OrderView {
   queueNumber: string;
   status: ShopStatus;
   channelName?: string;
+  spot?: string;
   items: Array<{ name: string; qty: number; unitCents: number; options: string[] }>;
   totalCents: number;
   paidCents: number;
@@ -37,6 +38,7 @@ interface PastOrder {
   queueNumber: string;
   status: ShopStatus;
   channelName?: string;
+  spot?: string;
   itemCount: number;
   totalCents: number;
 }
@@ -928,7 +930,7 @@ function Menu({ info, catalog, config, loginError }: { info: Info; catalog: Cata
                 history.slice(0, 15).map((o) => (
                   <a key={o.orderId} className="acct-row" href={`#/shop/order/${o.orderId}`}>
                     <span className="aic"><Icon name="bell" size={21} /></span>
-                    <span className="at">{o.queueNumber} — {STATUS_TEXT[o.status].title.split(":")[0]}<span className="ad">{o.channelName ?? tx("Order")} · {tx(o.itemCount === 1 ? "{n} item" : "{n} items", { n: o.itemCount })}</span></span>
+                    <span className="at">{o.queueNumber} — {STATUS_TEXT[o.status].title.split(":")[0]}<span className="ad">{o.channelName ?? tx("Order")}{o.spot ? ` · ${o.spot}` : ""} · {tx(o.itemCount === 1 ? "{n} item" : "{n} items", { n: o.itemCount })}</span></span>
                     <span className="ad" style={{ flex: "none" }}>{new Date(o.at).toLocaleDateString()}</span>
                   </a>
                 ))
@@ -1008,7 +1010,7 @@ function Menu({ info, catalog, config, loginError }: { info: Info; catalog: Cata
                 history.map((o) => (
                   <a key={o.orderId} className="acct-row" href={`#/shop/order/${o.orderId}`}>
                     <span className="aic"><Icon name="ticket" size={21} /></span>
-                    <span className="at">{o.queueNumber} — {o.channelName ?? tx("Order")}<span className="ad">{STATUS_TEXT[o.status].title.split(":")[0]} · {new Date(o.at).toLocaleDateString()} · {tx(o.itemCount === 1 ? "{n} item" : "{n} items", { n: o.itemCount })}</span></span>
+                    <span className="at">{o.queueNumber} — {o.channelName ?? tx("Order")}{o.spot ? ` · ${o.spot}` : ""}<span className="ad">{STATUS_TEXT[o.status].title.split(":")[0]} · {new Date(o.at).toLocaleDateString()} · {tx(o.itemCount === 1 ? "{n} item" : "{n} items", { n: o.itemCount })}</span></span>
                     <span className="v" style={{ fontWeight: 700 }}>{formatMoney(o.totalCents)}</span>
                   </a>
                 ))
@@ -1584,7 +1586,7 @@ function Status({ orderId, info }: { orderId: string; info: Info }) {
           <span className="status-order-line">{tx("Order")} <span className="status-id">{o.orderId}</span></span>
           <button className="copy-id-btn" onClick={() => { void navigator.clipboard?.writeText(o.orderId).then(() => setCopied(true)).catch(() => undefined); }}><Icon name="ticket" size={15} />{copied ? "ORDER ID copied" : "Copy ORDER ID"}</button>
         </div>
-        {o.channelName && <p className="e2e-sub">{o.channelName}</p>}
+        {o.channelName && <p className="e2e-sub">{o.channelName}{o.spot ? ` · ${o.spot}` : ""}</p>}
         {cancelled ? (
           <div className="e2e-card" style={{ borderColor: "#f2c4b8", background: "#fdf0ec" }}><h3 style={{ color: "#b03a26" }}>{text.title}</h3><p className="e2e-sub" style={{ textAlign: "left", margin: 0 }}>{text.body(o)}</p></div>
         ) : (

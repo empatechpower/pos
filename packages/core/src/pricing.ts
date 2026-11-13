@@ -27,7 +27,7 @@ export interface PricingConfig {
 }
 
 export const DEFAULT_PRICING: PricingConfig = {
-  serviceRate: 0.09,
+  serviceRate: 0.08,
   gstRate: 0.09,
   gstOn: false,
   bcrsDepositCents: 10,
