@@ -69,12 +69,21 @@ export async function enroll(db: Db, merchantId: string, code: string, name: str
   return { token, device: toDevice(r.rows[0]), enrolledBy: c.created_by };
 }
 
+/** How many browsers one person can have signed in through Telegram at once. */
+export const LINKED_DEVICES_PER_PERSON = 5;
+
 /**
- * A device made without an enrollment code, for a browser opened from a one-time Telegram link. Older devices made the same way
- * for the same person are switched off, so there is one at a time and no pile of them.
+ * A device made without an enrollment code, for a browser opened from a one-time Telegram link. One person can use several
+ * browsers at once (a laptop and a tablet, or a colleague helping from the same Telegram account); only when they have more than
+ * five are the oldest switched off, so there is no pile of them. (It used to allow one, so opening a second link signed the
+ * first browser out with "this device was removed".)
  */
 export async function createLinkedDevice(db: Db, merchantId: string, outletId: string, name: string, enrolledBy: string): Promise<{ token: string; device: Device }> {
-  await db.query("UPDATE devices SET active=false WHERE merchant_id=$1 AND name=$2 AND enrolled_by=$3 AND active", [merchantId, name, enrolledBy]);
+  await db.query(
+    `UPDATE devices SET active=false WHERE id IN (
+       SELECT id FROM devices WHERE merchant_id=$1 AND name=$2 AND enrolled_by=$3 AND active ORDER BY created_at DESC, id DESC OFFSET $4)`,
+    [merchantId, name, enrolledBy, LINKED_DEVICES_PER_PERSON - 1],
+  );
   const token = randomBytes(32).toString("base64url");
   const r = await db.query("INSERT INTO devices (merchant_id, outlet_id, name, token_hash, enrolled_by) VALUES ($1,$2,$3,$4,$5) RETURNING *", [merchantId, outletId, name, sha256(token), enrolledBy]);
   return { token, device: toDevice(r.rows[0]) };

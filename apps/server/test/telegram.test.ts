@@ -294,15 +294,20 @@ describe("opening the web editor", () => {
     expect((await call("POST", "/api/telegram/redeem", { body: { code: url.split("code=")[1] }, device: null })).status).toBe(401);
   });
 
-  it("each person has one Telegram device at a time", async () => {
+  it("one person can be signed in on several browsers at once; only beyond five are the oldest switched off", async () => {
     const mk = async () => {
       const url = buttons((await press(1001, "ed:standard"))[0]).find((b) => b.url)!.url!;
       return (await call("POST", "/api/telegram/redeem", { body: { code: url.split("code=")[1] }, device: null })).json;
     };
+    const me = (x: any) => call("GET", "/api/auth/me", { staff: x.token, device: x.deviceToken });
     const a = await mk();
     const b = await mk();
-    expect((await call("GET", "/api/auth/me", { staff: a.token, device: a.deviceToken })).status).toBe(401); // the older device was switched off
-    expect((await call("GET", "/api/auth/me", { staff: b.token, device: b.deviceToken })).status).toBe(200);
+    expect((await me(a)).status).toBe(200); // opening a second link does not sign the first browser out
+    expect((await me(b)).status).toBe(200);
+    const more = [await mk(), await mk(), await mk(), await mk()];
+    expect((await me(a)).status).toBe(401); // six in all: the oldest is switched off
+    expect((await me(b)).status).toBe(200);
+    for (const x of more) expect((await me(x)).status).toBe(200);
   });
 });
 
