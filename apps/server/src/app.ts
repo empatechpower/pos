@@ -546,6 +546,30 @@ export async function buildApp({ config, store, db, catalog, catalogAdmin, print
   const valid = (b: MoneyBody | undefined) =>
     !!b?.customerId && !!b.idempotencyKey && Number.isSafeInteger(b.amountCents) && (b.amountCents as number) > 0;
 
+  /** Credit by member for reports: what they started with, what was added later, what they spent, and what is left. */
+  app.get("/api/reports/credit", { preHandler: needs("wallet.read") }, async () => {
+    const r = await db.query(
+      `SELECT w.customer_id, m.name, m.phone, w.balance_cents,
+              COALESCE(SUM(e.amount_cents) FILTER (WHERE e.kind='topup' AND e.idempotency_key LIKE 'open:%'),0) AS opening,
+              COALESCE(SUM(e.amount_cents) FILTER (WHERE e.kind='topup' AND e.idempotency_key NOT LIKE 'open:%'),0) AS topups,
+              COALESCE(-SUM(e.amount_cents) FILTER (WHERE e.kind='spend'),0) AS spent,
+              COALESCE(SUM(e.amount_cents) FILTER (WHERE e.kind='refund'),0) AS refunds,
+              COALESCE(SUM(e.amount_cents) FILTER (WHERE e.kind='adjust'),0) AS adjustments
+         FROM wallets w
+         LEFT JOIN members m ON m.merchant_id = w.merchant_id AND m.id::text = w.customer_id
+         LEFT JOIN ledger_entries e ON e.wallet_id = w.id
+        WHERE w.merchant_id=$1
+        GROUP BY w.id, m.name, m.phone`,
+      [merchantId],
+    );
+    return {
+      members: r.rows.map((x) => ({
+        id: x.customer_id as string, name: (x.name as string | null) ?? null, phone: (x.phone as string | null) ?? null,
+        openingCents: Number(x.opening), topupsCents: Number(x.topups), spentCents: Number(x.spent), refundsCents: Number(x.refunds), adjustmentsCents: Number(x.adjustments), balanceCents: Number(x.balance_cents),
+      })),
+    };
+  });
+
   /** One member's credit history, newest first: every top-up, purchase, refund and adjustment, and who made it. */
   app.get<{ Params: { id: string } }>("/api/members/:id/credit-history", { preHandler: needs("wallet.read") }, async (req) => {
     const r = await db.query(

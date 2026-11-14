@@ -240,6 +240,20 @@ describe("paying for an order with member credit", () => {
     expect((await order(s.token, { payWithCredit: true })).status).toBe(200);
   });
 
+  it("the credit report separates opening credit from later top-ups and spending, and matches the balance", async () => {
+    await createMember({ name: "Rae", email: "rae@example.com", creditCents: 1000 });
+    const m = (await call("/api/members?q=rae@", { staff: mgr })).json.members[0];
+    await call("/api/wallet/topup", { body: { customerId: m.id, amountCents: 119, idempotencyKey: "rep1" }, staff: mgr });
+    const sess = await emailIn("rae@example.com");
+    await order(sess.token, { payWithCredit: true });
+    const rep = (await call("/api/reports/credit", { staff: mgr })).json.members.find((x: any) => x.id === m.id);
+    expect(rep.openingCents).toBe(1000);
+    expect(rep.topupsCents).toBe(119);
+    expect(rep.spentCents).toBeGreaterThan(0);
+    expect(rep.openingCents + rep.topupsCents - rep.spentCents + rep.refundsCents + rep.adjustmentsCents).toBe(rep.balanceCents);
+    expect((await call("/api/reports/credit", {})).status).toBe(401);
+  });
+
   it("stops, and changes nothing, when there is not enough credit", async () => {
     await createMember({ name: "Di", email: "di@example.com", creditCents: 50 });
     const s = await emailIn("di@example.com");
