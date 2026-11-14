@@ -144,7 +144,25 @@ function Members({ canAdjustPoints, canImport, rewardsOn }: { canAdjustPoints: b
   const [open, setOpen] = useState<{ id: string; kind: "credit" | "creditedit" | "points" | "history" } | null>(null);
   const [panel, setPanel] = useState<null | "add" | "upload">(null);
   const [msg, setMsg] = useState<string | null>(null);
+  const [freeze, setFreeze] = useState<{ frozen: boolean; allowed: string[] }>({ frozen: false, allowed: [] });
   const seq = useRef(0);
+  const loadFreeze = useCallback(async () => {
+    const r = await staffFetch("/api/credit/freeze");
+    if ("res" in r && r.res.ok) setFreeze((await r.res.json()) as { frozen: boolean; allowed: string[] });
+  }, []);
+  useEffect(() => {
+    void loadFreeze();
+    const on = () => void loadFreeze();
+    window.addEventListener("pos:freeze-changed", on);
+    return () => window.removeEventListener("pos:freeze-changed", on);
+  }, [loadFreeze]);
+  const allow = async (id: string, allowed: boolean) => {
+    const r = await staffFetch(`/api/credit/freeze/members/${id}`, { method: "PUT", body: { allowed } });
+    if ("problem" in r) return setMsg(r.problem);
+    if (!r.res.ok) return setMsg("Could not change that. Nothing was changed.");
+    setMsg(allowed ? "That member can spend their credit while it is frozen." : "That member's credit is frozen again.");
+    void loadFreeze();
+  };
 
   const load = useCallback(async (query: string) => {
     const my = ++seq.current;
@@ -189,6 +207,7 @@ function Members({ canAdjustPoints, canImport, rewardsOn }: { canAdjustPoints: b
           </div>
           <div style={{ display: "flex", gap: 8, marginTop: 8 }}>
             <button className="secondary sm" onClick={() => setOpen(open?.id === m.id && open.kind === "credit" ? null : { id: m.id, kind: "credit" })}>Add credit</button>
+            {freeze.frozen && canAdjustPoints && <button className={freeze.allowed.includes(m.id) ? "primary sm" : "secondary sm"} onClick={() => void allow(m.id, !freeze.allowed.includes(m.id))}>{freeze.allowed.includes(m.id) ? "Allowed while frozen ✓" : "Allow while frozen"}</button>}
             <button className="secondary sm" onClick={() => setOpen(open?.id === m.id && open.kind === "history" ? null : { id: m.id, kind: "history" })}>Credit history</button>
             {canAdjustPoints && <button className="secondary sm" onClick={() => setOpen(open?.id === m.id && open.kind === "creditedit" ? null : { id: m.id, kind: "creditedit" })}>Edit credit</button>}
             {rewardsOn && canAdjustPoints && <button className="secondary sm" onClick={() => setOpen(open?.id === m.id && open.kind === "points" ? null : { id: m.id, kind: "points" })}>Adjust points</button>}
@@ -597,6 +616,7 @@ function FreezeCredit() {
     if ("problem" in r) return setErr(r.problem);
     if (!r.res.ok) return setErr("Could not change it. Nothing was changed.");
     setFrozen(next);
+    window.dispatchEvent(new Event("pos:freeze-changed"));
   };
   return (
     <>

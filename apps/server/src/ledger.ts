@@ -164,3 +164,21 @@ export async function setCreditFrozen(db: Db, merchantId: string, frozen: boolea
     [merchantId, frozen],
   );
 }
+
+/** Members allowed to spend while the freeze is on. */
+export async function creditExemptIds(db: Db, merchantId: string): Promise<string[]> {
+  const r = await db.query("SELECT member_id FROM credit_freeze_exempt WHERE merchant_id=$1", [merchantId]);
+  return r.rows.map((x) => x.member_id as string);
+}
+
+export async function setCreditExempt(db: Db, merchantId: string, memberId: string, exempt: boolean): Promise<void> {
+  if (exempt) await db.query("INSERT INTO credit_freeze_exempt (merchant_id, member_id) VALUES ($1,$2) ON CONFLICT DO NOTHING", [merchantId, memberId]);
+  else await db.query("DELETE FROM credit_freeze_exempt WHERE merchant_id=$1 AND member_id=$2", [merchantId, memberId]);
+}
+
+/** True when this member's credit cannot be spent right now: the freeze is on and they are not on the allowed list. */
+export async function creditBlockedFor(db: Db, merchantId: string, memberId: string): Promise<boolean> {
+  if (!(await creditFrozen(db, merchantId))) return false;
+  const r = await db.query("SELECT 1 FROM credit_freeze_exempt WHERE merchant_id=$1 AND member_id=$2", [merchantId, memberId]);
+  return !r.rowCount;
+}

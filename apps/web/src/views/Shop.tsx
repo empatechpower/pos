@@ -78,6 +78,8 @@ interface MemberView {
   prefs?: { orderUpdates: boolean; promos: boolean };
   /** Prepaid credit the member can pay with, in cents. */
   creditCents?: number;
+  /** Credit is frozen and this member is not on the allowed list: they cannot spend it. */
+  creditBlocked?: boolean;
 }
 const params = () => new URLSearchParams(location.hash.split("?")[1] ?? "");
 const orderIdFromHash = () => /^#\/shop\/order\/([\w-]+)/.exec(location.hash)?.[1] ?? null;
@@ -440,8 +442,8 @@ function Menu({ info, catalog, config, loginError, recheck }: { info: Info; cata
     if (!t) return setMember(null);
     const r = await fetch("/api/shop/me", { headers: { authorization: `Bearer ${t}` } }).catch(() => null);
     if (r?.ok) {
-      const j = (await r.json()) as { member: MemberView; creditCents?: number; coupons?: CouponView[]; stamps?: StampView | null };
-      setMember({ ...j.member, creditCents: j.creditCents ?? 0 });
+      const j = (await r.json()) as { member: MemberView; creditCents?: number; creditBlocked?: boolean; coupons?: CouponView[]; stamps?: StampView | null };
+      setMember({ ...j.member, creditCents: j.creditCents ?? 0, creditBlocked: j.creditBlocked === true });
       setCoupons(j.coupons ?? []);
       setStamps(j.stamps ?? null);
       setName((n) => n || j.member.name || "");
@@ -1274,9 +1276,9 @@ function Menu({ info, catalog, config, loginError, recheck }: { info: Info; cata
           <div className="pay-sticky">
             {noteEl}
             {dine && !spot && <p className="e2e-sub">{tx("Choose your table to continue.")}</p>}
-            {info.creditFrozen && <p className="e2e-sub">{tx("Ordering with credit is paused right now. Please see our staff.")}</p>}
-            {!info.creditFrozen && credit < shownTotal && <p className="e2e-sub">{tx("Your credit is not enough for this order. Please top up at the counter.")}</p>}
-            <button className={`e2e-cta ${canOrder && (!dine || !!spot) && credit >= shownTotal && !info.creditFrozen ? "" : "off"}`} disabled={!canOrder || (dine && !spot) || credit < shownTotal || busy || !!info.creditFrozen} onClick={() => void place()}>
+            {member?.creditBlocked && <p className="e2e-sub">{tx("Ordering with credit is paused right now. Please see our staff.")}</p>}
+            {!member?.creditBlocked && credit < shownTotal && <p className="e2e-sub">{tx("Your credit is not enough for this order. Please top up at the counter.")}</p>}
+            <button className={`e2e-cta ${canOrder && (!dine || !!spot) && credit >= shownTotal && !member?.creditBlocked ? "" : "off"}`} disabled={!canOrder || (dine && !spot) || credit < shownTotal || busy || !!member?.creditBlocked} onClick={() => void place()}>
               <span>{busy ? tx("Placing your order…") : tx("Pay with credit")}</span><span>{formatMoney(shownTotal)}</span>
             </button>
           </div>

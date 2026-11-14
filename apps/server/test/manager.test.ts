@@ -254,6 +254,23 @@ describe("paying for an order with member credit", () => {
     expect((await call("/api/reports/credit", {})).status).toBe(401);
   });
 
+  it("a member on the allowed list can still spend while credit is frozen; others cannot", async () => {
+    await createMember({ name: "Gus", email: "gus@example.com", creditCents: 3000 });
+    await createMember({ name: "Hal", email: "hal@example.com", creditCents: 3000 });
+    const gus = (await call("/api/members?q=gus@", { staff: mgr })).json.members[0];
+    const sg = await emailIn("gus@example.com");
+    const sh = await emailIn("hal@example.com");
+    await call("/api/credit/freeze", { body: { frozen: true }, staff: mgr, method: "PUT" });
+    expect((await call(`/api/credit/freeze/members/${gus.id}`, { body: { allowed: true }, staff: cashier, method: "PUT" })).status).toBe(403);
+    expect((await call(`/api/credit/freeze/members/${gus.id}`, { body: { allowed: true }, staff: mgr, method: "PUT" })).json.allowed).toBe(true);
+    expect((await call("/api/shop/me", { device: "", staff: undefined } as any)).status).toBe(401);
+    expect((await order(sh.token, { payWithCredit: true })).json.error).toBe("credit_frozen");
+    expect((await order(sg.token, { payWithCredit: true })).status).toBe(200);
+    await call(`/api/credit/freeze/members/${gus.id}`, { body: { allowed: false }, staff: mgr, method: "PUT" });
+    expect((await order(sg.token, { payWithCredit: true })).json.error).toBe("credit_frozen");
+    await call("/api/credit/freeze", { body: { frozen: false }, staff: mgr, method: "PUT" });
+  });
+
   it("stops, and changes nothing, when there is not enough credit", async () => {
     await createMember({ name: "Di", email: "di@example.com", creditCents: 50 });
     const s = await emailIn("di@example.com");

@@ -5,7 +5,7 @@ import type { BrandStore } from "./brand.js";
 import type { CatalogStore, PgCatalogStore } from "./catalog.js";
 import { liveSmsNumber } from "./devices.js";
 import type { Db } from "./db/pool.js";
-import { balanceOf, creditFrozen, refund as refundCredit, spend as spendCredit } from "./ledger.js";
+import { balanceOf, creditBlockedFor, creditFrozen, refund as refundCredit, spend as spendCredit } from "./ledger.js";
 import { FailureLimiter } from "./rateLimit.js";
 import { normaliseEmail, type MemberStore } from "./members.js";
 import { authorizeUrl, createStripeCheckout, createStripeRefund, fetchProfile, sendMail, newState, newVerifier, sameSecret, verifyStripeSignature, type Integrations, type OAuthProvider } from "./integrations.js";
@@ -256,7 +256,7 @@ export function registerShop(app: FastifyInstance, d: ShopDeps) {
     app.get("/api/shop/me", async (req, reply) => {
       const m = await members.fromToken(bearer(req));
       if (!m) return reply.code(401).send({ error: "not_signed_in" });
-      return { member: m, creditCents: await balanceOf(d.db, merchantId, m.id), history: await members.history(m.id, 20), coupons: await members.coupons(m.id), stamps: d.config.rewards.stampCard.enabled ? { ...(await members.stamps(m.id)), target: d.config.rewards.stampCard.target, rewardTitle: d.config.rewards.stampCard.rewardTitle, minPaidCents: d.config.rewards.stampCard.minPaidCents } : null, pointsEnabled: d.config.rewards.pointsEnabled };
+      return { member: m, creditCents: await balanceOf(d.db, merchantId, m.id), creditBlocked: await creditBlockedFor(d.db, merchantId, m.id), history: await members.history(m.id, 20), coupons: await members.coupons(m.id), stamps: d.config.rewards.stampCard.enabled ? { ...(await members.stamps(m.id)), target: d.config.rewards.stampCard.target, rewardTitle: d.config.rewards.stampCard.rewardTitle, minPaidCents: d.config.rewards.stampCard.minPaidCents } : null, pointsEnabled: d.config.rewards.pointsEnabled };
     });
 
     app.post("/api/shop/auth/logout", async (req) => {
@@ -455,7 +455,7 @@ export function registerShop(app: FastifyInstance, d: ShopDeps) {
     if (coupon && quote.priced.couponIneligible) return reply.code(400).send({ error: "coupon_not_eligible", shortfallCents: coupon.minSpendCents - quote.priced.subtotal });
     if (b.payWithCredit && !member) return reply.code(401).send({ error: "sign_in_to_use_credit" });
     // The shop has frozen member credit (for example, the event is over): no order can be paid with it.
-    if (b.payWithCredit && (await creditFrozen(d.db, merchantId))) return reply.code(403).send({ error: "credit_frozen" });
+    if (b.payWithCredit && member && (await creditBlockedFor(d.db, merchantId, member.id))) return reply.code(403).send({ error: "credit_frozen" });
     let orderId = newId();
 
     // A credit purchase carries an idempotency key made by the customer's phone for this attempt. A retry (double tap,
