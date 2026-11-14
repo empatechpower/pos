@@ -576,6 +576,7 @@ function CreditHistory({ memberId }: { memberId: string }) {
 function FreezeCredit() {
   const [frozen, setFrozen] = useState<boolean | null>(null);
   const [busy, setBusy] = useState(false);
+  const [asking, setAsking] = useState(false);
   const [err, setErr] = useState<string | null>(null);
   useEffect(() => {
     void (async () => {
@@ -584,22 +585,40 @@ function FreezeCredit() {
     })();
   }, []);
   if (frozen === null) return null;
-  const flip = async () => {
-    const next = !frozen;
-    if (next && !window.confirm("Freeze all member credit? Nobody will be able to place an order or pay with credit until you unfreeze it. Balances are not changed.")) return;
+  const next = !frozen;
+  const apply = async () => {
     setBusy(true);
     setErr(null);
     const r = await staffFetch("/api/credit/freeze", { method: "PUT", body: { frozen: next } });
     setBusy(false);
+    setAsking(false);
     if ("problem" in r) return setErr(r.problem);
     if (!r.res.ok) return setErr("Could not change it. Nothing was changed.");
     setFrozen(next);
   };
   return (
-    <div className="flash" style={{ marginBottom: 10, display: "flex", gap: 10, alignItems: "center", flexWrap: "wrap", background: frozen ? "#fdecea" : undefined }}>
-      <span style={{ flex: 1 }}>{frozen ? <><b>Member credit is frozen.</b> Nobody can place an order or pay with credit. Balances are unchanged.</> : "Member credit is active."}</span>
-      <button className={frozen ? "primary sm" : "secondary sm"} disabled={busy} onClick={() => void flip()}>{frozen ? "Unfreeze credit" : "Freeze credit"}</button>
-      {err && <span style={{ color: "#c0392b" }}>{err}</span>}
-    </div>
+    <>
+      <div className="flash" style={{ marginBottom: 10, display: "flex", gap: 10, alignItems: "center", flexWrap: "wrap", background: frozen ? "#fdecea" : undefined }}>
+        <span style={{ flex: 1 }}>{frozen ? <><b>Member credit is frozen.</b> Nobody can place an order or pay with credit. Balances are unchanged.</> : "Member credit is active."}</span>
+        <button className={frozen ? "primary sm" : "secondary sm"} disabled={busy} onClick={() => setAsking(true)}>{frozen ? "Unfreeze credit" : "Freeze credit"}</button>
+        {err && <span style={{ color: "#c0392b" }}>{err}</span>}
+      </div>
+      {asking && (
+        <div className="rn-back" onClick={() => !busy && setAsking(false)}>
+          <div className="rn-modal" role="dialog" aria-modal="true" aria-label={next ? "Freeze member credit" : "Unfreeze member credit"} onClick={(e) => e.stopPropagation()}>
+            <h3>{next ? "Freeze member credit?" : "Unfreeze member credit?"}</h3>
+            <p className="muted">
+              {next
+                ? "Nobody will be able to place an order or pay with credit, online or at the till. Balances are not changed, and you can unfreeze it at any time."
+                : "Members will be able to spend their credit and place orders again, online and at the till."}
+            </p>
+            <div className="rn-actions">
+              <button className="secondary" disabled={busy} onClick={() => setAsking(false)}>Cancel</button>
+              <button className="primary" disabled={busy} autoFocus onClick={() => void apply()}>{busy ? "Working…" : next ? "Freeze credit" : "Unfreeze credit"}</button>
+            </div>
+          </div>
+        </div>
+      )}
+    </>
   );
 }
