@@ -5,11 +5,14 @@ A single static page: `index.html` plus `assets/rezein-logo.png`. No build step 
     open apps/landing/index.html          # preview on a Mac
     npx serve apps/landing                # or any static file server
 
+## Where it lives
+The server serves this folder at `/about/` (e.g. https://demo.rezein.com/about/), so it deploys with the app.
+
 ## Before publishing
 Edit the `CONFIG` block at the bottom of `index.html`:
 
-- `demoUrl`: where the live customer ordering page is (the app's `/#/shop`). It is set to
-  `http://localhost:5173/#/shop` for local use and must be changed to the real address.
+- `demoUrl`: where the live customer ordering page is. It is `/#/shop`, the same address as this page. For
+  `open apps/landing/index.html` or a standalone host, use the full address instead.
 - `contactEmail`: the address for "Talk to us". It is empty on purpose; while it is empty the button is hidden,
   so the page never shows a link that goes nowhere.
 

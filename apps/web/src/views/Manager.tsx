@@ -139,7 +139,7 @@ function Members({ canAdjustPoints, canImport, rewardsOn }: { canAdjustPoints: b
   const [q, setQ] = useState("");
   const [rows, setRows] = useState<MemberRow[] | null>(null);
   const [total, setTotal] = useState(0);
-  const [open, setOpen] = useState<{ id: string; kind: "credit" | "creditedit" | "points" } | null>(null);
+  const [open, setOpen] = useState<{ id: string; kind: "credit" | "creditedit" | "points" | "history" } | null>(null);
   const [panel, setPanel] = useState<null | "add" | "upload">(null);
   const [msg, setMsg] = useState<string | null>(null);
   const seq = useRef(0);
@@ -186,9 +186,11 @@ function Members({ canAdjustPoints, canImport, rewardsOn }: { canAdjustPoints: b
           </div>
           <div style={{ display: "flex", gap: 8, marginTop: 8 }}>
             <button className="secondary sm" onClick={() => setOpen(open?.id === m.id && open.kind === "credit" ? null : { id: m.id, kind: "credit" })}>Add credit</button>
+            <button className="secondary sm" onClick={() => setOpen(open?.id === m.id && open.kind === "history" ? null : { id: m.id, kind: "history" })}>Credit history</button>
             {canAdjustPoints && <button className="secondary sm" onClick={() => setOpen(open?.id === m.id && open.kind === "creditedit" ? null : { id: m.id, kind: "creditedit" })}>Edit credit</button>}
             {rewardsOn && canAdjustPoints && <button className="secondary sm" onClick={() => setOpen(open?.id === m.id && open.kind === "points" ? null : { id: m.id, kind: "points" })}>Adjust points</button>}
           </div>
+          {open?.id === m.id && open.kind === "history" && <CreditHistory memberId={m.id} />}
           {open?.id === m.id && open.kind === "credit" && <CreditForm member={m} onDone={(t) => { setMsg(t); setOpen(null); void load(q.trim()); }} />}
           {open?.id === m.id && open.kind === "creditedit" && <CreditEditForm member={m} onDone={(t) => { setMsg(t); setOpen(null); void load(q.trim()); }} />}
           {open?.id === m.id && open.kind === "points" && <PointsForm member={m} onDone={(t) => { setMsg(t); setOpen(null); void load(q.trim()); }} />}
@@ -527,6 +529,44 @@ function Books() {
       <p className="muted" style={{ fontSize: 13 }}>{r.wallets} wallets · {r.entries} entries. Opening + credits + debits + reversals = closing. Debits are shown as negative amounts.</p>
       {r.mismatchedWallets.length > 0 && <div className="flash warn">{r.mismatchedWallets.length} wallet(s) do not match their own entries.</div>}
       <button className="secondary sm" onClick={() => void load()}>Check again</button>
+    </div>
+  );
+}
+
+type HistoryEntry = { kind: string; amountCents: number; balanceAfterCents: number; opening: boolean; orderId: string | null; note: string | null; by: string | null; at: string };
+
+/** Every movement on one member's credit, newest first, with who made it. For checking a balance. */
+function CreditHistory({ memberId }: { memberId: string }) {
+  const [rows, setRows] = useState<HistoryEntry[] | null>(null);
+  const [err, setErr] = useState<string | null>(null);
+  useEffect(() => {
+    void (async () => {
+      const r = await staffFetch(`/api/members/${memberId}/credit-history`);
+      if ("problem" in r) return setErr(r.problem);
+      if (!r.res.ok) return setErr("Could not load the history.");
+      setRows(((await r.res.json()) as { entries: HistoryEntry[] }).entries);
+    })();
+  }, [memberId]);
+  const what = (e: HistoryEntry) => (e.opening ? "Opening credit" : e.kind === "topup" ? "Top-up" : e.kind === "spend" ? "Order paid" : e.kind === "refund" ? "Refund" : "Adjusted");
+  if (err) return <div className="flash">{err}</div>;
+  if (!rows) return <p className="muted">Loading…</p>;
+  if (!rows.length) return <p className="muted">No credit movements yet.</p>;
+  return (
+    <div style={{ marginTop: 8, overflowX: "auto" }}>
+      <table style={{ width: "100%", fontSize: 13, borderCollapse: "collapse" }}>
+        <thead><tr style={{ textAlign: "left" }}><th>When</th><th>What</th><th style={{ textAlign: "right" }}>Amount</th><th style={{ textAlign: "right" }}>Balance</th><th>By</th></tr></thead>
+        <tbody>
+          {rows.map((e, i) => (
+            <tr key={i} style={{ borderTop: "1px solid #ddd" }}>
+              <td>{new Date(e.at).toLocaleString("en-SG", { day: "numeric", month: "short", hour: "2-digit", minute: "2-digit", second: "2-digit", hour12: false })}</td>
+              <td>{what(e)}{e.note ? <span className="muted"> · {e.note}</span> : null}</td>
+              <td style={{ textAlign: "right", color: e.amountCents < 0 ? "#c0392b" : "#1b7f3b" }}>{e.amountCents < 0 ? "−" : "+"}{formatMoney(Math.abs(e.amountCents))}</td>
+              <td style={{ textAlign: "right" }}>{formatMoney(e.balanceAfterCents)}</td>
+              <td>{e.by ?? <span className="muted">—</span>}</td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
     </div>
   );
 }

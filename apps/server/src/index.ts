@@ -47,6 +47,12 @@ if (existsSync(webDist)) {
     cacheControl: false,
     setHeaders: (res, path) => res.setHeader("cache-control", path.includes("/assets/") ? "public, max-age=31536000, immutable" : "no-cache"),
   });
+  // The Rezein landing page (one static page) lives at /about/ on the same address.
+  const landingDir = fileURLToPath(new URL("../../landing", import.meta.url));
+  if (existsSync(landingDir)) {
+    await app.register(fastifyStatic, { root: landingDir, prefix: "/about/", decorateReply: false, cacheControl: false, setHeaders: (res) => res.setHeader("cache-control", "public, max-age=300") });
+    app.get("/about", (_req, reply) => reply.redirect("/about/"));
+  }
   app.setNotFoundHandler((req, reply) => (req.url.startsWith("/api/") ? reply.code(404).send({ error: "not found" }) : reply.header("cache-control", "no-cache").sendFile("index.html")));
 }
 

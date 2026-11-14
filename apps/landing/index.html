@@ -165,6 +165,18 @@
     .status li::before { background: var(--ok); }
     .status .next li::before { background: transparent; border: 2px solid var(--teal); }
     @media (max-width: 860px) { .status { grid-template-columns: 1fr; } }
+    /* Ready today: full width, two columns, ticks. On the way: a quieter strip underneath. */
+    .status { grid-template-columns: 1fr; }
+    .status .panel { padding: 32px 36px; }
+    .status .panel h3 { font-size: 1.2rem; }
+    .status .panel h3::after { content: attr(data-count); margin-left: auto; font-size: .78rem; font-weight: 700; padding: 4px 11px; border-radius: 999px; background: #e3f4ec; color: var(--ok); }
+    .status .panel.next h3::after { background: #dff3f5; color: var(--teal); }
+    .status ul { grid-template-columns: 1fr 1fr; gap: 14px 40px; margin-top: 22px; }
+    .status li { padding-left: 34px; line-height: 1.5; }
+    .status li::before { top: .12em; width: 20px; height: 20px; border-radius: 50%; background: var(--ok) url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 20 20'%3E%3Cpath d='M5.5 10.5l3 3 6-6.5' fill='none' stroke='%23fff' stroke-width='2.2' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E") center/20px no-repeat; }
+    .status .panel.next { background: #f1f9fa; border: 1px dashed #9ed6dc; }
+    .status .next li::before { background: #fff; border: 2px solid var(--teal); }
+    @media (max-width: 860px) { .status ul { grid-template-columns: 1fr; } .status .panel { padding: 26px 22px; } }
 
     /* CTA */
     .cta { padding: 20px 0 96px; }
@@ -267,7 +279,7 @@
           <article class="card">
             <div class="ico"><svg viewBox="0 0 24 24"><rect x="7" y="2" width="10" height="20" rx="2.5"/><path d="M11 18h2"/></svg></div>
             <h3>Customers order from their phone</h3>
-            <p>Scan a table's QR code and order with photos, hot or cold, extras and live status. Your staff accept each order first, so nothing reaches the kitchen unchecked.</p>
+            <p>Scan a table's QR code and order with photos, hot or cold, extras and live status. Orders paid with member credit go straight to the kitchen; every other order is checked and accepted by staff first. Customers can switch the page to English, Malay, Indonesian, Mandarin, Japanese, French, German or Tamil.</p>
           </article>
           <article class="card">
             <div class="ico"><svg viewBox="0 0 24 24"><path d="M2 9a15 15 0 0 1 20 0M5 12.5a10 10 0 0 1 14 0M8.5 16a5 5 0 0 1 7 0"/><path d="M12 19.5h.01"/><path d="M3 3l18 18"/></svg></div>
@@ -277,7 +289,7 @@
           <article class="card">
             <div class="ico"><svg viewBox="0 0 24 24"><rect x="2.5" y="5" width="19" height="14" rx="2.5"/><path d="M2.5 10h19M6 15h4"/></svg></div>
             <h3>Prepaid credit</h3>
-            <p>Customers top up at the counter and pay from their balance. Each spend is checked against one balance, so two tills cannot spend the same dollars, and every movement is recorded.</p>
+            <p>Load credit at the counter or upload a member list with starting balances. Members sign in with their phone and pay from their balance. Each spend is checked against one balance, so two tills cannot spend the same dollars, and every movement is recorded, with a history for each member showing who added or spent what.</p>
           </article>
           <article class="card">
             <div class="ico"><svg viewBox="0 0 24 24"><path d="M3 12l9-9 9 9-9 9z"/><path d="M12 8v8M9.5 10.5c0-1 1-1.5 2.5-1.5s2.5.5 2.5 1.5-1 1.3-2.5 1.5-2.5.6-2.5 1.5 1 1.5 2.5 1.5 2.5-.5 2.5-1.5"/></svg></div>
@@ -287,7 +299,7 @@
           <article class="card">
             <div class="ico"><svg viewBox="0 0 24 24"><path d="M6 9V3h12v6M6 18H4a1 1 0 0 1-1-1v-6a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2v6a1 1 0 0 1-1 1h-2"/><rect x="6" y="14" width="12" height="7" rx="1"/></svg></div>
             <h3>Receipts, tickets and labels</h3>
-            <p>Prints to receipt printers and to Zebra label printers. If a printer is off, the job waits and retries instead of disappearing, and a manager can see what failed.</p>
+            <p>Prints to receipt printers, separate kitchen and drinks printers, and Zebra label printers, with Chinese and English on the same ticket. If a printer is off, the job waits and retries instead of disappearing, and a manager can see what failed.</p>
           </article>
         </div>
       </div>
@@ -301,7 +313,7 @@
         <p class="lead" style="margin-top:14px">The same path works for orders a customer places and orders your staff key in.</p>
         <ol class="steps">
           <li><b>Customer orders</b><span>Picks items and options on their phone and gets a queue number.</span></li>
-          <li><b>Staff accept</b><span>The order appears on the counter. One tap accepts it, or turns it down.</span></li>
+          <li><b>Staff accept</b><span>The order appears on the counter. One tap accepts it, or turns it down. Orders paid with credit are accepted automatically.</span></li>
           <li><b>Payment</b><span>Cash, or from the customer's prepaid credit. The kitchen starts once it is paid.</span></li>
           <li><b>Kitchen ticket</b><span>Shown on the kitchen screen and printed, with every choice on it.</span></li>
           <li><b>Ready</b><span>The queue display and the customer's phone both say so.</span></li>
@@ -357,7 +369,7 @@
         </div>
         <div class="status">
           <div class="panel">
-            <h3><span class="dot"></span>Ready today</h3>
+            <h3 data-count="10 built"><span class="dot"></span>Ready today</h3>
             <ul>
               <li>Till, kitchen screen and queue display, working offline</li>
               <li>Customer ordering from a phone, with item options and live status</li>
@@ -365,16 +377,20 @@
               <li>Prices and service charge by channel</li>
               <li>Receipt, kitchen-ticket and label printing for network printers</li>
               <li>Staff roles, approved devices and an audit trail</li>
+              <li>Android hub app: prints to your network printers and receives sign-in texts</li>
+              <li>Manage the shop from Telegram: change a price, switch items on or off, open staff pages already signed in</li>
+              <li>Customer accounts with phone sign-in, and rewards: points, coupons and a stamp card</li>
+              <li>Rename items and categories and change prices yourself, without calling anyone</li>
             </ul>
           </div>
           <div class="panel next">
-            <h3><span class="dot next"></span>On the way</h3>
+            <h3 data-count="5 planned"><span class="dot next"></span>On the way</h3>
             <ul>
-              <li>Android hub: print controller, and backup internet when the shop's line is down</li>
-              <li>Manage the shop from Telegram: change a price, add an item, pull a report</li>
+              <li>Android hub: backup internet when the shop's line is down</li>
+              <li>Telegram: add an item and pull a report</li>
               <li>Split and combine bills for restaurants</li>
               <li>Delivery workflow and delivery-app orders</li>
-              <li>Paying online, and customer accounts with rewards</li>
+              <li>Paying online by card or PayNow, once a payment account is connected</li>
             </ul>
           </div>
         </div>
@@ -407,7 +423,7 @@
     // Set these two before publishing. A button whose value is empty stays hidden,
     // so the page never shows a link that goes nowhere.
     var CONFIG = {
-      demoUrl: "http://localhost:5173/#/shop", // the live customer ordering page
+      demoUrl: "/#/shop",                       // the live customer ordering page (same address as this page)
       contactEmail: ""                          // e.g. "hello@yourcompany.com"
     };
     document.querySelectorAll("[data-cta=demo]").forEach(function (a) {

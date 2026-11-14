@@ -294,6 +294,35 @@ export function Shop() {
       .catch(() => setFailed(true));
   }, []);
 
+  // Keep the menu current without a reload: ask the server for its menu version (a few bytes) every 30 s, when the
+  // customer comes back to the tab, and before they pay. Only when it differs is the whole menu downloaded, once.
+  const haveVersion = useRef(0);
+  haveVersion.current = catalog?.version ?? 0;
+  const checking = useRef(false);
+  const recheckMenu = useRef(async () => {});
+  recheckMenu.current = async () => {
+    if (!haveVersion.current || checking.current) return;
+    checking.current = true;
+    try {
+      const v = await fetch("/api/catalog/version", { cache: "no-store" });
+      if (!v.ok) return;
+      const { version } = (await v.json()) as { version: number };
+      if (version === haveVersion.current) return;
+      const c = await fetch("/api/catalog", { cache: "no-cache" });
+      if (c.ok) setCatalog((await c.json()) as Catalog);
+    } catch {
+      // offline: keep the menu we have
+    } finally {
+      checking.current = false;
+    }
+  };
+  useEffect(() => {
+    const run = () => { if (document.visibilityState === "visible") void recheckMenu.current(); };
+    const t = window.setInterval(run, 30_000);
+    document.addEventListener("visibilitychange", run);
+    return () => { window.clearInterval(t); document.removeEventListener("visibilitychange", run); };
+  }, []);
+
   if (failed) return <div className="shop"><div className="shop-msg"><h2>{tx("Ordering isn't available right now")}</h2><p>{tx("Please order at the counter, or try again in a moment.")}</p></div></div>;
   if (!info || !catalog || !config || signing) return <div className="shop"><div className="shop-msg"><p>{signing ? "Signing you in…" : tx("Loading…")}</p></div></div>;
 
@@ -313,7 +342,7 @@ export function Shop() {
           <Status orderId={orderId} info={info} />
         </>
       ) : (
-        <Menu info={info} catalog={catalog} config={config} loginError={loginError} />
+        <Menu info={info} catalog={catalog} config={config} loginError={loginError} recheck={() => recheckMenu.current()} />
       )}
     </div>
   );
@@ -321,7 +350,7 @@ export function Shop() {
 
 type Screen = "login" | "order" | "rewards" | "account" | "bag" | "summary" | "checkout" | "payment";
 
-function Menu({ info, catalog, config, loginError }: { info: Info; catalog: Catalog; config: BusinessConfig; loginError: string | null }) {
+function Menu({ info, catalog, config, loginError, recheck }: { info: Info; catalog: Catalog; config: BusinessConfig; loginError: string | null; recheck: () => void }) {
   const q = params();
   const channels = info.channels;
   const wanted = q.get("channel");
@@ -464,14 +493,21 @@ function Menu({ info, catalog, config, loginError }: { info: Info; catalog: Cata
   const channel = channels.find((c) => c.id === channelId);
   const categories = useMemo(() => ["All", ...new Set(menu.map((m) => m.category))], [menu]);
 
+  // Before the customer pays, make sure the menu is current (the server checks again when the order is placed).
+  useEffect(() => { if (screen === "bag" || screen === "summary" || screen === "checkout" || screen === "payment") recheck(); }, [screen]); // eslint-disable-line react-hooks/exhaustive-deps
+
   // Switching channel can remove items it does not sell, or choices that no longer exist.
   useEffect(() => {
     setBag((cur) => {
-      const kept = cur.filter((l) => {
+      const ok = (l: BagLine) => {
         const m = byId.get(l.productId);
-        return m && !m.soldOut && resolveOptions(m.options, l.selection).ok;
-      });
-      if (kept.length < cur.length) setNote(`Some items were removed: they aren't available for ${channel?.name}.`);
+        return !!m && !m.soldOut && resolveOptions(m.options, l.selection).ok;
+      };
+      const kept = cur.filter(ok);
+      if (kept.length < cur.length) {
+        const names = [...new Set(cur.filter((l) => !ok(l)).map((l) => byId.get(l.productId)?.name))].filter(Boolean) as string[];
+        setNote(names.length ? tx("{x} was changed or is no longer available, so it was taken out of your bag. Please add it again.", { x: names.join(", ") }) : tx("Some items were removed from your bag: they are no longer available."));
+      }
       return kept.length === cur.length ? cur : kept;
     });
   }, [byId]);
@@ -587,8 +623,13 @@ function Menu({ info, catalog, config, loginError }: { info: Info; catalog: Cata
         setUsePoints(false);
         void loadMember();
         setNote(tx("Your points balance changed. Please check your total and try again."));
-      } else if (j.error === "unavailable" || j.error === "option_sold_out") {
-        setNote(tx("One of your items just sold out. Please check your bag."));
+      } else if (res.status === 400 && (j as { productId?: string }).productId) {
+        // The server refused one line (sold out, or a choice that no longer exists). Refresh the menu, which also drops
+        // the dead line, then take the customer to their bag with the item named.
+        const name = byId.get((j as { productId?: string }).productId!)?.name ?? tx("An item");
+        recheck();
+        setScreen("bag");
+        setNote(tx("{x} in your bag has changed or is no longer available. Please check your bag, then pay again.", { x: name }));
       } else {
         setNote(tx("We couldn't place your order. Please try again, or order at the counter."));
       }

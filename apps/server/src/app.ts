@@ -83,6 +83,9 @@ export async function buildApp({ config, store, db, catalog, catalogAdmin, print
     return reply.header("etag", etag).header("cache-control", "no-cache").send(c);
   });
 
+  /** A few bytes: the menu's version. A phone compares it with its own and downloads the menu only when it differs. */
+  app.get("/api/catalog/version", async (_req, reply) => reply.header("cache-control", "no-store").send({ version: await catalog.version() }));
+
   /** Kept for older clients: the default channel's menu at this outlet. */
   app.get("/api/menu", async () => {
     const c = await catalog.load();
@@ -542,6 +545,31 @@ export async function buildApp({ config, store, db, catalog, catalogAdmin, print
   type MoneyBody = { customerId?: string; amountCents?: number; idempotencyKey?: string; orderId?: string; deviceId?: string; note?: string };
   const valid = (b: MoneyBody | undefined) =>
     !!b?.customerId && !!b.idempotencyKey && Number.isSafeInteger(b.amountCents) && (b.amountCents as number) > 0;
+
+  /** One member's credit history, newest first: every top-up, purchase, refund and adjustment, and who made it. */
+  app.get<{ Params: { id: string } }>("/api/members/:id/credit-history", { preHandler: needs("wallet.read") }, async (req) => {
+    const r = await db.query(
+      `SELECT e.kind, e.amount_cents, e.balance_after, e.idempotency_key, e.order_id, e.note, e.device_id, e.created_at, s.name AS staff_name, s.code AS staff_code
+         FROM ledger_entries e
+         JOIN wallets w ON w.id = e.wallet_id
+         LEFT JOIN staff s ON s.id = e.staff_id
+        WHERE w.merchant_id=$1 AND w.customer_id=$2
+        ORDER BY e.created_at DESC, e.id DESC LIMIT 200`,
+      [merchantId, req.params.id],
+    );
+    return {
+      entries: r.rows.map((x) => ({
+        kind: x.kind as string,
+        amountCents: Number(x.amount_cents),
+        balanceAfterCents: Number(x.balance_after),
+        opening: String(x.idempotency_key).startsWith("open:"),
+        orderId: (x.order_id as string | null) ?? null,
+        note: (x.note as string | null) ?? null,
+        by: (x.staff_name as string | null) ? `${x.staff_name} (${x.staff_code})` : x.device_id === "shop" || x.device_id === "SHOP" ? "Customer (online order)" : null,
+        at: x.created_at as Date,
+      })),
+    };
+  });
 
   app.get<{ Params: { customerId: string } }>("/api/wallet/:customerId", { preHandler: needs("wallet.read") }, async (req) => ({
     balanceCents: await balanceOf(db, merchantId, req.params.customerId),

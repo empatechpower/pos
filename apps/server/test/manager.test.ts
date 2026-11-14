@@ -86,6 +86,17 @@ describe("managing members: points and prepaid credit", () => {
     expect((await list("credit@")).json.members[0].creditCents).toBe(5000);
   });
 
+  it("a member's credit history lists each movement, newest first, with who made it", async () => {
+    const m = await signUp("hist@example.com", "Hana");
+    await call("/api/wallet/topup", { body: { customerId: m.id, amountCents: 700, idempotencyKey: "h1" }, staff: mgr });
+    await call("/api/wallet/topup", { body: { customerId: m.id, amountCents: 60, idempotencyKey: "h2" }, staff: cashier });
+    const h = await call(`/api/members/${m.id}/credit-history`, { staff: mgr });
+    expect(h.status).toBe(200);
+    expect(h.json.entries.map((e: any) => [e.amountCents, e.balanceAfterCents])).toEqual([[60, 760], [700, 700]]);
+    expect(h.json.entries[0].by).toBeTruthy();
+    expect((await call(`/api/members/${m.id}/credit-history`, {})).status).toBe(401);
+  });
+
   it("a manager can add or take points with a reason, once per request, and it is recorded", async () => {
     const m = await signUp("pts@example.com", "Pia");
     const add = await call(`/api/members/${m.id}/points`, { body: { points: 100, note: "Apology for a late order", idempotencyKey: "p1" }, staff: mgr });

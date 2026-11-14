@@ -316,4 +316,10 @@ describe("turning items off in a pricebook, free items, bulk edits and copying a
     const pr = await db.query("SELECT categories FROM printers WHERE id='rc-p'");
     if (pr.rowCount) expect(pr.rows[0].categories).toEqual(["NewCat"]);
   });
+  it("the menu version is a tiny public answer that rises with every change", async () => {
+    const v1 = (await call("GET", "/api/catalog/version")).json.version;
+    expect(v1).toBe((await getCatalog()).version);
+    await post("/api/catalog/products", { id: "rc1", name: "Rc One Renamed", category: "NewCat" });
+    expect((await call("GET", "/api/catalog/version")).json.version).toBe(v1 + 1);
+  });
 });

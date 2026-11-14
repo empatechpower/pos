@@ -6,12 +6,17 @@ import type { Db } from "./db/pool.js";
 
 export interface CatalogStore {
   load(): Promise<Catalog>;
+  /** Just the version number: one small query, for devices to ask "has the menu changed?" */
+  version(): Promise<number>;
 }
 
 export class StaticCatalogStore implements CatalogStore {
   constructor(private readonly catalog: Catalog) {}
   async load() {
     return this.catalog;
+  }
+  async version() {
+    return this.catalog.version;
   }
 }
 
@@ -70,6 +75,11 @@ export class PgCatalogStore implements CatalogStore {
 
   load(): Promise<Catalog> {
     return this.read(this.db);
+  }
+
+  async version(): Promise<number> {
+    const r = await this.db.query("SELECT version FROM catalog_meta WHERE merchant_id=$1", [this.merchantId]);
+    return Number(r.rows[0]?.version ?? 0);
   }
 
   private async read(q: Pick<pg.Pool, "query">): Promise<Catalog> {
