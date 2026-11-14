@@ -1,4 +1,7 @@
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
+
+// The address limit for guests is set small here so the test can reach it (the real default is higher).
+process.env.ORDER_LIMIT_IP = "10";
 import { PRESETS, newId, reduceOrder, visibleToKitchen } from "@pos/core";
 import { buildApp } from "../src/app.js";
 import { createStaff } from "../src/auth.js";

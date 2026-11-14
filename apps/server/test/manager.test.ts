@@ -1,4 +1,8 @@
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
+
+// Small order limits so the limiter can be exercised: per member, and per address for guests.
+process.env.ORDER_LIMIT_MEMBER = "4";
+process.env.ORDER_LIMIT_IP = "3";
 import { PRESETS } from "@pos/core";
 import { buildApp } from "../src/app.js";
 import { createStaff } from "../src/auth.js";
@@ -269,6 +273,20 @@ describe("paying for an order with member credit", () => {
     await call(`/api/credit/freeze/members/${gus.id}`, { body: { allowed: false }, staff: mgr, method: "PUT" });
     expect((await order(sg.token, { payWithCredit: true })).json.error).toBe("credit_frozen");
     await call("/api/credit/freeze", { body: { frozen: false }, staff: mgr, method: "PUT" });
+  });
+
+  it("order limits count a signed-in member on their own, and an address only for guests", async () => {
+    await createMember({ name: "Ivy", email: "ivy@example.com", creditCents: 0 });
+    await createMember({ name: "Jay", email: "jay@example.com", creditCents: 0 });
+    const ivy = await emailIn("ivy@example.com");
+    const jay = await emailIn("jay@example.com");
+    for (let i = 0; i < 4; i++) expect((await order(ivy.token)).status).toBe(200); // each call comes from a different address
+    expect((await order(ivy.token)).status).toBe(429); // the member's own limit, whatever the address
+    expect((await order(jay.token)).status).toBe(200); // another member is not held up by it
+    const guest = (ip: string) => fetch(base + "/api/shop/orders", { method: "POST", headers: { "content-type": "application/json", "x-forwarded-for": ip }, body: JSON.stringify({ channelId: "take-away", items: [{ productId: "kaya-toast", qty: 1 }], customerPhone: "9123 4567" }) });
+    for (let i = 0; i < 3; i++) expect((await guest("203.0.113.9")).status).toBe(200);
+    expect((await guest("203.0.113.9")).status).toBe(429); // a guest address has its own ceiling
+    expect((await guest("203.0.113.10")).status).toBe(200); // another address is fine
   });
 
   it("stops, and changes nothing, when there is not enough credit", async () => {

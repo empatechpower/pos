@@ -89,15 +89,19 @@ export function registerShop(app: FastifyInstance, d: ShopDeps) {
   const merchantId = d.config.businessId;
   const integ: Integrations = d.integrations ?? { publicUrl: "" };
   const showCodes = process.env.NODE_ENV !== "production";
-  // Ordering is open to anyone, so it is limited per address: few orders, many status checks.
-  const orderLimit = new FailureLimiter(10, 10 * 60_000);
-  const readLimit = new FailureLimiter(300, 60_000);
-  const limited = (lim: FailureLimiter, req: FastifyRequest, reply: FastifyReply) => {
-    if (lim.blocked(req.ip)) {
+  // Ordering is open to anyone, so it is limited. Many customers share one public address (the venue's Wi-Fi), so a signed-in member
+  // is counted on their own, and an address only has a high ceiling for guests. All of these can be set on the server (see below).
+  const envNum = (name: string, fallback: number) => (Number(process.env[name]) > 0 ? Number(process.env[name]) : fallback);
+  const orderWindowMs = envNum("ORDER_LIMIT_WINDOW_MIN", 10) * 60_000;
+  const orderLimitMember = new FailureLimiter(envNum("ORDER_LIMIT_MEMBER", 60), orderWindowMs); // orders per member per window
+  const orderLimitIp = new FailureLimiter(envNum("ORDER_LIMIT_IP", 200), orderWindowMs); // orders per address per window, for guests
+  const readLimit = new FailureLimiter(envNum("READ_LIMIT_PER_MIN", 1500), 60_000); // order status and menu reads, per address
+  const limited = (lim: FailureLimiter, req: FastifyRequest, reply: FastifyReply, key: string = req.ip) => {
+    if (lim.blocked(key)) {
       void reply.code(429).send({ error: "too_many_requests" });
       return true;
     }
-    lim.fail(req.ip); // counts every attempt
+    lim.fail(key); // counts every attempt
     return false;
   };
 
@@ -225,8 +229,14 @@ export function registerShop(app: FastifyInstance, d: ShopDeps) {
   // ---- customer accounts --------------------------------------------------------------------
 
   const bearer = (req: FastifyRequest) => (typeof req.headers.authorization === "string" && req.headers.authorization.startsWith("Bearer ") ? req.headers.authorization.slice(7) : undefined);
-  const authLimit = new FailureLimiter(10, 10 * 60_000);
+  const authLimit = new FailureLimiter(envNum("AUTH_LIMIT", 30), 10 * 60_000);
   const members = d.members;
+  /** The order limit: counted on the signed-in member when there is one, otherwise on the address. Returns the member for the caller to reuse. */
+  const orderGate = async (req: FastifyRequest, reply: FastifyReply) => {
+    const member = members ? await members.fromToken(bearer(req)) : null;
+    const blocked = member ? limited(orderLimitMember, req, reply, member.id) : limited(orderLimitIp, req, reply);
+    return { blocked, member };
+  };
 
   if (members) {
     /** Step 1: ask for a sign-in code. Same answer whether or not the email has an account. */
@@ -336,7 +346,7 @@ export function registerShop(app: FastifyInstance, d: ShopDeps) {
     });
 
     /** The customer's browser asks whether the text has arrived. The session is handed over once. */
-    const statusLimit = new FailureLimiter(600, 10 * 60_000);
+    const statusLimit = new FailureLimiter(envNum("SMS_STATUS_LIMIT", 3000), 10 * 60_000);
     app.get<{ Params: { id: string } }>("/api/shop/auth/phone/:id", async (req, reply) => {
       if (limited(statusLimit, req, reply)) return;
       const st = await members.smsStatus(req.params.id);
@@ -405,7 +415,8 @@ export function registerShop(app: FastifyInstance, d: ShopDeps) {
 
   /** A customer places an order. Held for staff to accept; nothing reaches the kitchen yet. */
   app.post<{ Body: OrderBody }>("/api/shop/orders", async (req, reply) => {
-    if (limited(orderLimit, req, reply)) return;
+    const gate = await orderGate(req, reply);
+    if (gate.blocked) return;
     const b = req.body ?? {};
     if (typeof b.channelId !== "string" || !Array.isArray(b.items)) return reply.code(400).send({ error: "channelId and items are required" });
     const items = b.items.map((i) => ({
@@ -427,7 +438,7 @@ export function registerShop(app: FastifyInstance, d: ShopDeps) {
     if (phone && !/^[+\d][\d\s-]{5,19}$/.test(phone)) return reply.code(400).send({ error: "phone number looks wrong" });
 
     const cat = await d.catalog.load();
-    const member = members ? await members.fromToken(bearer(req)) : null;
+    const member = gate.member;
     if (membersOnly) {
       if (!member) return reply.code(401).send({ error: "sign_in_to_order" });
       if (!b.payWithCredit) return reply.code(400).send({ error: "pay_with_credit" });
@@ -622,7 +633,7 @@ export function registerShop(app: FastifyInstance, d: ShopDeps) {
   const cancellable = (o: ReturnType<typeof reduceOrder>) => !!o && o.source === "online" && o.stage === "open" && confirmedPaid(o) === 0;
 
   app.post<{ Params: { id: string } }>("/api/shop/orders/:id/cancel", async (req, reply) => {
-    if (limited(orderLimit, req, reply)) return;
+    if ((await orderGate(req, reply)).blocked) return;
     const order = reduceOrder(req.params.id, await d.store.eventsForOrder(req.params.id));
     if (!order || order.source !== "online") return reply.code(404).send({ error: "order_not_found" });
     if (order.stage === "cancelled") return { status: "cancelled" };
@@ -636,7 +647,7 @@ export function registerShop(app: FastifyInstance, d: ShopDeps) {
 
   /** Start a payment for what is still owed on an order. The customer is sent to the hosted payment page. */
   app.post<{ Params: { id: string }; Body: { method?: string } }>("/api/shop/orders/:id/pay", async (req, reply) => {
-    if (limited(orderLimit, req, reply)) return;
+    if ((await orderGate(req, reply)).blocked) return;
     if (!integ.stripe) return reply.code(404).send({ error: "online_payment_not_available" });
     const method = req.body?.method;
     if (method !== "card" && method !== "paynow") return reply.code(400).send({ error: "method must be card or paynow" });

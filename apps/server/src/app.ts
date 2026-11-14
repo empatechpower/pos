@@ -472,7 +472,9 @@ export async function buildApp({ config, store, db, catalog, catalogAdmin, print
       return ok ? { ok: true } : reply.code(404).send({ error: "printer_not_found" });
     });
 
-    app.get<{ Querystring: { status?: string } }>("/api/print/jobs", manage, async (req) => ({ jobs: await queue.listJobs(req.query.status) }));
+    app.get<{ Querystring: { status?: string; limit?: string; offset?: string; title?: string; orderId?: string } }>("/api/print/jobs", manage, async (req) => ({
+      jobs: await queue.listJobs(req.query.status, Number(req.query.limit) || 100, { offset: Number(req.query.offset) || 0, title: req.query.title || undefined, orderId: req.query.orderId || undefined }),
+    }));
 
     app.post<{ Params: { id: string } }>("/api/print/jobs/:id/retry", manage, async (req, reply) => {
       const ok = await queue.retryFailed(req.params.id);

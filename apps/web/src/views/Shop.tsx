@@ -440,7 +440,12 @@ function Menu({ info, catalog, config, loginError, recheck }: { info: Info; cata
   const loadMember = async () => {
     const t = localStorage.getItem(LS_MEMBER);
     if (!t) return setMember(null);
-    const r = await fetch("/api/shop/me", { headers: { authorization: `Bearer ${t}` } }).catch(() => null);
+    let r = await fetch("/api/shop/me", { headers: { authorization: `Bearer ${t}` } }).catch(() => null);
+    // A busy moment or a dropped connection is not a sign-out: try once more before showing a guest.
+    if (!r || (!r.ok && r.status !== 401)) {
+      await new Promise((res) => setTimeout(res, 1200));
+      r = await fetch("/api/shop/me", { headers: { authorization: `Bearer ${t}` } }).catch(() => null);
+    }
     if (r?.ok) {
       const j = (await r.json()) as { member: MemberView; creditCents?: number; creditBlocked?: boolean; coupons?: CouponView[]; stamps?: StampView | null };
       setMember({ ...j.member, creditCents: j.creditCents ?? 0, creditBlocked: j.creditBlocked === true });
@@ -1639,14 +1644,30 @@ function Status({ orderId, info }: { orderId: string; info: Info }) {
       setProblem(tx("No connection. Retrying…"));
     }
   };
+  // Ask often at first, then less: a status that has not changed for a while does not need a request every few seconds, and
+  // many phones asking at once is what loads the server. Stops once the order is finished, and pauses while the tab is hidden.
+  const doneRef = useRef(false);
+  doneRef.current = o?.status === "completed" || o?.status === "cancelled";
   useEffect(() => {
     let alive = true;
-    const run = () => { if (alive) void load(); };
-    run();
-    const t = window.setInterval(run, 4000);
+    let timer = 0;
+    const started = Date.now();
+    const next = () => {
+      const age = (Date.now() - started) / 1000;
+      return age < 120 ? 4000 : age < 600 ? 8000 : 15000;
+    };
+    const run = async () => {
+      if (!alive) return;
+      if (document.visibilityState === "visible" && !doneRef.current) await load();
+      if (alive && !doneRef.current) timer = window.setTimeout(() => void run(), next());
+    };
+    const wake = () => { if (document.visibilityState === "visible" && alive && !doneRef.current) { window.clearTimeout(timer); void run(); } };
+    void run();
+    document.addEventListener("visibilitychange", wake);
     return () => {
       alive = false;
-      window.clearInterval(t);
+      window.clearTimeout(timer);
+      document.removeEventListener("visibilitychange", wake);
     };
   }, [orderId]);
 
@@ -1737,7 +1758,7 @@ function Status({ orderId, info }: { orderId: string; info: Info }) {
         ))}
         {problem && <div className="shop-note">{problem}</div>}
         <a className="login-btn" style={{ justifyContent: "center", marginTop: 10, textDecoration: "none" }} href="#/shop?tab=account">{tx("View in Account")}</a>
-        <a className="e2e-cta" style={{ textDecoration: "none" }} href="#/shop" onClick={() => localStorage.removeItem(LS_LAST)}><span>{t("backToOrder", "Back to Order")}</span><Icon name="arrowR" size={19} /></a>
+        <a className="e2e-cta" style={{ textDecoration: "none" }} href={`#/shop${/^Table\s+\d+$/i.test(o?.spot ?? "") ? `?table=${o!.spot!.replace(/\D/g, "")}` : ""}`} onClick={() => localStorage.removeItem(LS_LAST)}><span>{t("backToOrder", "Back to Order")}</span><Icon name="arrowR" size={19} /></a>
       </div>
     </>
   );

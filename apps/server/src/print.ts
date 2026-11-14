@@ -354,10 +354,13 @@ export class PrintStore {
     return out;
   }
 
-  async listJobs(status?: string, limit = 100) {
+  /** Newest first. Page with limit (up to 500) and offset; narrow with a status, an order's queue number (title) or an order id. */
+  async listJobs(status?: string, limit = 100, opts: { offset?: number; title?: string; orderId?: string } = {}) {
     const r = await this.db.query(
-      "SELECT id, printer_id, doc_type, order_id, title, status, attempts, last_error, created_at, updated_at FROM print_jobs WHERE merchant_id=$1 AND ($2::text IS NULL OR status=$2) ORDER BY created_at DESC LIMIT $3",
-      [this.merchantId, status ?? null, Math.min(limit, 500)],
+      `SELECT id, printer_id, doc_type, order_id, title, status, attempts, last_error, created_at, updated_at FROM print_jobs
+        WHERE merchant_id=$1 AND ($2::text IS NULL OR status=$2) AND ($3::text IS NULL OR title=$3) AND ($4::text IS NULL OR order_id=$4)
+        ORDER BY created_at DESC, id DESC LIMIT $5 OFFSET $6`,
+      [this.merchantId, status ?? null, opts.title ?? null, opts.orderId ?? null, Math.max(1, Math.min(limit, 500)), Math.max(0, opts.offset ?? 0)],
     );
     return r.rows;
   }
