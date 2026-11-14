@@ -403,6 +403,8 @@ export function Pos({ config, catalog, online, customerId, setCustomerId }: PosP
 const failText = (r: { reason: string }) =>
   r.reason === "signin_required"
     ? "Your session has ended. Sign in again. The customer was not charged."
+    : r.reason === "credit_frozen"
+      ? "Member credit is frozen, so it can't be spent. Take cash instead. The customer was not charged."
     : r.reason === "not_allowed"
       ? "This account isn't allowed to take credit payments."
       : "Could not reach the server. The customer was not charged.";

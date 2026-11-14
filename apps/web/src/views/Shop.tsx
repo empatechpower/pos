@@ -12,6 +12,8 @@ interface Info {
   tables?: string[];
   /** Members only: phone sign-in is the only way in, and an order is paid from member credit. */
   membersOnly?: boolean;
+  /** Member credit is frozen: it cannot be spent, so no order can be paid with it. */
+  creditFrozen?: boolean;
   /** Opening hours and a phone number, when the shop has set them. */
   contact?: { phone?: string; hours?: string };
   channels: Array<{ id: string; name: string; kind: string }>;
@@ -608,6 +610,8 @@ function Menu({ info, catalog, config, loginError, recheck }: { info: Info; cata
       } else if (j.error === "idempotency_key_reused") {
         clearPurchaseKey();
         setNote(tx("Something changed on your order. Please check it and tap Pay again."));
+      } else if (j.error === "credit_frozen") {
+        setNote(tx("Ordering with credit is paused right now. Please see our staff."));
       } else if (j.error === "not_enough_credit") {
         void loadMember();
         setNote(tx("Not enough credit: {amt} available.", { amt: formatMoney((j as { balanceCents?: number }).balanceCents ?? 0) }));
@@ -1270,8 +1274,9 @@ function Menu({ info, catalog, config, loginError, recheck }: { info: Info; cata
           <div className="pay-sticky">
             {noteEl}
             {dine && !spot && <p className="e2e-sub">{tx("Choose your table to continue.")}</p>}
-            {credit < shownTotal && <p className="e2e-sub">{tx("Your credit is not enough for this order. Please top up at the counter.")}</p>}
-            <button className={`e2e-cta ${canOrder && (!dine || !!spot) && credit >= shownTotal ? "" : "off"}`} disabled={!canOrder || (dine && !spot) || credit < shownTotal || busy} onClick={() => void place()}>
+            {info.creditFrozen && <p className="e2e-sub">{tx("Ordering with credit is paused right now. Please see our staff.")}</p>}
+            {!info.creditFrozen && credit < shownTotal && <p className="e2e-sub">{tx("Your credit is not enough for this order. Please top up at the counter.")}</p>}
+            <button className={`e2e-cta ${canOrder && (!dine || !!spot) && credit >= shownTotal && !info.creditFrozen ? "" : "off"}`} disabled={!canOrder || (dine && !spot) || credit < shownTotal || busy || !!info.creditFrozen} onClick={() => void place()}>
               <span>{busy ? tx("Placing your order…") : tx("Pay with credit")}</span><span>{formatMoney(shownTotal)}</span>
             </button>
           </div>

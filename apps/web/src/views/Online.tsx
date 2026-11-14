@@ -64,6 +64,7 @@ export function Online({ config, online }: { config: BusinessConfig; online: boo
       setMsg(`Paid with credit. Balance ${formatMoney(r.balanceCents)}.`);
     } else if (r.reason === "insufficient_funds") setMsg(`Not enough credit: ${formatMoney(r.balanceCents)} available, ${formatMoney(cents)} needed.`);
     else if (r.reason === "signin_required") setMsg("Sign in as staff to take credit.");
+    else if (r.reason === "credit_frozen") setMsg("Member credit is frozen, so it can't be spent. Take cash instead.");
     else setMsg("Could not take credit. The customer was not charged.");
   }
 

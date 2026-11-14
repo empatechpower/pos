@@ -225,6 +225,21 @@ describe("paying for an order with member credit", () => {
     expect(st).toMatchObject({ status: "queued", paidCents: total, canCancel: false });
   });
 
+  it("frozen credit cannot be spent online or by staff, balances stay, and unfreezing restores it", async () => {
+    await createMember({ name: "Fay", email: "fay@example.com", creditCents: 2000 });
+    const s = await emailIn("fay@example.com");
+    expect((await call("/api/credit/freeze", { staff: mgr })).json.frozen).toBe(false);
+    expect((await call("/api/credit/freeze", { body: { frozen: true }, staff: cashier, method: "PUT" })).status).toBe(403);
+    expect((await call("/api/credit/freeze", { body: { frozen: true }, staff: mgr, method: "PUT" })).json.frozen).toBe(true);
+    expect((await call("/api/shop/info", { device: "" })).json.creditFrozen).toBe(true);
+    const r = await order(s.token, { payWithCredit: true });
+    expect(r.status).toBe(403);
+    expect(r.json.error).toBe("credit_frozen");
+    expect(await creditOf("fay@")).toBe(2000);
+    await call("/api/credit/freeze", { body: { frozen: false }, staff: mgr, method: "PUT" });
+    expect((await order(s.token, { payWithCredit: true })).status).toBe(200);
+  });
+
   it("stops, and changes nothing, when there is not enough credit", async () => {
     await createMember({ name: "Di", email: "di@example.com", creditCents: 50 });
     const s = await emailIn("di@example.com");

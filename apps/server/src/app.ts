@@ -4,7 +4,7 @@ import { confirmedPaid, isFullyPaid, menuFor, newId, reduceOrder, shopStatus, ty
 import { CASHIER_TOPUP_LIMIT_CENTS, audit, authenticate, can, createStaff, login, logout, recentAudit, type Permission, type Role, type Staff } from "./auth.js";
 import type { CatalogStore, ChangeResult, PgCatalogStore } from "./catalog.js";
 import type { Db } from "./db/pool.js";
-import { adjustTo, balanceOf, refund, spend, topUp } from "./ledger.js";
+import { adjustTo, balanceOf, creditFrozen, refund, setCreditFrozen, spend, topUp } from "./ledger.js";
 import { authenticateDevice, createEnrollmentCode, enroll, markPrintPoll, setSmsNumber, issueStreamTicket, listDevices, redeemStreamTicket, revokeDevice, type Device } from "./devices.js";
 import { BrandStore } from "./brand.js";
 import { PrintStore, validatePrinter, type Printer } from "./print.js";
@@ -617,6 +617,15 @@ export async function buildApp({ config, store, db, catalog, catalogAdmin, print
     };
   });
 
+  /** Freeze or unfreeze all member credit. Frozen: it cannot be spent (online orders and staff credit payments are refused). Balances stay. */
+  app.get("/api/credit/freeze", { preHandler: needs("wallet.read") }, async () => ({ frozen: await creditFrozen(db, merchantId) }));
+  app.put<{ Body: { frozen?: boolean } }>("/api/credit/freeze", { preHandler: needs("wallet.refund") }, async (req, reply) => {
+    if (typeof req.body?.frozen !== "boolean") return reply.code(400).send({ error: "frozen (true or false) is required" });
+    await setCreditFrozen(db, merchantId, req.body.frozen);
+    await audit(db, merchantId, req.staff!.id, req.body.frozen ? "credit.freeze" : "credit.unfreeze", {});
+    return { frozen: req.body.frozen };
+  });
+
   const routes = [
     ["topup", topUp, "wallet.topup"],
     ["spend", spend, "wallet.spend"],
@@ -626,6 +635,7 @@ export async function buildApp({ config, store, db, catalog, catalogAdmin, print
     app.post<{ Body: MoneyBody }>(`/api/wallet/${path}`, { preHandler: needs(permission) }, async (req, reply) => {
       const b = req.body;
       if (!valid(b)) return reply.code(400).send({ error: "customerId, idempotencyKey and a positive integer amountCents are required" });
+      if (path === "spend" && (await creditFrozen(db, merchantId))) return reply.code(403).send({ ok: false, error: "credit_frozen", message: "Member credit is frozen. It cannot be spent until it is switched back on." });
       const staff = req.staff!;
       if (path === "topup" && staff.role === "cashier" && b!.amountCents! > CASHIER_TOPUP_LIMIT_CENTS) {
         return reply.code(403).send({ error: "over_limit", limitCents: CASHIER_TOPUP_LIMIT_CENTS });

@@ -151,3 +151,16 @@ export async function adjustTo(
     client.release();
   }
 }
+
+/** The freeze switch: while on, member credit cannot be spent. Balances, top-ups and refunds still work. */
+export async function creditFrozen(db: Db, merchantId: string): Promise<boolean> {
+  const r = await db.query("SELECT credit_frozen FROM shop_settings WHERE merchant_id=$1", [merchantId]);
+  return r.rows[0]?.credit_frozen === true;
+}
+
+export async function setCreditFrozen(db: Db, merchantId: string, frozen: boolean): Promise<void> {
+  await db.query(
+    "INSERT INTO shop_settings (merchant_id, credit_frozen) VALUES ($1,$2) ON CONFLICT (merchant_id) DO UPDATE SET credit_frozen=EXCLUDED.credit_frozen",
+    [merchantId, frozen],
+  );
+}

@@ -162,6 +162,7 @@ function Members({ canAdjustPoints, canImport, rewardsOn }: { canAdjustPoints: b
 
   return (
     <>
+      {canAdjustPoints && <FreezeCredit />}
       <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginBottom: 10 }}>
         <button className={panel === "add" ? "primary sm" : "secondary sm"} onClick={() => setPanel(panel === "add" ? null : "add")}>Add a member</button>
         {canImport && <button className={panel === "upload" ? "primary sm" : "secondary sm"} onClick={() => setPanel(panel === "upload" ? null : "upload")}>Upload a list</button>}
@@ -567,6 +568,38 @@ function CreditHistory({ memberId }: { memberId: string }) {
           ))}
         </tbody>
       </table>
+    </div>
+  );
+}
+
+/** One switch for all member credit. Frozen: nobody can spend it (the shop and the till both refuse), but balances stay. */
+function FreezeCredit() {
+  const [frozen, setFrozen] = useState<boolean | null>(null);
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState<string | null>(null);
+  useEffect(() => {
+    void (async () => {
+      const r = await staffFetch("/api/credit/freeze");
+      if ("res" in r && r.res.ok) setFrozen(((await r.res.json()) as { frozen: boolean }).frozen);
+    })();
+  }, []);
+  if (frozen === null) return null;
+  const flip = async () => {
+    const next = !frozen;
+    if (next && !window.confirm("Freeze all member credit? Nobody will be able to place an order or pay with credit until you unfreeze it. Balances are not changed.")) return;
+    setBusy(true);
+    setErr(null);
+    const r = await staffFetch("/api/credit/freeze", { method: "PUT", body: { frozen: next } });
+    setBusy(false);
+    if ("problem" in r) return setErr(r.problem);
+    if (!r.res.ok) return setErr("Could not change it. Nothing was changed.");
+    setFrozen(next);
+  };
+  return (
+    <div className="flash" style={{ marginBottom: 10, display: "flex", gap: 10, alignItems: "center", flexWrap: "wrap", background: frozen ? "#fdecea" : undefined }}>
+      <span style={{ flex: 1 }}>{frozen ? <><b>Member credit is frozen.</b> Nobody can place an order or pay with credit. Balances are unchanged.</> : "Member credit is active."}</span>
+      <button className={frozen ? "primary sm" : "secondary sm"} disabled={busy} onClick={() => void flip()}>{frozen ? "Unfreeze credit" : "Freeze credit"}</button>
+      {err && <span style={{ color: "#c0392b" }}>{err}</span>}
     </div>
   );
 }

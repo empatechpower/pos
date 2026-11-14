@@ -5,7 +5,7 @@ import type { BrandStore } from "./brand.js";
 import type { CatalogStore, PgCatalogStore } from "./catalog.js";
 import { liveSmsNumber } from "./devices.js";
 import type { Db } from "./db/pool.js";
-import { balanceOf, refund as refundCredit, spend as spendCredit } from "./ledger.js";
+import { balanceOf, creditFrozen, refund as refundCredit, spend as spendCredit } from "./ledger.js";
 import { FailureLimiter } from "./rateLimit.js";
 import { normaliseEmail, type MemberStore } from "./members.js";
 import { authorizeUrl, createStripeCheckout, createStripeRefund, fetchProfile, sendMail, newState, newVerifier, sameSecret, verifyStripeSignature, type Integrations, type OAuthProvider } from "./integrations.js";
@@ -146,6 +146,7 @@ export function registerShop(app: FastifyInstance, d: ShopDeps) {
       // With a table list set, ordering is dine-in only, one fixed list of tables.
       tables,
       membersOnly,
+      creditFrozen: await creditFrozen(d.db, merchantId),
       channels: cat.channels.filter((c) => c.active && (!tables.length || c.kind === "dine_in")).map((c) => ({ id: c.id, name: c.name, kind: c.kind })),
       brand: await brandPayload(),
       // What this deployment can do beyond email sign-in and paying at the counter. The page enables only these.
@@ -453,6 +454,8 @@ export function registerShop(app: FastifyInstance, d: ShopDeps) {
     // The minimum spend is on the items subtotal only (before service charge, tax and deposits).
     if (coupon && quote.priced.couponIneligible) return reply.code(400).send({ error: "coupon_not_eligible", shortfallCents: coupon.minSpendCents - quote.priced.subtotal });
     if (b.payWithCredit && !member) return reply.code(401).send({ error: "sign_in_to_use_credit" });
+    // The shop has frozen member credit (for example, the event is over): no order can be paid with it.
+    if (b.payWithCredit && (await creditFrozen(d.db, merchantId))) return reply.code(403).send({ error: "credit_frozen" });
     let orderId = newId();
 
     // A credit purchase carries an idempotency key made by the customer's phone for this attempt. A retry (double tap,
