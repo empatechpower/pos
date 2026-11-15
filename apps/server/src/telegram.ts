@@ -19,7 +19,8 @@ import { FailureLimiter } from "./rateLimit.js";
 
 type Button = { text: string; callback_data?: string; url?: string };
 interface TgUser { id: number; first_name?: string; username?: string }
-interface TgMessage { message_id: number; chat: { id: number; type: string }; from?: TgUser; text?: string }
+interface TgPhoto { file_id: string; file_size?: number; width?: number; height?: number }
+interface TgMessage { message_id: number; chat: { id: number; type: string }; from?: TgUser; text?: string; caption?: string; photo?: TgPhoto[]; document?: { file_id: string; file_size?: number; mime_type?: string } }
 interface TgCallback { id: string; from: TgUser; message?: TgMessage; data?: string }
 export interface TgUpdate { message?: TgMessage; callback_query?: TgCallback }
 
@@ -30,6 +31,12 @@ export interface TelegramDeps {
   integ: Integrations;
   cat: PgCatalogStore;
   needs: (permission: Permission) => (req: FastifyRequest, reply: FastifyReply) => unknown;
+  /** Sales and order data for /sales and /orders. */
+  reports?: {
+    sales: (from?: string, to?: string) => Promise<{ from: string; to: string; orders: number; items: number; grossCents: number; serviceCents: number; averageOrderCents: number; byChannel: { channel: string; orders: number; cents: number }[]; products: { name: string; qty: number; cents: number }[] }>;
+    orders: (from?: string, to?: string, includeCancelled?: boolean) => Promise<{ from: string; to: string; count: number; orders: { orderId: string; queueNumber: string | null; openedAt: string; channel: string; table: string | null; stage: string; customerName: string | null; lines: { name: string; qty: number; unitCents: number; options: string[] }[]; subtotalCents: number; serviceCents: number; totalCents: number; paidCents: number }[] }>;
+    today: () => string;
+  };
 }
 
 const sha256 = (s: string) => createHash("sha256").update(s).digest("hex");
@@ -57,6 +64,38 @@ export function findItems(products: readonly Product[], query: string, limit = 8
   const q = norm(query);
   hits.sort((a, b) => Number(norm(b.name) === q) - Number(norm(a.name) === q) || a.name.length - b.name.length);
   return hits.slice(0, limit);
+}
+
+const MAX_PHOTO_BYTES = 300 * 1024;
+const csvCell = (v: unknown) => {
+  const t = String(v ?? "");
+  // A cell that starts with = + - @ can run as a formula in a spreadsheet, so it is shown as plain text.
+  const safe = /^[=+\-@\t\r]/.test(t) ? `'${t}` : t;
+  return /[",\n\r]/.test(safe) ? `"${safe.replace(/"/g, '""')}"` : safe;
+};
+
+/** "today", "yesterday", "week" (last 7 days), "month" (last 30 days) or a date like 2026-11-14 (or two dates). Dates are Singapore days. */
+export function parseRange(arg: string, today: string): { from: string; to: string; label: string } | null {
+  const a = arg.trim().toLowerCase();
+  const shift = (day: string, n: number) => new Date(Date.parse(`${day}T00:00:00Z`) + n * 86_400_000).toISOString().slice(0, 10);
+  if (a === "" || a === "today") return { from: today, to: today, label: "today" };
+  if (a === "yesterday") return { from: shift(today, -1), to: shift(today, -1), label: "yesterday" };
+  if (a === "week") return { from: shift(today, -6), to: today, label: "the last 7 days" };
+  if (a === "month") return { from: shift(today, -29), to: today, label: "the last 30 days" };
+  const d = a.match(/\d{4}-\d{2}-\d{2}/g);
+  if (d && d.length <= 2 && a.replace(/\d{4}-\d{2}-\d{2}|[\s,to-]/g, "") === "") {
+    const [x, y] = [d[0]!, d[1] ?? d[0]!];
+    if ([x, y].every((v) => !Number.isNaN(Date.parse(`${v}T00:00:00Z`)))) return x <= y ? { from: x, to: y, label: x === y ? x : `${x} to ${y}` } : { from: y, to: x, label: `${y} to ${x}` };
+  }
+  return null;
+}
+
+/** "Latte > Flat White", "Latte → Flat White" or "Latte to Flat White": the old name and the new one. */
+export function parseRename(text: string): { from: string; to: string } | null {
+  const m = /^(.*?\S)\s*(?:->|=>|→|>)\s*(\S.*)$/.exec(text.trim()) ?? /^(.*?\S)\s+to\s+(\S.*)$/i.exec(text.trim());
+  if (!m) return null;
+  const to = m[2]!.replace(/\s+/g, " ").trim().slice(0, 60);
+  return to ? { from: m[1]!.trim(), to } : null;
 }
 
 const kindLabel: Record<string, string> = { dine_in: "Dine in (with service charge)", takeaway: "Take away", delivery: "Delivery" };
@@ -101,6 +140,9 @@ export async function setupTelegramWebhook(integ: Integrations, log: (m: string)
       { command: "edit", description: "Open the web page to edit all items" },
       { command: "pricebooks", description: "List pricebooks and channels" },
       { command: "items", description: "Find an item and its prices" },
+      { command: "rename", description: "Rename an item or category" },
+      { command: "sales", description: "Sales totals for a day or period" },
+      { command: "orders", description: "Orders as a spreadsheet file" },
       { command: "help", description: "What I can do" },
     ],
   });
@@ -126,6 +168,33 @@ export function registerTelegram(app: FastifyInstance, d: TelegramDeps): void {
   const send = (chatId: number, text: string, buttons?: Button[][]) =>
     api("sendMessage", { chat_id: chatId, text, disable_web_page_preview: true, ...(buttons ? { reply_markup: { inline_keyboard: buttons } } : {}) });
 
+  /** Send a small text file (a CSV) into the chat. */
+  const sendFile = async (chatId: number, filename: string, content: string, caption: string) => {
+    if (!t) return;
+    const form = new FormData();
+    form.append("chat_id", String(chatId));
+    form.append("caption", caption);
+    form.append("document", new Blob([content], { type: "text/csv" }), filename);
+    try {
+      await f(`https://api.telegram.org/bot${t.token}/sendDocument`, { method: "POST", body: form, signal: AbortSignal.timeout(15_000) });
+    } catch {
+      await send(chatId, "I couldn't send the file just now. Try again in a minute.");
+    }
+  };
+  /** Fetch a file the user sent to the bot (a photo). Null if Telegram will not give it. */
+  const download = async (fileId: string): Promise<Buffer | null> => {
+    if (!t) return null;
+    const info = await api("getFile", { file_id: fileId });
+    const path = info.result?.file_path as string | undefined;
+    if (!path) return null;
+    try {
+      const r = await f(`https://api.telegram.org/file/bot${t.token}/${path}`, { signal: AbortSignal.timeout(15_000) });
+      return r.ok ? Buffer.from(await r.arrayBuffer()) : null;
+    } catch {
+      return null;
+    }
+  };
+
   const merchantLabel = d.merchantId;
   const linkFails = new FailureLimiter(8, 10 * 60_000);
   const redeemFails = new FailureLimiter(10, 10 * 60_000);
@@ -138,14 +207,24 @@ export function registerTelegram(app: FastifyInstance, d: TelegramDeps): void {
     return id;
   };
 
+  // A photo waits here while the manager picks which item it belongs to (the id is short because a button can carry only 64 bytes).
+  const photos = new Map<string, { fileId: string; at: number }>();
+  const putPhoto = (fileId: string) => {
+    for (const [k, v] of photos) if (Date.now() - v.at > 15 * 60_000) photos.delete(k);
+    const id = randomBytes(4).toString("hex");
+    photos.set(id, { fileId, at: Date.now() });
+    return id;
+  };
+
   type Who = { staffId: string; name: string; role: "cashier" | "manager" | "owner" };
-  const linkedStaff = async (telegramId: number): Promise<Who | null> => {
+  const linkedStaff = async (telegramId: number, from?: TgUser): Promise<Who | null> => {
     const r = await d.db.query(
-      `SELECT s.id, s.name, s.role FROM telegram_links l JOIN staff s ON s.id = l.staff_id
+      `SELECT s.id, s.name, s.role, s.code FROM telegram_links l JOIN staff s ON s.id = l.staff_id
         WHERE l.merchant_id=$1 AND l.telegram_id=$2 AND s.active`,
       [d.merchantId, telegramId],
     );
-    if (r.rows[0]) return { staffId: r.rows[0].id, name: r.rows[0].name, role: r.rows[0].role };
+    // The old shared "Telegram manager" login is replaced by a personal one below, so each person is named in the audit log.
+    if (r.rows[0] && !(r.rows[0].code === "TGMGR" && t?.managerIds?.includes(String(telegramId)))) return { staffId: r.rows[0].id, name: r.rows[0].name, role: r.rows[0].role };
     // A Telegram account named in TELEGRAM_ADMIN_IDS is the owner's: it is linked to the owner's staff login the first time it speaks, so no code is needed.
     if (t?.adminIds?.includes(String(telegramId))) {
       const owner = await d.db.query("SELECT id, name, role FROM staff WHERE merchant_id=$1 AND role='owner' AND active ORDER BY created_at LIMIT 1", [d.merchantId]);
@@ -158,12 +237,15 @@ export function registerTelegram(app: FastifyInstance, d: TelegramDeps): void {
         return { staffId: owner.rows[0].id, name: owner.rows[0].name, role: owner.rows[0].role };
       }
     }
-    // A Telegram account named in TELEGRAM_MANAGER_IDS gets a manager login of its own (never the owner's): it can manage prices,
-    // products, orders and printers, but cannot manage staff. The login has a random PIN nobody knows, so it works only through Telegram.
+    // A Telegram account named in TELEGRAM_MANAGER_IDS gets a manager login of its own (never the owner's), one per person, named after their Telegram
+    // profile so the audit log says who did what. It can manage prices, products, orders and printers, but cannot manage staff. The login has a random
+    // PIN nobody knows, so it works only through Telegram.
     if (t?.managerIds?.includes(String(telegramId))) {
-      let mgr = (await d.db.query("SELECT id, name, role FROM staff WHERE merchant_id=$1 AND code='TGMGR' AND role='manager' AND active", [d.merchantId])).rows[0];
+      const code = `TG${telegramId}`;
+      const display = `Telegram: ${[from?.first_name, from?.username ? `@${from.username}` : ""].filter(Boolean).join(" ") || telegramId}`.slice(0, 60);
+      let mgr = (await d.db.query("SELECT id, name, role FROM staff WHERE merchant_id=$1 AND code=$2 AND role='manager' AND active", [d.merchantId, code])).rows[0];
       if (!mgr) {
-        const made = await createStaff(d.db, { merchantId: d.merchantId, code: "TGMGR", name: "Telegram manager", role: "manager", pin: String(randomInt(10_000_000, 100_000_000)) });
+        const made = await createStaff(d.db, { merchantId: d.merchantId, code, name: display, role: "manager", pin: String(randomInt(10_000_000, 100_000_000)) });
         mgr = { id: made.id, name: made.name, role: made.role };
       }
       await d.db.query(
@@ -200,7 +282,11 @@ export function registerTelegram(app: FastifyInstance, d: TelegramDeps): void {
         `/manager, /online, /printers, /prices : a link that opens that page, already signed in (no code or PIN)\n` +
         `/edit : a link to a web page where you can edit every item at once\n` +
         `/pricebooks : list pricebooks and which channels use them\n` +
-        `/items kaya : find an item and see its prices\n\n` +
+        `/items kaya : find an item and see its prices\n` +
+        `/rename Latte > Flat White : rename an item, or a whole category\n` +
+        `Send a photo with the item's name as the caption : sets that item's picture\n` +
+        `/sales today (or yesterday, week, month, or a date) : sales totals and top items\n` +
+        `/orders week : the orders as a spreadsheet file\n\n` +
         `A price of 0 is allowed: that item sells for free. To stop selling an item in a pricebook, use /off.`,
     );
 
@@ -262,6 +348,56 @@ export function registerTelegram(app: FastifyInstance, d: TelegramDeps): void {
     );
   };
 
+  const applyRename = async (chatId: number, who: Who, productId: string, to: string) => {
+    const p = (await d.cat.load()).products.find((x) => x.id === productId);
+    if (!p) return send(chatId, "I can't find that item any more.");
+    const r = await d.cat.upsertProduct({ id: p.id, name: to, category: p.category, soldOut: p.soldOut, pointsExempt: p.pointsExempt });
+    if (!r.ok) return send(chatId, `I couldn't rename it: ${r.problems.join("; ")}`);
+    await audit(d.db, d.merchantId, who.staffId, "catalog.product", { ...r.detail, was: p.name, via: "telegram" });
+    return send(chatId, `✅ ${p.name} is now “${to}”. Its price, options and photo are unchanged.`);
+  };
+
+  const applyCategoryRename = async (chatId: number, who: Who, from: string, to: string) => {
+    const r = await d.cat.renameCategory(from, to);
+    if (!r.ok) return send(chatId, `I couldn't rename it: ${r.problems.join("; ")}`);
+    await audit(d.db, d.merchantId, who.staffId, "catalog.category", { ...r.detail, via: "telegram" });
+    return send(chatId, `✅ Category “${from}” is now “${to}” (${r.detail.items} items moved). Printers that list it keep printing it.`);
+  };
+
+  const applyPhoto = async (chatId: number, who: Who, productId: string, fileId: string) => {
+    const p = (await d.cat.load()).products.find((x) => x.id === productId);
+    if (!p) return send(chatId, "I can't find that item any more.");
+    const bytes = await download(fileId);
+    if (!bytes) return send(chatId, "I couldn't get that photo from Telegram. Send it again.");
+    const r = await d.cat.setImage(productId, bytes);
+    if (!r.ok) return send(chatId, `I couldn't use that photo: ${r.problems.join("; ")}`);
+    await audit(d.db, d.merchantId, who.staffId, "product.image", { ...r.detail, via: "telegram" });
+    return send(chatId, `✅ New picture for ${p.name}. It shows on the menu now.`);
+  };
+
+  const showSales = async (chatId: number, arg: string) => {
+    if (!d.reports) return send(chatId, "Reports aren't available here.");
+    const range = parseRange(arg, d.reports.today());
+    if (!range) return send(chatId, "Try /sales today, /sales yesterday, /sales week, /sales month, or a date like /sales 2026-11-14.");
+    const r = await d.reports.sales(range.from, range.to);
+    if (!r.orders) return send(chatId, `No sales for ${range.label}.`);
+    const top = r.products.slice(0, 8).map((x, i) => `${i + 1}. ${x.name}: ${x.qty} (${money(x.cents)})`).join("\n");
+    const ch = r.byChannel.map((x) => `${x.channel}: ${x.orders} orders, ${money(x.cents)}`).join("\n");
+    return send(chatId, `Sales for ${range.label} (${r.from}${r.from === r.to ? "" : ` to ${r.to}`})\n${r.orders} orders · ${r.items} items\nTotal ${money(r.grossCents)} (service charge ${money(r.serviceCents)}) · average ${money(r.averageOrderCents)}\n\n${ch}\n\nTop items:\n${top}\n\nFor every order as a spreadsheet: /orders ${arg || "today"}`);
+  };
+
+  const sendOrders = async (chatId: number, arg: string) => {
+    if (!d.reports) return send(chatId, "Reports aren't available here.");
+    const range = parseRange(arg, d.reports.today());
+    if (!range) return send(chatId, "Try /orders today, /orders yesterday, /orders week, /orders month, or a date like /orders 2026-11-14.");
+    const r = await d.reports.orders(range.from, range.to);
+    if (!r.count) return send(chatId, `No orders for ${range.label}.`);
+    const head = ["order", "queue", "opened", "channel", "table", "customer", "stage", "items", "subtotal", "service", "total", "paid"];
+    const rows = r.orders.map((o) => [o.orderId, o.queueNumber ?? "", o.openedAt, o.channel, o.table ?? "", o.customerName ?? "", o.stage, o.lines.map((l) => `${l.qty}x ${l.name}${l.options.length ? ` (${l.options.join(", ")})` : ""}`).join("; "), (o.subtotalCents / 100).toFixed(2), (o.serviceCents / 100).toFixed(2), (o.totalCents / 100).toFixed(2), (o.paidCents / 100).toFixed(2)]);
+    const csv = [head, ...rows].map((row) => row.map(csvCell).join(",")).join("\n");
+    return sendFile(chatId, `orders-${r.from}${r.from === r.to ? "" : `-to-${r.to}`}.csv`, csv, `${r.count} orders for ${range.label}. Amounts are in dollars.`);
+  };
+
   const listBooks = async (chatId: number) => {
     const c = await d.cat.load();
     const lines = c.pricebooks.map((b) => {
@@ -275,8 +411,22 @@ export function registerTelegram(app: FastifyInstance, d: TelegramDeps): void {
   // ---- messages -----------------------------------------------------------------------------------
 
   async function onMessage(m: TgMessage) {
-    if (m.chat.type !== "private" || !m.text || !m.from) return;
+    if (m.chat.type !== "private" || !m.from) return;
     const chatId = m.chat.id;
+    const fileId = m.photo?.length ? [...m.photo].filter((x) => !x.file_size || x.file_size <= MAX_PHOTO_BYTES).sort((a, b) => (b.file_size ?? 0) - (a.file_size ?? 0))[0]?.file_id : m.document?.mime_type?.startsWith("image/") && (m.document.file_size ?? 0) <= MAX_PHOTO_BYTES ? m.document.file_id : undefined;
+    if (!m.text && (m.photo?.length || m.document)) {
+      const who = await linkedStaff(m.from.id, m.from);
+      if (!who || !can(who.role, "catalog.manage")) return send(chatId, "I don't know you, or you can't change the menu.");
+      if (!fileId) return send(chatId, "That photo is too big. Send one under 300 KB (a smaller or compressed picture), as a normal photo.");
+      const name = (m.caption ?? "").replace(/^\/photo(?:@\S+)?\s*/i, "").trim();
+      if (!name) return send(chatId, "Send the photo again with the item's name as the caption, for example: kaya toast");
+      const items = findItems((await d.cat.load()).products, name);
+      if (!items.length) return send(chatId, `No item matches “${name}”. Try /items ${name.split(" ")[0]}.`);
+      if (items.length === 1) return applyPhoto(chatId, who, items[0]!.id, fileId);
+      const pid = putPhoto(fileId);
+      return send(chatId, "Which item is the photo for?", items.map((p) => [{ text: p.name, callback_data: `ph:${pid}:${p.id}` }]));
+    }
+    if (!m.text) return;
     const text = m.text.trim();
     if (!text.startsWith("/")) return send(chatId, "Send /help to see what I can do.");
     const word = text.split(/\s+/)[0]!;
@@ -284,7 +434,7 @@ export function registerTelegram(app: FastifyInstance, d: TelegramDeps): void {
     const arg = text.slice(word.length).trim();
 
     if (cmd === "/start" || cmd === "/help") {
-      const who = await linkedStaff(m.from.id);
+      const who = await linkedStaff(m.from.id, m.from);
       if (!who) return send(chatId, `Hello! I manage the ${merchantLabel} menu. To use me, link your account: on the shop's staff site open Manager > Telegram, press “Link my Telegram”, and send me the code like this:\n\n/link ABCD2345`);
       return help(chatId);
     }
@@ -312,7 +462,7 @@ export function registerTelegram(app: FastifyInstance, d: TelegramDeps): void {
       return help(chatId);
     }
 
-    const who = await linkedStaff(m.from.id);
+    const who = await linkedStaff(m.from.id, m.from);
     if (!who) return send(chatId, "I don't know you yet. On the shop's staff site open Manager > Telegram, press “Link my Telegram”, and send me the code with /link CODE.");
     if (!can(who.role, "catalog.manage")) return send(chatId, "Only managers and owners can change the menu.");
 
@@ -350,6 +500,24 @@ export function registerTelegram(app: FastifyInstance, d: TelegramDeps): void {
         if (items.length === 1) return go(items[0]!);
         return chooseItem(chatId, off ? "oi:off" : "oi:on", items, cat);
       }
+      case "/rename": {
+        const rn = parseRename(arg);
+        if (!rn) return send(chatId, "Tell me the old and new name, for example:\n/rename Latte > Flat White\nFor a category: /rename Drinks > Beverages");
+        const cats = [...new Set(cat.products.map((p) => p.category))];
+        const asCategory = cats.find((c) => norm(c) === norm(rn.from));
+        if (asCategory) return applyCategoryRename(chatId, who, asCategory, rn.to);
+        const items = findItems(cat.products, rn.from);
+        if (!items.length) return send(chatId, `No item or category matches “${rn.from}”. Try /items ${rn.from.split(" ")[0]}.`);
+        if (items.length === 1) return applyRename(chatId, who, items[0]!.id, rn.to);
+        const id = putPending(rn.to);
+        return send(chatId, `Rename which item to “${rn.to}”?`, items.map((p) => [{ text: p.name, callback_data: `rn:${id}:${p.id}` }]));
+      }
+      case "/sales":
+        if (!can(who.role, "audit.read")) return send(chatId, "Only managers and owners can see sales.");
+        return showSales(chatId, arg);
+      case "/orders":
+        if (!can(who.role, "audit.read")) return send(chatId, "Only managers and owners can see orders.");
+        return sendOrders(chatId, arg);
       case "/newpricebook": {
         const name = arg.replace(/\s+/g, " ").slice(0, 40);
         if (!name) return send(chatId, "Give the new pricebook a name, for example:\n/newpricebook Grab");
@@ -383,7 +551,7 @@ export function registerTelegram(app: FastifyInstance, d: TelegramDeps): void {
     await api("answerCallbackQuery", { callback_query_id: q.id });
     const chatId = q.message?.chat.id;
     if (!chatId || !q.data || q.message?.chat.type !== "private") return;
-    const who = await linkedStaff(q.from.id);
+    const who = await linkedStaff(q.from.id, q.from);
     if (!who || !can(who.role, "catalog.manage")) return send(chatId, "I don't know you, or you can't change the menu.");
     const parts = q.data.split(":");
     const cat = await d.cat.load();
@@ -421,6 +589,20 @@ export function registerTelegram(app: FastifyInstance, d: TelegramDeps): void {
         if (!p || !(kind === "dine_in" || kind === "takeaway" || kind === "delivery")) return send(chatId, "That choice has expired. Send /newpricebook again.");
         pending.delete(id!);
         return createPricebook(chatId, who, p.name, kind);
+      }
+      case "rn": {
+        const [, id, productId] = parts;
+        const p = id ? pending.get(id) : undefined;
+        if (!p || !productId) return send(chatId, "That choice has expired. Send /rename again.");
+        pending.delete(id!);
+        return applyRename(chatId, who, productId, p.name);
+      }
+      case "ph": {
+        const [, id, productId] = parts;
+        const p = id ? photos.get(id) : undefined;
+        if (!p || !productId) return send(chatId, "That choice has expired. Send the photo again.");
+        photos.delete(id!);
+        return applyPhoto(chatId, who, productId, p.fileId);
       }
       case "ed": {
         const bookId = parts[1];

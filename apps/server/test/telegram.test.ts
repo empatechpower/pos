@@ -6,7 +6,7 @@ import { PgCatalogStore } from "../src/catalog.js";
 import { seedCatalog } from "../src/catalogSeed.js";
 import { createEnrollmentCode, enroll } from "../src/devices.js";
 import { PgEventStore } from "../src/pgStore.js";
-import { findItems, parseAmount, setupTelegramWebhook } from "../src/telegram.js";
+import { findItems, parseAmount, parseRange, parseRename, setupTelegramWebhook } from "../src/telegram.js";
 import type { Integrations } from "../src/integrations.js";
 import { startTestDb } from "./pg.js";
 import type { Db } from "../src/db/pool.js";
@@ -17,18 +17,25 @@ let stop: () => Promise<void>;
 let app: Awaited<ReturnType<typeof buildApp>>;
 let base = "";
 let device = "";
+let deviceId = "";
 let mgr = "";
 let cashier = "";
 let ip = 0;
 
 /** Everything the bot sent to Telegram. */
 const sent: Array<{ method: string; body: any }> = [];
+const PNG = Buffer.from("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg==", "base64");
 const fakeFetch = (async (url: string | URL, init?: RequestInit) => {
   const u = String(url);
+  if (u === "https://api.telegram.org/file/botTOK/photos/p.png") return new Response(PNG);
   if (!u.startsWith("https://api.telegram.org/botTOK/")) return new Response("?", { status: 500 });
   const method = u.split("/").pop()!;
-  sent.push({ method, body: JSON.parse(String(init?.body ?? "{}")) });
-  return new Response(JSON.stringify({ ok: true, result: method === "getMe" ? { username: "rezein_test_bot" } : {} }));
+  if (init?.body instanceof FormData) {
+    const doc = init.body.get("document") as File;
+    sent.push({ method, body: { chat_id: init.body.get("chat_id"), caption: init.body.get("caption"), filename: doc.name, content: await doc.text() } });
+  } else sent.push({ method, body: JSON.parse(String(init?.body ?? "{}")) });
+  const result = method === "getMe" ? { username: "rezein_test_bot" } : method === "getFile" ? { file_path: "photos/p.png" } : {};
+  return new Response(JSON.stringify({ ok: true, result }));
 }) as typeof fetch;
 const integrations: Integrations = { publicUrl: "https://shop.example", telegram: { token: "TOK", webhookSecret: "hook-secret", adminIds: ["777"], managerIds: ["555"] }, fetch: fakeFetch };
 
@@ -71,7 +78,9 @@ beforeAll(async () => {
   app = await buildApp({ config, db, logger: false, store: new PgEventStore(db, "bp", "EV"), catalog: cat, catalogAdmin: cat, trustProxy: true, integrations });
   await app.listen({ port: 0, host: "127.0.0.1" });
   base = `http://127.0.0.1:${(app.server.address() as { port: number }).port}`;
-  device = (await enroll(db, "bp", (await createEnrollmentCode(db, { merchantId: "bp", outletId: "EV", createdBy: null })).code, "Laptop"))!.token;
+  const enrolled = (await enroll(db, "bp", (await createEnrollmentCode(db, { merchantId: "bp", outletId: "EV", createdBy: null })).code, "Laptop"))!;
+  device = enrolled.token;
+  deviceId = enrolled.device.id;
   await createStaff(db, { merchantId: "bp", code: "MGR", name: "Max", role: "manager", pin: "222222" });
   await createStaff(db, { merchantId: "bp", code: "C1", name: "Cat", role: "cashier", pin: "3333" });
   await createStaff(db, { merchantId: "bp", code: "OWN", name: "Olivia", role: "owner", pin: "999999" });
@@ -365,14 +374,115 @@ describe("a customer given manager access through Telegram", () => {
     const code = buttons(r.said[0]).find((b) => b.url)!.url!.split("code=")[1]!;
     const redeemed = await call("POST", "/api/telegram/redeem", { body: { code }, device: null });
     expect(redeemed.status).toBe(200);
-    expect(redeemed.json.staff).toMatchObject({ code: "TGMGR", role: "manager" });
+    expect(redeemed.json.staff).toMatchObject({ code: "TG555", role: "manager" }); // their own login, named after them
     expect(redeemed.json.to).toBe("prices");
     // The same login is reused, not made again, and its PIN is not one anybody has.
     await say(555, "/manager");
-    expect((await db.query("SELECT count(*)::int AS n FROM staff WHERE code='TGMGR'")).rows[0].n).toBe(1);
-    expect((await call("POST", "/api/auth/login", { body: { code: "TGMGR", pin: "123456" } })).status).toBe(401);
+    expect((await db.query("SELECT count(*)::int AS n FROM staff WHERE code='TG555'")).rows[0].n).toBe(1);
+    expect((await db.query("SELECT name FROM staff WHERE code='TG555'")).rows[0].name).toMatch(/^Telegram: /);
+    expect((await call("POST", "/api/auth/login", { body: { code: "TG555", pin: "123456" } })).status).toBe(401);
     // It can use the bot like any manager.
     expect((await say(555, "/pricebooks")).said[0].text).toMatch(/Pricebooks/);
   });
 });
 
+
+/** Send the bot a photo (with a caption) as Telegram user `from`. */
+async function sendPhoto(from: number, caption: string, sizes: Array<{ file_id: string; file_size?: number }> = [{ file_id: "small", file_size: 5_000 }, { file_id: "big", file_size: 40_000 }]) {
+  const start = sent.length;
+  await call("POST", "/api/telegram/webhook", { body: { update_id: ++updateId, message: { message_id: updateId, chat: { id: from, type: "private" }, from: { id: from }, caption, photo: sizes } }, device: null, headers: { "x-telegram-bot-api-secret-token": "hook-secret" } });
+  return sent.slice(start);
+}
+const said = (m: Array<{ method: string; body: any }>) => m.filter((x) => x.method === "sendMessage").map((x) => x.body);
+
+describe("reading names, dates and renames", () => {
+  it("reads a rename written several ways", () => {
+    expect(parseRename("Latte > Flat White")).toEqual({ from: "Latte", to: "Flat White" });
+    expect(parseRename("Latte → Flat White")).toEqual({ from: "Latte", to: "Flat White" });
+    expect(parseRename("Iced Latte to Flat White")).toEqual({ from: "Iced Latte", to: "Flat White" });
+    expect(parseRename("Latte")).toBeNull();
+    expect(parseRename("Latte >")).toBeNull();
+  });
+  it("reads a period as Singapore days", () => {
+    expect(parseRange("", "2026-11-15")).toMatchObject({ from: "2026-11-15", to: "2026-11-15" });
+    expect(parseRange("yesterday", "2026-11-01")).toMatchObject({ from: "2026-10-31", to: "2026-10-31" });
+    expect(parseRange("week", "2026-11-15")).toMatchObject({ from: "2026-11-09", to: "2026-11-15" });
+    expect(parseRange("month", "2026-11-15")).toMatchObject({ from: "2026-10-17", to: "2026-11-15" });
+    expect(parseRange("2026-11-14", "2026-11-15")).toMatchObject({ from: "2026-11-14", to: "2026-11-14" });
+    expect(parseRange("2026-11-16 to 2026-11-10", "2026-11-15")).toMatchObject({ from: "2026-11-10", to: "2026-11-16" });
+    expect(parseRange("soon", "2026-11-15")).toBeNull();
+    expect(parseRange("2026-13-45", "2026-11-15")).toBeNull();
+  });
+});
+
+describe("menu changes and reports by Telegram (for an AI assistant working Telegram)", () => {
+  it("renames an item, keeping its price and its place, and a category", async () => {
+    await link(1001);
+    const before = (await getCatalog()).products.find((p) => p.id === "kaya-toast")!;
+    const r = await say(1001, "/rename Kaya Toast > Kaya Toast Set");
+    expect(r.said[0].text).toMatch(/is now “Kaya Toast Set”/);
+    const after = (await getCatalog()).products.find((p) => p.id === "kaya-toast")!;
+    expect(after).toMatchObject({ name: "Kaya Toast Set", category: before.category });
+    expect((await getCatalog()).pricebooks.find((b) => b.id === "standard")!.prices["kaya-toast"]).toBe(200);
+    expect((await call("GET", "/api/audit", { staff: mgr })).json.entries.some((e: any) => e.action === "catalog.product" && e.detail?.via === "telegram")).toBe(true);
+    await say(1001, "/rename Kaya Toast Set > Kaya Toast");
+
+    const cat = before.category;
+    expect((await say(1001, `/rename ${cat} > Zed Menu`)).said[0].text).toMatch(/Category .* is now “Zed Menu”/);
+    expect((await getCatalog()).products.find((p) => p.id === "kaya-toast")!.category).toBe("Zed Menu");
+    await say(1001, `/rename Zed Menu > ${cat}`);
+    expect((await say(1001, "/rename Nothing Here > Whatever")).said[0].text).toMatch(/No item or category/);
+    expect((await say(1001, "/rename Kaya Toast")).said[0].text).toMatch(/old and new name/);
+  });
+
+  it("an item's photo set by sending a picture with its name as the caption", async () => {
+    expect((await getCatalog()).products.find((p) => p.id === "kaya-toast")!.imageVersion ?? 0).toBe(0);
+    const out = await sendPhoto(1001, "kaya toast");
+    expect(out.map((x) => x.method)).toContain("getFile");
+    expect(out.find((x) => x.method === "getFile")!.body.file_id).toBe("big"); // the largest that fits
+    expect(said(out)[0].text).toMatch(/New picture for Kaya Toast/);
+    expect((await getCatalog()).products.find((p) => p.id === "kaya-toast")!.imageVersion).toBeGreaterThan(0);
+    const img = await fetch(base + "/api/products/kaya-toast/image");
+    expect(img.status).toBe(200);
+  });
+
+  it("asks for a caption, refuses an oversized picture, and strangers cannot change a picture", async () => {
+    expect(said(await sendPhoto(1001, ""))[0].text).toMatch(/caption/);
+    expect(said(await sendPhoto(1001, "kaya", [{ file_id: "huge", file_size: 900_000 }]))[0].text).toMatch(/too big/);
+    expect(said(await sendPhoto(1001, "zzzzqq"))[0].text).toMatch(/No item matches/);
+    expect(said(await sendPhoto(4242, "kaya toast"))[0].text).toMatch(/don't know you/);
+  });
+
+  it("asks which item when a caption matches several", async () => {
+    const out = await sendPhoto(1001, "rice");
+    const msg = said(out)[0];
+    expect(msg.text).toMatch(/Which item/);
+    const pick = buttons(msg).find((b) => b.callback_data)!.callback_data!;
+    expect(pick.length).toBeLessThanOrEqual(64);
+    expect((await press(1001, pick))[0].text).toMatch(/New picture for/);
+  });
+
+  it("/sales and /orders report from the live record, for managers only", async () => {
+    const day = new Date().toLocaleDateString("en-CA", { timeZone: "Asia/Singapore" });
+    expect((await say(1001, "/sales")).said[0].text).toMatch(/No sales for today/);
+    expect((await say(1001, "/orders")).said[0].text).toMatch(/No orders for today/);
+    const id = "tg-report-1";
+    const push = (extra: object[]) => call("POST", "/api/sync/push", { body: { events: extra.map((e, i) => ({ id: `${id}-${i}`, orderId: id, deviceId, ts: Date.now() + i, seq: 9000 + i, ...e })) } });
+    expect((await push([{ type: "OrderOpened", fulfilment: "takeaway", channelId: "take-away", channelName: "Take away", serviceCharge: false, queueNumber: "T001" }, { type: "ItemAdded", lineId: "l1", productId: "kaya-toast", name: "Kaya, Toast", unitCents: 200, qty: 2 }])).status).toBe(200);
+
+    const sales = (await say(1001, "/sales today")).said[0].text as string;
+    expect(sales).toMatch(/1 orders · 2 items/);
+    expect(sales).toMatch(/Kaya, Toast: 2/);
+    const start = sent.length;
+    await say(1001, `/orders ${day}`);
+    const doc = sent.slice(start).find((x) => x.method === "sendDocument")!.body;
+    expect(doc.filename).toBe(`orders-${day}.csv`);
+    expect(doc.content.split("\n")[0]).toMatch(/^order,queue,opened,channel/);
+    expect(doc.content).toMatch(/"2x Kaya, Toast"/); // a comma in a name stays inside its cell
+    expect(doc.content).toContain("T001");
+    expect((await say(1001, "/sales soon")).said[0].text).toMatch(/Try \/sales today/);
+
+    // A cashier-level link cannot read reports: only managers and owners can use the bot at all.
+    expect((await say(900, "/sales")).said[0].text).toMatch(/link/i);
+  });
+});

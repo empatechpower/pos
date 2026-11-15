@@ -1,7 +1,9 @@
 import cors from "@fastify/cors";
 import Fastify, { type FastifyReply, type FastifyRequest } from "fastify";
-import { confirmedPaid, isFullyPaid, menuFor, newId, reduceOrder, shopStatus, type BusinessConfig, type ChannelKind, type OptionGroup, type OrderEvent } from "@pos/core";
-import { CASHIER_TOPUP_LIMIT_CENTS, audit, authenticate, can, createStaff, login, logout, recentAudit, type Permission, type Role, type Staff } from "./auth.js";
+import { readFileSync } from "node:fs";
+import { fileURLToPath } from "node:url";
+import { confirmedPaid, isFullyPaid, menuFor, newId, orderTotals, reduceAll, reduceOrder, shopStatus, type BusinessConfig, type ChannelKind, type OptionGroup, type OrderEvent } from "@pos/core";
+import { CASHIER_TOPUP_LIMIT_CENTS, audit, authenticate, authenticateAgent, can, createAgent, createConnectCode, redeemConnectCode, createStaff, listAgents, login, logout, recentAudit, revokeAgent, type Permission, type Role, type Staff } from "./auth.js";
 import type { CatalogStore, ChangeResult, PgCatalogStore } from "./catalog.js";
 import type { Db } from "./db/pool.js";
 import { adjustTo, balanceOf, creditBlockedFor, creditExemptIds, creditFrozen, refund, setCreditExempt, setCreditFrozen, spend, topUp } from "./ledger.js";
@@ -19,6 +21,8 @@ declare module "fastify" {
   interface FastifyRequest {
     staff?: Staff;
     device?: Device;
+    /** Set when an agent made the request: the person it says it is acting for (for example "Sam, via Telegram"). */
+    agentActor?: string;
   }
 }
 
@@ -200,7 +204,22 @@ export async function buildApp({ config, store, db, catalog, catalogAdmin, print
   // ---- staff login ------------------------------------------------------------------------
 
   /** Pre-handler: an enrolled device, a valid staff session, and the permission this route needs. */
+  const agentFailures = new FailureLimiter(20, 15 * 60_000);
   const needs = (permission: Permission) => async (req: FastifyRequest, reply: FastifyReply) => {
+    // An agent (an AI helper or script) signs in with one API key instead of a device and a PIN.
+    const agentKey = req.headers["x-agent-key"];
+    if (typeof agentKey === "string") {
+      if (agentFailures.blocked(req.ip)) return reply.code(429).send({ error: "too_many_attempts" });
+      const agent = await authenticateAgent(db, agentKey);
+      if (!agent || agent.merchantId !== merchantId) {
+        agentFailures.fail(req.ip);
+        return reply.code(401).send({ error: "invalid_agent_key" });
+      }
+      if (!can(agent.role, permission)) return reply.code(403).send({ error: "not_allowed", needs: permission });
+      req.staff = agent;
+      req.agentActor = String(req.headers["x-agent-actor"] ?? "").trim().slice(0, 60) || "unknown";
+      return;
+    }
     const denied = await needsDevice(req, reply);
     if (denied) return denied;
     const staff = await authenticate(db, bearer(req));
@@ -248,6 +267,114 @@ export async function buildApp({ config, store, db, catalog, catalogAdmin, print
     }
   });
 
+  // Every change an agent makes is logged with who it says it was acting for, so the shop can see "Sam, via Telegram: renamed Teh".
+  app.addHook("onResponse", async (req, reply) => {
+    if (!req.agentActor || !req.staff || req.method === "GET" || req.method === "HEAD") return;
+    await audit(db, merchantId, req.staff.id, "agent.call", { actor: req.agentActor, agent: req.staff.name, method: req.method, path: req.url.split("?")[0], status: reply.statusCode }).catch(() => {});
+  });
+
+  /** The agent API described for an AI assistant. Public: it holds no secrets. */
+  app.get("/api/agent/openapi.yaml", async (_req, reply) => {
+    try {
+      return reply.header("content-type", "text/yaml; charset=utf-8").send(readFileSync(fileURLToPath(new URL("../../../docs/agent-openapi.yaml", import.meta.url)), "utf8"));
+    } catch {
+      return reply.code(404).send({ error: "not_available" });
+    }
+  });
+
+  const connectFails = new FailureLimiter(10, 15 * 60_000);
+  /** The merchant makes a code under Manager > Agents and gives it to the agent; the agent trades it for its key. */
+  app.post("/api/agents/connect-code", { preHandler: needs("staff.manage") }, async (req) => createConnectCode(db, merchantId, req.staff!.id));
+  app.post<{ Body: { code?: string; name?: string } }>("/api/agents/connect", async (req, reply) => {
+    if (connectFails.blocked(req.ip)) return reply.code(429).send({ error: "too_many_attempts" });
+    const name = String(req.body?.name ?? "Muse").trim().slice(0, 40) || "Muse";
+    const made = await redeemConnectCode(db, merchantId, String(req.body?.code ?? ""), name);
+    if (!made) {
+      connectFails.fail(req.ip);
+      return reply.code(401).send({ error: "invalid_or_expired_code" });
+    }
+    return { key: made.key, agentId: made.id, shop: { name: config.name, outlet: config.outletName }, note: "Keep this key secret. Send it as the x-agent-key header. Add x-agent-actor with the person you are acting for." };
+  });
+
+  // ---- data for analysis (read only) --------------------------------------------------------
+
+  const SGT = "Asia/Singapore";
+  const dayOf = (ms: number) => new Date(ms).toLocaleDateString("en-CA", { timeZone: SGT });
+  const hourOf = (ms: number) => Number(new Date(ms).toLocaleTimeString("en-GB", { hour: "2-digit", hour12: false, timeZone: SGT }).slice(0, 2));
+  /** Orders opened between two dates (Singapore days, inclusive; default today), with lines, totals and payments. Cancelled orders are left out unless asked for. */
+  const ordersBetween = async (from?: string, to?: string, includeCancelled = false) => {
+    const today = dayOf(Date.now());
+    const a = /^\d{4}-\d{2}-\d{2}$/.test(from ?? "") ? from! : today;
+    const b = /^\d{4}-\d{2}-\d{2}$/.test(to ?? "") ? to! : a;
+    const all = reduceAll((await store.after(0)).map((x) => x.event));
+    return {
+      from: a,
+      to: b,
+      orders: all
+        .filter((o) => o.lines.some((l) => l.qty > 0) && (includeCancelled || o.stage !== "cancelled") && dayOf(o.openedAt) >= a && dayOf(o.openedAt) <= b)
+        .sort((x, y) => x.openedAt - y.openedAt),
+    };
+  };
+
+  const ordersReport = async (fromDate?: string, toDate?: string, includeCancelled = false) => {
+    const { from, to, orders } = await ordersBetween(fromDate, toDate, includeCancelled);
+    return {
+      from, to, count: orders.length,
+      orders: orders.map((o) => {
+        const t = orderTotals(o, config);
+        return {
+          orderId: o.orderId, queueNumber: o.queueNumber ?? null, openedAt: new Date(o.openedAt).toISOString(), day: dayOf(o.openedAt), hour: hourOf(o.openedAt),
+          channel: o.channelName ?? o.fulfilment, source: o.source, table: o.spot ?? null, stage: o.stage,
+          customerName: o.customerName ?? null, customerPhone: o.customerPhone ?? null, memberId: o.memberId ?? null,
+          lines: o.lines.filter((l) => l.qty > 0).map((l) => ({ productId: l.productId, name: l.name, qty: l.qty, unitCents: l.unitCents, options: (l.options ?? []).map((x) => x.name) })),
+          subtotalCents: t.subtotal, serviceCents: t.service, totalCents: t.total, paidCents: confirmedPaid(o),
+          payments: o.payments.filter((p) => p.confirmed).map((p) => ({ method: p.method, amountCents: p.amountCents })),
+        };
+      }),
+    };
+  };
+  app.get<{ Querystring: { from?: string; to?: string; cancelled?: string } }>("/api/reports/orders", { preHandler: needs("audit.read") }, async (req) => ordersReport(req.query.from, req.query.to, req.query.cancelled === "1"));
+
+  /** Sales summary for a date range: totals, by day, by hour, by channel, and products ranked. */
+  const salesReport = async (fromDate?: string, toDate?: string) => {
+    const { from, to, orders } = await ordersBetween(fromDate, toDate);
+    const days = new Map<string, { orders: number; cents: number }>();
+    const hours = new Map<number, { orders: number; cents: number }>();
+    const channels = new Map<string, { orders: number; cents: number }>();
+    const products = new Map<string, { qty: number; cents: number }>();
+    let subtotal = 0, service = 0, gross = 0, items = 0;
+    const bump = <K>(m: Map<K, { orders: number; cents: number }>, k: K, cents: number) => { const x = m.get(k) ?? { orders: 0, cents: 0 }; x.orders++; x.cents += cents; m.set(k, x); };
+    for (const o of orders) {
+      const t = orderTotals(o, config);
+      subtotal += t.subtotal; service += t.service; gross += t.total;
+      bump(days, dayOf(o.openedAt), t.total); bump(hours, hourOf(o.openedAt), t.total); bump(channels, o.channelName ?? o.fulfilment, t.total);
+      for (const l of o.lines) {
+        if (l.qty <= 0) continue;
+        items += l.qty;
+        const p = products.get(l.name) ?? { qty: 0, cents: 0 };
+        p.qty += l.qty; p.cents += l.unitCents * l.qty; products.set(l.name, p);
+      }
+    }
+    const list = <K>(m: Map<K, { orders: number; cents: number }>, key: string) => [...m].sort((a, b) => (a[0] < b[0] ? -1 : 1)).map(([k, v]) => ({ [key]: k, orders: v.orders, cents: v.cents }));
+    return {
+      from, to, orders: orders.length, items, subtotalCents: subtotal, serviceCents: service, grossCents: gross, averageOrderCents: orders.length ? Math.round(gross / orders.length) : 0,
+      byDay: list(days, "day"), byHour: list(hours, "hour"), byChannel: [...channels].sort((a, b) => (a[0] < b[0] ? -1 : 1)).map(([channel, v]) => ({ channel, orders: v.orders, cents: v.cents })),
+      products: [...products].map(([name, v]) => ({ name, qty: v.qty, cents: v.cents })).sort((a, b) => b.qty - a.qty || b.cents - a.cents),
+    };
+  };
+  app.get<{ Querystring: { from?: string; to?: string } }>("/api/reports/sales", { preHandler: needs("audit.read") }, async (req) => salesReport(req.query.from, req.query.to));
+
+  // ---- agents: limited API access for an AI helper or script (owner only) ---------------------
+
+  app.get("/api/agents", { preHandler: needs("staff.manage") }, async () => ({ agents: await listAgents(db, merchantId) }));
+  app.post<{ Body: { name?: string } }>("/api/agents", { preHandler: needs("staff.manage") }, async (req, reply) => {
+    const name = String(req.body?.name ?? "").trim().slice(0, 40);
+    if (!name) return reply.code(400).send({ error: "name is required" });
+    return createAgent(db, merchantId, name, req.staff!.id); // the key is in this answer and nowhere else
+  });
+  app.delete<{ Params: { id: string } }>("/api/agents/:id", { preHandler: needs("staff.manage") }, async (req, reply) =>
+    (await revokeAgent(db, merchantId, req.params.id, req.staff!.id)) ? { ok: true } : reply.code(404).send({ error: "agent_not_found" }));
+
   app.get("/api/audit", { preHandler: needs("audit.read") }, async () => ({ entries: await recentAudit(db, merchantId) }));
 
   // ---- customer ordering and shop look ------------------------------------------------------
@@ -256,7 +383,7 @@ export async function buildApp({ config, store, db, catalog, catalogAdmin, print
 
   // ---- the Telegram bot for managing prices ---------------------------------------------------
 
-  if (catalogAdmin) registerTelegram(app, { db, merchantId, outletId: config.outletName, integ: integrations ?? { publicUrl: "" }, cat: catalogAdmin as PgCatalogStore, needs });
+  if (catalogAdmin) registerTelegram(app, { db, merchantId, outletId: config.outletName, integ: integrations ?? { publicUrl: "" }, cat: catalogAdmin as PgCatalogStore, needs, reports: { sales: salesReport, orders: ordersReport, today: () => dayOf(Date.now()) } });
 
   // ---- devices ----------------------------------------------------------------------------
 

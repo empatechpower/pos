@@ -18,7 +18,7 @@ const newKey = () => (globalThis.crypto?.randomUUID ? globalThis.crypto.randomUU
 /** Staff page for the shop: every order and payment, and the members' points and prepaid credit. No till. */
 export function Manager({ config }: { config: BusinessConfig }) {
   const staff = useStaff();
-  const [tab, setTab] = useState<"orders" | "members" | "telegram" | "books" | "reports">("orders");
+  const [tab, setTab] = useState<"orders" | "members" | "telegram" | "books" | "reports" | "agents">("orders");
   return (
     <div className="credit prices">
       <h2>Manager</h2>
@@ -31,10 +31,11 @@ export function Manager({ config }: { config: BusinessConfig }) {
             <button className={tab === "members" ? "on" : ""} aria-pressed={tab === "members"} onClick={() => setTab("members")}>Members</button>
             {staff.role !== "cashier" && <button className={tab === "reports" ? "on" : ""} aria-pressed={tab === "reports"} onClick={() => setTab("reports")}>Reports</button>}
             {staff.role !== "cashier" && <button className={tab === "books" ? "on" : ""} aria-pressed={tab === "books"} onClick={() => setTab("books")}>Books</button>}
+            {staff.role === "owner" && <button className={tab === "agents" ? "on" : ""} aria-pressed={tab === "agents"} onClick={() => setTab("agents")}>Agents</button>}
             {staff.role !== "cashier" && <button className={tab === "telegram" ? "on" : ""} aria-pressed={tab === "telegram"} onClick={() => setTab("telegram")}>Telegram</button>}
           </div>
           <PendingSignIns signedIn />
-          {tab === "orders" ? <Transactions config={config} /> : tab === "reports" ? <Reports config={config} /> : tab === "books" ? <Books /> : tab === "telegram" ? <TelegramPanel /> : <Members canAdjustPoints={staff.role !== "cashier"} canImport={staff.role !== "cashier"} rewardsOn={config.rewards.pointsEnabled} />}
+          {tab === "orders" ? <Transactions config={config} /> : tab === "reports" ? <Reports config={config} /> : tab === "agents" ? <AgentsPanel /> : tab === "books" ? <Books /> : tab === "telegram" ? <TelegramPanel /> : <Members canAdjustPoints={staff.role !== "cashier"} canImport={staff.role !== "cashier"} rewardsOn={config.rewards.pointsEnabled} />}
         </>
       )}
     </div>
@@ -641,6 +642,80 @@ function FreezeCredit() {
           </div>
         </div>
       )}
+    </>
+  );
+}
+
+/** Limited API access for an AI helper or script. The key is shown once, when it is made. */
+function AgentsPanel() {
+  const [agents, setAgents] = useState<Array<{ id: string; name: string; createdAt: string; lastUsedAt: string | null; revoked: boolean }> | null>(null);
+  const [name, setName] = useState("");
+  const [fresh, setFresh] = useState<{ name: string; key: string } | null>(null);
+  const [msg, setMsg] = useState<string | null>(null);
+  const load = async () => {
+    const r = await staffFetch("/api/agents");
+    if ("res" in r && r.res.ok) setAgents(((await r.res.json()) as { agents: NonNullable<typeof agents> }).agents);
+  };
+  useEffect(() => { void load(); }, []);
+  const make = async () => {
+    setMsg(null);
+    const r = await staffFetch("/api/agents", { body: { name } });
+    if ("problem" in r) return setMsg(r.problem);
+    if (!r.res.ok) return setMsg("Could not make it.");
+    const j = (await r.res.json()) as { name: string; key: string };
+    setFresh({ name: j.name, key: j.key });
+    setName("");
+    void load();
+  };
+  const [connect, setConnect] = useState<{ code: string; expiresAt: string } | null>(null);
+  const makeCode = async () => {
+    setMsg(null);
+    const r = await staffFetch("/api/agents/connect-code", { body: {} });
+    if ("problem" in r) return setMsg(r.problem);
+    if (!r.res.ok) return setMsg("Could not make a code.");
+    setConnect((await r.res.json()) as { code: string; expiresAt: string });
+  };
+  const revoke = async (id: string, n: string) => {
+    if (!window.confirm(`Stop "${n}" from signing in? Its key will no longer work.`)) return;
+    const r = await staffFetch(`/api/agents/${id}`, { method: "DELETE" });
+    if ("res" in r && r.res.ok) void load();
+  };
+  return (
+    <>
+      <p className="muted">An agent is an AI helper or script with its own key. It can change the menu and prices, read reports and credit, and reprint tickets. It can never add or take credit, freeze credit, or manage staff, devices or printers. Everything it does is recorded under its name.</p>
+      {fresh && (
+        <div className="flash">
+          <b>Key for {fresh.name}</b> — copy it now. It is shown only once.
+          <div style={{ wordBreak: "break-all", fontFamily: "monospace", margin: "6px 0" }}>{fresh.key}</div>
+          <button className="secondary sm" onClick={() => void navigator.clipboard?.writeText(fresh.key)}>Copy</button>{" "}
+          <button className="secondary sm" onClick={() => setFresh(null)}>Done</button>
+        </div>
+      )}
+      <div className="rp-card">
+        <h3>Connect Muse</h3>
+        <p className="muted">Press the button, then give the code to Muse (for example by sending it in your Muse chat). It works once and expires in 15 minutes. Muse then acts for your shop, and you can stop it below at any time.</p>
+        <button className="primary sm" onClick={() => void makeCode()}>Make a connect code</button>
+        {connect && (
+          <p style={{ margin: "10px 0 0" }}>
+            <b style={{ fontSize: 24, letterSpacing: 2, fontFamily: "monospace" }}>{connect.code}</b>{" "}
+            <button className="secondary sm" onClick={() => void navigator.clipboard?.writeText(connect.code)}>Copy</button>
+            <span className="muted"> · expires {new Date(connect.expiresAt).toLocaleTimeString("en-SG", { hour: "2-digit", minute: "2-digit", timeZone: "Asia/Singapore" })}</span>
+          </p>
+        )}
+      </div>
+      <p className="muted">Or make a key by hand, for a script or another assistant:</p>
+      <div style={{ display: "flex", gap: 8, margin: "10px 0" }}>
+        <input value={name} onChange={(e) => setName(e.target.value)} placeholder="Name, for example Muse" maxLength={40} style={{ flex: 1 }} />
+        <button className="primary sm" disabled={!name.trim()} onClick={() => void make()}>Make an agent</button>
+      </div>
+      {msg && <div className="flash">{msg}</div>}
+      {agents?.length === 0 && <p className="muted">No agents yet.</p>}
+      {agents?.map((a) => (
+        <div className="tab" key={a.id}>
+          <div><b>{a.name}</b>{a.revoked && <span className="muted"> · stopped</span>}<div className="muted" style={{ fontSize: 13 }}>{a.lastUsedAt ? `last used ${new Date(a.lastUsedAt).toLocaleString("en-SG", { timeZone: "Asia/Singapore" })}` : "not used yet"}</div></div>
+          {!a.revoked && <div className="tabr"><button className="secondary sm" onClick={() => void revoke(a.id, a.name)}>Stop</button></div>}
+        </div>
+      ))}
     </>
   );
 }

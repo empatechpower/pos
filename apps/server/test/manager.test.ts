@@ -22,6 +22,7 @@ let till = "";
 let tillId = "";
 let mgr = "";
 let cashier = "";
+let owner = "";
 let ip = 0;
 
 async function call(url: string, o: { method?: string; body?: object; staff?: string; device?: string } = {}) {
@@ -55,6 +56,8 @@ beforeAll(async () => {
   tillId = e.device.id;
   await createStaff(db, { merchantId: "bp", code: "MGR", name: "Max", role: "manager", pin: "222222" });
   await createStaff(db, { merchantId: "bp", code: "C1", name: "Cat", role: "cashier", pin: "3333" });
+  await createStaff(db, { merchantId: "bp", code: "OWN1", name: "Olive", role: "owner", pin: "999999" });
+  owner = (await call("/api/auth/login", { body: { code: "OWN1", pin: "999999" } })).json.token;
   mgr = (await call("/api/auth/login", { body: { code: "MGR", pin: "222222" } })).json.token;
   cashier = (await call("/api/auth/login", { body: { code: "C1", pin: "3333" } })).json.token;
 }, 120_000);
@@ -323,3 +326,69 @@ describe("paying for an order with member credit", () => {
     expect(await creditOf("flo@")).toBe(2000);
   });
 });
+
+describe("agents: limited access for an AI helper or script", () => {
+  const withKey = (url: string, key: string, o: { method?: string; body?: object } = {}) =>
+    fetch(base + url, { method: o.method ?? (o.body ? "POST" : "GET"), headers: { "x-agent-key": key, "x-forwarded-for": `198.51.100.${++ip % 250}`, ...(o.body ? { "content-type": "application/json" } : {}) }, body: o.body ? JSON.stringify(o.body) : undefined }).then(async (r) => ({ status: r.status, json: await r.json().catch(() => ({})) as any }));
+
+  it("only the owner can make or revoke an agent, and the key is shown once", async () => {
+    expect((await call("/api/agents", { body: { name: "Muse" }, staff: mgr })).status).toBe(403);
+    const made = await call("/api/agents", { body: { name: "Muse" }, staff: owner });
+    expect(made.status).toBe(200);
+    expect(made.json.key).toMatch(/^agt_/);
+    const list = (await call("/api/agents", { staff: owner })).json.agents;
+    expect(list).toHaveLength(1);
+    expect(JSON.stringify(list)).not.toContain(made.json.key); // the key is never listed again
+    const key = made.json.key as string;
+
+    // It can read and change the menu...
+    expect((await withKey("/api/members?q=", key)).status).toBe(200);
+    expect((await withKey("/api/audit", key)).status).toBe(200);
+    const products = (await call("/api/catalog", { device: "" })).json.products;
+    expect((await withKey("/api/catalog/products", key, { body: { id: products[0].id, name: products[0].name, category: products[0].category } })).status).toBe(200);
+    // ...but cannot move money, freeze credit, or manage devices or staff.
+    expect((await withKey("/api/wallet/topup", key, { body: { customerId: "x", amountCents: 100, idempotencyKey: "a1" } })).status).toBe(403);
+    expect((await withKey("/api/credit/freeze", key, { method: "PUT", body: { frozen: true } })).status).toBe(403);
+    expect((await withKey("/api/agents", key)).status).toBe(403);
+    expect((await withKey("/api/staff", key, { body: { code: "Z", name: "Z", pin: "1234", role: "owner" } })).status).toBe(403);
+    // A wrong key is refused.
+    expect((await withKey("/api/members?q=", "agt_nope")).status).toBe(401);
+    // Its actions are named in the audit log.
+    expect((await call("/api/audit", { staff: owner })).json.entries.some((e: any) => e.action === "agent.create")).toBe(true);
+
+    // Revoking stops it at once.
+    expect((await call(`/api/agents/${made.json.id}`, { method: "DELETE", staff: owner })).status).toBe(200);
+    expect((await withKey("/api/members?q=", key)).status).toBe(401);
+  });
+
+  it("an agent connects with a one-time code, reads data for analysis, and its changes are logged with who it acted for", async () => {
+    expect((await call("/api/agents/connect-code", { body: {}, staff: mgr })).status).toBe(403); // only the owner
+    const c = (await call("/api/agents/connect-code", { body: {}, staff: owner })).json;
+    expect(c.code).toMatch(/^[A-Z0-9]{4}-[A-Z0-9]{4}$/);
+    const join = (code: string) => fetch(base + "/api/agents/connect", { method: "POST", headers: { "content-type": "application/json", "x-forwarded-for": `198.51.100.${++ip % 250}` }, body: JSON.stringify({ code, name: "Muse" }) }).then(async (r) => ({ status: r.status, json: await r.json() as any }));
+    const linked = await join(c.code.toLowerCase());
+    expect(linked.status).toBe(200);
+    expect(linked.json.key).toMatch(/^agt_/);
+    expect((await join(c.code)).status).toBe(401); // a code works once
+    expect((await join("ZZZZ-ZZZZ")).status).toBe(401);
+    const key = linked.json.key as string;
+
+    const sales = await withKey("/api/reports/sales", key);
+    expect(sales.status).toBe(200);
+    const ord = await withKey("/api/reports/orders?from=2000-01-01&to=2100-01-01", key);
+    expect(ord.status).toBe(200);
+    expect(ord.json.count).toBeGreaterThan(0);
+    const all = await withKey("/api/reports/sales?from=2000-01-01&to=2100-01-01", key);
+    expect(all.json.orders).toBe(ord.json.count);
+    expect(all.json.grossCents).toBe(ord.json.orders.reduce((n: number, o: any) => n + o.totalCents, 0));
+    expect(all.json.byDay.reduce((n: number, d: any) => n + d.orders, 0)).toBe(all.json.orders);
+
+    const products = (await call("/api/catalog", { device: "" })).json.products;
+    const rename = await fetch(base + "/api/catalog/products", { method: "POST", headers: { "x-agent-key": key, "x-agent-actor": "Sam via Telegram", "content-type": "application/json", "x-forwarded-for": "198.51.100.77" }, body: JSON.stringify({ id: products[0].id, name: products[0].name, category: products[0].category }) });
+    expect(rename.status).toBe(200);
+    const audit = (await call("/api/audit", { staff: owner })).json.entries;
+    const entry = audit.find((e: any) => e.action === "agent.call");
+    expect(entry.detail).toMatchObject({ actor: "Sam via Telegram", method: "POST", path: "/api/catalog/products", status: 200 });
+  });
+});
+

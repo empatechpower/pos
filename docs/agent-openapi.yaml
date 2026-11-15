@@ -1,0 +1,118 @@
+openapi: 3.0.3
+info:
+  title: Rezein agent API
+  version: "1.0"
+  description: |
+    For an AI assistant (such as Muse) acting for one shop. Send the key in the `x-agent-key` header and, on every call,
+    `x-agent-actor` with the person you are acting for (for example "Sam via Telegram"). Changes are written to the shop's audit log with that name.
+    An agent can change the menu and prices, read reports and credit, and reprint tickets. It can NEVER add, take or refund credit,
+    freeze credit, or manage staff, devices or printers. Money stays with people in the Rezein app.
+    Money amounts are whole cents. Dates are Singapore days (YYYY-MM-DD).
+servers:
+  - url: https://demo.rezein.com
+components:
+  securitySchemes:
+    agentKey: { type: apiKey, in: header, name: x-agent-key }
+security:
+  - agentKey: []
+paths:
+  /api/agents/connect:
+    post:
+      summary: Link to a shop with a one-time code the merchant gives you (no key needed for this call)
+      security: []
+      requestBody:
+        required: true
+        content: { application/json: { schema: { type: object, required: [code], properties: { code: { type: string, example: "AB3K-9XQ2" }, name: { type: string, example: "Muse" } } } } }
+      responses:
+        "200": { description: "{ key, agentId, shop } - keep the key secret; it is shown once" }
+        "401": { description: Code wrong, used or expired }
+  /api/catalog:
+    get:
+      summary: The menu - products, options, categories, price lists and channels
+      responses: { "200": { description: Catalog } }
+  /api/catalog/version:
+    get:
+      summary: Just the menu version number (changes whenever anything is edited)
+      responses: { "200": { description: "{ version }" } }
+  /api/catalog/products:
+    post:
+      summary: Add or change an item. Fields you leave out are kept as they are.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [name, category]
+              properties:
+                id: { type: string, description: Leave out to add a new item }
+                name: { type: string }
+                category: { type: string }
+                soldOut: { type: boolean }
+                pointsExempt: { type: boolean }
+                priceCents: { type: integer, description: Required for a new item }
+                description: { type: string }
+                altName: { type: string }
+                options: { type: array, items: { type: object }, description: Choose-one, pick-any and extras groups }
+      responses: { "200": { description: Saved } }
+  /api/catalog/products/{id}/image:
+    put:
+      summary: Replace an item's photo (PNG, JPEG or WebP, up to 300 KB). Send the raw image bytes as the body.
+      parameters: [{ name: id, in: path, required: true, schema: { type: string } }]
+      requestBody: { required: true, content: { image/png: {}, image/jpeg: {}, image/webp: {} } }
+      responses: { "200": { description: Saved }, "400": { description: Too big or not an image } }
+  /api/catalog/categories/rename:
+    post:
+      summary: Rename a category (items and kitchen printers follow). An existing name merges the two.
+      requestBody: { required: true, content: { application/json: { schema: { type: object, required: [from, to], properties: { from: { type: string }, to: { type: string } } } } } }
+      responses: { "200": { description: Renamed } }
+  /api/catalog/pricebooks/{id}/prices/{productId}:
+    put:
+      summary: Set one item's price in one price list (priceCents null removes it)
+      parameters: [{ name: id, in: path, required: true, schema: { type: string } }, { name: productId, in: path, required: true, schema: { type: string } }]
+      requestBody: { required: true, content: { application/json: { schema: { type: object, properties: { priceCents: { type: integer, nullable: true } } } } } }
+      responses: { "200": { description: Saved } }
+  /api/catalog/pricebooks/{id}/off/{productId}:
+    put:
+      summary: Switch an item off or on in one price list
+      parameters: [{ name: id, in: path, required: true, schema: { type: string } }, { name: productId, in: path, required: true, schema: { type: string } }]
+      requestBody: { required: true, content: { application/json: { schema: { type: object, properties: { off: { type: boolean } } } } } }
+      responses: { "200": { description: Saved } }
+  /api/reports/sales:
+    get:
+      summary: Sales summary for a date range - totals, by day, by hour, by channel, products ranked
+      parameters: [{ name: from, in: query, schema: { type: string } }, { name: to, in: query, schema: { type: string } }]
+      responses: { "200": { description: Summary } }
+  /api/reports/orders:
+    get:
+      summary: Every order in a date range with its items, totals and payments (add cancelled=1 to include cancelled ones)
+      parameters: [{ name: from, in: query, schema: { type: string } }, { name: to, in: query, schema: { type: string } }, { name: cancelled, in: query, schema: { type: string } }]
+      responses: { "200": { description: Orders } }
+  /api/reports/credit:
+    get:
+      summary: Member credit - opening, added later, spent, refunds and balance for each member
+      responses: { "200": { description: Credit by member } }
+  /api/members:
+    get:
+      summary: Find members by name, email or phone
+      parameters: [{ name: q, in: query, schema: { type: string } }]
+      responses: { "200": { description: Members } }
+  /api/members/{id}/credit-history:
+    get:
+      summary: One member's credit history, newest first, with who made each change
+      parameters: [{ name: id, in: path, required: true, schema: { type: string } }]
+      responses: { "200": { description: Entries } }
+  /api/audit:
+    get:
+      summary: The shop's recent activity log
+      responses: { "200": { description: Entries } }
+  /api/print/order-status:
+    get:
+      summary: Whether tickets printed, for up to 100 order ids
+      parameters: [{ name: ids, in: query, required: true, schema: { type: string }, description: Comma-separated order ids }]
+      responses: { "200": { description: Status per order } }
+  /api/print/reprint:
+    post:
+      summary: "Print a receipt or kitchen ticket again. Tell the person first, because the kitchen may cook it again."
+      requestBody: { required: true, content: { application/json: { schema: { type: object, required: [orderId, docType], properties: { orderId: { type: string }, docType: { type: string, enum: [receipt, kitchen] } } } } } }
+      responses: { "200": { description: Queued } }

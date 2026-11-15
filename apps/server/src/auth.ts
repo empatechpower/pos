@@ -4,13 +4,16 @@ import type { Db } from "./db/pool.js";
 
 const scrypt = promisify(scryptCb) as (pw: string, salt: Buffer, len: number) => Promise<Buffer>;
 
-export type Role = "cashier" | "manager" | "owner";
+export type Role = "cashier" | "manager" | "owner" | "agent";
 export type Permission = "print.manage" | "print.reprint" | "catalog.manage" | "device.manage" | "wallet.read" | "wallet.topup" | "wallet.spend" | "wallet.refund" | "audit.read" | "staff.manage";
 
 const PERMISSIONS: Record<Role, Permission[]> = {
   cashier: ["wallet.read", "wallet.topup", "wallet.spend", "print.reprint"],
   manager: ["wallet.read", "wallet.topup", "wallet.spend", "wallet.refund", "audit.read", "device.manage", "catalog.manage", "print.manage", "print.reprint"],
   owner: ["wallet.read", "wallet.topup", "wallet.spend", "wallet.refund", "audit.read", "device.manage", "catalog.manage", "print.manage", "print.reprint", "staff.manage"],
+  // An AI helper or script: change the menu and prices, read reports and credit, reprint tickets. It can never move money,
+  // freeze credit, manage devices or printers, or create staff.
+  agent: ["wallet.read", "audit.read", "catalog.manage", "print.reprint"],
 };
 export const can = (role: Role, p: Permission) => PERMISSIONS[role].includes(p);
 
@@ -152,4 +155,68 @@ export async function recentAudit(db: Db, merchantId: string, limit = 100) {
     [merchantId, Math.min(limit, 500)],
   );
   return r.rows;
+}
+
+// ---- agent keys -------------------------------------------------------------------------------
+
+/** Make an agent (a limited login nobody can sign in to with a PIN) and its API key. The key is shown once and only its hash is kept. */
+export async function createAgent(db: Db, merchantId: string, name: string, createdBy: string): Promise<{ id: string; name: string; key: string }> {
+  const code = `AG${randomBytes(3).toString("hex").toUpperCase()}`;
+  const staff = await createStaff(db, { merchantId, code, name: `Agent: ${name}`, role: "agent", pin: String(10_000_000 + (randomBytes(4).readUInt32BE() % 89_999_999)) });
+  const key = `agt_${randomBytes(24).toString("base64url")}`;
+  const r = await db.query("INSERT INTO agent_keys (merchant_id, staff_id, name, key_hash) VALUES ($1,$2,$3,$4) RETURNING id", [merchantId, staff.id, name, sha256(key)]);
+  await audit(db, merchantId, createdBy, "agent.create", { agentId: r.rows[0].id, name });
+  return { id: r.rows[0].id as string, name, key };
+}
+
+export async function listAgents(db: Db, merchantId: string) {
+  const r = await db.query("SELECT id, name, created_at, last_used_at, revoked_at FROM agent_keys WHERE merchant_id=$1 ORDER BY created_at", [merchantId]);
+  return r.rows.map((x) => ({ id: x.id as string, name: x.name as string, createdAt: x.created_at as Date, lastUsedAt: (x.last_used_at as Date | null) ?? null, revoked: !!x.revoked_at }));
+}
+
+export async function revokeAgent(db: Db, merchantId: string, id: string, by: string): Promise<boolean> {
+  const r = await db.query("UPDATE agent_keys SET revoked_at = now() WHERE merchant_id=$1 AND id=$2 AND revoked_at IS NULL RETURNING staff_id", [merchantId, id]);
+  if (!r.rowCount) return false;
+  await db.query("UPDATE staff SET active=false WHERE id=$1", [r.rows[0].staff_id]);
+  await audit(db, merchantId, by, "agent.revoke", { agentId: id });
+  return true;
+}
+
+/** The agent behind an API key, or null. Revoked keys and deactivated agents never match. */
+export async function authenticateAgent(db: Db, key: string | undefined): Promise<Staff | null> {
+  if (!key || !key.startsWith("agt_")) return null;
+  const r = await db.query(
+    `SELECT s.* FROM agent_keys k JOIN staff s ON s.id = k.staff_id WHERE k.key_hash=$1 AND k.revoked_at IS NULL AND s.active`,
+    [sha256(key)],
+  );
+  if (!r.rows[0]) return null;
+  void db.query("UPDATE agent_keys SET last_used_at = now() WHERE key_hash=$1", [sha256(key)]).catch(() => {});
+  return toStaff(r.rows[0]);
+}
+
+// ---- connecting an agent with a one-time code -------------------------------------------------
+
+export const CONNECT_CODE_MINUTES = 15;
+
+/** A short code the merchant hands to the agent. It works once, for a few minutes, and only makes a new agent for this shop. */
+export async function createConnectCode(db: Db, merchantId: string, createdBy: string): Promise<{ code: string; expiresAt: Date }> {
+  const alphabet = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
+  const pick = () => Array.from(randomBytes(4), (b) => alphabet[b % alphabet.length]).join("");
+  const code = `${pick()}-${pick()}`;
+  const expiresAt = new Date(Date.now() + CONNECT_CODE_MINUTES * 60_000);
+  await db.query("INSERT INTO agent_connect_codes (code_hash, merchant_id, created_by, expires_at) VALUES ($1,$2,$3,$4)", [sha256(code), merchantId, createdBy, expiresAt]);
+  await audit(db, merchantId, createdBy, "agent.connect_code", {});
+  return { code, expiresAt };
+}
+
+/** The agent trades the code for its key. Null when the code is wrong, used or expired. */
+export async function redeemConnectCode(db: Db, merchantId: string, code: string, name: string): Promise<{ id: string; name: string; key: string } | null> {
+  const norm = code.toUpperCase().replace(/[^A-Z0-9]/g, "");
+  const dashed = `${norm.slice(0, 4)}-${norm.slice(4)}`;
+  const used = await db.query(
+    "UPDATE agent_connect_codes SET used_at = now() WHERE code_hash=$1 AND merchant_id=$2 AND used_at IS NULL AND expires_at > now() RETURNING created_by",
+    [sha256(dashed), merchantId],
+  );
+  if (!used.rowCount) return null;
+  return createAgent(db, merchantId, name, used.rows[0].created_by as string);
 }
