@@ -12,7 +12,7 @@ export class ErrorBoundary extends Component<{ children: ReactNode }, { error: E
   componentDidCatch(error: Error) {
     console.error("[app] a page failed to draw:", error);
     try {
-      localStorage.removeItem("pos.shopBag");
+      for (const k of Object.keys(localStorage)) if (k === "pos.shopBag" || k.startsWith("pos.shopBag:")) localStorage.removeItem(k);
       localStorage.removeItem("pos.purchase");
     } catch {
       /* storage not available */

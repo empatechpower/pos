@@ -232,20 +232,24 @@ const clearPurchaseKey = () => {
   }
 };
 
-const BAG_KEY = "pos.shopBag";
+/** The bag is kept per table link (…?table=12), so several tabs in one browser, each opened from a different table, never share a bag. */
+const bagKeyFor = (table: string) => {
+  const n = table.replace(/\D/g, "");
+  return n ? `pos.shopBag:t${n}` : "pos.shopBag";
+};
 /** The unsent bag and table survive a reload or an interrupted visit for a few hours, then are forgotten. */
-function loadBag(): { bag: BagLine[]; spot: string } | null {
+function loadBag(key: string): { bag: BagLine[]; spot: string } | null {
   try {
-    const j = JSON.parse(localStorage.getItem(BAG_KEY) ?? "null") as { at: number; bag: BagLine[]; spot: string } | null;
+    const j = JSON.parse(localStorage.getItem(key) ?? "null") as { at: number; bag: BagLine[]; spot: string } | null;
     return j && Date.now() - j.at < 4 * 3600_000 && Array.isArray(j.bag) ? { bag: j.bag, spot: j.spot ?? "" } : null;
   } catch {
     return null;
   }
 }
-function saveBag(bag: BagLine[], spot: string) {
+function saveBag(key: string, bag: BagLine[], spot: string) {
   try {
-    if (!bag.length && !spot) localStorage.removeItem(BAG_KEY);
-    else localStorage.setItem(BAG_KEY, JSON.stringify({ at: Date.now(), bag, spot }));
+    if (!bag.length && !spot) localStorage.removeItem(key);
+    else localStorage.setItem(key, JSON.stringify({ at: Date.now(), bag, spot }));
   } catch {
     /* private window or storage full: the bag simply is not kept */
   }
@@ -366,7 +370,8 @@ function Menu({ info, catalog, config, loginError, recheck }: { info: Info; cata
   const [category, setCategory] = useState("All");
   const [search, setSearch] = useState<string | null>(null);
   const [searchCleared, setSearchCleared] = useState(false); // the × was pressed: the next category tap closes the empty bar
-  const saved = useRef(loadBag()).current;
+  const bagKey = useRef(bagKeyFor(table)).current;
+  const saved = useRef(loadBag(bagKey)).current;
   const [bag, setBag] = useState<BagLine[]>(saved?.bag ?? []);
   const [picking, setPicking] = useState<MenuEntry | null>(null);
   const [editing, setEditing] = useState<BagLine | null>(null);
@@ -394,7 +399,7 @@ function Menu({ info, catalog, config, loginError, recheck }: { info: Info; cata
   const [spot, setSpot] = useState(linkTable ?? (tableList.length ? (tableList.includes(saved?.spot ?? "") ? saved!.spot : "") : table || saved?.spot || ""));
   const [tableEdit, setTableEdit] = useState(false);
   useEffect(() => { if (linkTable) setSpot(linkTable); }, [linkTable]);
-  useEffect(() => saveBag(bag, spot), [bag, spot]);
+  useEffect(() => saveBag(bagKey, bag, spot), [bag, spot]);
   const [busy, setBusy] = useState(false);
   const [note, setNote] = useState<string | null>(null);
   const [agreed, setAgreed] = useState<number | null>(null);
@@ -595,7 +600,7 @@ function Menu({ info, catalog, config, loginError, recheck }: { info: Info; cata
       if (res.ok && j.orderId) {
         localStorage.setItem(LS_LAST, j.orderId);
         clearPurchaseKey();
-        saveBag([], spot); // the order is placed: do not bring this bag back, but remember the table for the next order
+        saveBag(bagKey, [], spot); // the order is placed: do not bring this bag back, but remember the table for the next order
         if (payMethod === "credit") void loadMember(); // the balance has gone down
         if (payMethod === "card" || payMethod === "paynow") {
           // The order exists; now send the customer to the card / PayNow page. If that is unavailable they land on the
