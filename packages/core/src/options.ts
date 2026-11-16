@@ -12,6 +12,8 @@ export interface OptionChoice {
   soldOut?: boolean;
   /** Pre-selected for required single-choice groups. */
   default?: boolean;
+  /** Combos: the menu item this choice stands for. Its sold-out state follows that item, and a kitchen ticket prints it as its own item. */
+  productId?: string;
 }
 
 export interface OptionGroup {
@@ -43,6 +45,8 @@ export interface ChosenOption {
   name: string;
   qty: number;
   priceCents: Cents;
+  /** Combos: the menu item chosen for this part. */
+  productId?: string;
 }
 
 export type OptionError = "unknown_option" | "option_sold_out" | "missing_required" | "too_many_options" | "bad_option_quantity";
@@ -90,7 +94,7 @@ export function resolveOptions(groups: readonly OptionGroup[] | undefined, input
     for (const c of g.choices) {
       const q = picked?.get(c.id);
       if (!q) continue;
-      options.push({ group: g.name, name: c.name, qty: q, priceCents: c.priceCents });
+      options.push({ group: g.name, name: c.name, qty: q, priceCents: c.priceCents, ...(c.productId ? { productId: c.productId } : {}) });
       extra += c.priceCents * q;
       keyParts.push(`${g.id}:${c.id}:${q}`);
     }
@@ -126,4 +130,46 @@ export function priceRange(baseCents: Cents, groups: readonly OptionGroup[] | un
 /** Short lines describing a line's options, for tickets and receipts: "Cold", "Sunny Side Egg x2". */
 export function optionLines(options: readonly ChosenOption[] | undefined): string[] {
   return (options ?? []).map((o) => (o.qty > 1 ? `${o.name} x${o.qty}` : o.name));
+}
+
+/** A combo is an item whose choices stand for other menu items (a main, a side, a drink). */
+export const isCombo = (groups: readonly OptionGroup[] | undefined): boolean => !!groups?.some((g) => g.choices.some((c) => c.productId));
+
+/**
+ * What a combo costs if each part were bought alone, against the combo's price: the saving shown to customers.
+ * `priceOf` gives an item's own price (null if it has none). Parts with a surcharge count at their own price too,
+ * so the saving is measured on the default choices.
+ */
+export function comboSaving(baseCents: Cents, groups: readonly OptionGroup[] | undefined, priceOf: (productId: string) => Cents | null): Cents {
+  let alone = 0;
+  let paid = baseCents;
+  for (const g of groups ?? []) {
+    if (g.kind !== "single" || !g.required || !g.choices.some((c) => c.productId)) continue;
+    const c = g.choices.find((x) => x.default && !x.soldOut) ?? g.choices.find((x) => !x.soldOut);
+    const own = c?.productId ? priceOf(c.productId) : null;
+    if (!c || own === null) return 0;
+    alone += own;
+    paid += c.priceCents;
+  }
+  return Math.max(0, alone - paid);
+}
+
+/**
+ * Split a combo order line into one line per part, so each part goes to the printer for its own kind of item
+ * (the drink to the drink printer, the burger to the kitchen). Choices that are not parts (a "no ice" note) stay with the first part.
+ * A line that is not a combo comes back unchanged. Part line ids are the combo's id plus "#n".
+ */
+export function splitComboLine<L extends { lineId: string; productId: string; name: string; qty: number; unitCents: Cents; options?: ChosenOption[] }>(line: L): L[] {
+  const parts = (line.options ?? []).filter((o) => o.productId);
+  if (!parts.length) return [line];
+  const others = (line.options ?? []).filter((o) => !o.productId);
+  return parts.map((o, i) => ({
+    ...line,
+    lineId: `${line.lineId}#${i}`,
+    productId: o.productId!,
+    name: o.name,
+    qty: line.qty * o.qty,
+    unitCents: 0,
+    options: [{ group: "Combo", name: line.name, qty: 1, priceCents: 0 }, ...(i === 0 ? others : [])],
+  }));
 }

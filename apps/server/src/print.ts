@@ -1,5 +1,5 @@
 import {
-  encodeEpl, encodeEscPos, encodeEscPosRaster, encodeZpl, isFullyPaid, itemLabel, kitchenCuts, kitchenTicket, receipt, visibleToKitchen, withDrawer,
+  encodeEpl, encodeEscPos, encodeEscPosRaster, encodeZpl, isFullyPaid, itemLabel, kitchenCuts, kitchenTicket, receipt, splitComboLine, visibleToKitchen, withDrawer,
   type BusinessConfig, type Catalog, type CutMode, type Doc, type Label, type OrderLine, type OrderState, type PrintContext, type PrinterLanguage,
 } from "@pos/core";
 import { createHash } from "node:crypto";
@@ -191,7 +191,8 @@ export class PrintStore {
           const targets = printers.filter((x) => x.roles.includes(docType));
           if (!targets.length) continue;
           const sent = new Set((await client.query("SELECT line_id FROM printed_lines WHERE merchant_id=$1 AND order_id=$2 AND doc_type=$3", [this.merchantId, order.orderId, docType])).rows.map((r) => r.line_id as string));
-          const fresh = order.lines.filter((l) => l.qty > 0 && !sent.has(l.lineId));
+          // A combo prints as its parts, each to the printer for that kind of item; "sent" is tracked on the combo's own line id.
+          const fresh = order.lines.filter((l) => l.qty > 0 && !sent.has(l.lineId)).flatMap(splitComboLine);
           if (!fresh.length) continue;
           const claimed = new Set<string>();
           const specific = targets.filter((t) => t.categories.length);
@@ -220,7 +221,7 @@ export class PrintStore {
             for (const l of lines) claimed.add(l.lineId);
           }
           for (const id of claimed) {
-            await client.query("INSERT INTO printed_lines (merchant_id,order_id,line_id,doc_type) VALUES ($1,$2,$3,$4) ON CONFLICT DO NOTHING", [this.merchantId, order.orderId, id, docType]);
+            await client.query("INSERT INTO printed_lines (merchant_id,order_id,line_id,doc_type) VALUES ($1,$2,$3,$4) ON CONFLICT DO NOTHING", [this.merchantId, order.orderId, id.split("#")[0], docType]);
           }
         }
       }
@@ -242,7 +243,7 @@ export class PrintStore {
     for (const p of printers) {
       const docs = docType === "receipt"
         ? [receipt(order, ctx.config, ctx.print, { showQueue: p.showQueue })]
-        : kitchenCuts(order.lines, p.cutMode, (id) => category.get(id) ?? "").map((c) => kitchenTicket(order, ctx.print, { lines: c.lines, showQueue: p.showQueue }));
+        : kitchenCuts(order.lines.flatMap(splitComboLine), p.cutMode, (id) => category.get(id) ?? "").map((c) => kitchenTicket(order, ctx.print, { lines: c.lines, showQueue: p.showQueue }));
       for (const [n, doc] of docs.entries()) {
         if (await this.insertJob(this.db, p, docType, order.orderId, `reprint:${docType}:${order.orderId}:${p.id}:${Date.now()}:${n}:${Math.random()}`, enc(p, doc), title(order) + " (reprint)")) made++;
       }

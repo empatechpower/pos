@@ -220,6 +220,36 @@ describe("paying for an order with member credit", () => {
   const order = (token: string | undefined, o: object = {}) => call("/api/shop/orders", { staff: token, device: "", body: { channelId: "take-away", items: [{ productId: "kaya-toast", qty: 2 }], customerPhone: "9123 4567", ...((o as { payWithCredit?: boolean }).payWithCredit ? { idempotencyKey: `k-${++ip}-${Math.random().toString(36).slice(2)}` } : {}), ...o } });
   const creditOf = async (email: string) => (await list(email)).json.members[0].creditCents as number;
 
+  it("sells a combo: the base price plus the top-up for a swapped part, and a part that is off cannot be picked", async () => {
+    const part = (g: string, id: string, name: string, extra = 0, d = false) => ({ id, name, priceCents: extra, productId: id, ...(d ? { default: true } : {}) });
+    const made = await call("/api/catalog/products", { staff: mgr, body: { id: "set-a", name: "Set A", category: "Combos", priceCents: 300, options: [
+      { id: "main", name: "Main", kind: "single", required: true, choices: [part("main", "kaya-toast", "Kaya Toast", 0, true)] },
+      { id: "drink", name: "Drink", kind: "single", required: true, choices: [part("drink", "teh", "Teh", 0, true), part("drink", "kopi", "Coffee", 50)] },
+    ] } });
+    expect(made.status).toBe(200);
+    // A combo cannot point at an item that does not exist.
+    expect((await call("/api/catalog/products", { staff: mgr, body: { id: "set-bad", name: "Bad", category: "Combos", priceCents: 300, options: [{ id: "m", name: "Main", kind: "single", required: true, choices: [part("m", "ghost", "Ghost", 0, true)] }] } })).status).toBe(400);
+
+    await createMember({ name: "Dee", email: "dee@example.com", creditCents: 5000 });
+    const s = await emailIn("dee@example.com");
+    const pick = (drink: string) => [{ productId: "set-a", qty: 1, options: [{ groupId: "main", choiceId: "kaya-toast" }, { groupId: "drink", choiceId: drink }] }];
+    const plain = await order(s.token, { items: pick("teh") });
+    expect(plain.status).toBe(200);
+    expect(plain.json.totalCents).toBe(300);
+    const swapped = await order(s.token, { items: pick("kopi") });
+    expect(swapped.json.totalCents).toBe(350); // base 3.00 + 0.50 for coffee
+
+    // Switch Teh off (sold out): the choice follows it, and the order is refused.
+    expect((await call("/api/catalog/products", { staff: mgr, body: { id: "teh", name: (await call("/api/catalog")).json.products.find((p: any) => p.id === "teh").name, category: (await call("/api/catalog")).json.products.find((p: any) => p.id === "teh").category, soldOut: true } })).status).toBe(200);
+    const served = (await call("/api/catalog")).json.products.find((p: any) => p.id === "set-a").options.find((g: any) => g.id === "drink");
+    expect(served.choices.find((c: any) => c.id === "teh").soldOut).toBe(true);
+    expect((await order(s.token, { items: pick("teh") })).status).toBe(400);
+    expect((await order(s.token, { items: pick("kopi") })).status).toBe(200);
+    // Put it back.
+    const teh = (await call("/api/catalog")).json.products.find((p: any) => p.id === "teh");
+    await call("/api/catalog/products", { staff: mgr, body: { id: "teh", name: teh.name, category: teh.category, soldOut: false } });
+  });
+
   it("takes the credit, marks the order paid and accepted, and it is ready for the kitchen", async () => {
     await createMember({ name: "Cy", email: "cy@example.com", creditCents: 2000 });
     const s = await emailIn("cy@example.com");

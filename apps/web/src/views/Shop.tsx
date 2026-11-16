@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
-import { cleanNote, defaultSelection, formatMoney, menuFor, optionLines, priceRange, quoteOrder, readableOn, resolveOptions, type BusinessConfig, type Catalog, type ChosenOptionInput, type MenuEntry, type ShopStatus } from "@pos/core";
+import { cleanNote, comboSaving, defaultSelection, formatMoney, isCombo, menuFor, optionLines, priceRange, quoteOrder, readableOn, resolveOptions, type BusinessConfig, type Catalog, type ChosenOptionInput, type MenuEntry, type ShopStatus } from "@pos/core";
 import { OptionSheet } from "./OptionSheet";
+import { RollMoney } from "./RollMoney";
 import "../shopProto.css";
 import { LANGS, detectedLang, greeting, lang, langMode, setLangMode, shortLabel, t, tx, useLang } from "../shopI18n";
 
@@ -201,10 +202,14 @@ const channelIcon = (kind: string): keyof typeof ICONS => (kind === "dine_in" ? 
 
 const photo = (p: { id: string; imageVersion?: number }) => (p.imageVersion ? `/api/products/${p.id}/image?v=${p.imageVersion}` : null);
 // The card shows the plain lower price; Variants are chosen on the sheet (no ranges on cards).
-const cardPrice = (m: MenuEntry) => {
+const cardPrice = (m: MenuEntry, saving = 0) => {
+  if (isCombo(m.options)) return `${formatMoney(m.priceCents)}${saving > 0 ? ` · Save ${formatMoney(saving)}` : ""}`; // a combo is one price; swaps are chosen on the sheet
   const [lo, hi] = priceRange(m.priceCents, m.options);
   return lo === hi ? formatMoney(lo) : `From ${formatMoney(lo)}`;
 };
+
+/** The gentle first-visit scroll on the Order page runs once per page load, never again when the customer comes back to Order. */
+let orderAutoScrolled = false;
 
 /** The customer's own ordering page: no sign-in, no device set-up. Public by design. */
 const PURCHASE_KEY = "pos.purchase";
@@ -384,9 +389,8 @@ function Menu({ info, catalog, config, loginError, recheck }: { info: Info; cata
   const tableLocked = false;
   /** Moving to a different table asks first. The order is the customer's own either way: it never joins another person's order at that table. */
   const changeTable = (to: string): boolean => {
-    if (!to || to === spot) return true;
-    if (spot && !window.confirm(tx("Move to {t}? Your order will be sent to {t}.", { t: to }))) return false;
-    setSpot(to);
+    if (!to) return true;
+    if (to !== spot) setSpot(to);
     return true;
   };
   // Changing only the part after # does not reload the page, so keep the table in step with the link.
@@ -434,6 +438,47 @@ function Menu({ info, catalog, config, loginError, recheck }: { info: Info; cata
     ro.observe(el);
     return () => ro.disconnect();
   }, [screen, tableEdit]);
+
+  useEffect(() => {
+    if (!(tableEdit && tableList.length)) return;
+    const prev = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
+    return () => { document.body.style.overflow = prev; };
+  }, [tableEdit, tableList.length]);
+
+  // Order page, first time up: wait 1 s, then drift down over 5.2 s until the first menu item sits under the header. Any touch, scroll or key press cancels it.
+  useEffect(() => {
+    if (screen !== "order" || orderAutoScrolled) return;
+    orderAutoScrolled = true;
+    if (typeof matchMedia === "function" && matchMedia("(prefers-reduced-motion: reduce)").matches) return;
+    let cancelled = false;
+    let raf = 0;
+    const events = ["wheel", "touchstart", "pointerdown", "mousedown", "keydown"] as const;
+    const stop = () => {
+      cancelled = true;
+      clearTimeout(timer);
+      cancelAnimationFrame(raf);
+      events.forEach((e) => window.removeEventListener(e, stop));
+    };
+    const timer = window.setTimeout(() => {
+      const first = document.querySelector<HTMLElement>(".sc");
+      const line = (document.querySelector<HTMLElement>(".shop-chips") ?? headRef.current)?.getBoundingClientRect().bottom ?? 0;
+      const dist = first ? first.getBoundingClientRect().top - line : 0;
+      if (cancelled || window.scrollY > 4 || dist <= 8) return stop();
+      const from = window.scrollY;
+      const began = performance.now();
+      const tick = (now: number) => {
+        if (cancelled) return;
+        const p = Math.min(1, (now - began) / 5200);
+        window.scrollTo(0, from + dist * (p < 0.5 ? 2 * p * p : 1 - Math.pow(-2 * p + 2, 2) / 2));
+        if (p < 1) raf = requestAnimationFrame(tick);
+        else stop();
+      };
+      raf = requestAnimationFrame(tick);
+    }, 1000);
+    events.forEach((e) => window.addEventListener(e, stop, { passive: true }));
+    return stop;
+  }, [screen]);
 
   const setScreen = (s: Screen) => {
     setScreenRaw(s);
@@ -709,13 +754,13 @@ function Menu({ info, catalog, config, loginError, recheck }: { info: Info; cata
 
   const totalsRows = (q2: NonNullable<typeof quote> & { ok: true }) => (
     <>
-      <div className="sum-row"><span className="k">{t("itemsSubtotal", "Items subtotal")}</span><span className="v">{formatMoney(q2.priced.subtotal)}</span></div>
-      {q2.priced.couponDiscount > 0 && <div className="sum-row neg"><span className="k">{chosen?.title ?? "Coupon / voucher"}</span><span className="v">−{formatMoney(q2.priced.couponDiscount)}</span></div>}
-      {q2.priced.pointsDiscount > 0 && <div className="sum-row neg"><span className="k">Points · {q2.priced.pointsUsed.toLocaleString()} pts</span><span className="v">−{formatMoney(q2.priced.pointsDiscount)}</span></div>}
-      {q2.priced.service > 0 && <div className="sum-row"><span className="k">{t("pmService", "Service charge")} ({Math.round(config.pricing.serviceRate * 1000) / 10}%)</span><span className="v">{formatMoney(q2.priced.service)}</span></div>}
-      {q2.priced.gst > 0 && <div className="sum-row"><span className="k">GST</span><span className="v">{formatMoney(q2.priced.gst)}</span></div>}
-      {q2.priced.bcrs > 0 && <div className="sum-row"><span className="k">{t("bcrsDeposit", "BCRS Deposit")} ({tx("+{n}c each", { n: config.pricing.bcrsDepositCents })})</span><span className="v">{formatMoney(q2.priced.bcrs)}</span></div>}
-      <div className="sum-row grand"><span className="k">{t("total", "Total")}</span><span className="v">{formatMoney(shownTotal)}</span></div>
+      <div className="sum-row"><span className="k">{t("itemsSubtotal", "Items subtotal")}</span><span className="v"><RollMoney cents={q2.priced.subtotal} /></span></div>
+      {q2.priced.couponDiscount > 0 && <div className="sum-row neg"><span className="k">{chosen?.title ?? "Coupon / voucher"}</span><span className="v">−<RollMoney cents={q2.priced.couponDiscount} /></span></div>}
+      {q2.priced.pointsDiscount > 0 && <div className="sum-row neg"><span className="k">Points · {q2.priced.pointsUsed.toLocaleString()} pts</span><span className="v">−<RollMoney cents={q2.priced.pointsDiscount} /></span></div>}
+      {q2.priced.service > 0 && <div className="sum-row"><span className="k">{t("pmService", "Service charge")} ({Math.round(config.pricing.serviceRate * 1000) / 10}%)</span><span className="v"><RollMoney cents={q2.priced.service} /></span></div>}
+      {q2.priced.gst > 0 && <div className="sum-row"><span className="k">GST</span><span className="v"><RollMoney cents={q2.priced.gst} /></span></div>}
+      {q2.priced.bcrs > 0 && <div className="sum-row"><span className="k">{t("bcrsDeposit", "BCRS Deposit")} ({tx("+{n}c each", { n: config.pricing.bcrsDepositCents })})</span><span className="v"><RollMoney cents={q2.priced.bcrs} /></span></div>}
+      <div className="sum-row grand"><span className="k">{t("total", "Total")}</span><span className="v"><RollMoney cents={shownTotal} /></span></div>
     </>
   );
   const lineView = (l: BagLine) => {
@@ -732,7 +777,7 @@ function Menu({ info, catalog, config, loginError, recheck }: { info: Info; cata
       return (
         <div className="sum-row" key={l.key}>
           <span className="k with-thumb">{thumbs && img && <img className="status-thumb" src={img} alt="" />}<span>{v.m.name} × {l.qty}{v.opts && <small className="muted" style={{ display: "block" }}>{v.opts}</small>}{v.note && <small className="muted" style={{ display: "block" }}>{v.note}</small>}</span></span>
-          <span className="v">{formatMoney(v.lineCents)}</span>
+          <span className="v"><RollMoney cents={v.lineCents} /></span>
         </div>
       );
     });
@@ -772,6 +817,23 @@ function Menu({ info, catalog, config, loginError, recheck }: { info: Info; cata
           ))}
         </div>
         <button className="shop-primary" onClick={() => setLangOpen(false)}>{t("close", "Close")}</button>
+      </div>
+    </div>
+  );
+  const tableDialog = tableEdit && dine && tableList.length > 0 && !tableLocked && (
+    <div className="tbl-back" onClick={() => setTableEdit(false)}>
+      <div className="tbl-dlg" role="dialog" aria-modal="true" aria-label={tx("Change table")} onClick={(e) => e.stopPropagation()} onKeyDown={(e) => { if (e.key === "Escape") setTableEdit(false); }}>
+        <button className="tbl-x" onClick={() => setTableEdit(false)} aria-label={t("close", "Close")}>✕</button>
+        <h3>{tx("Change table")}</h3>
+        <p className="muted">{tx("Your order will be sent to the table you choose.")}</p>
+        <div className="tbl-list">
+          {tableList.map((x) => (
+            <button key={x} className="tbl-opt" autoFocus={x === spot} aria-current={x === spot} onClick={() => { changeTable(x); setTableEdit(false); }}>
+              <Icon name="table" size={18} /><span>{x}</span>{x === spot && <span className="cur">{t("current", "Current")}</span>}
+            </button>
+          ))}
+        </div>
+        <button className="tbl-cancel" onClick={() => setTableEdit(false)}>{tx("Cancel")}</button>
       </div>
     </div>
   );
@@ -820,9 +882,7 @@ function Menu({ info, catalog, config, loginError, recheck }: { info: Info; cata
       <div className="shop-fixedhead" ref={headRef}>
         {header(false)}
         {tableEdit && dine && !tableLocked && (
-          tableList.length ? (
-            <div className="shop-tableedit"><select autoFocus value={spot} onChange={(e) => { if (changeTable(e.target.value)) setTableEdit(false); }}><option value="">{tx("Choose your table")}</option>{tableList.map((x) => <option key={x}>{x}</option>)}</select></div>
-          ) : (
+          tableList.length ? null : (
           <div className="shop-tableedit"><input autoFocus value={spot} maxLength={30} placeholder={tx("e.g. Table 12")} onChange={(e) => setSpot(e.target.value)} onKeyDown={(e) => e.key === "Enter" && setTableEdit(false)} /><button onClick={() => setTableEdit(false)}>{t("done", "Done")}</button></div>
           )
         )}
@@ -872,7 +932,7 @@ function Menu({ info, catalog, config, loginError, recheck }: { info: Info; cata
                 <div className="sc-main" onClick={() => { if (!m.soldOut) setPicking(m); }}>
                   <b>{m.name}</b>
                   <span className="muted">{m.description ?? m.category}</span>
-                  <span className="sc-price">{m.soldOut ? "Sold out" : cardPrice(m)}{!m.soldOut && /bcrs/i.test(m.name) && <em className="bcrs-badge"><Icon name="can" size={11} />+10c BCRS Deposit</em>}</span>
+                  <span className="sc-price">{m.soldOut ? "Sold out" : cardPrice(m, isCombo(m.options) ? comboSaving(m.priceCents, m.options, (id) => menu.find((x) => x.id === id)?.priceCents ?? null) : 0)}{!m.soldOut && /bcrs/i.test(m.name) && <em className="bcrs-badge"><Icon name="can" size={11} />+10c BCRS Deposit</em>}</span>
                 </div>
                 {!m.soldOut && (
                   <div className="sc-act">
@@ -893,7 +953,7 @@ function Menu({ info, catalog, config, loginError, recheck }: { info: Info; cata
       {count > 0 && (
         <button className="shop-bar" onClick={() => setScreen("bag")}>
           <Icon name="bag" size={20} /><span>{tx(count > 1 ? "View bag · {n} items" : "View bag · {n} item", { n: count })}</span>
-          <span className="amt"><i className="div" /><b>{formatMoney(total)}</b><Icon name="arrowR" size={18} /></span>
+          <span className="amt"><i className="div" /><b><RollMoney cents={total} /></b><Icon name="arrowR" size={18} /></span>
         </button>
       )}
     </>
@@ -1034,17 +1094,6 @@ function Menu({ info, catalog, config, loginError, recheck }: { info: Info; cata
             <div className="e2e-card">
               <h3>{t("preferences", "Preferences")}</h3>
               <button className="sum-link-row" onClick={() => setLangOpen(true)}><span className="sl-ic"><Icon name="globe" size={21} /></span><span className="sl-t">{t("language", "Language")}<span className="sl-d">{t("langLeadShort", "Auto-selects from your phone settings.")}</span></span><span className="sl-v">{LANGS.find((l) => l.code === lang())!.native}</span><span className="chev"><Icon name="chevR" size={16} /></span></button>
-              {([["orderUpdates", "prefNotifT", "Order updates", "prefNotifD", "Email me when my order is ready."], ["promos", "prefPromoT", "Offers and news", "prefPromoD", "Email me about new items and offers."]] as const).map(([k, tk, tt, dk, dd]) => {
-                const on = member ? (member.prefs?.[k] ?? k === "orderUpdates") : false;
-                return (
-                  <button key={k} className="set-opt" aria-pressed={on} disabled={!member} style={{ marginTop: 10, opacity: member ? 1 : 0.6 }} onClick={() => void savePref(k, !on)}>
-                    <span className="so-main"><span className="so-t">{t(tk, tt)}</span><span className="so-d">{t(dk, dd)}</span></span>
-                    <span className={`set-switch${on ? " is-on" : ""}`}><span className="sw-word">{on ? t("onW", "On") : t("offW", "Off")}</span><span className="sw-track"><span className="sw-knob" /></span></span>
-                  </button>
-                );
-              })}
-              {!member && <p className="e2e-note">{t("prefsGuest", "Sign in to choose which emails you get.")}</p>}
-              {member && !member.email && <p className="e2e-note">{t("prefsNoEmail", "Add an email address in Profile details to receive these.")}</p>}
             </div>
           </>
         ) : acctPanel === "help" ? (
@@ -1069,7 +1118,7 @@ function Menu({ info, catalog, config, loginError, recheck }: { info: Info; cata
                   <div className="member-main">
                     <div className="name">{who}</div>
                     {member.phone && <div className="acct-phone">{member.phone}</div>}
-                    <div className="pts-stack"><span className="pts-line"><b>{formatMoney(credit)}</b><span>{tx("credit")}</span></span></div>
+                    <div className="pts-stack"><span className="pts-line"><b><RollMoney cents={credit} /></b><span>{tx("credit")}</span></span></div>
                     {config.rewards.pointsEnabled && <div className="pts-stack"><span className="pts-line"><b>{member.pointsBalance.toLocaleString()}</b><span>{t("points", "points")}</span></span><span className="pts-worth">{tx("{amt} worth", { amt: formatMoney(member.pointsBalance) })}</span></div>}
                   </div>
                 ) : (
@@ -1139,12 +1188,12 @@ function Menu({ info, catalog, config, loginError, recheck }: { info: Info; cata
           </div>
           <p className="hist-note" style={{ margin: "6px 0 8px" }}>{t("redeemNote2", "100 points = S$1 off. Any points you don't use stay in your balance.")}</p>
           <div className="pedit-slider-box">
-            <span className="pedit-val"><span className="n">{pVal.toLocaleString()} {t("points", "points")}</span><br /><span className="d">= {formatMoney(pVal)} {t("offOrder", "off this order")}</span></span>
+            <span className="pedit-val"><span className="n">{pVal.toLocaleString()} {t("points", "points")}</span><br /><span className="d">= <RollMoney cents={pVal} /> {t("offOrder", "off this order")}</span></span>
             <input type="range" className="pedit-slider" min={minPts} max={maxPts} step={1} value={pVal} onChange={(e) => choosePts(Number(e.target.value))} style={{ background: `linear-gradient(90deg,var(--orange) ${pPct}%,#e9dec9 ${pPct}%)` }} aria-label={t("redeemSliderAria", "Points to redeem")} />
             <div className="pedit-scale"><span>{minPts.toLocaleString()}</span><span>{t("maxW", "Max")} {maxPts.toLocaleString()}</span></div>
           </div>
           <button className="pedit-all" aria-expanded={pEditAmt} onClick={() => setPEditAmt(!pEditAmt)}>{t("editAmount", "Type an exact amount")}</button>
-          {pEditAmt && <div className="pedit-amt-row"><input className="qty-input" type="number" inputMode="numeric" min={minPts} max={maxPts} step={1} value={pVal} onChange={(e) => choosePts(Number(e.target.value))} aria-label={t("redeemExactAria", "Exact points to redeem")} /><span className="pedit-amt-unit">{t("points", "points")} · = {formatMoney(pVal)} {t("offShort", "off")}</span></div>}
+          {pEditAmt && <div className="pedit-amt-row"><input className="qty-input" type="number" inputMode="numeric" min={minPts} max={maxPts} step={1} value={pVal} onChange={(e) => choosePts(Number(e.target.value))} aria-label={t("redeemExactAria", "Exact points to redeem")} /><span className="pedit-amt-unit">{t("points", "points")} · = <RollMoney cents={pVal} /> {t("offShort", "off")}</span></div>}
           <button className="pedit-all" onClick={() => { setPointsPts(null); setAgreed(null); }}>{t("redeemMax", "Use the most")} · {maxPts.toLocaleString()} {t("points", "points")}</button>
           <button className="popup-close" onClick={() => setPEdit(false)}>{t("done", "Done")}</button>
         </div>
@@ -1156,7 +1205,7 @@ function Menu({ info, catalog, config, loginError, recheck }: { info: Info; cata
   const bagScreen = (
     <>
       <div className="shop-headwrap">
-        {header(true)}
+        {header(false)}
         {seg}
         <div className="title-row">
           <button className="back-btn" onClick={() => setScreen("order")} aria-label={tx("Back")}><Icon name="chevL" size={20} /></button>
@@ -1184,7 +1233,7 @@ function Menu({ info, catalog, config, loginError, recheck }: { info: Info; cata
                 <h3 className="bag-name">{v.m.name}</h3>
                 {(v.opts || !v.note) && <p className="bag-desc">{v.opts || v.m.description || v.m.category}</p>}
                 {v.note && <p className="bag-desc bag-note">{v.note}</p>}
-                <div className="bag-pricerow">{formatMoney(v.lineCents)}</div>
+                <div className="bag-pricerow"><RollMoney cents={v.lineCents} /></div>
               </div>
               <div className="sc-act sc-act-col"><button className="sc-edit" aria-label={`Edit ${v.m.name}`} onClick={() => setEditing(l)}>{t("edit", "Edit")}</button><span className="sc-step"><button className="minus" aria-label={`Fewer ${v.m.name}`} onClick={() => bump(l, -1)}>−</button><b>{l.qty}</b><button className="plus" aria-label={`More ${v.m.name}`} onClick={() => bump(l, 1)}>+</button></span></div>
             </div>
@@ -1206,19 +1255,19 @@ function Menu({ info, catalog, config, loginError, recheck }: { info: Info; cata
               </div>
             )}
             <div className="totals">
-              <div className="row"><span>{t("subtotal", "Subtotal")}</span><span className="v">{formatMoney(quote.priced.subtotal)}</span></div>
-              {quote.priced.couponDiscount > 0 && <div className="row coupon"><span>{chosen?.title ?? "Coupon"}</span><span className="v">−{formatMoney(quote.priced.couponDiscount)}</span></div>}
-              {quote.priced.pointsDiscount > 0 && <div className="row coupon"><span>Points · {quote.priced.pointsUsed.toLocaleString()} pts</span><span className="v">−{formatMoney(quote.priced.pointsDiscount)}</span></div>}
-              {quote.priced.service > 0 && <div className="row"><span>{t("pmService", "Service charge")} ({Math.round(config.pricing.serviceRate * 1000) / 10}%)</span><span className="v">{formatMoney(quote.priced.service)}</span></div>}
-              {quote.priced.gst > 0 && <div className="row"><span>GST</span><span className="v">{formatMoney(quote.priced.gst)}</span></div>}
-              {quote.priced.bcrs > 0 && <div className="row"><span>{t("bcrsDeposit", "BCRS Deposit")} ({tx("+{n}c each", { n: config.pricing.bcrsDepositCents })})</span><span className="v">{formatMoney(quote.priced.bcrs)}</span></div>}
-              <div className="row grand"><span>{t("total", "Total")}</span><span className="v">{formatMoney(shownTotal)}</span></div>
+              <div className="row"><span>{t("subtotal", "Subtotal")}</span><span className="v"><RollMoney cents={quote.priced.subtotal} /></span></div>
+              {quote.priced.couponDiscount > 0 && <div className="row coupon"><span>{chosen?.title ?? "Coupon"}</span><span className="v">−<RollMoney cents={quote.priced.couponDiscount} /></span></div>}
+              {quote.priced.pointsDiscount > 0 && <div className="row coupon"><span>Points · {quote.priced.pointsUsed.toLocaleString()} pts</span><span className="v">−<RollMoney cents={quote.priced.pointsDiscount} /></span></div>}
+              {quote.priced.service > 0 && <div className="row"><span>{t("pmService", "Service charge")} ({Math.round(config.pricing.serviceRate * 1000) / 10}%)</span><span className="v"><RollMoney cents={quote.priced.service} /></span></div>}
+              {quote.priced.gst > 0 && <div className="row"><span>GST</span><span className="v"><RollMoney cents={quote.priced.gst} /></span></div>}
+              {quote.priced.bcrs > 0 && <div className="row"><span>{t("bcrsDeposit", "BCRS Deposit")} ({tx("+{n}c each", { n: config.pricing.bcrsDepositCents })})</span><span className="v"><RollMoney cents={quote.priced.bcrs} /></span></div>}
+              <div className="row grand"><span>{t("total", "Total")}</span><span className="v"><RollMoney cents={shownTotal} /></span></div>
             </div>
             {rewardsOn && <div className="stamp-note"><span style={{ display: "flex", color: "var(--ink)" }}><Icon name="gift" size={27} /></span><span><span className="t">{t("stampNoteT", "1 stamp after confirmed payment")}</span><br /><span className="d">{tx("You'll earn 1 stamp for this order.")}</span></span></div>}
           </>
         )}
         <button className={`review-cta ${bag.length === 0 ? "off" : ""}`} disabled={bag.length === 0 || !quote?.ok} onClick={() => setScreen("summary")}>
-          <Icon name="bag" size={19} /><span>{tx(count === 1 ? "Review order · {n} item" : "Review order · {n} items", { n: count })}</span><span className="div" /><span>{formatMoney(shownTotal)}</span><Icon name="arrowR" size={19} />
+          <Icon name="bag" size={19} /><span>{tx(count === 1 ? "Review order · {n} item" : "Review order · {n} items", { n: count })}</span><span className="div" /><span><RollMoney cents={shownTotal} /></span><Icon name="arrowR" size={19} />
         </button>
       </div>
       {pointsEditor}
@@ -1255,7 +1304,7 @@ function Menu({ info, catalog, config, loginError, recheck }: { info: Info; cata
         {dine && !tableLocked && (
           <div className="e2e-card"><h3>{t("typeTableW", "Table")}</h3><div className="e2e-field"><label htmlFor="sum-table">{tx("Table number")}</label>
             {tableList.length ? (
-              <select className="e2e-input" id="sum-table" value={spot} onChange={(e) => { changeTable(e.target.value); }}><option value="">{tx("Choose your table")}</option>{tableList.map((x) => <option key={x}>{x}</option>)}</select>
+              <button className="e2e-input tbl-open" id="sum-table" type="button" onClick={() => setTableEdit(true)}>{spot || tx("Choose your table")} <span aria-hidden>›</span></button>
             ) : (
               <input className="e2e-input" id="sum-table" value={spot} maxLength={30} placeholder={tx("e.g. Table 12")} onChange={(e) => setSpot(e.target.value)} />
             )}
@@ -1294,7 +1343,7 @@ function Menu({ info, catalog, config, loginError, recheck }: { info: Info; cata
           </div>
         ) : (
         <button className={`e2e-cta ${canOrder && (!dine || !!spot) ? "" : "off"}`} disabled={!canOrder || (dine && !spot)} onClick={() => setScreen("checkout")}>
-          <span>{tx(count === 1 ? "Order Now · {n} item" : "Order Now · {n} items", { n: count })}</span><span>{formatMoney(shownTotal)}</span>
+          <span>{tx(count === 1 ? "Order Now · {n} item" : "Order Now · {n} items", { n: count })}</span><span><RollMoney cents={shownTotal} /></span>
         </button>
         )}
         {!canOrder && <p className="e2e-sub">{member ? "Add your phone number to place this order." : "Tap Sign up, or Check out as guest, to place this order."}</p>}
@@ -1311,7 +1360,7 @@ function Menu({ info, catalog, config, loginError, recheck }: { info: Info; cata
         <div className="e2e-card"><h3>{t("orderSummaryCard", "Order summary")}</h3>{itemRows(false)}</div>
         <div className="e2e-card"><h3>{tx("Charges & rewards")}</h3>{totalsRows(quote)}</div>
         {detailsCard}
-        <button className="e2e-cta" onClick={() => setScreen("payment")}><span>{t("jumpPay", "Proceed to payment")}</span><span>{formatMoney(shownTotal)}</span></button>
+        <button className="e2e-cta" onClick={() => setScreen("payment")}><span>{t("jumpPay", "Proceed to payment")}</span><span><RollMoney cents={shownTotal} /></span></button>
       </div>
     </>
   ) : null;
@@ -1331,7 +1380,7 @@ function Menu({ info, catalog, config, loginError, recheck }: { info: Info; cata
           <>
             {back("Back to order summary", "summary")}
             {noteEl}
-            <div className="e2e-card"><h3>{t("totalToPay", "Total to pay")}</h3><div className="sum-row grand" style={{ border: 0, margin: 0, padding: 0 }}><span className="k">{t("total", "Total")}</span><span className="v">{formatMoney(shownTotal)}</span></div></div>
+            <div className="e2e-card"><h3>{t("totalToPay", "Total to pay")}</h3><div className="sum-row grand" style={{ border: 0, margin: 0, padding: 0 }}><span className="k">{t("total", "Total")}</span><span className="v"><RollMoney cents={shownTotal} /></span></div></div>
             {member && (() => {
               const enough = credit >= shownTotal;
               return (
@@ -1377,6 +1426,7 @@ function Menu({ info, catalog, config, loginError, recheck }: { info: Info; cata
       )}
       {walletSheet}
       {langSheet}
+      {tableDialog}
       {picking && (
         <OptionSheet
           notes
@@ -1747,7 +1797,7 @@ function Status({ orderId, info }: { orderId: string; info: Info }) {
         <div className="e2e-card">
           <h3>{t("itemsCardT", "Items")}</h3>
           {o.items.map((i, n) => (
-            <div key={n} className="sum-row"><span className="k">{i.name} × {i.qty}{i.options.length > 0 && <small className="muted" style={{ display: "block" }}>{i.options.join(" · ")}</small>}</span><span className="v">{formatMoney(i.qty * i.unitCents)}</span></div>
+            <div key={n} className="sum-row"><span className="k">{i.name} × {i.qty}{i.options.length > 0 && <small className="muted" style={{ display: "block" }}>{i.options.join(" · ")}</small>}</span><span className="v"><RollMoney cents={i.qty * i.unitCents} /></span></div>
           ))}
           <div className="sum-row grand"><span className="k">{t("total", "Total")}</span><span className="v">{formatMoney(o.totalCents)}</span></div>
         </div>

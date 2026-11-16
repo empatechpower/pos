@@ -34,6 +34,11 @@ export function OptionSheet({ name, description, photoUrl, baseCents, groups, in
   const total = baseCents + (r.ok ? r.extraCents : 0);
   const missing = !r.ok && r.error === "missing_required" ? groups.find((g) => g.id === r.groupId)?.name : null;
 
+  /** What the item costs with this variant picked (other choices kept), so the tile, the total and the bag all say the same number. */
+  const variantPrice = (g: OptionGroup, choiceId: string) => {
+    const r2 = resolveOptions(groups, [...sel.filter((s) => s.groupId !== g.id), { groupId: g.id, choiceId }]);
+    return baseCents + (r2.ok ? r2.extraCents : (g.choices.find((c) => c.id === choiceId)?.priceCents ?? 0));
+  };
   const pickOne = (g: OptionGroup, choiceId: string) => setSel((cur) => [...cur.filter((s) => s.groupId !== g.id), { groupId: g.id, choiceId }]);
   const toggle = (g: OptionGroup, choiceId: string) =>
     setSel((cur) => (countOf(cur, g.id, choiceId) ? cur.filter((s) => !(s.groupId === g.id && s.choiceId === choiceId)) : [...cur, { groupId: g.id, choiceId }]));
@@ -77,7 +82,7 @@ export function OptionSheet({ name, description, photoUrl, baseCents, groups, in
                           onClick={() => (g.kind === "single" && (g.required || !on) ? pickOne(g, c.id) : toggle(g, c.id))} // an optional choose-one can be tapped again to clear it
                         >
                           <span>{c.name}</span>
-                          {c.soldOut ? <small>{tx("Sold out")}</small> : c.priceCents > 0 ? <small>+{formatMoney(c.priceCents)}</small> : null}
+                          {c.soldOut ? <small>{tx("Sold out")}</small> : g.variant && g.kind === "single" ? <small>{formatMoney(variantPrice(g, c.id))}</small> : c.priceCents > 0 ? <small>+{formatMoney(c.priceCents)}</small> : null}
                         </button>
                       );
                     })}

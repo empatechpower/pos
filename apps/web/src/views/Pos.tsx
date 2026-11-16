@@ -11,6 +11,8 @@ import {
   fulfilmentOf,
   menuFor,
   optionLines,
+  comboSaving,
+  isCombo,
   priceRange,
   resolveOptions,
   type BusinessConfig,
@@ -233,7 +235,11 @@ export function Pos({ config, catalog, online, customerId, setCustomerId }: PosP
           {shown.map((m) => (
             <button key={m.id} className="item" disabled={m.soldOut} onClick={() => add(m)}>
               <span className="n">{m.name}</span>
-              <span className="p">{m.soldOut ? "Sold out" : (() => { const [lo, hi] = priceRange(m.priceCents, m.options); return lo === hi ? formatMoney(lo) : `from ${formatMoney(lo)}`; })()}</span>
+              <span className="p">{m.soldOut ? "Sold out" : (() => {
+                if (isCombo(m.options)) { const save = comboSaving(m.priceCents, m.options, (id) => menu.find((x) => x.id === id)?.priceCents ?? null); return `Combo ${formatMoney(m.priceCents)}${save > 0 ? ` · save ${formatMoney(save)}` : ""}`; }
+                const [lo, hi] = priceRange(m.priceCents, m.options);
+                return lo === hi ? formatMoney(lo) : `from ${formatMoney(lo)}`;
+              })()}</span>
             </button>
           ))}
         </div>

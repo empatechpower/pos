@@ -1,5 +1,5 @@
 import { randomBytes } from "node:crypto";
-import { validateCatalog, type Catalog, type Channel, type ChannelKind, type OptionGroup, type PricebookAssignment, type Product } from "@pos/core";
+import { validateCatalog, withComboAvailability, type Catalog, type Channel, type ChannelKind, type OptionGroup, type PricebookAssignment, type Product } from "@pos/core";
 import { MAX_IMAGE_BYTES, sniffImage } from "./brand.js";
 import type pg from "pg";
 import type { Db } from "./db/pool.js";
@@ -73,8 +73,8 @@ export class PgCatalogStore implements CatalogStore {
     }
   }
 
-  load(): Promise<Catalog> {
-    return this.read(this.db);
+  async load(): Promise<Catalog> {
+    return withComboAvailability(await this.read(this.db));
   }
 
   async version(): Promise<number> {

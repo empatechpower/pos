@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
-import { formatMoney, type Catalog, type ChannelKind } from "@pos/core";
+import { formatMoney, isCombo, type Catalog, type ChannelKind, type OptionGroup } from "@pos/core";
+import { OptionsEditor } from "./OptionsEditor";
 import { authHeader, staffFetch, useStaff } from "../auth";
 import { markDeviceRejected } from "../device";
 
@@ -39,6 +40,7 @@ export function Prices({ catalog, outletId }: { catalog: Catalog; outletId: stri
   const [brand, setBrand] = useState<Brand | null>(null);
   const [find, setFind] = useState("");
   const [renaming, setRenaming] = useState<{ id: string; name: string } | null>(null);
+  const [editingOptions, setEditingOptions] = useState<string | null>(null);
   useEffect(() => {
     void fetch("/api/brand").then(async (r) => r.ok && setBrand((await r.json()) as Brand));
   }, []);
@@ -67,6 +69,23 @@ export function Prices({ catalog, outletId }: { catalog: Catalog; outletId: stri
     }
     setMsg(done);
     window.dispatchEvent(new Event("pos:catalog-refresh"));
+  }
+
+  /** Save an item's option groups and combo slots. Returns the reason in plain words when it did not work. */
+  async function saveOptions(productId: string, options: OptionGroup[]): Promise<string | null> {
+    const p = catalog.products.find((x) => x.id === productId);
+    if (!p) return "That item is gone.";
+    const res = await fetch("/api/catalog/products", { method: "POST", headers: { "content-type": "application/json", ...authHeader() }, body: JSON.stringify({ id: p.id, name: p.name, category: p.category, pointsExempt: p.pointsExempt, soldOut: p.soldOut, options }) }).catch(() => null);
+    if (!res) return "Could not reach the server. Nothing was changed.";
+    if (res.status === 401) return "Your session has ended. Sign in again. Nothing was changed.";
+    if (!res.ok) {
+      const j = (await res.json().catch(() => ({}))) as { problems?: string[]; error?: string };
+      return `Not saved: ${j.problems?.join("; ") ?? j.error ?? res.status}`;
+    }
+    setEditingOptions(null);
+    setMsg(options.length ? `Options saved for ${p.name}.` : `Options cleared for ${p.name}.`);
+    window.dispatchEvent(new Event("pos:catalog-refresh"));
+    return null;
   }
 
   const savePrice = (productId: string, text: string) => {
@@ -171,6 +190,9 @@ export function Prices({ catalog, outletId }: { catalog: Catalog; outletId: stri
                   else setMsg(((await res?.json().catch(() => ({}))) as { problems?: string[]; error?: string } | undefined)?.problems?.join("; ") ?? "The photo was not saved.");
                 }} />
               </label>
+              <button className="secondary sm" title="Variants, modifiers and combo parts for this item" onClick={() => setEditingOptions(p.id)}>
+                {isCombo(p.options) ? "Combo" : p.options?.length ? `Options (${p.options.length})` : "Options"}
+              </button>
               <button className="secondary sm" onClick={() => void send("POST", "products", { id: p.id, name: p.name, category: p.category, pointsExempt: p.pointsExempt, soldOut: !p.soldOut }, p.soldOut ? "Back on sale." : "Marked sold out.")}>
                 {p.soldOut ? "Back on" : "Sold out"}
               </button>
@@ -200,6 +222,11 @@ export function Prices({ catalog, outletId }: { catalog: Catalog; outletId: stri
             </div>
           </div>
         );
+      })()}
+
+      {editingOptions && (() => {
+        const p = catalog.products.find((x) => x.id === editingOptions);
+        return p ? <OptionsEditor product={p} catalog={catalog} onSave={(groups) => saveOptions(p.id, groups)} onClose={() => setEditingOptions(null)} /> : null;
       })()}
 
       {renaming && (() => {

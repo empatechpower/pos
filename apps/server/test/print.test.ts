@@ -213,6 +213,33 @@ describe("routing to several printers", () => {
     await setPrinter("bar", printerBody({ roles: ["kitchen"], categories: ["Drinks"], active: false }));
   });
 
+  it("a combo prints as its parts: the drink to the bar, the food to the kitchen, once", async () => {
+    await setPrinter("bar", printerBody({ name: "Bar", roles: ["kitchen"], categories: ["Drinks"], connection: { host: "10.0.0.7", port: 9100 } }));
+    const o = orderEvents([], { queue: "A310" });
+    o.events.push(o.mk({ type: "ItemAdded", lineId: "combo-line", productId: "set-a", name: "Set A", unitCents: 650, qty: 2, options: [
+      { group: "Main", name: "Kaya Toast", qty: 1, priceCents: 0, productId: "kaya-toast" },
+      { group: "Drink", name: "Coffee", qty: 1, priceCents: 0, productId: "kopi" },
+    ] }));
+    await push(o.events, baseR);
+    const { got, send } = capture();
+    await agent(send);
+    const bar = got.find((g) => g.host === "10.0.0.7" && g.text.includes("A310"))!;
+    const kitchen = got.find((g) => g.host === "10.0.0.6" && g.text.includes("A310"))!;
+    expect(bar.text).toContain("2 x Coffee");
+    expect(bar.text).toContain("Set A"); // the kitchen can see it belongs to a combo
+    expect(bar.text).not.toContain("Kaya");
+    expect(kitchen.text).toContain("2 x Kaya Toast");
+    expect(kitchen.text).not.toContain("Coffee");
+    // Adding to the order later does not print the combo's parts again.
+    await push([o.mk({ type: "ItemAdded", lineId: "extra-line", productId: "kopi", name: "Coffee", unitCents: 200, qty: 1 })], baseR);
+    const again = capture();
+    await agent(again.send);
+    const text = again.got.map((g) => g.text).join("\n");
+    expect(text).toContain("1 x Coffee");
+    expect(text).not.toContain("Kaya");
+    await setPrinter("bar", printerBody({ roles: ["kitchen"], categories: ["Drinks"], active: false }));
+  });
+
   it("one label per unit, in one job, in the printer's language", async () => {
     await setPrinter("cups", { name: "Cups", language: "zpl", roles: ["label"], labelWidthMm: 50, labelHeightMm: 30, connection: { host: "10.0.0.8", port: 9100 } });
     const o = orderEvents([{ id: "kopi", name: "Coffee", qty: 3 }], { queue: "A302" });

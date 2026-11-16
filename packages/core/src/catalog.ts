@@ -151,6 +151,7 @@ export function validateCatalog(c: Catalog): string[] {
   const books = new Set(c.pricebooks.map((p) => p.id));
   const channels = new Set(c.channels.map((x) => x.id));
   const products = new Set(c.products.map((p) => p.id));
+  const byId = new Map(c.products.map((p) => [p.id, p]));
   if (!books.has(c.defaultPricebookId)) problems.push("default pricebook does not exist");
   for (const a of c.assignments) {
     if (!a.outletId && !a.channelId) problems.push("an assignment needs an outlet, a channel, or both");
@@ -168,6 +169,15 @@ export function validateCatalog(c: Catalog): string[] {
     if (p.description && p.description.length > 200) problems.push(`${p.id}: description is too long`);
     if (p.altName && p.altName.length > 80) problems.push(`${p.id}: alternative name is too long`);
     problems.push(...validateOptions(p.id, p.options));
+    for (const g of p.options ?? []) {
+      for (const ch of g.choices ?? []) {
+        if (!ch.productId) continue;
+        const part = byId.get(ch.productId);
+        if (!part) problems.push(`${p.id}: combo choice "${ch.name}" points at an item that does not exist`);
+        else if (part.id === p.id) problems.push(`${p.id}: a combo cannot contain itself`);
+        else if (part.options?.some((og) => og.choices.some((x) => x.productId))) problems.push(`${p.id}: a combo cannot contain another combo ("${part.name}")`);
+      }
+    }
   }
   return problems;
 }
@@ -201,4 +211,21 @@ export function validateOptions(productId: string, groups: readonly OptionGroup[
     if (g.required && g.kind === "single" && !(g.choices ?? []).some((c) => !c.soldOut)) at(`"${g.name}" is required but every choice is sold out`);
   }
   return out;
+}
+
+/**
+ * For serving: a combo choice is sold out when the item it stands for is. Done on the way out, never before
+ * validation, so switching one drink off cannot make an unrelated change fail.
+ */
+export function withComboAvailability(c: Catalog): Catalog {
+  const out = new Map(c.products.map((p) => [p.id, !!p.soldOut]));
+  if (!c.products.some((p) => p.options?.some((g) => g.choices.some((x) => x.productId)))) return c;
+  return {
+    ...c,
+    products: c.products.map((p) =>
+      p.options?.some((g) => g.choices.some((x) => x.productId))
+        ? { ...p, options: p.options.map((g) => ({ ...g, choices: g.choices.map((x) => (x.productId && out.get(x.productId) ? { ...x, soldOut: true } : x)) })) }
+        : p,
+    ),
+  };
 }
