@@ -2,6 +2,7 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest";
 
 // The address limit for guests is set small here so the test can reach it (the real default is higher).
 process.env.ORDER_LIMIT_IP = "10";
+process.env.QUEUE_CACHE_MS = "0"; // the queue position is always fresh in these tests
 import { PRESETS, newId, reduceOrder, visibleToKitchen } from "@pos/core";
 import { buildApp } from "../src/app.js";
 import { createStaff } from "../src/auth.js";
@@ -229,6 +230,24 @@ describe("the customer's status page", () => {
     await tillPush(o.orderId, { type: "StageSet", stage: "ready" });
     const s = await status();
     expect(s).toMatchObject({ status: "ready", queueNumber: o.queueNumber, totalCents: 200, paidCents: 200, items: [{ name: "Kaya Toast", qty: 1, unitCents: 200 }] });
+  });
+
+  it("shows where an order is in line while the kitchen has it, and not before or after", async () => {
+    const place = async (ip: string) => (await order({ channelId: "take-away", items: [kaya()] }, baseP, { "x-forwarded-for": ip })).json;
+    const a = await place("198.51.100.20");
+    const b = await place("198.51.100.21");
+    const status = async (id: string) => (await call(`/api/shop/orders/${id}`)).json;
+    expect((await status(a.orderId)).queue).toBeNull(); // not accepted yet: the kitchen has not got it
+    for (const o of [a, b]) {
+      await tillPush(o.orderId, { type: "OrderAccepted" });
+      await tillPush(o.orderId, { type: "PaymentRecorded", paymentId: `q-${o.orderId}`, method: "cash", amountCents: 200, confirmed: true });
+    }
+    const first = (await status(a.orderId)).queue; // other tests leave orders in the queue, so compare positions, not absolute numbers
+    const second = (await status(b.orderId)).queue;
+    expect(second.ahead).toBe(first.ahead + 1); // the one placed before it is still waiting
+    expect(second).toHaveProperty("etaMinutes"); // a number, or null while there is too little history to guess from
+    await tillPush(a.orderId, { type: "StageSet", stage: "ready" });
+    expect((await status(a.orderId)).queue).toBeNull(); // ready: no longer in line
   });
 
   it("shows a cancelled order as cancelled", async () => {

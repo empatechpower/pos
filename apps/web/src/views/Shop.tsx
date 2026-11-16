@@ -34,6 +34,8 @@ interface OrderView {
   paidCents: number;
   canCancel?: boolean;
   canPayOnline?: boolean;
+  /** Where the order is in line, while the kitchen has it. The time is a guess, and null when there is too little history to make one. */
+  queue?: { ahead: number; etaMinutes: number | null } | null;
 }
 interface PastOrder {
   orderId: string;
@@ -408,6 +410,8 @@ function Menu({ info, catalog, config, loginError, recheck }: { info: Info; cata
   const [note, setNote] = useState<string | null>(null);
   const [agreed, setAgreed] = useState<number | null>(null);
   const [member, setMember] = useState<MemberView | null>(null);
+  // A saved sign-in is still being checked: show a blank header instead of "Guest / Sign in" for that moment.
+  const [memberPending, setMemberPending] = useState(() => { try { return !!localStorage.getItem(LS_MEMBER); } catch { return false; } });
   const [usePoints, setUsePoints] = useState(false);
   const [pointsPts, setPointsPts] = useState<number | null>(null); // a chosen amount; null = use all that can be used
   const [pEdit, setPEdit] = useState(false);
@@ -508,7 +512,7 @@ function Menu({ info, catalog, config, loginError, recheck }: { info: Info; cata
       setMember(null);
     }
   };
-  useEffect(() => { void loadMember(); }, []);
+  useEffect(() => { void loadMember().finally(() => setMemberPending(false)); }, []);
   useEffect(() => {
     if (screen !== "account" || !member) return;
     const t = localStorage.getItem(LS_MEMBER);
@@ -628,6 +632,8 @@ function Menu({ info, catalog, config, loginError, recheck }: { info: Info; cata
   const bump = (l: BagLine, d: number) => {
     const m = byId.get(l.productId);
     if (m) addLine(m, l.selection, d, l.note);
+    // After a + / − (or removing a line) in the Bag, push the page down so the Total stays visible above the bottom nav.
+    window.setTimeout(() => document.getElementById("bag-total")?.scrollIntoView({ behavior: "smooth", block: "nearest" }), 80);
   };
   const addSimple = (m: MenuEntry, d: number) => addLine(m, m.options?.length ? defaultSelection(m.options) : [], d);
 
@@ -707,7 +713,8 @@ function Menu({ info, catalog, config, loginError, recheck }: { info: Info; cata
   const shown = menu.filter((m) => (category === "All" || m.category === category) && (!needle || m.name.toLowerCase().includes(needle) || (m.altName ?? "").toLowerCase().includes(needle)));
   const dine = channel?.kind === "dine_in";
   const spotText = dine ? spot || tx("Add table") : tx("Pickup counter");
-  const who = member ? member.name || (member.email ?? member.phone ?? "Member").split("@")[0] : t("guestW", "Guest");
+  const loadingMember = memberPending && !member;
+  const who = member ? member.name || (member.email ?? member.phone ?? "Member").split("@")[0] : loadingMember ? "\u00A0" : t("guestW", "Guest");
   const canOrder = !!quote?.ok && (!!member || (!info.membersOnly && guestOk)) && phoneOk;
   const navActive = screen === "rewards" ? "rewards" : screen === "account" ? "account" : "order";
 
@@ -726,7 +733,9 @@ function Menu({ info, catalog, config, loginError, recheck }: { info: Info; cata
             <Icon name="table" size={16} />{spot || tx("Add table")}
           </button>
         )}
-        {member ? (
+        {loadingMember ? (
+          <span className="shop-pts" aria-hidden="true">&nbsp;<br />&nbsp;</span>
+        ) : member ? (
           rewardsOn ? (config.rewards.pointsEnabled && <span className="shop-pts">{member.pointsBalance.toLocaleString()} points</span>) : <span className="shop-pts">{formatMoney(credit)} {tx("credit")}</span>
         ) : rewardsOn ? (
           <button className="shop-pts link" onClick={() => setScreen("login")}>{t("signUpNow", "Sign up now")}<br />{tx("& get {n} points", { n: config.rewards.welcomePoints })}</button>
@@ -918,7 +927,7 @@ function Menu({ info, catalog, config, loginError, recheck }: { info: Info; cata
         )}
         {noteEl}
         <div className="shop-list">
-          {shown.length === 0 && <p className="shop-msg">{tx("Nothing matches.")}</p>}
+          {shown.length === 0 && <p className="shop-msg">{tx("No items match your search.")}</p>}
           {shown.map((m) => {
             const n = inBag(m.id);
             const img = photo(m);
@@ -1261,7 +1270,7 @@ function Menu({ info, catalog, config, loginError, recheck }: { info: Info; cata
               {quote.priced.service > 0 && <div className="row"><span>{t("pmService", "Service charge")} ({Math.round(config.pricing.serviceRate * 1000) / 10}%)</span><span className="v"><RollMoney cents={quote.priced.service} /></span></div>}
               {quote.priced.gst > 0 && <div className="row"><span>GST</span><span className="v"><RollMoney cents={quote.priced.gst} /></span></div>}
               {quote.priced.bcrs > 0 && <div className="row"><span>{t("bcrsDeposit", "BCRS Deposit")} ({tx("+{n}c each", { n: config.pricing.bcrsDepositCents })})</span><span className="v"><RollMoney cents={quote.priced.bcrs} /></span></div>}
-              <div className="row grand"><span>{t("total", "Total")}</span><span className="v"><RollMoney cents={shownTotal} /></span></div>
+              <div className="row grand" id="bag-total"><span>{t("total", "Total")}</span><span className="v"><RollMoney cents={shownTotal} /></span></div>
             </div>
             {rewardsOn && <div className="stamp-note"><span style={{ display: "flex", color: "var(--ink)" }}><Icon name="gift" size={27} /></span><span><span className="t">{t("stampNoteT", "1 stamp after confirmed payment")}</span><br /><span className="d">{tx("You'll earn 1 stamp for this order.")}</span></span></div>}
           </>
@@ -1687,22 +1696,46 @@ function Status({ orderId, info }: { orderId: string; info: Info }) {
   const [copied, setCopied] = useState(false);
   const [confirmCancel, setConfirmCancel] = useState(false);
   const [working, setWorking] = useState(false);
+  const [refreshing, setRefreshing] = useState(false);
+  // Ready alert: best effort. It works while this page is open (even in the background for a while), not when the phone has closed it.
+  const canAlert = typeof Notification !== "undefined";
+  const [alertOn, setAlertOn] = useState(() => canAlert && Notification.permission === "granted" && localStorage.getItem(`pos.alert.${orderId}`) === "1");
+  const lastStatus = useRef<ShopStatus | null>(null);
 
   const load = async () => {
     try {
       const res = await fetch(`/api/shop/orders/${orderId}`);
       if (res.status === 404) return setProblem(tx("We can't find that order."));
       if (!res.ok) return setProblem(tx("Couldn't refresh. Retrying…"));
-      setO((await res.json()) as OrderView);
+      const next = (await res.json()) as OrderView;
+      // The moment it turns ready, tell the customer if they asked to be told.
+      if (next.status === "ready" && lastStatus.current && lastStatus.current !== "ready" && localStorage.getItem(`pos.alert.${orderId}`) === "1" && canAlert && Notification.permission === "granted") {
+        try { new Notification(tx("Your order is ready"), { body: tx("Collect number {n} at the counter.", { n: next.queueNumber }), tag: `ready-${orderId}` }); } catch { /* the phone may refuse; the page still shows it */ }
+        try { navigator.vibrate?.([200, 100, 200]); } catch { /* not every phone can */ }
+      }
+      lastStatus.current = next.status;
+      setO(next);
       setProblem(null);
     } catch {
       setProblem(tx("No connection. Retrying…"));
     }
   };
+  async function refreshNow() {
+    setRefreshing(true);
+    await load();
+    setRefreshing(false);
+  }
+  async function turnAlertOn() {
+    if (!canAlert) return;
+    const ok = Notification.permission === "granted" || (await Notification.requestPermission()) === "granted";
+    if (ok) { localStorage.setItem(`pos.alert.${orderId}`, "1"); setAlertOn(true); }
+  }
   // Ask often at first, then less: a status that has not changed for a while does not need a request every few seconds, and
   // many phones asking at once is what loads the server. Stops once the order is finished, and pauses while the tab is hidden.
   const doneRef = useRef(false);
   doneRef.current = o?.status === "completed" || o?.status === "cancelled";
+  const alertRef = useRef(false);
+  alertRef.current = alertOn; // with the alert on, keep checking even when the tab is in the background
   useEffect(() => {
     let alive = true;
     let timer = 0;
@@ -1713,7 +1746,7 @@ function Status({ orderId, info }: { orderId: string; info: Info }) {
     };
     const run = async () => {
       if (!alive) return;
-      if (document.visibilityState === "visible" && !doneRef.current) await load();
+      if ((document.visibilityState === "visible" || alertRef.current) && !doneRef.current) await load();
       if (alive && !doneRef.current) timer = window.setTimeout(() => void run(), next());
     };
     const wake = () => { if (document.visibilityState === "visible" && alive && !doneRef.current) { window.clearTimeout(timer); void run(); } };
@@ -1767,6 +1800,18 @@ function Status({ orderId, info }: { orderId: string; info: Info }) {
           <button className="copy-id-btn" onClick={() => { void navigator.clipboard?.writeText(o.orderId).then(() => setCopied(true)).catch(() => undefined); }}><Icon name="ticket" size={15} />{copied ? "ORDER ID copied" : "Copy ORDER ID"}</button>
         </div>
         {o.channelName && <p className="e2e-sub">{o.channelName}{o.spot ? ` · ${o.spot}` : ""}</p>}
+        {!cancelled && o.queue && (
+          <div className="e2e-card queue-card">
+            <h3>{o.queue.ahead === 0 ? (o.status === "preparing" ? tx("Your order is being made") : tx("You're next")) : o.queue.ahead === 1 ? tx("1 order ahead of you") : tx("{n} orders ahead of you", { n: o.queue.ahead })}</h3>
+            <p className="queue-eta">{o.queue.etaMinutes !== null ? tx("About {n} mins until it's ready", { n: o.queue.etaMinutes }) : tx("We'll show an estimate once the kitchen gets going.")}</p>
+            <p className="e2e-note" style={{ margin: 0 }}>{tx("This is an estimate, not a promise. It updates by itself.")}</p>
+            <div className="queue-actions">
+              <button className="login-btn" disabled={refreshing} onClick={() => void refreshNow()}><span>{refreshing ? tx("Refreshing…") : tx("Refresh")}</span></button>
+              {canAlert && !alertOn && Notification.permission !== "denied" && <button className="login-btn" onClick={() => void turnAlertOn()}><span>{tx("Alert me when it's ready")}</span></button>}
+            </div>
+            {alertOn && <p className="e2e-note" style={{ margin: 0 }}>{tx("We'll alert you when it's ready, as long as this page stays open. If you close it, open it again to check.")}</p>}
+          </div>
+        )}
         {cancelled ? (
           <div className="e2e-card" style={{ borderColor: "#f2c4b8", background: "#fdf0ec" }}><h3 style={{ color: "#b03a26" }}>{text.title}</h3><p className="e2e-sub" style={{ textAlign: "left", margin: 0 }}>{text.body(o)}</p></div>
         ) : (

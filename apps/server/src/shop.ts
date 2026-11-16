@@ -1,5 +1,5 @@
 import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
-import { cleanNote, collectionNumber, confirmedPaid, newId, optionLines, orderTotals, quoteOrder, reduceOrder, shopStatus, type BusinessConfig, type OrderEvent } from "@pos/core";
+import { cleanNote, collectionNumber, confirmedPaid, newId, optionLines, orderTotals, queueView, quoteOrder, reduceAll, reduceOrder, shopStatus, type BusinessConfig, type OrderEvent, type OrderState } from "@pos/core";
 import { audit, type Permission } from "./auth.js";
 import type { BrandStore } from "./brand.js";
 import type { CatalogStore, PgCatalogStore } from "./catalog.js";
@@ -607,6 +607,17 @@ export function registerShop(app: FastifyInstance, d: ShopDeps) {
   sweeper.unref();
   app.addHook("onClose", async () => clearInterval(sweeper));
 
+  // Every order, rebuilt from the log at most once every 5 seconds however many phones are asking, for the queue position.
+  // A count a few seconds out of date is fine for "about how long". QUEUE_CACHE_MS changes it (0 = always fresh).
+  const queueCacheMs = Number.isFinite(Number(process.env.QUEUE_CACHE_MS)) && process.env.QUEUE_CACHE_MS !== undefined ? Number(process.env.QUEUE_CACHE_MS) : 5000;
+  let queueSnap: { at: number; orders: OrderState[] } | null = null;
+  const everyOrder = async () => {
+    if (queueSnap && Date.now() - queueSnap.at < queueCacheMs) return queueSnap.orders;
+    const orders = reduceAll((await d.store.after(0)).map((x) => x.event));
+    queueSnap = { at: Date.now(), orders };
+    return orders;
+  };
+
   /** Status for the customer. The order id is a long random value, so only whoever placed it has it. */
   app.get<{ Params: { id: string } }>("/api/shop/orders/:id", async (req, reply) => {
     if (limited(readLimit, req, reply)) return;
@@ -625,6 +636,8 @@ export function registerShop(app: FastifyInstance, d: ShopDeps) {
       paidCents: paid,
       pointsRedeemed: order.pointsRedeemed ?? 0,
       canCancel: cancellable(order),
+      // Where this order is in line and about how long: only while it is waiting for or being made by the kitchen.
+      queue: ["queued", "preparing"].includes(shopStatus(order, d.config)) ? queueView(await everyOrder(), order, d.config, Date.now()) : null,
       canPayOnline: !!integ.stripe && order.stage !== "cancelled" && order.stage !== "completed" && total - paid > 0,
     };
   });

@@ -82,6 +82,8 @@ export interface OrderState {
   stage: OrderStage;
   /** Time the order was first fully paid (confirmed). */
   paidAt?: number;
+  /** When the kitchen first marked it ready. Used to learn how long orders really take. */
+  readyAt?: number;
 }
 
 export const newId = (): string =>
@@ -142,6 +144,7 @@ export function reduceOrder(orderId: string, events: readonly OrderEvent[]): Ord
         break;
       case "StageSet":
         state.stage = e.stage;
+        if (e.stage === "ready") state.readyAt ??= e.ts;
         break;
     }
     if (!state.paidAt && isFullyPaid(state, undefined)) state.paidAt = e.ts;

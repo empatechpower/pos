@@ -1,6 +1,6 @@
 import type { BusinessConfig } from "./config.js";
 import { channelById, menuFor, fulfilmentOf, type Catalog, type Channel, type PriceContext } from "./catalog.js";
-import { isFullyPaid, type OrderState } from "./events.js";
+import { isFullyPaid, visibleToKitchen, type OrderState } from "./events.js";
 import { resolveOptions, type ChosenOption, type ChosenOptionInput, type OptionError } from "./options.js";
 import { priceOrder, type CouponInput, type PointsInput, type PriceResult } from "./pricing.js";
 
@@ -118,3 +118,44 @@ export const contrastRatio = (a: string, b: string): number => {
  * oranges looking the way designers draw them; light colours such as yellow get dark text.
  */
 export const readableOn = (bg: string): "#ffffff" | "#21252a" => (contrastRatio(bg, "#ffffff") >= 3 ? "#ffffff" : "#21252a");
+
+// ---- the customer's own place in the queue ------------------------------------------------------
+
+export interface QueueView {
+  /** Orders that reached the kitchen before this one and are not ready yet. */
+  ahead: number;
+  /** A guess in whole minutes, from how long recent orders really took. Null until there is enough to go on. */
+  etaMinutes: number | null;
+}
+
+const MIN = 60_000;
+/** When an order joined the kitchen's queue: opened, accepted by staff, and (if the shop takes payment first) paid. */
+const joinedAt = (o: OrderState) => Math.max(o.openedAt, o.acceptedAt ?? 0, o.paidAt ?? 0);
+
+/**
+ * Where is this order in line, and about how long is it? The wait is learned from the last few hours of real orders
+ * (how long each took to be marked ready, and how many came out in the last half hour), never from a fixed number.
+ * With fewer than 3 finished orders to learn from it gives no time, rather than a made-up one. Null if the order is not
+ * in the kitchen's queue (not accepted or paid yet, already ready, collected or cancelled).
+ */
+export function queueView(orders: readonly OrderState[], mine: OrderState, config: BusinessConfig, now: number): QueueView | null {
+  const status = shopStatus(mine, config);
+  if ((status !== "queued" && status !== "preparing") || !visibleToKitchen(mine, config)) return null;
+  const myAt = joinedAt(mine);
+  const waiting = (o: OrderState) => o.orderId !== mine.orderId && (o.stage === "open" || o.stage === "preparing") && visibleToKitchen(o, config) && o.lines.some((l) => l.qty > 0);
+  const ahead = orders.filter((o) => waiting(o) && (joinedAt(o) < myAt || (joinedAt(o) === myAt && o.orderId < mine.orderId))).length;
+
+  const took = orders
+    .filter((o) => o.readyAt !== undefined && o.readyAt >= now - 180 * MIN)
+    .map((o) => o.readyAt! - joinedAt(o))
+    .filter((d) => d > 0 && d <= 90 * MIN)
+    .sort((a, b) => a - b);
+  if (took.length < 3) return { ahead, etaMinutes: null };
+  const mid = Math.floor(took.length / 2);
+  const typical = took.length % 2 ? took[mid]! : (took[mid - 1]! + took[mid]!) / 2;
+  const lastHalfHour = orders.filter((o) => o.readyAt !== undefined && o.readyAt >= now - 30 * MIN).length;
+  let wait: number | null = null;
+  if (ahead === 0) wait = typical;
+  else if (lastHalfHour >= 3) wait = Math.max(typical, ((ahead + 1) / lastHalfHour) * 30 * MIN);
+  return { ahead, etaMinutes: wait === null ? null : Math.min(120, Math.max(1, Math.ceil(wait / MIN))) };
+}

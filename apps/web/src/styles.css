@@ -517,3 +517,9 @@ html .shop .scroll-body, html .shop .e2e-scroll { overflow-y: visible; overflow-
 .roll-money.moving { display: inline-block; animation: rollLift 800ms ease-in-out; }
 @keyframes rollLift { 0% { transform: translateY(0); } 35% { transform: translateY(-2px) scale(1.05); } 100% { transform: none; } }
 @media (prefers-reduced-motion: reduce) { .roll-money.moving { animation: none; } }
+/* Leaves room for the fixed bottom bar when the Bag scrolls its Total into view. */
+.shop #bag-total { scroll-margin-bottom: 150px; }
+.queue-card h3 { font-size: 19px; }
+.queue-eta { margin: 0; font-size: 15px; font-weight: 700; color: #b85c0a; }
+.queue-actions { display: flex; gap: 8px; flex-wrap: wrap; }
+.queue-actions .login-btn { flex: 1 1 140px; justify-content: center; }

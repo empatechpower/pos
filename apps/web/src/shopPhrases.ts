@@ -856,7 +856,7 @@ export const PHRASES: Record<string, string[]> = {
   "Bereit — {title}",
   "தயார் — {title}"
  ],
- "Nothing matches.": [
+ "No items match your search.": [
   "Tiada padanan.",
   "Tidak ada yang cocok.",
   "没有匹配项。",
