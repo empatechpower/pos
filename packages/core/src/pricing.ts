@@ -10,7 +10,7 @@ export interface PricingConfig {
   serviceRate: number;
   gstRate: number;
   gstOn: boolean;
-  /** Charged per unit of any line flagged bcrs (name contains "BCRS" unless overridden). */
+  /** Charged per unit of any line flagged bcrs (an item setting; very old lines with no flag fall back to "BCRS" in the name). */
   bcrsDepositCents: Cents;
   /** Which bill components points are allowed to pay for. */
   pointsDeduct: {
@@ -40,7 +40,7 @@ export interface PricedLine {
   name: string;
   unitCents: Cents;
   qty: number;
-  /** Overrides the name rule when set. */
+  /** Carries the deposit. Set from the item at the moment of sale. Only lines from before this setting existed have it unset, and they keep the old name rule so past orders do not change. */
   bcrs?: boolean;
   pointsExempt?: boolean;
 }
@@ -91,9 +91,6 @@ export function priceOrder(input: PriceInput): PriceResult {
   const subtotal = lines.reduce((n, l) => n + l.unitCents * l.qty, 0);
   const exempt = lines.reduce((n, l) => (l.pointsExempt ? n + l.unitCents * l.qty : n), 0);
   const bcrs = lines.reduce((n, l) => (isBcrs(l) ? n + l.qty : n), 0) * cfg.bcrsDepositCents;
-  // Service charge: dine-in only, on items, never on the deposit.
-  const service = (input.serviceCharge ?? input.fulfilment === "dine_in") ? percentOf(subtotal, cfg.serviceRate) : 0;
-
   let coupon = input.coupon ?? null;
   let points = input.points ?? null;
   let ignored: PriceResult["ignored"];
@@ -102,8 +99,13 @@ export function priceOrder(input: PriceInput): PriceResult {
     ignored = "points";
   }
 
+  // The bill discount (a coupon or voucher) comes off the items first, and the minimum spend is judged on the items before it.
   const couponEligible = !!coupon && subtotal >= coupon.minSpendCents;
   const couponDiscount = coupon && couponEligible ? Math.min(coupon.amountCents, subtotal) : 0;
+
+  // Service charge: dine-in only, on the items AFTER the bill discount, never on the deposit (owner rule, 16 Nov 2026).
+  // Points are paid like money at the end, so they do not lower it.
+  const service = (input.serviceCharge ?? input.fulfilment === "dine_in") ? percentOf(Math.max(0, subtotal - couponDiscount), cfg.serviceRate) : 0;
 
   // GST is never charged on the deposit. For points, it is fixed on the full items + service.
   const gstBase = points

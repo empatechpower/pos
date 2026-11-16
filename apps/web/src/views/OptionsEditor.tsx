@@ -12,7 +12,7 @@ interface Props {
   product: Product;
   catalog: Catalog;
   /** Saves the groups ([] clears them). Resolves to an error message, or null when it worked. */
-  onSave: (groups: OptionGroup[]) => Promise<string | null>;
+  onSave: (groups: OptionGroup[], bcrs: boolean) => Promise<string | null>;
   onClose: () => void;
 }
 
@@ -26,6 +26,7 @@ export function OptionsEditor({ product, catalog, onSave, onClose }: Props) {
   const [prices, setPrices] = useState<Record<string, string>>({});
   const [error, setError] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
+  const [bcrs, setBcrs] = useState(!!product.bcrs);
   const menu = catalog.products.filter((p) => p.id !== product.id && !isCombo(p.options)).sort((a, b) => a.category.localeCompare(b.category) || a.name.localeCompare(b.name));
   const defaultBook = catalog.pricebooks.find((b) => b.id === catalog.defaultPricebookId);
   const priceOf = (id: string) => defaultBook?.prices[id] ?? null;
@@ -69,7 +70,7 @@ export function OptionsEditor({ product, catalog, onSave, onClose }: Props) {
     // A required choose-one group needs a starting choice: use the first one when none is marked.
     const out = clean().map((g) => (g.kind === "single" && g.required && g.choices.length && !g.choices.some((c) => c.default) ? { ...g, choices: g.choices.map((c, i) => (i === 0 ? { ...c, default: true } : c)) } : g));
     setSaving(true);
-    setError(await onSave(out));
+    setError(await onSave(out, bcrs));
     setSaving(false);
   }
 
@@ -80,6 +81,7 @@ export function OptionsEditor({ product, catalog, onSave, onClose }: Props) {
     <div className="rn-back" onClick={onClose}>
       <div className="rn-modal oe-modal" role="dialog" aria-modal="true" aria-label={`Options for ${product.name}`} onClick={(e) => e.stopPropagation()}>
         <h3>Options and combo: {product.name}</h3>
+        <label className="oe-bcrs"><input type="checkbox" checked={bcrs} onChange={(e) => setBcrs(e.target.checked)} /> Container deposit (BCRS) applies to this item: S$0.10 is added for each one sold</label>
         <p className="muted">
           Options change an item (Hot or Cold, Extra egg). A combo slot lets the customer pick a part from your menu (Side: Fries, Nuggets). The item's own price is the price of the combo;
           each part can add a top-up.

@@ -22,6 +22,8 @@ export interface Product {
   category: string;
   soldOut?: boolean;
   pointsExempt?: boolean;
+  /** Carries the container deposit (BCRS, S$0.10 each). Set on the item; never guessed from its name when it is sold. */
+  bcrs?: boolean;
   /** A line or two shown under the name. */
   description?: string;
   /** The name in another language, e.g. the Chinese name. */

@@ -250,6 +250,23 @@ describe("paying for an order with member credit", () => {
     await call("/api/catalog/products", { staff: mgr, body: { id: "teh", name: teh.name, category: teh.category, soldOut: false } });
   });
 
+  it("charges the container deposit for an item set to carry it, and a rename does not switch it off", async () => {
+    await createMember({ name: "Quin", email: "quin.deposit@example.com", creditCents: 3000 });
+    const s = await emailIn("quin.deposit@example.com");
+    const cat = async () => (await call("/api/catalog")).json.products.find((p: any) => p.id === "teh");
+    const t = await cat();
+    const price = (await call("/api/catalog")).json.pricebooks.find((b: any) => b.id === "standard").prices.teh as number;
+    await call("/api/catalog/products", { staff: mgr, body: { id: "teh", name: t.name, category: t.category, bcrs: true } });
+    expect((await cat()).bcrs).toBe(true);
+    // A rename, or a sold-out toggle, sends no deposit setting: it must stay on.
+    await call("/api/catalog/products", { staff: mgr, body: { id: "teh", name: t.name + " Special", category: t.category } });
+    expect((await cat()).bcrs).toBe(true);
+    const placed = await order(s.token, { items: [{ productId: "teh", qty: 2 }], payWithCredit: false });
+    expect(placed.json.totalCents).toBe(price * 2 + 20); // take-away: no service charge; 10c deposit for each of the 2
+    await call("/api/catalog/products", { staff: mgr, body: { id: "teh", name: t.name, category: t.category, bcrs: false } });
+    expect((await cat()).bcrs).toBeUndefined();
+  });
+
   it("takes the credit, marks the order paid and accepted, and it is ready for the kitchen", async () => {
     await createMember({ name: "Cy", email: "cy@example.com", creditCents: 2000 });
     const s = await emailIn("cy@example.com");

@@ -515,7 +515,7 @@ export async function buildApp({ config, store, db, catalog, catalogAdmin, print
       return changed(req, reply, "category", () => cat.renameCategory(from, to));
     });
 
-    app.post<{ Body: { id?: string; name?: string; category?: string; soldOut?: boolean; pointsExempt?: boolean; priceCents?: number; description?: string; altName?: string; options?: OptionGroup[] } }>(
+    app.post<{ Body: { id?: string; name?: string; category?: string; soldOut?: boolean; pointsExempt?: boolean; bcrs?: boolean; priceCents?: number; description?: string; altName?: string; options?: OptionGroup[] } }>(
       "/api/catalog/products",
       manage,
       async (req, reply) => {
@@ -523,7 +523,7 @@ export async function buildApp({ config, store, db, catalog, catalogAdmin, print
         if (!b.name?.trim() || !b.category?.trim()) return bad(reply, "name and category are required");
         if (b.priceCents !== undefined && !isCents(b.priceCents)) return bad(reply, "priceCents must be a whole number of cents, 0 or more");
         return changed(req, reply, "product", () =>
-          cat.upsertProduct({ id: b.id, name: b.name!.trim(), category: b.category!.trim(), soldOut: b.soldOut, pointsExempt: b.pointsExempt, priceCents: b.priceCents, description: b.description, altName: b.altName, options: b.options }),
+          cat.upsertProduct({ id: b.id, name: b.name!.trim(), category: b.category!.trim(), soldOut: b.soldOut, pointsExempt: b.pointsExempt, bcrs: b.bcrs, priceCents: b.priceCents, description: b.description, altName: b.altName, options: b.options }),
         );
       },
     );

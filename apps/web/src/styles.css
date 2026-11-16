@@ -523,3 +523,7 @@ html .shop .scroll-body, html .shop .e2e-scroll { overflow-y: visible; overflow-
 .queue-eta { margin: 0; font-size: 15px; font-weight: 700; color: #b85c0a; }
 .queue-actions { display: flex; gap: 8px; flex-wrap: wrap; }
 .queue-actions .login-btn { flex: 1 1 140px; justify-content: center; }
+.oe-bcrs { display: flex; gap: 8px; align-items: flex-start; font-size: 13px; padding: 8px 10px; border: 1.5px solid var(--line); border-radius: 10px; }
+.oe-bcrs input { width: auto; margin-top: 3px; }
+.shop .help-tel { color: #b85c0a; font-weight: 700; text-decoration: none; }
+.shop .help-tel:hover, .shop .help-tel:focus-visible { text-decoration: underline; }

@@ -7,6 +7,7 @@ export interface MenuItem {
   priceCents: Cents;
   soldOut?: boolean;
   pointsExempt?: boolean;
+  bcrs?: boolean;
 }
 
 /** Sample menu (a few Bailey & Patch items from the prototype). Replace with the admin-managed menu. */
@@ -14,7 +15,7 @@ export const MENU: MenuItem[] = [
   { id: "kaya-toast", name: "Kaya Toast", category: "Toast", priceCents: 200 },
   { id: "kopi", name: "Coffee", category: "Drinks", priceCents: 220 },
   { id: "teh", name: "Milk Tea", category: "Drinks", priceCents: 240 },
-  { id: "coke-bcrs", name: "Coke Classic 320ml BCRS", category: "Drinks", priceCents: 250 },
+  { id: "coke-bcrs", name: "Coke Classic 320ml BCRS", category: "Drinks", priceCents: 250, bcrs: true },
   { id: "karaage-rice", name: "Chicken Karaage Tornado Rice", category: "Rice", priceCents: 890 },
   { id: "nasi-lemak", name: "Nasi Lemak", category: "Rice", priceCents: 690 },
   { id: "fried-rice", name: "Egg Fried Rice", category: "Rice", priceCents: 650 },

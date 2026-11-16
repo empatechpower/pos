@@ -145,7 +145,7 @@ export function registerShop(app: FastifyInstance, d: ShopDeps) {
       // Shown at the top of the order details on the staff Online page. Set OUTLET_ADDRESS and GST_REG_NO on the server.
       address: process.env.OUTLET_ADDRESS?.trim() || undefined,
       gstRegNo: process.env.GST_REG_NO?.trim() || undefined,
-      contact: process.env.OUTLET_HOURS || process.env.OUTLET_PHONE ? { hours: process.env.OUTLET_HOURS?.trim() || undefined, phone: process.env.OUTLET_PHONE?.trim() || undefined } : undefined,
+      contact: process.env.OUTLET_HOURS || process.env.OUTLET_PHONE || process.env.OUTLET_ADDRESS ? { hours: process.env.OUTLET_HOURS?.trim() || undefined, phone: process.env.OUTLET_PHONE?.trim() || undefined, address: process.env.OUTLET_ADDRESS?.trim() || undefined } : undefined,
       paymentTiming: d.config.paymentTiming,
       // With a table list set, ordering is dine-in only, one fixed list of tables.
       tables,
@@ -541,7 +541,7 @@ export function registerShop(app: FastifyInstance, d: ShopDeps) {
       }),
       ...(couponUsed ? [mk({ type: "CouponApplied", title: coupon!.title, amountCents: coupon!.amountCents, minSpendCents: coupon!.minSpendCents })] : []),
       ...(pointsUsed > 0 ? [mk({ type: "PointsRedeemed", points: pointsUsed })] : []),
-      ...quote.lines.map((l) => mk({ type: "ItemAdded", lineId: newId(), productId: l.productId, name: l.name, unitCents: l.unitCents, qty: l.qty, pointsExempt: l.pointsExempt, options: l.options.length ? l.options : undefined })),
+      ...quote.lines.map((l) => mk({ type: "ItemAdded", lineId: newId(), productId: l.productId, name: l.name, unitCents: l.unitCents, qty: l.qty, pointsExempt: l.pointsExempt, bcrs: l.bcrs, options: l.options.length ? l.options : undefined })),
       // Paid with the member's credit: the order is paid and accepted at once, so it goes straight to the kitchen.
       ...(creditCents > 0 ? [mk({ type: "OrderAccepted" }), mk({ type: "PaymentRecorded", paymentId: `credit:${orderId}`, method: "credit", amountCents: creditCents, confirmed: true })] : []),
     ];

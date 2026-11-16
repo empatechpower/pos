@@ -37,7 +37,15 @@ describe("quoteOrder", () => {
 
   it("merges repeated lines and ignores any attempt to supply a price", () => {
     const q = quoteOrder(catalog(), config, ctx("take"), [{ productId: "kaya", qty: 1 }, { productId: "kaya", qty: 2, unitCents: 1 } as never]);
-    expect(q.ok && q.lines).toEqual([{ productId: "kaya", name: "Kaya Toast", unitCents: 200, qty: 3, pointsExempt: undefined, options: [] }]);
+    expect(q.ok && q.lines).toEqual([{ productId: "kaya", name: "Kaya Toast", unitCents: 200, qty: 3, pointsExempt: undefined, bcrs: false, options: [] }]);
+  });
+
+  it("freezes the item's deposit setting on the line and charges 10c a unit for it", () => {
+    const cat = catalog();
+    cat.products.find((p) => p.id === "kaya")!.bcrs = true;
+    const q = quoteOrder(cat, config, ctx("take"), [{ productId: "kaya", qty: 3 }]);
+    expect(q.ok && q.lines[0]).toMatchObject({ bcrs: true });
+    expect(q.ok && q.priced.bcrs).toBe(30);
   });
 
   it("refuses sold-out items, unknown items and items a channel does not sell", () => {

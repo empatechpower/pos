@@ -146,3 +146,45 @@ describe("stacking", () => {
     expect(r.total).toBe(1500);
   });
 });
+
+describe("service charge after a bill discount (owner rule, 16 Nov 2026)", () => {
+  const dineIn = (coupon: { amountCents: number; minSpendCents: number } | null, extra: object = {}) =>
+    priceOrder({ lines: [{ name: "Kaya Toast", unitCents: 500, qty: 2 }], fulfilment: "dine_in", coupon, ...extra });
+
+  it("takes the voucher off the items first, then charges 8% on what is left", () => {
+    expect(dineIn(null)).toMatchObject({ subtotal: 1000, service: 80, total: 1080 });
+    expect(dineIn({ amountCents: 200, minSpendCents: 0 })).toMatchObject({ subtotal: 1000, couponDiscount: 200, service: 64, total: 864 }); // 8% of 8.00, not of 10.00
+  });
+
+  it("a voucher bigger than the bill leaves no service charge", () => {
+    expect(dineIn({ amountCents: 5000, minSpendCents: 0 })).toMatchObject({ couponDiscount: 1000, service: 0, total: 0 });
+  });
+
+  it("the minimum spend is still judged on the items before the discount", () => {
+    expect(dineIn({ amountCents: 200, minSpendCents: 1000 })).toMatchObject({ couponDiscount: 200, service: 64 });
+    expect(dineIn({ amountCents: 200, minSpendCents: 1001 })).toMatchObject({ couponDiscount: 0, couponIneligible: true, service: 80, total: 1080 });
+  });
+
+  it("take away is unchanged, and points are paid at the end so they do not lower the service charge", () => {
+    expect(priceOrder({ lines: [{ name: "Kaya Toast", unitCents: 500, qty: 2 }], fulfilment: "takeaway", coupon: { amountCents: 200, minSpendCents: 0 } })).toMatchObject({ service: 0, total: 800 });
+    const withPoints = dineIn(null, { points: { balance: 10_000, requested: 100 } });
+    expect(withPoints.service).toBe(80);
+    expect(withPoints.pointsDiscount).toBe(100);
+  });
+});
+
+describe("the container deposit is an item setting, not a guess from the name", () => {
+  const line = (name: string, bcrs?: boolean): PricedLine => ({ name, unitCents: 250, qty: 2, ...(bcrs === undefined ? {} : { bcrs }) });
+  const price = (l: PricedLine) => priceOrder({ lines: [l], fulfilment: "takeaway" }).bcrs;
+
+  it("charges 10c a unit for an item set to carry it, whatever it is called", () => {
+    expect(price(line("Sprite 320ml", true))).toBe(20);
+  });
+  it("charges nothing for an item that is not set to carry it, even if its name says BCRS", () => {
+    expect(price(line("Coke Classic 320ml BCRS", false))).toBe(0);
+  });
+  it("a line from before the setting existed (no flag at all) keeps the old name rule, so past orders do not change", () => {
+    expect(price(line("Coke Classic 320ml BCRS"))).toBe(20);
+    expect(price(line("Kaya Toast"))).toBe(0);
+  });
+});

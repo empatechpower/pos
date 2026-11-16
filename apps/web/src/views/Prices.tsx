@@ -72,10 +72,10 @@ export function Prices({ catalog, outletId }: { catalog: Catalog; outletId: stri
   }
 
   /** Save an item's option groups and combo slots. Returns the reason in plain words when it did not work. */
-  async function saveOptions(productId: string, options: OptionGroup[]): Promise<string | null> {
+  async function saveOptions(productId: string, options: OptionGroup[], bcrs: boolean): Promise<string | null> {
     const p = catalog.products.find((x) => x.id === productId);
     if (!p) return "That item is gone.";
-    const res = await fetch("/api/catalog/products", { method: "POST", headers: { "content-type": "application/json", ...authHeader() }, body: JSON.stringify({ id: p.id, name: p.name, category: p.category, pointsExempt: p.pointsExempt, soldOut: p.soldOut, options }) }).catch(() => null);
+    const res = await fetch("/api/catalog/products", { method: "POST", headers: { "content-type": "application/json", ...authHeader() }, body: JSON.stringify({ id: p.id, name: p.name, category: p.category, pointsExempt: p.pointsExempt, soldOut: p.soldOut, bcrs, options }) }).catch(() => null);
     if (!res) return "Could not reach the server. Nothing was changed.";
     if (res.status === 401) return "Your session has ended. Sign in again. Nothing was changed.";
     if (!res.ok) {
@@ -226,7 +226,7 @@ export function Prices({ catalog, outletId }: { catalog: Catalog; outletId: stri
 
       {editingOptions && (() => {
         const p = catalog.products.find((x) => x.id === editingOptions);
-        return p ? <OptionsEditor product={p} catalog={catalog} onSave={(groups) => saveOptions(p.id, groups)} onClose={() => setEditingOptions(null)} /> : null;
+        return p ? <OptionsEditor product={p} catalog={catalog} onSave={(groups, bcrs) => saveOptions(p.id, groups, bcrs)} onClose={() => setEditingOptions(null)} /> : null;
       })()}
 
       {renaming && (() => {

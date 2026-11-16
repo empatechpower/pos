@@ -83,6 +83,20 @@ Open `https://YOUR-SHOP-ADDRESS/#/manager` on a computer or tablet, sign in with
   **Add credit** tops up a member (cashiers up to S$200 at a time; managers and owners more). **Adjust points** (managers and owners only)
   adds or takes points and needs a reason; both are recorded with who did it.
 
+**Help & support details (server settings on Render)**
+
+The customer's Help & support screen shows these when they are set: `OUTLET_PHONE` (for example `+65 8087 6692`), `OUTLET_ADDRESS`
+(for example `20 Lengkok Bahru, Singapore 159053`) and `OUTLET_HOURS`. A setting that is not set is simply not shown.
+
+**Container deposit (BCRS)**
+
+The 10c deposit is a setting on each item: Manager > Prices > **Options** on the item > tick **Container deposit (BCRS)**. It is added for each one sold.
+Items whose name already contained "BCRS" were switched on once when this was introduced. A rename never turns it off.
+
+**Service charge and discounts**
+
+The service charge (dine in) is worked out on the items after a voucher or coupon comes off. Points are paid like money at the end, so they do not lower it.
+
 **Members and credit (this version has rewards switched off)**
 
 - **Rewards are off** by default: no points, coupons, stamps or welcome gifts, and none of their screens show. (Set `REWARDS=on` in the server settings to bring them back.)

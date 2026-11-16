@@ -16,7 +16,7 @@ interface Info {
   /** Member credit is frozen: it cannot be spent, so no order can be paid with it. */
   creditFrozen?: boolean;
   /** Opening hours and a phone number, when the shop has set them. */
-  contact?: { phone?: string; hours?: string };
+  contact?: { phone?: string; hours?: string; address?: string };
   channels: Array<{ id: string; name: string; kind: string }>;
   brand: { primary: string; accent: string; ink: string; logoUrl: string | null; heroUrl: string | null; tagline: string | null; promoTitle: string | null; promoBody: string | null };
   /** What this shop can do beyond email sign-in and paying at the counter. */
@@ -941,7 +941,7 @@ function Menu({ info, catalog, config, loginError, recheck }: { info: Info; cata
                 <div className="sc-main" onClick={() => { if (!m.soldOut) setPicking(m); }}>
                   <b>{m.name}</b>
                   <span className="muted">{m.description ?? m.category}</span>
-                  <span className="sc-price">{m.soldOut ? "Sold out" : cardPrice(m, isCombo(m.options) ? comboSaving(m.priceCents, m.options, (id) => menu.find((x) => x.id === id)?.priceCents ?? null) : 0)}{!m.soldOut && /bcrs/i.test(m.name) && <em className="bcrs-badge"><Icon name="can" size={11} />+10c BCRS Deposit</em>}</span>
+                  <span className="sc-price">{m.soldOut ? "Sold out" : cardPrice(m, isCombo(m.options) ? comboSaving(m.priceCents, m.options, (id) => menu.find((x) => x.id === id)?.priceCents ?? null) : 0)}{!m.soldOut && m.bcrs && <em className="bcrs-badge"><Icon name="can" size={11} />+{config.pricing.bcrsDepositCents}c BCRS Deposit</em>}</span>
                 </div>
                 {!m.soldOut && (
                   <div className="sc-act">
@@ -1113,8 +1113,10 @@ function Menu({ info, catalog, config, loginError, recheck }: { info: Info; cata
               <div className="sum-row"><span className="k">{t("outletW", "Outlet")}</span><span className="v">{info.name} · {info.outletName}</span></div>
               <div className="sum-row" style={{ display: "block" }}><span className="k" style={{ fontWeight: 700, color: "var(--ink)" }}>{tx("How do I collect my order?")}</span><span className="ad" style={{ display: "block", marginTop: 2, fontSize: 12 }}>{tx("Your collection number is the last 5 digits of the phone number you ordered with. Watch for it on the counter screen.")}</span></div>
               <div className="sum-row" style={{ display: "block" }}><span className="k" style={{ fontWeight: 700, color: "var(--ink)" }}>{t("helpQ2", "How do points work?")}</span><span className="ad" style={{ display: "block", marginTop: 2, fontSize: 12 }}>{tx("Members earn points on every order. 100 points = S$1 off a later order — apply points in the Bag before you check out.")}</span></div>
+              <div className="sum-row" style={{ display: "block" }}><span className="k" style={{ fontWeight: 700, color: "var(--ink)" }}>{tx("Can I cancel my order?")}</span><span className="ad" style={{ display: "block", marginTop: 2, fontSize: 12 }}>{tx("Only before you pay. From the Order Status screen you can cancel an unpaid order any time before preparation starts. Once an order is paid, it cannot be cancelled in the app.")}</span></div>
+              {info.contact?.address && <div className="sum-row"><span className="k">{tx("Address")}</span><span className="v">{info.contact.address}</span></div>}
               {info.contact?.hours && <div className="sum-row"><span className="k">{tx("Opening hours")}</span><span className="v">{info.contact.hours}</span></div>}
-              {info.contact?.phone && <div className="sum-row"><span className="k">{tx("Call us")}</span><span className="v"><a href={`tel:${info.contact.phone.replace(/[^+\d]/g, "")}`}>{info.contact.phone}</a></span></div>}
+              {info.contact?.phone && <div className="sum-row"><span className="k">{tx("Call us")}</span><span className="v"><a className="help-tel" href={`tel:${info.contact.phone.replace(/[^+\d]/g, "")}`}>{info.contact.phone}</a></span></div>}
               <p className="e2e-note">{tx("Still need help? Please ask at the counter and we will sort it out.")}</p>
             </div>
           </>

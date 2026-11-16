@@ -49,8 +49,8 @@ export class PgCatalogStore implements CatalogStore {
         for (const p of seed.products) {
           const img = images?.get(p.id);
           await client.query(
-            "INSERT INTO products (merchant_id,id,name,category,sold_out,points_exempt,description,alt_name,options,image_version) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)",
-            [m, p.id, p.name, p.category, !!p.soldOut, !!p.pointsExempt, p.description ?? null, p.altName ?? null, p.options ? JSON.stringify(p.options) : null, img ? 1 : 0],
+            "INSERT INTO products (merchant_id,id,name,category,sold_out,points_exempt,description,alt_name,options,image_version,bcrs) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)",
+            [m, p.id, p.name, p.category, !!p.soldOut, !!p.pointsExempt, p.description ?? null, p.altName ?? null, p.options ? JSON.stringify(p.options) : null, img ? 1 : 0, !!p.bcrs],
           );
           if (img) await client.query("INSERT INTO product_images (merchant_id,product_id,bytes,type,version) VALUES ($1,$2,$3,$4,1)", [m, p.id, img.bytes, img.type]);
         }
@@ -86,7 +86,7 @@ export class PgCatalogStore implements CatalogStore {
     const m = this.merchantId;
     const [meta, products, books, prices, channels, assigns, offs] = await Promise.all([
       q.query("SELECT version, default_pricebook_id FROM catalog_meta WHERE merchant_id=$1", [m]),
-      q.query("SELECT id,name,category,sold_out,points_exempt,description,alt_name,options,image_version FROM products WHERE merchant_id=$1 ORDER BY sort", [m]),
+      q.query("SELECT id,name,category,sold_out,points_exempt,description,alt_name,options,image_version,bcrs FROM products WHERE merchant_id=$1 ORDER BY sort", [m]),
       q.query("SELECT id,name,missing FROM pricebooks WHERE merchant_id=$1 ORDER BY name", [m]),
       q.query("SELECT pricebook_id, product_id, price_cents FROM pricebook_prices WHERE merchant_id=$1", [m]),
       q.query("SELECT id,name,kind,service_charge,active FROM channels WHERE merchant_id=$1 ORDER BY sort", [m]),
@@ -111,6 +111,7 @@ export class PgCatalogStore implements CatalogStore {
           category: p.category,
           soldOut: p.sold_out || undefined,
           pointsExempt: p.points_exempt || undefined,
+          bcrs: p.bcrs || undefined,
           description: p.description ?? undefined,
           altName: p.alt_name ?? undefined,
           imageVersion: p.image_version || undefined,
@@ -311,7 +312,7 @@ export class PgCatalogStore implements CatalogStore {
    * sent are left as they are, so a quick "mark sold out" can never wipe a description or its options.
    * To clear one, send an empty string (text) or an empty list (options).
    */
-  upsertProduct(p: { id?: string; name: string; category: string; soldOut?: boolean; pointsExempt?: boolean; priceCents?: number; description?: string; altName?: string; options?: OptionGroup[] }) {
+  upsertProduct(p: { id?: string; name: string; category: string; soldOut?: boolean; pointsExempt?: boolean; bcrs?: boolean; priceCents?: number; description?: string; altName?: string; options?: OptionGroup[] }) {
     return this.change(async (c) => {
       const m = this.merchantId;
       const id = p.id ?? shortId("item");
@@ -321,13 +322,15 @@ export class PgCatalogStore implements CatalogStore {
       const [descGiven, desc] = text(p.description);
       const [altGiven, alt] = text(p.altName);
       const optsGiven = p.options !== undefined;
+      const bcrsGiven = p.bcrs !== undefined; // not sent = left as it is, so a rename or a sold-out toggle never switches the deposit off
       await c.query(
-        `INSERT INTO products (merchant_id,id,name,category,sold_out,points_exempt,description,alt_name,options) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)
+        `INSERT INTO products (merchant_id,id,name,category,sold_out,points_exempt,description,alt_name,options,bcrs) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$13)
          ON CONFLICT (merchant_id,id) DO UPDATE SET name=EXCLUDED.name, category=EXCLUDED.category, sold_out=EXCLUDED.sold_out, points_exempt=EXCLUDED.points_exempt,
            description = CASE WHEN $10 THEN EXCLUDED.description ELSE products.description END,
            alt_name    = CASE WHEN $11 THEN EXCLUDED.alt_name    ELSE products.alt_name    END,
-           options     = CASE WHEN $12 THEN EXCLUDED.options     ELSE products.options     END`,
-        [m, id, p.name, p.category, !!p.soldOut, !!p.pointsExempt, desc, alt, optsGiven && p.options!.length ? JSON.stringify(p.options) : null, descGiven, altGiven, optsGiven],
+           options     = CASE WHEN $12 THEN EXCLUDED.options     ELSE products.options     END,
+           bcrs        = CASE WHEN $14 THEN EXCLUDED.bcrs        ELSE products.bcrs        END`,
+        [m, id, p.name, p.category, !!p.soldOut, !!p.pointsExempt, desc, alt, optsGiven && p.options!.length ? JSON.stringify(p.options) : null, descGiven, altGiven, optsGiven, !!p.bcrs, bcrsGiven],
       );
       if (p.priceCents !== undefined) {
         const def = (await c.query("SELECT default_pricebook_id FROM catalog_meta WHERE merchant_id=$1", [m])).rows[0].default_pricebook_id as string;

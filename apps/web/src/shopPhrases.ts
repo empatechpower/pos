@@ -1,6 +1,33 @@
 /** Translations for the shop's sentences. Each English phrase maps to [ms, id, zh, ja, fr, de, ta]; English is the phrase itself.
  *  Names that come from the shop's own menu (items, descriptions) are not here: they are shown as the shop wrote them. */
 export const PHRASES: Record<string, string[]> = {
+ "Can I cancel my order?": [
+  "Bolehkah saya membatalkan pesanan saya?",
+  "Bisakah saya membatalkan pesanan saya?",
+  "我可以取消订单吗？",
+  "注文をキャンセルできますか？",
+  "Puis-je annuler ma commande ?",
+  "Kann ich meine Bestellung stornieren?",
+  "என் ஆர்டரை ரத்து செய்ய முடியுமா?"
+ ],
+ "Only before you pay. From the Order Status screen you can cancel an unpaid order any time before preparation starts. Once an order is paid, it cannot be cancelled in the app.": [
+  "Hanya sebelum anda membayar. Dari skrin Status Pesanan anda boleh membatalkan pesanan yang belum dibayar pada bila-bila masa sebelum penyediaan bermula. Pesanan yang telah dibayar tidak boleh dibatalkan dalam aplikasi.",
+  "Hanya sebelum Anda membayar. Dari layar Status Pesanan, Anda dapat membatalkan pesanan yang belum dibayar kapan pun sebelum persiapan dimulai. Pesanan yang sudah dibayar tidak dapat dibatalkan di aplikasi.",
+  "仅可在付款前取消。在订单状态页面，您可以在开始备餐前随时取消未付款的订单。订单一旦付款，便无法在应用内取消。",
+  "お支払い前のみ可能です。注文状況画面から、調理開始前であれば未払いの注文をいつでもキャンセルできます。お支払い済みの注文はアプリ内でキャンセルできません。",
+  "Uniquement avant de payer. Depuis l’écran Statut de la commande, vous pouvez annuler une commande non payée à tout moment avant le début de la préparation. Une commande payée ne peut pas être annulée dans l’application.",
+  "Nur vor der Zahlung. Über den Bestellstatus-Bildschirm können Sie eine unbezahlte Bestellung jederzeit vor Beginn der Zubereitung stornieren. Eine bezahlte Bestellung kann in der App nicht storniert werden.",
+  "கட்டணம் செலுத்துவதற்கு முன்பு மட்டுமே. ஆர்டர் நிலைத் திரையிலிருந்து, தயாரிப்பு தொடங்குவதற்கு முன் எந்த நேரத்திலும் செலுத்தப்படாத ஆர்டரை ரத்து செய்யலாம். கட்டணம் செலுத்திய ஆர்டரை செயலியில் ரத்து செய்ய முடியாது."
+ ],
+ "Address": [
+  "Alamat",
+  "Alamat",
+  "地址",
+  "住所",
+  "Adresse",
+  "Adresse",
+  "முகவரி"
+ ],
  "Add table": [
   "Tambah meja",
   "Tambah meja",
