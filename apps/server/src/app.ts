@@ -626,6 +626,13 @@ export async function buildApp({ config, store, db, catalog, catalogAdmin, print
       return queued ? { queued } : reply.code(409).send({ error: "no_printer_for_this" });
     });
 
+    /** No-sale / change: opens the till without printing anything. Cashiers and up; every use is audited. */
+    app.post<{ Body: { reason?: string } }>("/api/print/drawer", { preHandler: needs("print.reprint") }, async (req, reply) => {
+      const queued = await queue.openDrawer();
+      await audit(db, merchantId, req.staff!.id, "drawer.open", { reason: String(req.body?.reason ?? "").slice(0, 80) || null, queued });
+      return queued ? { queued } : reply.code(409).send({ error: "no_drawer_printer" });
+    });
+
     // The delivery agent (a hub app or small service) is a device, not a person: device token only.
     const agent = { preHandler: needsDevice };
 

@@ -23,7 +23,7 @@ import {
   type PaymentMethod,
   type OrderState,
 } from "@pos/core";
-import { useStaff } from "../auth";
+import { staffFetch, useStaff } from "../auth";
 import { deviceId, getDeviceCode, record } from "../db";
 import { useOrders } from "../hooks";
 import { OptionSheet } from "./OptionSheet";
@@ -222,6 +222,11 @@ export function Pos({ config, catalog, online, customerId, setCustomerId }: PosP
   const openTabs = orders.filter((o) => o.stage !== "cancelled" && o.stage !== "completed" && !isSettled(o, config));
   const prepay = config.paymentTiming === "prepay";
 
+  async function openDrawer() {
+    const r = await staffFetch("/api/print/drawer", { body: { reason: "no sale" } });
+    notify("res" in r && r.res.ok ? "Drawer opening." : "res" in r && r.res.status === 409 ? "No receipt printer has the cash drawer switched on. Ask a manager." : "Could not open the drawer.");
+  }
+
   return (
     <div className="pos">
       <section className="menu">
@@ -261,6 +266,10 @@ export function Pos({ config, catalog, online, customerId, setCustomerId }: PosP
               <option key={t}>{t}</option>
             ))}
           </select>
+        )}
+
+        {staff && online && (
+          <button className="secondary sm" type="button" onClick={() => void openDrawer()}>Open drawer</button>
         )}
 
         <label className="cust">

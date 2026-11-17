@@ -251,6 +251,16 @@ export class PrintStore {
     return made;
   }
 
+  /** Open the till with no sale: only the kick command, no paper. Goes to every active receipt printer that has the drawer ticked. */
+  async openDrawer(): Promise<number> {
+    const printers = (await this.listPrinters()).filter((p) => p.active && p.drawer && p.roles.includes("receipt"));
+    let made = 0;
+    for (const p of printers) {
+      if (await this.insertJob(this.db, p, "test", null, `drawer:${p.id}:${Date.now()}:${Math.random()}`, enc(p, { blocks: [{ t: "drawer" }] }), "Open drawer")) made++;
+    }
+    return made;
+  }
+
   /** A short page to prove a printer is reachable and set up. */
   async testPage(printerId: string, now: number): Promise<boolean> {
     const p = (await this.listPrinters()).find((x) => x.id === printerId);

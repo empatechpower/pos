@@ -131,3 +131,9 @@ The queue number is **off by default** on every printer: tickets show the table 
 
 In quick service (pay first), a paid online order moves by itself: Order sent, Accepted, In the queue, and then **Ready to serve!** the moment the kitchen printer has really received every kitchen ticket of the order. That is the end of the customer's journey. If one ticket fails or is unconfirmed (a printer off, out of paper), the order stays "In the queue" until someone presses Reprint on the Online page, so the customer is never told "ready" for food nobody has been asked to make. Receipts and labels do not hold an order back. Restaurant mode (pay after) is unchanged: staff mark orders ready by hand.
 
+
+
+## Cash drawer
+
+- A fully paid sale with a cash payment starts its receipt with the drawer-kick command (`ESC p 0 60 120`, pin 2). Tick "Open the cash drawer for cash sales" on the receipt printer in Printers. It is off by default. The drawer plugs into the receipt printer's RJ11 port.
+- **Open drawer** on the POS screen (signed-in staff, online) opens the till with no sale and prints nothing. It goes to every active receipt printer with the drawer ticked, and each use is recorded in the audit log as `drawer.open`.

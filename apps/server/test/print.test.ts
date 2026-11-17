@@ -148,6 +148,18 @@ describe("what gets queued, and when", () => {
     expect(got.find((g) => g.host === "10.0.0.5")!.bytes.includes(Buffer.from([0x1b, 0x70]))).toBe(false);
   });
 
+  it("Open drawer sends only the kick command, to printers with the drawer ticked, and is audited", async () => {
+    const r = await call("/api/print/drawer", { method: "POST", body: { reason: "change" }, staff: mgr, device: till.token });
+    expect(r.status).toBe(200);
+    expect(r.json.queued).toBe(1);
+    const { got, send } = capture();
+    await agent(send);
+    const hit = got.find((g) => g.host === "10.0.0.5")!;
+    expect(hit.bytes.includes(Buffer.from([0x1b, 0x70, 0]))).toBe(true);
+    expect(hit.text).not.toContain("TOTAL");
+    expect((await call("/api/print/drawer", { method: "POST", body: {}, device: till.token })).status).toBe(401);
+  });
+
   it("pushing the same events again, or unrelated ones, queues nothing more", async () => {
     const o = orderEvents([{ id: "kopi", name: "Coffee", qty: 1 }], { queue: "A103", pay: "cash" });
     await push(o.events);
