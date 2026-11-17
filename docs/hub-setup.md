@@ -146,3 +146,7 @@ In quick service (pay first), a paid online order moves by itself: Order sent, A
 - **Order history:** every order with paid status, opened and closed times, and a detail view with discounts, GST, deposit and payments by method. Tick "Show cancelled orders" to include voids.
 - Not in yet: profit and food cost (needs a cost per item), combo-split rows, who served each order, and till reconciliation.
 - The same numbers come from `GET /api/reports/sales` (`summary`, `hourly`, `mix`) and `GET /api/reports/orders` (per-order GST, deposit, coupon, points and `closedAt`).
+
+## Queue estimate ("About N mins")
+
+The customer's queue card learns the time from real orders: it needs at least 3 orders marked Ready in the last 3 hours. Until then it shows no time. To show a time from day one, set `QUEUE_FALLBACK_MINUTES` (for example `8`, the minutes one order usually takes). The estimate is then that figure times the orders in line, this one included, and real history replaces it as soon as there is enough.

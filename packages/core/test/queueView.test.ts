@@ -57,3 +57,16 @@ describe("a customer's place in the queue", () => {
     expect(queueView([mine, ...slow], mine, config, NOW)).toEqual({ ahead: 0, etaMinutes: null });
   });
 });
+
+describe("a typical time set by the merchant", () => {
+  it("is used only while there is too little history, per order in line including this one", () => {
+    const mine = order({ at: NOW - 2 * MIN, source: "online", acceptedAt: NOW - 2 * MIN });
+    const first = order({ at: NOW - 5 * MIN, source: "online", acceptedAt: NOW - 5 * MIN });
+    expect(queueView([first, mine], mine, config, NOW)).toMatchObject({ ahead: 1, etaMinutes: null });
+    expect(queueView([first, mine], mine, config, NOW, 6)).toMatchObject({ ahead: 1, etaMinutes: 12 });
+    expect(queueView([mine], mine, config, NOW, 6)).toMatchObject({ ahead: 0, etaMinutes: 6 });
+    // With real history, the real figure wins over the setting.
+    const hist = [done(NOW - 50 * MIN, 4), done(NOW - 40 * MIN, 4), done(NOW - 30 * MIN, 4)];
+    expect(queueView([...hist, mine], mine, config, NOW, 30)!.etaMinutes).toBe(4);
+  });
+});

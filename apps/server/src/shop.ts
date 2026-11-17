@@ -643,7 +643,7 @@ export function registerShop(app: FastifyInstance, d: ShopDeps) {
       pointsRedeemed: order.pointsRedeemed ?? 0,
       canCancel: cancellable(order),
       // Where this order is in line and about how long: only while it is waiting for or being made by the kitchen.
-      queue: ["queued", "preparing"].includes(shopStatus(order, d.config)) ? queueView(await everyOrder(), order, d.config, Date.now()) : null,
+      queue: ["queued", "preparing"].includes(shopStatus(order, d.config)) ? queueView(await everyOrder(), order, d.config, Date.now(), Number(process.env.QUEUE_FALLBACK_MINUTES) || undefined) : null,
       canPayOnline: !!integ.stripe && order.stage !== "cancelled" && order.stage !== "completed" && total - paid > 0,
     };
   });

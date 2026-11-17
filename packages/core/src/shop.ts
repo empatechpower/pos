@@ -137,10 +137,10 @@ const joinedAt = (o: OrderState) => Math.max(o.openedAt, o.acceptedAt ?? 0, o.pa
 /**
  * Where is this order in line, and about how long is it? The wait is learned from the last few hours of real orders
  * (how long each took to be marked ready, and how many came out in the last half hour), never from a fixed number.
- * With fewer than 3 finished orders to learn from it gives no time, rather than a made-up one. Null if the order is not
+ * With fewer than 3 finished orders to learn from it gives no time, rather than a made-up one, unless the merchant has set a typical minutes-per-order figure. Null if the order is not
  * in the kitchen's queue (not accepted or paid yet, already ready, collected or cancelled).
  */
-export function queueView(orders: readonly OrderState[], mine: OrderState, config: BusinessConfig, now: number): QueueView | null {
+export function queueView(orders: readonly OrderState[], mine: OrderState, config: BusinessConfig, now: number, fallbackMinutes?: number): QueueView | null {
   const status = shopStatus(mine, config);
   if ((status !== "queued" && status !== "preparing") || !visibleToKitchen(mine, config)) return null;
   const myAt = joinedAt(mine);
@@ -152,7 +152,11 @@ export function queueView(orders: readonly OrderState[], mine: OrderState, confi
     .map((o) => o.readyAt! - joinedAt(o))
     .filter((d) => d > 0 && d <= 90 * MIN)
     .sort((a, b) => a - b);
-  if (took.length < 3) return { ahead, etaMinutes: null };
+  if (took.length < 3) {
+    // Not enough finished orders to learn from. Only if the merchant has said how long one order usually takes do we show a time (that figure per order in line, this one included).
+    const per = fallbackMinutes && fallbackMinutes > 0 ? fallbackMinutes : null;
+    return { ahead, etaMinutes: per === null ? null : Math.min(120, Math.max(1, Math.ceil(per * (ahead + 1)))) };
+  }
   const mid = Math.floor(took.length / 2);
   const typical = took.length % 2 ? took[mid]! : (took[mid - 1]! + took[mid]!) / 2;
   const lastHalfHour = orders.filter((o) => o.readyAt !== undefined && o.readyAt >= now - 30 * MIN).length;
