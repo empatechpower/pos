@@ -377,13 +377,14 @@ main { flex: 1; padding: 14px 16px; }
 .shop .popup-back { position: fixed; }
 /* The header stays put on every screen, not only Order. */
 .shop-headwrap { position: sticky; top: 0; z-index: 8; }
-.shop .swipe-shell { background: transparent; }
+/* As in the prototype, the shell behind an in-bag card is red: it shows as the thin red edge along the top of the card, and as the bin panel when the card slides. */
+.shop .swipe-shell { background: var(--red); }
 .shop .swipe-shell.is-swiped, .shop .swipe-shell.is-dragging { background: var(--red); }
 
 /* Item cards on the Order screen slide like bag cards. A finger can only drag them sideways if the browser leaves
    horizontal movement to us, so the cards (not just what is inside them) say so. */
 .shop .swipe-shell, .shop .swipe-shell > * { touch-action: pan-y; }
-.shop .swipe-shell > .sc { margin-top: 0; position: relative; z-index: 1; transition: transform .18s ease; will-change: transform; }
+.shop .swipe-shell > .sc { margin-top: 4px; position: relative; z-index: 1; transition: transform .18s ease; will-change: transform; }
 .shop .swipe-shell.is-swiped > .sc { transform: translateX(-84px); }
 .shop .swipe-shell.is-dragging > .sc { transition: none !important; }
 .shop .swipe-shell.has-x > .sc { transform: translateX(var(--sx, 0px)); }
@@ -516,8 +517,9 @@ html .shop .scroll-body, html .shop .e2e-scroll { overflow-y: visible; overflow-
 .tbl-open { display: flex; justify-content: space-between; align-items: center; width: 100%; text-align: left; cursor: pointer; background: #fff; }
 .tbl-x:focus-visible, .tbl-opt:focus-visible, .tbl-cancel:focus-visible { outline: 3px solid var(--accent); outline-offset: 2px; }
 .roll-money { font-variant-numeric: tabular-nums; }
-.roll-money.moving { display: inline-block; animation: rollLift 800ms ease-in-out; }
-@keyframes rollLift { 0% { transform: translateY(0); } 35% { transform: translateY(-2px) scale(1.05); } 100% { transform: none; } }
+/* The prototype's bump: the changed amount rises 8px into place while it fades in, over 800ms. */
+.roll-money.moving { display: inline-block; animation: priceRise 800ms ease-out; }
+@keyframes priceRise { 0% { transform: translateY(8px); opacity: .3; } 100% { transform: translateY(0); opacity: 1; } }
 @media (prefers-reduced-motion: reduce) { .roll-money.moving { animation: none; } }
 /* Leaves room for the fixed bottom bar when the Bag scrolls its Total into view. */
 .shop #bag-total { scroll-margin-bottom: 150px; }

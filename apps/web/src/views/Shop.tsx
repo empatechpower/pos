@@ -673,6 +673,15 @@ function Menu({ info, catalog, config, loginError, recheck }: { info: Info; cata
     // After a + / − (or removing a line) in the Bag, push the page down so the Total stays visible above the bottom nav.
     window.setTimeout(() => document.getElementById("bag-total")?.scrollIntoView({ behavior: "smooth", block: "nearest" }), 80);
   };
+  /** One fewer of an item that has choices: takes one off the line added last. Which choices stay is for the Bag to change. */
+  const fewerOf = (m: MenuEntry) => {
+    setBag((cur) => {
+      const at = cur.map((l, i) => (l.productId === m.id ? i : -1)).filter((i) => i >= 0).pop();
+      if (at === undefined) return cur;
+      return cur.flatMap((l, i) => (i !== at ? [l] : l.qty > 1 ? [{ ...l, qty: l.qty - 1 }] : []));
+    });
+    setAgreed(null);
+  };
   const addSimple = (m: MenuEntry, d: number) => addLine(m, m.options?.length ? defaultSelection(m.options) : [], d);
 
   async function place() {
@@ -983,8 +992,9 @@ function Menu({ info, catalog, config, loginError, recheck }: { info: Info; cata
                 </div>
                 {!m.soldOut && (
                   <div className="sc-act">
-                    {n > 0 && !hasOpts ? (
-                      <span className="sc-step"><button className="minus" aria-label={`Fewer ${m.name}`} onClick={() => addSimple(m, -1)}>−</button><b>{n}</b><button className="plus" aria-label={`More ${m.name}`} onClick={() => addSimple(m, 1)}>+</button></span>
+                    {n > 0 ? (
+                      // The same capsule for every item in the bag. With choices (Hot / Iced, extras) the + opens the chooser again and the − takes one off the last one added.
+                      <span className="sc-step"><button className="minus" aria-label={`Fewer ${m.name}`} onClick={() => (hasOpts ? fewerOf(m) : addSimple(m, -1))}>−</button><b>{n}</b><button className="plus" aria-label={`More ${m.name}`} onClick={() => (hasOpts ? setPicking(m) : addSimple(m, 1))}>+</button></span>
                     ) : (
                       <button className="sc-add" aria-label={`Add ${m.name}`} onClick={() => (hasOpts ? setPicking(m) : addSimple(m, 1))}>+</button>
                     )}

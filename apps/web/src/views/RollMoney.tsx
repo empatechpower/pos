@@ -13,6 +13,7 @@ const ease = (t: number) => (t < 0.5 ? 2 * t * t : 1 - Math.pow(-2 * t + 2, 2) /
 export function RollMoney({ cents }: { cents: number }) {
   const [shown, setShown] = useState(cents);
   const [moving, setMoving] = useState(false);
+  const [bump, setBump] = useState(0); // a new value restarts the rise, as in the prototype
   const now = useRef(cents); // what is on screen, so a quick second change starts from here
   useEffect(() => {
     if (now.current === cents) return;
@@ -27,6 +28,7 @@ export function RollMoney({ cents }: { cents: number }) {
     let last = -1;
     let raf = 0;
     setMoving(true);
+    setBump((n) => n + 1);
     const tick = (t: number) => {
       const p = Math.min(1, (t - start) / DURATION_MS);
       if (p >= 1) {
@@ -47,5 +49,5 @@ export function RollMoney({ cents }: { cents: number }) {
     raf = requestAnimationFrame(tick);
     return () => cancelAnimationFrame(raf);
   }, [cents]);
-  return <span className={moving ? "roll-money moving" : "roll-money"}>{formatMoney(shown)}</span>;
+  return <span key={bump} className={moving ? "roll-money moving" : "roll-money"}>{formatMoney(shown)}</span>;
 }
