@@ -20,7 +20,8 @@ export function Online({ config, online }: { config: BusinessConfig; online: boo
   const [detail, setDetail] = useState<string | null>(null);
 
   const fresh = orders.filter((o) => !o.acceptedAt && o.stage !== "cancelled").sort((a, b) => a.openedAt - b.openedAt);
-  const active = orders.filter((o) => o.acceptedAt && o.stage !== "completed" && o.stage !== "cancelled").sort((a, b) => a.openedAt - b.openedAt);
+  // Newest first: the order that just came in is the one staff look for.
+  const active = orders.filter((o) => o.acceptedAt && o.stage !== "completed" && o.stage !== "cancelled").sort((a, b) => b.openedAt - a.openedAt);
 
   const printState = usePrintStatus([...fresh, ...active].map((o) => o.orderId), !!staff);
 
@@ -106,17 +107,30 @@ export function Online({ config, online }: { config: BusinessConfig; online: boo
     );
   };
 
+  const newList = (
+    <>
+      <h3>New ({fresh.length})</h3>
+      {fresh.length === 0 && <p className="muted">No new orders.</p>}
+      {fresh.map((o) => row(o, true))}
+    </>
+  );
+  const acceptedList = (
+    <>
+      <h3>Accepted ({active.length})</h3>
+      {active.length === 0 && <p className="muted">Nothing in progress.</p>}
+      {active.map((o) => row(o, false))}
+    </>
+  );
+
   return (
     <div className="credit prices wide">
       <h2>Online orders</h2>
       <PendingSignIns signedIn={!!staff} />
       {msg && <div className="flash">{msg}</div>}
-      <h3>New ({fresh.length})</h3>
-      {fresh.length === 0 && <p className="muted">No new orders.</p>}
-      {fresh.map((o) => row(o, true))}
-      <h3>Accepted ({active.length})</h3>
-      {active.length === 0 && <p className="muted">Nothing in progress.</p>}
-      {active.map((o) => row(o, false))}
+      {/* New orders need an answer, so they come first. With none waiting, the work in progress moves to the top and "New" shrinks to one line below. */}
+      {fresh.length > 0 && newList}
+      {acceptedList}
+      {fresh.length === 0 && newList}
     </div>
   );
 }

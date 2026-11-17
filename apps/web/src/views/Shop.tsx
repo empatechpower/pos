@@ -133,6 +133,45 @@ const ICONS: Record<string, string> = {
   basket: '<path d="M4.8 9.8h14.4l-1.2 8.4a2 2 0 0 1-2 1.8H8a2 2 0 0 1-2-1.8L4.8 9.8Z"/><path d="M8.3 9.8 12 4.2l3.7 5.6"/><path d="M9.4 13.2v3.4M12 13.2v3.4M14.6 13.2v3.4"/>',
 };
 /** A bag row that slides left to show a bin button, like the prototype. A slight slide is enough to open it. */
+/** One lock count, so two dialogs open at once never leave the page unscrollable (or scrollable) by mistake. */
+let scrollLocks = 0;
+let scrollBefore = "";
+
+/**
+ * A dialog that behaves like one: the page behind it cannot scroll, Tab stays inside it, Escape closes it,
+ * focus starts inside and goes back to what opened it. Attach the returned ref to the dialog's box.
+ */
+function useDialog(open: boolean, onClose: () => void) {
+  const box = useRef<HTMLDivElement>(null);
+  const close = useRef(onClose);
+  close.current = onClose;
+  useEffect(() => {
+    if (!open) return;
+    const opener = document.activeElement as HTMLElement | null;
+    if (scrollLocks++ === 0) { scrollBefore = document.body.style.overflow; document.body.style.overflow = "hidden"; }
+    const FOCUSABLE = 'button:not([disabled]), a[href], input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])';
+    const el = box.current;
+    if (el && !el.contains(document.activeElement)) (el.querySelector<HTMLElement>(FOCUSABLE) ?? el).focus();
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") { e.stopPropagation(); close.current(); return; }
+      if (e.key !== "Tab" || !box.current) return;
+      const items = [...box.current.querySelectorAll<HTMLElement>(FOCUSABLE)];
+      if (!items.length) { e.preventDefault(); return; }
+      const first = items[0]!, last = items[items.length - 1]!;
+      if (!box.current.contains(document.activeElement)) { e.preventDefault(); first.focus(); }
+      else if (e.shiftKey && document.activeElement === first) { e.preventDefault(); last.focus(); }
+      else if (!e.shiftKey && document.activeElement === last) { e.preventDefault(); first.focus(); }
+    };
+    document.addEventListener("keydown", onKey, true);
+    return () => {
+      document.removeEventListener("keydown", onKey, true);
+      if (--scrollLocks === 0) document.body.style.overflow = scrollBefore;
+      opener?.focus?.();
+    };
+  }, [open]);
+  return box;
+}
+
 function SwipeRow({ children, onRemove, label }: { children: ReactNode; onRemove: () => void; label: string }) {
   const OPEN = 84;
   const [open, setOpen] = useState(false);
@@ -425,6 +464,9 @@ function Menu({ info, catalog, config, loginError, recheck }: { info: Info; cata
   const [guestForm, setGuestForm] = useState(false);
   const [acctPanel, setAcctPanel] = useState<null | "profile" | "help" | "notif" | "prefs">(null);
   const [langOpen, setLangOpen] = useState(false);
+  const langBox = useDialog(langOpen, () => setLangOpen(false));
+  const walletBox = useDialog(wallet, () => setWallet(false));
+  const tableBox = useDialog(tableEdit && tableList.length > 0, () => setTableEdit(false));
   const [payMethod, setPayMethod] = useState<"counter" | "card" | "paynow" | "credit">(info.membersOnly ? "credit" : "counter");
   const [history, setHistory] = useState<PastOrder[] | null>(null);
   const [editName, setEditName] = useState("");
@@ -442,13 +484,6 @@ function Menu({ info, catalog, config, loginError, recheck }: { info: Info; cata
     ro.observe(el);
     return () => ro.disconnect();
   }, [screen, tableEdit]);
-
-  useEffect(() => {
-    if (!(tableEdit && tableList.length)) return;
-    const prev = document.body.style.overflow;
-    document.body.style.overflow = "hidden";
-    return () => { document.body.style.overflow = prev; };
-  }, [tableEdit, tableList.length]);
 
   // Order page, first time up: wait 1 s, then drift down over 5.2 s until the first menu item sits under the header. Any touch, scroll or key press cancels it.
   useEffect(() => {
@@ -738,7 +773,7 @@ function Menu({ info, catalog, config, loginError, recheck }: { info: Info; cata
         ) : member ? (
           rewardsOn ? (config.rewards.pointsEnabled && <span className="shop-pts">{member.pointsBalance.toLocaleString()} points</span>) : <span className="shop-pts">{formatMoney(credit)} {tx("credit")}</span>
         ) : rewardsOn ? (
-          <button className="shop-pts link" onClick={() => setScreen("login")}>{t("signUpNow", "Sign up now")}<br />{tx("& get {n} points", { n: config.rewards.welcomePoints })}</button>
+          <button className="shop-pts link" onClick={() => setScreen("login")}>{t("signUpNow", "Sign up now")}<br /><WelcomeLine points={config.rewards.welcomePoints} voucherCents={config.rewards.welcomeVoucherCents} /></button>
         ) : (
           <button className="shop-pts link" onClick={() => setScreen("login")}>{t("signInW", "Sign in")}<br />{tx("to pay with credit")}</button>
         )}
@@ -809,8 +844,8 @@ function Menu({ info, catalog, config, loginError, recheck }: { info: Info; cata
   );
 
   const langSheet = langOpen && (
-    <div className="shop-sheet" role="dialog" aria-label={t("language", "Language")}>
-      <div className="shop-sheet-in">
+    <div className="shop-sheet" role="dialog" aria-modal="true" aria-label={t("language", "Language")}>
+      <div className="shop-sheet-in" ref={langBox}>
         <div className="shop-sheet-head"><h2>{t("language", "Language")}</h2><button onClick={() => setLangOpen(false)} aria-label={t("close", "Close")}>✕</button></div>
         <p className="muted">{t("langLead", "Choose the language for this app.")}</p>
         <div className="lang-list">
@@ -831,7 +866,7 @@ function Menu({ info, catalog, config, loginError, recheck }: { info: Info; cata
   );
   const tableDialog = tableEdit && dine && tableList.length > 0 && !tableLocked && (
     <div className="tbl-back" onClick={() => setTableEdit(false)}>
-      <div className="tbl-dlg" role="dialog" aria-modal="true" aria-label={tx("Change table")} onClick={(e) => e.stopPropagation()} onKeyDown={(e) => { if (e.key === "Escape") setTableEdit(false); }}>
+      <div className="tbl-dlg" ref={tableBox} role="dialog" aria-modal="true" aria-label={tx("Change table")} onClick={(e) => e.stopPropagation()}>
         <button className="tbl-x" onClick={() => setTableEdit(false)} aria-label={t("close", "Close")}>✕</button>
         <h3>{tx("Change table")}</h3>
         <p className="muted">{tx("Your order will be sent to the table you choose.")}</p>
@@ -847,8 +882,8 @@ function Menu({ info, catalog, config, loginError, recheck }: { info: Info; cata
     </div>
   );
   const walletSheet = wallet && (
-    <div className="shop-sheet" role="dialog" aria-label={tx("Coupons and vouchers")}>
-      <div className="shop-sheet-in">
+    <div className="shop-sheet" role="dialog" aria-modal="true" aria-label={tx("Coupons and vouchers")}>
+      <div className="shop-sheet-in" ref={walletBox}>
         <div className="shop-sheet-head"><h2>{tx("Coupons & vouchers")}</h2><button onClick={() => setWallet(false)} aria-label="Close">✕</button></div>
         {!member && <button className="shop-link" onClick={() => { setWallet(false); setScreen("login"); }}>{tx("Sign in to use your coupons & vouchers")}</button>}
         {member && coupons.length === 0 && <p className="muted">{tx("You have no coupons right now.")}</p>}
@@ -1146,7 +1181,7 @@ function Menu({ info, catalog, config, loginError, recheck }: { info: Info; cata
               {acctRow("user", t("profile", "Profile details"), "Name, phone and email on this account", () => { setEditName(member?.name ?? ""); setEditPhone(member?.phone ?? ""); setProfileMsg(null); setAcctPanel("profile"); })}
               {acctRow("globe", t("language", "Language"), LANGS.find((l) => l.code === lang())!.native + (langMode() === "auto" ? " · " + t("autoShort", "Auto") : ""), () => setLangOpen(true))}
               {acctRow("bell", t("notifications", "Notifications"), t("notificationsD", "Updates about your orders"), () => { setAcctPanel("notif"); })}
-              {acctRow("sliders", t("preferences", "Preferences"), t("preferencesD", "Language and email choices"), () => setAcctPanel("prefs"))}
+              {acctRow("sliders", t("preferences", "Preferences"), t("language", "Language"), () => setAcctPanel("prefs"))}
               {acctRow("help", "Help & support", "FAQs and contacting the outlet", () => setAcctPanel("help"))}
             </div>
             <div className="acct-sec">{t("orderHistory", "Order history")}</div>
@@ -1221,7 +1256,11 @@ function Menu({ info, catalog, config, loginError, recheck }: { info: Info; cata
         <div className="title-row">
           <button className="back-btn" onClick={() => setScreen("order")} aria-label={tx("Back")}><Icon name="chevL" size={20} /></button>
           <h2 className="page-title">{t("yourBag", "Your bag")}</h2>
-          <span className="table-tag tag-with-icon"><Icon name={dine ? "table" : "bag"} size={15} />{spotText}</span>
+          {dine && tableList.length > 0 && !tableLocked ? (
+            <button className="table-tag tag-with-icon table-tag-btn" onClick={() => setTableEdit(true)} aria-label={`${tx("Change table")}: ${spotText}`}><Icon name="table" size={15} />{spotText}</button>
+          ) : (
+            <span className="table-tag tag-with-icon"><Icon name={dine ? "table" : "bag"} size={15} />{spotText}</span>
+          )}
           {confirmClear ? (
             <span className="clear-confirm">{t("clearBagQ", "Clear bag?")}<button className="yes" onClick={() => { setBag([]); setConfirmClear(false); setScreen("order"); }}>{t("clear", "Clear")}</button><button className="no" onClick={() => setConfirmClear(false)}>{t("keep", "Keep")}</button></span>
           ) : (
@@ -1277,9 +1316,13 @@ function Menu({ info, catalog, config, loginError, recheck }: { info: Info; cata
             {rewardsOn && <div className="stamp-note"><span style={{ display: "flex", color: "var(--ink)" }}><Icon name="gift" size={27} /></span><span><span className="t">{t("stampNoteT", "1 stamp after confirmed payment")}</span><br /><span className="d">{tx("You'll earn 1 stamp for this order.")}</span></span></div>}
           </>
         )}
-        <button className={`review-cta ${bag.length === 0 ? "off" : ""}`} disabled={bag.length === 0 || !quote?.ok} onClick={() => setScreen("summary")}>
-          <Icon name="bag" size={19} /><span>{tx(count === 1 ? "Review order · {n} item" : "Review order · {n} items", { n: count })}</span><span className="div" /><span><RollMoney cents={shownTotal} /></span><Icon name="arrowR" size={19} />
-        </button>
+        {/* Add more and Review order stay together above the bottom bar. Add more only goes back to the menu: the bag is untouched. */}
+        <div className="pay-sticky bag-actions">
+          <button className="e2e-cta" onClick={() => setScreen("order")}><span>{tx("Add More")}</span><Icon name="arrowR" size={19} /></button>
+          <button className={`review-cta ${bag.length === 0 ? "off" : ""}`} disabled={bag.length === 0 || !quote?.ok} onClick={() => setScreen("summary")}>
+            <Icon name="bag" size={19} /><span>{tx(count === 1 ? "Review order · {n} item" : "Review order · {n} items", { n: count })}</span><span className="div" /><span><RollMoney cents={shownTotal} /></span><Icon name="arrowR" size={19} />
+          </button>
+        </div>
       </div>
       {pointsEditor}
     </>
@@ -1482,6 +1525,27 @@ const COUNTRIES: Array<[string, string, string]> = [
 ];
 
 /** The prototype's Welcome screen: Google, Microsoft, email, phone (by text message) or guest. */
+/** The second line of the guest header. With both a points gift and a voucher gift it crossfades between them every 3 seconds; both sit stacked in one fixed slot, so nothing shifts. */
+function WelcomeLine({ points, voucherCents }: { points: number; voucherCents: number }) {
+  const [first, setFirst] = useState(true);
+  const both = points > 0 && voucherCents > 0;
+  useEffect(() => {
+    if (!both || window.matchMedia?.("(prefers-reduced-motion: reduce)").matches) return;
+    const id = window.setInterval(() => setFirst((f) => !f), 3000);
+    return () => window.clearInterval(id);
+  }, [both]);
+  const money = voucherCents % 100 === 0 ? `S$${voucherCents / 100}` : formatMoney(voucherCents);
+  const pts = tx("& get {n} points", { n: points });
+  const vou = tx("& get {n} vouchers", { n: money });
+  if (!both) return <>{points > 0 ? pts : vou}</>;
+  return (
+    <span className="welcome-line" aria-label={`${pts} ${vou}`}>
+      <span className={first ? "on" : ""}>{pts}</span>
+      <span className={first ? "" : "on"}>{vou}</span>
+    </span>
+  );
+}
+
 function Login({ info, welcome, loginError, onGuest, onDone }: { info: Info; welcome: number; loginError: string | null; onGuest: () => void; onDone: (token: string) => void }) {
   const [view, setView] = useState<"home" | "email" | "otp" | "phone" | "sms">("home");
   const [mode, setMode] = useState<"login" | "signup">("login");
@@ -1696,6 +1760,24 @@ function Status({ orderId, info }: { orderId: string; info: Info }) {
   const [o, setO] = useState<OrderView | null>(null);
   const [problem, setProblem] = useState<string | null>(null);
   const [copied, setCopied] = useState(false);
+  const [copyFailed, setCopyFailed] = useState(false);
+  /** Copy the order id. "Copied" shows only when a method really worked; if none did, the id is selected so a long-press copies it. */
+  async function copyOrderId(id: string, el: Element | null) {
+    let ok = false;
+    try { await navigator.clipboard.writeText(id); ok = true; } catch { /* try the older way */ }
+    if (!ok) {
+      try {
+        const ta = document.createElement("textarea");
+        ta.value = id; ta.setAttribute("readonly", ""); ta.style.position = "fixed"; ta.style.opacity = "0";
+        document.body.appendChild(ta); ta.select();
+        ok = document.execCommand("copy");
+        document.body.removeChild(ta);
+      } catch { ok = false; }
+    }
+    setCopied(ok);
+    setCopyFailed(!ok);
+    if (!ok && el) { const r = document.createRange(); r.selectNodeContents(el); const sel = window.getSelection(); sel?.empty(); sel?.addRange(r); }
+  }
   const [confirmCancel, setConfirmCancel] = useState(false);
   const [working, setWorking] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
@@ -1799,7 +1881,7 @@ function Status({ orderId, info }: { orderId: string; info: Info }) {
         <p className="status-coll-hint">Your collection number is {o.queueNumber} — watch for it on the counter screen</p>
         <div className="status-order-row">
           <span className="status-order-line">{tx("Order")} <span className="status-id">{o.orderId}</span></span>
-          <button className="copy-id-btn" onClick={() => { void navigator.clipboard?.writeText(o.orderId).then(() => setCopied(true)).catch(() => undefined); }}><Icon name="ticket" size={15} />{copied ? "ORDER ID copied" : "Copy ORDER ID"}</button>
+          <button className="copy-id-btn" onClick={(e) => void copyOrderId(o.orderId, e.currentTarget.closest(".status-order-row")?.querySelector(".status-id") ?? null)}><Icon name="ticket" size={15} />{copied ? "ORDER ID copied" : copyFailed ? tx("Long-press to copy") : "Copy ORDER ID"}</button>
         </div>
         {o.channelName && <p className="e2e-sub">{o.channelName}{o.spot ? ` · ${o.spot}` : ""}</p>}
         {!cancelled && o.queue && (

@@ -2043,5 +2043,23 @@ export const PHRASES: Record<string, string[]> = {
   "Connectez-vous pour payer avec votre crédit membre.",
   "Melden Sie sich an, um mit Ihrem Mitgliedsguthaben zu zahlen.",
   "உங்கள் உறுப்பினர் கிரெடிட்டில் செலுத்த உள்நுழையவும்."
+ ],
+ "& get {n} vouchers": [
+  "& dapat baucar {n}",
+  "& dapat voucher {n}",
+  "& 获得 {n} 礼券",
+  "& {n} クーポン獲得",
+  "& recevez {n} de bons",
+  "& {n} Gutscheine erhalten",
+  "& {n} வவுச்சர்களைப் பெறவும்"
+ ],
+ "Long-press to copy": [
+  "Tekan lama untuk salin",
+  "Tekan lama untuk menyalin",
+  "长按复制",
+  "長押しでコピー",
+  "Appui long pour copier",
+  "Zum Kopieren lang drücken",
+  "நகலெடுக்க நீண்ட நேரம் அழுத்தவும்"
  ]
 };

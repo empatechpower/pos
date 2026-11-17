@@ -521,9 +521,28 @@ html .shop .scroll-body, html .shop .e2e-scroll { overflow-y: visible; overflow-
 .shop #bag-total { scroll-margin-bottom: 150px; }
 .queue-card h3 { font-size: 19px; }
 .queue-eta { margin: 0; font-size: 15px; font-weight: 700; color: #b85c0a; }
-.queue-actions { display: flex; gap: 8px; flex-wrap: wrap; }
+.queue-actions { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 14px; }
 .queue-actions .login-btn { flex: 1 1 140px; justify-content: center; }
 .oe-bcrs { display: flex; gap: 8px; align-items: flex-start; font-size: 13px; padding: 8px 10px; border: 1.5px solid var(--line); border-radius: 10px; }
 .oe-bcrs input { width: auto; margin-top: 3px; }
 .shop .help-tel { color: #b85c0a; font-weight: 700; text-decoration: none; }
 .shop .help-tel:hover, .shop .help-tel:focus-visible { text-decoration: underline; }
+
+/* Bag: Add more sits directly above Review order, the pair pinned above the bottom bar. */
+.shop .bag-actions { display: flex; flex-direction: column; gap: 8px; }
+.shop .bag-actions .review-cta { margin-top: 0; }
+.shop .bag-actions .e2e-cta { margin-top: 0; justify-content: space-between; padding: 0 18px; height: 46px; }
+
+/* The guest header's second line: two messages stacked in one slot, crossfading. */
+.shop .welcome-line { display: inline-grid; }
+.shop .welcome-line > span { grid-area: 1 / 1; opacity: 0; transition: opacity .45s; }
+.shop .welcome-line > span.on { opacity: 1; }
+
+/* The active bottom-bar icon hops gently (translation and rotation only, so it never grows past 20px). Still when motion is reduced. */
+@keyframes navHop { 0%, 100% { transform: translateY(0) rotate(0); } 22% { transform: translateY(-3px) rotate(-4deg); } 48% { transform: translateY(0) rotate(3deg); } 70% { transform: translateY(-2px) rotate(-2deg); } }
+.shop .shop-nav button[aria-current="page"] svg { animation: navHop 1.7s ease-in-out infinite; transform-origin: 50% 85%; }
+@media (prefers-reduced-motion: reduce) { .shop .shop-nav button[aria-current="page"] svg { animation: none; } .shop .welcome-line > span { transition: none; } }
+
+/* The table tag in the Bag header opens the same Change table dialog as the Order header. */
+.shop .table-tag-btn { cursor: pointer; font-family: inherit; background: none; border: 0; padding: 0; text-align: left; }
+.shop .table-tag-btn:focus-visible, .shop .shop-chip:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
