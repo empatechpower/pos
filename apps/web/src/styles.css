@@ -407,7 +407,10 @@ main { flex: 1; padding: 14px 16px; }
 /* The table button gently pulses, as in the prototype, so customers notice and check which table the order is for. */
 @keyframes spotPulse { 0%, 100% { background: rgba(247, 241, 230, .55); color: #21252a; box-shadow: 0 0 0 0 rgba(33, 37, 42, 0); } 50% { background: #21252a; color: #fffefb; box-shadow: 0 0 0 5px rgba(33, 37, 42, .18); } }
 @keyframes spotIconPulse { 0%, 100% { color: #b85c0a; } 50% { color: #ffb066; } }
-.shop .shop-table { animation: spotPulse 3.2s ease-in-out infinite; }
+/* The prototype's table button: no outline, 17px text, the full width of the right-hand column; the pulse supplies the dark fill. */
+.shop .shop-table { width: 100%; border: 0; padding: 5px 6px; font-family: inherit; font-size: 17px; line-height: 22px; background: rgba(247, 241, 230, .55); animation: spotPulse 3.2s ease-in-out infinite; }
+.shop .shop-table.on { background: rgba(247, 241, 230, .55); }
+.shop .shop-table:active { transform: scale(.97); }
 .shop .shop-table svg { animation: spotIconPulse 3.2s ease-in-out infinite; }
 @media (prefers-reduced-motion: reduce) { .shop .shop-table, .shop .shop-table svg { animation: none; } }
 .shop-tableedit select { flex: 1; padding: 10px 12px; border-radius: 12px; border: 1px solid var(--line); font: inherit; background: #fff; }
