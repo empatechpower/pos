@@ -10,6 +10,7 @@ import { FailureLimiter } from "./rateLimit.js";
 import { normaliseEmail, type MemberStore } from "./members.js";
 import { authorizeUrl, createStripeCheckout, createStripeRefund, fetchProfile, sendMail, newState, newVerifier, sameSecret, verifyStripeSignature, type Integrations, type OAuthProvider } from "./integrations.js";
 import type { EventStore } from "./store.js";
+import { listOutlets } from "./tenant.js";
 import { createHash } from "node:crypto";
 
 /** The server's own device id on events it creates for customers. */
@@ -138,14 +139,19 @@ export function registerShop(app: FastifyInstance, d: ShopDeps) {
     if (limited(readLimit, req, reply)) return;
     const cat = await d.catalog.load();
     const smsTo = await smsNumber();
+    // Hours, phone and address come from the outlet's own setup; the old server settings are only a fallback until it is filled in.
+    const outlet = (await listOutlets(d.db, merchantId)).find((o) => o.id === d.config.outletName);
+    const hours = outlet?.hours?.trim() || process.env.OUTLET_HOURS?.trim() || undefined;
+    const phone = outlet?.phone?.trim() || process.env.OUTLET_PHONE?.trim() || undefined;
+    const addr = outlet?.address?.trim() || process.env.OUTLET_ADDRESS?.trim() || undefined;
     return {
       name: d.config.name,
       outletName: d.config.outletName,
       // Set OUTLET_HOURS (e.g. "Daily 8am-9pm") and OUTLET_PHONE on the server to show them under Help & support.
       // Shown at the top of the order details on the staff Online page. Set OUTLET_ADDRESS and GST_REG_NO on the server.
-      address: process.env.OUTLET_ADDRESS?.trim() || undefined,
+      address: addr,
       gstRegNo: process.env.GST_REG_NO?.trim() || undefined,
-      contact: process.env.OUTLET_HOURS || process.env.OUTLET_PHONE || process.env.OUTLET_ADDRESS ? { hours: process.env.OUTLET_HOURS?.trim() || undefined, phone: process.env.OUTLET_PHONE?.trim() || undefined, address: process.env.OUTLET_ADDRESS?.trim() || undefined } : undefined,
+      contact: hours || phone || addr ? { hours, phone, address: addr } : undefined,
       paymentTiming: d.config.paymentTiming,
       // With a table list set, ordering is dine-in only, one fixed list of tables.
       tables,

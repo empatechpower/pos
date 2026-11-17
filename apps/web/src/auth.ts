@@ -6,6 +6,9 @@ export interface StaffInfo {
   name: string;
   code: string;
   role: "cashier" | "manager" | "owner";
+  /** Which franchise or outlet this login is limited to. Both empty = the whole brand. */
+  franchiseId?: string | null;
+  outletId?: string | null;
 }
 
 const LS_TOKEN = "pos.token";

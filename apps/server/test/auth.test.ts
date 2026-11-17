@@ -57,7 +57,7 @@ describe("sign in", () => {
   it("returns a token and the staff member's role", async () => {
     const r = await post("/api/auth/login", { code: "C1", pin: "3333" });
     expect(r.statusCode).toBe(200);
-    expect(r.json().staff).toEqual({ name: "Cat Cashier", code: "C1", role: "cashier" });
+    expect(r.json().staff).toEqual({ name: "Cat Cashier", code: "C1", role: "cashier", franchiseId: null, outletId: null });
     expect((await get("/api/auth/me", r.json().token)).json().role).toBe("cashier");
   });
 

@@ -1,10 +1,11 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { confirmedPaid, formatMoney, isFullyPaid, orderTotals, type BusinessConfig, type OrderState } from "@pos/core";
+import { confirmedPaid, formatMoney, isFullyPaid, orderTotals, type BusinessConfig, type Catalog, type OrderState } from "@pos/core";
 import { staffFetch, useStaff } from "../auth";
 import { useOrders } from "../hooks";
 import { PrintBadge, usePrintStatus } from "./PrintBadge";
 import { PendingSignIns } from "./PendingSignIns";
 import { Reports } from "./Reports";
+import { Outlets } from "./Outlets";
 
 const TZ = "Asia/Singapore";
 const dayKey = (ms: number) => new Date(ms).toLocaleDateString("en-CA", { timeZone: TZ });
@@ -16,9 +17,9 @@ const methodName = (m: string) => METHOD[m] ?? m;
 const newKey = () => (globalThis.crypto?.randomUUID ? globalThis.crypto.randomUUID() : `${Date.now()}-${Math.random()}`);
 
 /** Staff page for the shop: every order and payment, and the members' points and prepaid credit. No till. */
-export function Manager({ config }: { config: BusinessConfig }) {
+export function Manager({ config, catalog }: { config: BusinessConfig; catalog?: Catalog | null }) {
   const staff = useStaff();
-  const [tab, setTab] = useState<"orders" | "members" | "telegram" | "books" | "reports" | "agents">("orders");
+  const [tab, setTab] = useState<"orders" | "members" | "telegram" | "books" | "reports" | "agents" | "outlets">("orders");
   return (
     <div className="credit prices">
       <h2>Manager</h2>
@@ -30,12 +31,13 @@ export function Manager({ config }: { config: BusinessConfig }) {
             <button className={tab === "orders" ? "on" : ""} aria-pressed={tab === "orders"} onClick={() => setTab("orders")}>Transactions</button>
             <button className={tab === "members" ? "on" : ""} aria-pressed={tab === "members"} onClick={() => setTab("members")}>Members</button>
             {staff.role !== "cashier" && <button className={tab === "reports" ? "on" : ""} aria-pressed={tab === "reports"} onClick={() => setTab("reports")}>Reports</button>}
+            {staff.role !== "cashier" && <button className={tab === "outlets" ? "on" : ""} aria-pressed={tab === "outlets"} onClick={() => setTab("outlets")}>Outlets</button>}
             {staff.role !== "cashier" && <button className={tab === "books" ? "on" : ""} aria-pressed={tab === "books"} onClick={() => setTab("books")}>Books</button>}
             {staff.role === "owner" && <button className={tab === "agents" ? "on" : ""} aria-pressed={tab === "agents"} onClick={() => setTab("agents")}>Agents</button>}
             {staff.role !== "cashier" && <button className={tab === "telegram" ? "on" : ""} aria-pressed={tab === "telegram"} onClick={() => setTab("telegram")}>Telegram</button>}
           </div>
           <PendingSignIns signedIn />
-          {tab === "orders" ? <Transactions config={config} /> : tab === "reports" ? <Reports config={config} /> : tab === "agents" ? <AgentsPanel /> : tab === "books" ? <Books /> : tab === "telegram" ? <TelegramPanel /> : <Members canAdjustPoints={staff.role !== "cashier"} canImport={staff.role !== "cashier"} rewardsOn={config.rewards.pointsEnabled} />}
+          {tab === "orders" ? <Transactions config={config} /> : tab === "reports" ? <Reports config={config} catalog={catalog} /> : tab === "outlets" ? <Outlets /> : tab === "agents" ? <AgentsPanel /> : tab === "books" ? <Books /> : tab === "telegram" ? <TelegramPanel /> : <Members canAdjustPoints={staff.role !== "cashier"} canImport={staff.role !== "cashier"} rewardsOn={config.rewards.pointsEnabled} />}
         </>
       )}
     </div>

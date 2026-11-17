@@ -429,6 +429,13 @@ describe("agents: limited access for an AI helper or script", () => {
     expect(all.json.orders).toBe(ord.json.count);
     expect(all.json.grossCents).toBe(ord.json.orders.reduce((n: number, o: any) => n + o.totalCents, 0));
     expect(all.json.byDay.reduce((n: number, d: any) => n + d.orders, 0)).toBe(all.json.orders);
+    // Sales Summary, Hourly Sales and Product Mix are built on the same orders.
+    expect(all.json.summary.orders).toBe(all.json.orders);
+    expect(all.json.summary.netCents + all.json.summary.serviceCents + all.json.summary.gstCents + all.json.summary.liabilitiesCents).toBe(all.json.summary.netToAccountForCents);
+    expect(all.json.hourly.reduce((n: number, h: any) => n + h.orders, 0)).toBe(all.json.orders);
+    expect(all.json.mix.reduce((n: number, m: any) => n + m.qty, 0)).toBe(all.json.items);
+    expect(ord.json.orders[0]).toHaveProperty("gstCents");
+    expect(ord.json.orders[0]).toHaveProperty("closedAt");
 
     const products = (await call("/api/catalog", { device: "" })).json.products;
     const rename = await fetch(base + "/api/catalog/products", { method: "POST", headers: { "x-agent-key": key, "x-agent-actor": "Sam via Telegram", "content-type": "application/json", "x-forwarded-for": "198.51.100.77" }, body: JSON.stringify({ id: products[0].id, name: products[0].name, category: products[0].category }) });

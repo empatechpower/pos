@@ -137,3 +137,12 @@ In quick service (pay first), a paid online order moves by itself: Order sent, A
 
 - A fully paid sale with a cash payment starts its receipt with the drawer-kick command (`ESC p 0 60 120`, pin 2). Tick "Open the cash drawer for cash sales" on the receipt printer in Printers. It is off by default. The drawer plugs into the receipt printer's RJ11 port.
 - **Open drawer** on the POS screen (signed-in staff, online) opens the till with no sale and prints nothing. It goes to every active receipt printer with the drawer ticked, and each use is recorded in the audit log as `drawer.open`.
+
+## Reports (Manager → Reports)
+
+- **Sales summary:** gross sales (items), discounts (coupons and points), **net sales**, service, GST, container deposits (held for the customer, not sales) and **net to account for**, which equals what customers were billed. Payments by method, orders not fully paid, and voided (cancelled) orders are shown apart from sales.
+- **Hourly sales:** orders, items, average and total per hour. Pick "Last 24 hours" in the day list for a rolling view.
+- **Product mix:** ranked by quantity or sales, with category, average price and share. Filter by category, order type and day of week. A top-ten chart sits above the list.
+- **Order history:** every order with paid status, opened and closed times, and a detail view with discounts, GST, deposit and payments by method. Tick "Show cancelled orders" to include voids.
+- Not in yet: profit and food cost (needs a cost per item), combo-split rows, who served each order, and till reconciliation.
+- The same numbers come from `GET /api/reports/sales` (`summary`, `hourly`, `mix`) and `GET /api/reports/orders` (per-order GST, deposit, coupon, points and `closedAt`).

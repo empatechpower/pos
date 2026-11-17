@@ -6,13 +6,21 @@ import type { OrderEvent } from "@pos/core";
 export interface StoredEvent {
   serverSeq: number;
   event: OrderEvent;
+  /** The outlet the event was recorded at. Absent in the single-outlet JSON file. */
+  outletId?: string;
 }
 
 /** Storage seam: swap this JSON-file implementation for Postgres without touching routes. */
 export interface EventStore {
-  append(events: OrderEvent[]): Promise<StoredEvent[]>;
-  after(serverSeq: number): Promise<StoredEvent[]>;
-  latestSeq(): Promise<number>;
+  /** `outletId` is the outlet the events belong to; the default outlet when left out. */
+  append(events: OrderEvent[], outletId?: string): Promise<StoredEvent[]>;
+  /** One outlet's events (the default outlet when left out): what a device of that outlet syncs. */
+  after(serverSeq: number, outletId?: string): Promise<StoredEvent[]>;
+  /** Every outlet's events, each tagged with its outlet: for reports across a brand or franchise. */
+  afterAll(serverSeq: number): Promise<StoredEvent[]>;
+  latestSeq(outletId?: string): Promise<number>;
+  /** The outlet that recorded an order, when the store keeps outlets. */
+  outletOfOrder?(orderId: string): Promise<string | null>;
   /** Every event of one order, for rebuilding its state. */
   eventsForOrder(orderId: string): Promise<OrderEvent[]>;
 }
@@ -44,6 +52,10 @@ export class JsonFileEventStore implements EventStore {
 
   async after(serverSeq: number): Promise<StoredEvent[]> {
     return this.items.filter((s) => s.serverSeq > serverSeq);
+  }
+
+  async afterAll(serverSeq: number): Promise<StoredEvent[]> {
+    return this.after(serverSeq);
   }
 
   async latestSeq(): Promise<number> {

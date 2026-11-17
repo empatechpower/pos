@@ -80,6 +80,8 @@ interface EnqueueCtx {
   catalog: Catalog;
   config: BusinessConfig;
   print: PrintContext;
+  /** The outlet that took the order: only its printers are used. Left out, every active printer is (a single-outlet server). */
+  outletId?: string;
 }
 
 /** Printable dots across: 58 mm paper is 384 at 203 dpi, 80 mm is 576. */
@@ -168,7 +170,8 @@ export class PrintStore {
    * that have not been sent before (so adding to an open tab prints just the additions).
    */
   async enqueueForOrder(order: OrderState, ctx: EnqueueCtx): Promise<number> {
-    const printers = (await this.listPrinters()).filter((p) => p.active);
+    // An order prints at the outlet that took it, never at another outlet's printers.
+    const printers = (await this.listPrinters()).filter((p) => p.active && (!ctx.outletId || p.outletId === ctx.outletId));
     if (!printers.length || !order.lines.length) return 0;
     const category = new Map(ctx.catalog.products.map((p) => [p.id, p.category]));
     const client = await this.db.connect();
@@ -366,9 +369,14 @@ export class PrintStore {
   }
 
   /** Newest first. Page with limit (up to 500) and offset; narrow with a status, an order's queue number (title) or an order id. */
+  async jobOutlet(id: string): Promise<string | null> {
+    const r = await this.db.query("SELECT outlet_id FROM print_jobs WHERE merchant_id=$1 AND id=$2", [this.merchantId, id]);
+    return (r.rows[0]?.outlet_id as string | undefined) ?? null;
+  }
+
   async listJobs(status?: string, limit = 100, opts: { offset?: number; title?: string; orderId?: string } = {}) {
     const r = await this.db.query(
-      `SELECT id, printer_id, doc_type, order_id, title, status, attempts, last_error, created_at, updated_at FROM print_jobs
+      `SELECT id, printer_id, outlet_id, doc_type, order_id, title, status, attempts, last_error, created_at, updated_at FROM print_jobs
         WHERE merchant_id=$1 AND ($2::text IS NULL OR status=$2) AND ($3::text IS NULL OR title=$3) AND ($4::text IS NULL OR order_id=$4)
         ORDER BY created_at DESC, id DESC LIMIT $5 OFFSET $6`,
       [this.merchantId, status ?? null, opts.title ?? null, opts.orderId ?? null, Math.max(1, Math.min(limit, 500)), Math.max(0, opts.offset ?? 0)],

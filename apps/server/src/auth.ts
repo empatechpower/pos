@@ -30,6 +30,9 @@ export interface Staff {
   code: string;
   name: string;
   role: Role;
+  /** Scope. Neither set = the whole brand; a franchise = that franchise's outlets; an outlet = that outlet only. */
+  franchiseId?: string | null;
+  outletId?: string | null;
 }
 
 // ---- PIN hashing ------------------------------------------------------------------------------
@@ -54,13 +57,13 @@ const sha256 = (s: string) => createHash("sha256").update(s).digest("hex");
 
 export async function createStaff(
   db: Db,
-  i: { merchantId: string; code: string; name: string; role: Role; pin: string },
+  i: { merchantId: string; code: string; name: string; role: Role; pin: string; franchiseId?: string | null; outletId?: string | null },
 ): Promise<Staff> {
   if (!/^\d{4,8}$/.test(i.pin)) throw new Error("PIN must be 4 to 8 digits");
   const r = await db.query(
-    `INSERT INTO staff (merchant_id, code, name, role, pin_hash) VALUES ($1,$2,$3,$4,$5)
-     RETURNING id, merchant_id, code, name, role`,
-    [i.merchantId, i.code, i.name, i.role, await hashPin(i.pin)],
+    `INSERT INTO staff (merchant_id, code, name, role, pin_hash, franchise_id, outlet_id) VALUES ($1,$2,$3,$4,$5,$6,$7)
+     RETURNING id, merchant_id, code, name, role, franchise_id, outlet_id`,
+    [i.merchantId, i.code, i.name, i.role, await hashPin(i.pin), i.franchiseId ?? null, i.outletId ?? null],
   );
   return toStaff(r.rows[0]);
 }
@@ -71,6 +74,8 @@ const toStaff = (r: Record<string, unknown>): Staff => ({
   code: r.code as string,
   name: r.name as string,
   role: r.role as Role,
+  franchiseId: (r.franchise_id as string | null) ?? null,
+  outletId: (r.outlet_id as string | null) ?? null,
 });
 
 // ---- login / sessions -------------------------------------------------------------------------

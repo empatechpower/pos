@@ -116,7 +116,7 @@ export function App() {
         ) : route === "printers" ? (
           <Printers catalog={catalog} />
         ) : route === "manager" ? (
-          <Manager config={config} />
+          <Manager config={config} catalog={catalog} />
         ) : route === "orders" ? (
           <Orders config={config} />
         ) : route === "pricebook" ? (

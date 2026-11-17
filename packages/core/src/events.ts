@@ -84,6 +84,8 @@ export interface OrderState {
   paidAt?: number;
   /** When the kitchen first marked it ready. Used to learn how long orders really take. */
   readyAt?: number;
+  /** When the order was first completed or cancelled. */
+  closedAt?: number;
 }
 
 export const newId = (): string =>
@@ -145,6 +147,7 @@ export function reduceOrder(orderId: string, events: readonly OrderEvent[]): Ord
       case "StageSet":
         state.stage = e.stage;
         if (e.stage === "ready") state.readyAt ??= e.ts;
+        if (e.stage === "completed" || e.stage === "cancelled") state.closedAt ??= e.ts;
         break;
     }
     if (!state.paidAt && isFullyPaid(state, undefined)) state.paidAt = e.ts;

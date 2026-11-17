@@ -2,7 +2,7 @@ import cors from "@fastify/cors";
 import Fastify, { type FastifyReply, type FastifyRequest } from "fastify";
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
-import { confirmedPaid, isFullyPaid, menuFor, newId, orderTotals, reduceAll, reduceOrder, shopStatus, type BusinessConfig, type ChannelKind, type OptionGroup, type OrderEvent } from "@pos/core";
+import { confirmedPaid, hourly, isFullyPaid, productMix, summarize, menuFor, newId, orderTotals, reduceAll, reduceOrder, shopStatus, type BusinessConfig, type ChannelKind, type OptionGroup, type OrderEvent } from "@pos/core";
 import { CASHIER_TOPUP_LIMIT_CENTS, audit, authenticate, authenticateAgent, can, createAgent, createConnectCode, redeemConnectCode, createStaff, listAgents, login, logout, recentAudit, revokeAgent, type Permission, type Role, type Staff } from "./auth.js";
 import type { CatalogStore, ChangeResult, PgCatalogStore } from "./catalog.js";
 import type { Db } from "./db/pool.js";
@@ -16,6 +16,7 @@ import { registerTelegram } from "./telegram.js";
 import { MemberStore } from "./members.js";
 import { FailureLimiter } from "./rateLimit.js";
 import type { EventStore, StoredEvent } from "./store.js";
+import { ensureDefaultOutlet, listFranchises, listOutlets, outletAllowed, upsertFranchise, upsertOutlet, validId, visibleOutletIds } from "./tenant.js";
 
 declare module "fastify" {
   interface FastifyRequest {
@@ -59,6 +60,8 @@ export async function buildApp({ config, store, db, catalog, catalogAdmin, print
   app.addContentTypeParser("application/x-www-form-urlencoded", { parseAs: "string" }, (_req, body, done) => done(null, body ? Object.fromEntries(new URLSearchParams(String(body))) : {}));
   await app.register(cors, { origin: true });
   const merchantId = config.businessId;
+
+  if (db) await ensureDefaultOutlet(db, merchantId, config.outletName, config.outletName);
 
   const streams = new Set<(s: StoredEvent[]) => void>();
 
@@ -108,7 +111,8 @@ export async function buildApp({ config, store, db, catalog, catalogAdmin, print
       const cat = await catalog.load();
       for (const id of orderIds) {
         const order = reduceOrder(id, await store.eventsForOrder(id));
-        if (order) await print!.enqueueForOrder(order, { catalog: cat, config, print: { merchantName: config.name, outletName: config.outletName, now: Date.now() } });
+        const outletId = (await store.outletOfOrder?.(id)) ?? undefined;
+        if (order) await print!.enqueueForOrder(order, { catalog: cat, config, print: { merchantName: config.name, outletName: config.outletName, now: Date.now() }, outletId });
       }
     } catch (err) {
       app.log.error({ err }, "could not queue prints");
@@ -147,8 +151,8 @@ export async function buildApp({ config, store, db, catalog, catalogAdmin, print
   }
 
   /** Store events, tell live screens, queue whatever now needs printing. Used for tills and for customers' orders alike. */
-  async function ingest(events: OrderEvent[]): Promise<StoredEvent[]> {
-    const added = await store.append(events);
+  async function ingest(events: OrderEvent[], outletId?: string): Promise<StoredEvent[]> {
+    const added = await store.append(events, outletId);
     if (added.length) for (const push of streams) push(added);
     const touched = [...new Set(added.map((a) => a.event.orderId))];
     if (added.length && print) await queuePrints(touched);
@@ -165,14 +169,14 @@ export async function buildApp({ config, store, db, catalog, catalogAdmin, print
       // A device may only speak for itself: it cannot plant events that claim to come from another.
       if (req.device && e.deviceId !== req.device.id) return reply.code(403).send({ error: "device_mismatch" });
     }
-    const added = await ingest(events);
-    return { accepted: events.length, stored: added.length, latestSeq: await store.latestSeq() };
+    const added = await ingest(events, req.device?.outletId);
+    return { accepted: events.length, stored: added.length, latestSeq: await store.latestSeq(req.device?.outletId) };
   });
 
   /** Devices pull everything newer than the last server sequence they have seen. */
   app.get<{ Querystring: { after?: string } }>("/api/sync/pull", { preHandler: needsDevice }, async (req) => {
     const after = Number(req.query.after ?? 0) || 0;
-    return { events: await store.after(after), latestSeq: await store.latestSeq() };
+    return { events: await store.after(after, req.device?.outletId), latestSeq: await store.latestSeq(req.device?.outletId) };
   });
 
   /** Server-sent events: nudges connected screens (kitchen, queue) the instant something changes. */
@@ -242,10 +246,10 @@ export async function buildApp({ config, store, db, catalog, catalogAdmin, print
       if (r.reason === "invalid") loginFailures.fail(who);
       return reply.code(r.reason === "locked" ? 429 : 401).send({ error: r.reason });
     }
-    return { token: r.token, expiresAt: r.expiresAt, staff: { name: r.staff.name, code: r.staff.code, role: r.staff.role } };
+    return { token: r.token, expiresAt: r.expiresAt, staff: { name: r.staff.name, code: r.staff.code, role: r.staff.role, franchiseId: r.staff.franchiseId ?? null, outletId: r.staff.outletId ?? null } };
   });
 
-  app.get("/api/auth/me", { preHandler: needs("wallet.read") }, async (req) => ({ name: req.staff!.name, code: req.staff!.code, role: req.staff!.role }));
+  app.get("/api/auth/me", { preHandler: needs("wallet.read") }, async (req) => ({ name: req.staff!.name, code: req.staff!.code, role: req.staff!.role, franchiseId: req.staff!.franchiseId ?? null, outletId: req.staff!.outletId ?? null }));
 
   app.post("/api/auth/logout", async (req) => {
     const t = bearer(req);
@@ -253,15 +257,27 @@ export async function buildApp({ config, store, db, catalog, catalogAdmin, print
     return { ok: true };
   });
 
-  app.post<{ Body: { code?: string; name?: string; role?: Role; pin?: string } }>("/api/staff", { preHandler: needs("staff.manage") }, async (req, reply) => {
+  app.post<{ Body: { code?: string; name?: string; role?: Role; pin?: string; franchiseId?: string | null; outletId?: string | null } }>("/api/staff", { preHandler: needs("staff.manage") }, async (req, reply) => {
     const b = req.body ?? {};
     if (!b.code || !b.name || !b.pin || !b.role || !["cashier", "manager", "owner"].includes(b.role)) {
       return reply.code(400).send({ error: "code, name, pin and a valid role are required" });
     }
+    // Scope: an outlet or a franchise, never both. A scoped creator can only hand out access inside their own scope.
+    const franchiseId = b.franchiseId || null;
+    const outletId = b.outletId || null;
+    if (franchiseId && outletId) return reply.code(400).send({ error: "choose a franchise or an outlet, not both" });
+    const outlets = await listOutlets(db, merchantId);
+    if (outletId && !outlets.some((o) => o.id === outletId)) return reply.code(400).send({ error: "unknown_outlet" });
+    if (franchiseId && !(await listFranchises(db, merchantId)).some((f) => f.id === franchiseId)) return reply.code(400).send({ error: "unknown_franchise" });
+    const mine = await visibleOutletIds(db, merchantId, req.staff!);
+    if (mine !== null) {
+      const granted = outletId ? [outletId] : franchiseId ? outlets.filter((o) => o.franchiseId === franchiseId).map((o) => o.id) : null;
+      if (granted === null || !granted.every((id) => mine.includes(id)) || (franchiseId && req.staff!.franchiseId !== franchiseId)) return reply.code(403).send({ error: "outside_your_scope" });
+    }
     try {
-      const s = await createStaff(db, { merchantId, code: b.code, name: b.name, role: b.role, pin: b.pin });
-      await audit(db, merchantId, req.staff!.id, "staff.create", { code: s.code, role: s.role });
-      return { code: s.code, name: s.name, role: s.role };
+      const s = await createStaff(db, { merchantId, code: b.code, name: b.name, role: b.role, pin: b.pin, franchiseId, outletId });
+      await audit(db, merchantId, req.staff!.id, "staff.create", { code: s.code, role: s.role, franchiseId, outletId });
+      return { code: s.code, name: s.name, role: s.role, franchiseId, outletId };
     } catch (e) {
       return reply.code(400).send({ error: e instanceof Error ? e.message : "could not create staff" });
     }
@@ -302,12 +318,17 @@ export async function buildApp({ config, store, db, catalog, catalogAdmin, print
   const dayOf = (ms: number) => new Date(ms).toLocaleDateString("en-CA", { timeZone: SGT });
   const hourOf = (ms: number) => Number(new Date(ms).toLocaleTimeString("en-GB", { hour: "2-digit", hour12: false, timeZone: SGT }).slice(0, 2));
   /** Orders opened between two dates (Singapore days, inclusive; default today), with lines, totals and payments. Cancelled orders are left out unless asked for. */
-  const ordersBetween = async (from?: string, to?: string, includeCancelled = false) => {
+  const ordersBetween = async (from?: string, to?: string, includeCancelled = false, outlets: string[] | null = null) => {
     const today = dayOf(Date.now());
     const a = /^\d{4}-\d{2}-\d{2}$/.test(from ?? "") ? from! : today;
     const b = /^\d{4}-\d{2}-\d{2}$/.test(to ?? "") ? to! : a;
-    const all = reduceAll((await store.after(0)).map((x) => x.event));
+    // `outlets` null = every outlet of the brand. Events carry their outlet; the single-outlet JSON store carries none and passes through.
+    const stored = (await store.afterAll(0)).filter((x) => outlets === null || !x.outletId || outlets.includes(x.outletId));
+    const outletOf = new Map<string, string>();
+    for (const x of stored) if (x.outletId && !outletOf.has(x.event.orderId)) outletOf.set(x.event.orderId, x.outletId);
+    const all = reduceAll(stored.map((x) => x.event));
     return {
+      outletOf,
       from: a,
       to: b,
       orders: all
@@ -316,28 +337,45 @@ export async function buildApp({ config, store, db, catalog, catalogAdmin, print
     };
   };
 
-  const ordersReport = async (fromDate?: string, toDate?: string, includeCancelled = false) => {
-    const { from, to, orders } = await ordersBetween(fromDate, toDate, includeCancelled);
+  const ordersReport = async (fromDate?: string, toDate?: string, includeCancelled = false, outlets: string[] | null = null) => {
+    const { from, to, orders, outletOf } = await ordersBetween(fromDate, toDate, includeCancelled, outlets);
     return {
       from, to, count: orders.length,
       orders: orders.map((o) => {
         const t = orderTotals(o, config);
         return {
-          orderId: o.orderId, queueNumber: o.queueNumber ?? null, openedAt: new Date(o.openedAt).toISOString(), day: dayOf(o.openedAt), hour: hourOf(o.openedAt),
+          orderId: o.orderId, outletId: outletOf.get(o.orderId) ?? null, queueNumber: o.queueNumber ?? null, openedAt: new Date(o.openedAt).toISOString(), day: dayOf(o.openedAt), hour: hourOf(o.openedAt),
           channel: o.channelName ?? o.fulfilment, source: o.source, table: o.spot ?? null, stage: o.stage,
           customerName: o.customerName ?? null, customerPhone: o.customerPhone ?? null, memberId: o.memberId ?? null,
           lines: o.lines.filter((l) => l.qty > 0).map((l) => ({ productId: l.productId, name: l.name, qty: l.qty, unitCents: l.unitCents, options: (l.options ?? []).map((x) => x.name) })),
-          subtotalCents: t.subtotal, serviceCents: t.service, totalCents: t.total, paidCents: confirmedPaid(o),
+          subtotalCents: t.subtotal, serviceCents: t.service, gstCents: t.gst, bcrsCents: t.bcrs, couponCents: t.couponDiscount, pointsCents: t.pointsDiscount, totalCents: t.total, paidCents: confirmedPaid(o),
+          closedAt: o.closedAt ? new Date(o.closedAt).toISOString() : null,
           payments: o.payments.filter((p) => p.confirmed).map((p) => ({ method: p.method, amountCents: p.amountCents })),
         };
       }),
     };
   };
-  app.get<{ Querystring: { from?: string; to?: string; cancelled?: string } }>("/api/reports/orders", { preHandler: needs("audit.read") }, async (req) => ordersReport(req.query.from, req.query.to, req.query.cancelled === "1"));
+  /**
+   * Which outlets a report may cover for this login: its own scope, narrowed to ?outlet= when one is asked for.
+   * `null` = every outlet of the brand; "denied" = an outlet outside the login's scope was asked for.
+   */
+  const reportScope = async (staff: NonNullable<FastifyRequest["staff"]>, asked?: string): Promise<string[] | null | "denied"> => {
+    const visible = await visibleOutletIds(db, merchantId, staff);
+    if (!asked) return visible;
+    return outletAllowed(visible, asked) ? [asked] : "denied";
+  };
+
+  app.get<{ Querystring: { from?: string; to?: string; cancelled?: string; outlet?: string } }>("/api/reports/orders", { preHandler: needs("audit.read") }, async (req, reply) => {
+    const scope = await reportScope(req.staff!, req.query.outlet);
+    if (scope === "denied") return reply.code(403).send({ error: "outside_your_scope" });
+    return ordersReport(req.query.from, req.query.to, req.query.cancelled === "1", scope);
+  });
 
   /** Sales summary for a date range: totals, by day, by hour, by channel, and products ranked. */
-  const salesReport = async (fromDate?: string, toDate?: string) => {
-    const { from, to, orders } = await ordersBetween(fromDate, toDate);
+  const salesReport = async (fromDate?: string, toDate?: string, outlets: string[] | null = null) => {
+    const { from, to, orders } = await ordersBetween(fromDate, toDate, false, outlets);
+    const everyOne = (await ordersBetween(fromDate, toDate, true, outlets)).orders;
+    const cat = new Map((await catalog.load()).products.map((x) => [x.id, x.category]));
     const days = new Map<string, { orders: number; cents: number }>();
     const hours = new Map<number, { orders: number; cents: number }>();
     const channels = new Map<string, { orders: number; cents: number }>();
@@ -357,12 +395,73 @@ export async function buildApp({ config, store, db, catalog, catalogAdmin, print
     }
     const list = <K>(m: Map<K, { orders: number; cents: number }>, key: string) => [...m].sort((a, b) => (a[0] < b[0] ? -1 : 1)).map(([k, v]) => ({ [key]: k, orders: v.orders, cents: v.cents }));
     return {
+      summary: summarize(everyOne, config), hourly: hourly(orders, config), mix: productMix(orders, (id) => cat.get(id) ?? ""),
       from, to, orders: orders.length, items, subtotalCents: subtotal, serviceCents: service, grossCents: gross, averageOrderCents: orders.length ? Math.round(gross / orders.length) : 0,
       byDay: list(days, "day"), byHour: list(hours, "hour"), byChannel: [...channels].sort((a, b) => (a[0] < b[0] ? -1 : 1)).map(([channel, v]) => ({ channel, orders: v.orders, cents: v.cents })),
       products: [...products].map(([name, v]) => ({ name, qty: v.qty, cents: v.cents })).sort((a, b) => b.qty - a.qty || b.cents - a.cents),
     };
   };
-  app.get<{ Querystring: { from?: string; to?: string } }>("/api/reports/sales", { preHandler: needs("audit.read") }, async (req) => salesReport(req.query.from, req.query.to));
+  app.get<{ Querystring: { from?: string; to?: string; outlet?: string } }>("/api/reports/sales", { preHandler: needs("audit.read") }, async (req, reply) => {
+    const scope = await reportScope(req.staff!, req.query.outlet);
+    if (scope === "denied") return reply.code(403).send({ error: "outside_your_scope" });
+    return salesReport(req.query.from, req.query.to, scope);
+  });
+
+  /** One row per outlet this login may see, with the sales summary of each and a total: the brand owner's roll-up. */
+  app.get<{ Querystring: { from?: string; to?: string } }>("/api/reports/outlets", { preHandler: needs("audit.read") }, async (req) => {
+    const visible = await visibleOutletIds(db, merchantId, req.staff!);
+    const all = await listOutlets(db, merchantId);
+    const mine = all.filter((o) => outletAllowed(visible, o.id));
+    const { from, to } = await ordersBetween(req.query.from, req.query.to);
+    const rows = [];
+    for (const o of mine) rows.push({ outletId: o.id, name: o.name, franchiseId: o.franchiseId, summary: summarize((await ordersBetween(req.query.from, req.query.to, true, [o.id])).orders, config) });
+    return { from, to, outlets: rows, total: summarize((await ordersBetween(req.query.from, req.query.to, true, mine.map((o) => o.id))).orders, config) };
+  });
+
+  // ---- brands, franchises and outlets --------------------------------------------------------
+
+  /** The franchises and outlets this login may see. The brand owner sees all; a franchise login its franchise; an outlet login its outlet. */
+  app.get("/api/outlets", { preHandler: needs("wallet.read") }, async (req) => {
+    const visible = await visibleOutletIds(db, merchantId, req.staff!);
+    const outlets = (await listOutlets(db, merchantId)).filter((o) => outletAllowed(visible, o.id));
+    const franchises = (await listFranchises(db, merchantId)).filter((f) => visible === null || outlets.some((o) => o.franchiseId === f.id));
+    return { brand: { id: merchantId, name: config.name }, scope: { franchiseId: req.staff!.franchiseId ?? null, outletId: req.staff!.outletId ?? null, brandWide: visible === null }, franchises, outlets };
+  });
+
+  app.put<{ Params: { id: string }; Body: { name?: string; active?: boolean } }>("/api/franchises/:id", { preHandler: needs("staff.manage") }, async (req, reply) => {
+    if ((await visibleOutletIds(db, merchantId, req.staff!)) !== null) return reply.code(403).send({ error: "brand_only" });
+    const name = String(req.body?.name ?? "").trim().slice(0, 60);
+    if (!validId(req.params.id) || !name) return reply.code(400).send({ error: "a valid id and a name are required" });
+    await upsertFranchise(db, merchantId, { id: req.params.id, name, active: req.body?.active !== false });
+    await audit(db, merchantId, req.staff!.id, "franchise.save", { id: req.params.id, name });
+    return { ok: true };
+  });
+
+  /**
+   * Create or change an outlet. Adding an outlet, moving it between franchises and switching it off are for the brand owner;
+   * a manager of an outlet (or of its franchise) can update its name, address, phone and opening hours.
+   */
+  app.put<{ Params: { id: string }; Body: { name?: string; franchiseId?: string | null; address?: string | null; phone?: string | null; hours?: string | null; active?: boolean } }>("/api/outlets/:id", { preHandler: needs("device.manage") }, async (req, reply) => {
+    const visible = await visibleOutletIds(db, merchantId, req.staff!);
+    const id = req.params.id;
+    const b = req.body ?? {};
+    const name = String(b.name ?? "").trim().slice(0, 60);
+    if (!validId(id) || !name) return reply.code(400).send({ error: "a valid id and a name are required" });
+    const existing = (await listOutlets(db, merchantId)).find((o) => o.id === id);
+    if (!outletAllowed(visible, id)) return reply.code(403).send({ error: "outside_your_scope" });
+    const text = (v: unknown, max: number) => (v == null || String(v).trim() === "" ? null : String(v).trim().slice(0, max));
+    let franchiseId = existing?.franchiseId ?? null;
+    let active = existing?.active ?? true;
+    if (!existing || b.franchiseId !== undefined || b.active !== undefined) {
+      if (visible !== null) return reply.code(403).send({ error: "brand_only" });
+      if (b.franchiseId !== undefined) franchiseId = b.franchiseId || null;
+      if (b.active !== undefined) active = b.active !== false;
+      if (franchiseId && !(await listFranchises(db, merchantId)).some((f) => f.id === franchiseId)) return reply.code(400).send({ error: "unknown_franchise" });
+    }
+    await upsertOutlet(db, merchantId, { id, name, franchiseId, address: text(b.address, 200), phone: text(b.phone, 40), hours: text(b.hours, 120), active });
+    await audit(db, merchantId, req.staff!.id, "outlet.save", { id, name, franchiseId, created: !existing });
+    return { ok: true };
+  });
 
   // ---- agents: limited API access for an AI helper or script (owner only) ---------------------
 
@@ -401,16 +500,26 @@ export async function buildApp({ config, store, db, catalog, catalogAdmin, print
     return { token: r.token, deviceId: r.device.id, outletId: r.device.outletId };
   });
 
-  app.post<{ Body: { deviceId?: string; testing?: boolean } }>("/api/devices/enrollment", { preHandler: needs("device.manage") }, async (req) => {
-    const c = await createEnrollmentCode(db, { merchantId, outletId: config.outletName, createdBy: req.staff!.id, deviceId: req.body?.deviceId, testing: !!req.body?.testing });
+  app.post<{ Body: { deviceId?: string; testing?: boolean; outletId?: string } }>("/api/devices/enrollment", { preHandler: needs("device.manage") }, async (req, reply) => {
+    // A new device is enrolled at an outlet: the one asked for, or the login's own outlet, or the default one.
+    const visible = await visibleOutletIds(db, merchantId, req.staff!);
+    const outletId = req.body?.outletId || (visible && visible.length === 1 ? visible[0]! : config.outletName);
+    if (!(await listOutlets(db, merchantId)).some((o) => o.id === outletId)) return reply.code(400).send({ error: "unknown_outlet" });
+    if (!outletAllowed(visible, outletId)) return reply.code(403).send({ error: "outside_your_scope" });
+    const c = await createEnrollmentCode(db, { merchantId, outletId, createdBy: req.staff!.id, deviceId: req.body?.deviceId, testing: !!req.body?.testing });
     await audit(db, merchantId, req.staff!.id, "device.code", { reissue: req.body?.deviceId ?? null, testing: !!req.body?.testing });
     return c;
   });
 
-  app.get("/api/devices", { preHandler: needs("device.manage") }, async () => ({ devices: await listDevices(db, merchantId) }));
+  app.get("/api/devices", { preHandler: needs("device.manage") }, async (req) => {
+    const visible = await visibleOutletIds(db, merchantId, req.staff!);
+    return { devices: (await listDevices(db, merchantId)).filter((d) => outletAllowed(visible, d.outlet_id as string)) };
+  });
 
   app.post<{ Params: { id: string } }>("/api/devices/:id/revoke", { preHandler: needs("device.manage") }, async (req, reply) => {
     if (req.params.id === req.device!.id) return reply.code(400).send({ error: "cannot_revoke_this_device" });
+    const target = (await listDevices(db, merchantId)).find((d) => d.id === req.params.id);
+    if (target && !outletAllowed(await visibleOutletIds(db, merchantId, req.staff!), target.outlet_id as string)) return reply.code(403).send({ error: "outside_your_scope" });
     const ok = await revokeDevice(db, merchantId, req.params.id);
     if (!ok) return reply.code(404).send({ error: "not_found_or_already_revoked" });
     await audit(db, merchantId, req.staff!.id, "device.revoke", { deviceId: req.params.id });
@@ -424,6 +533,8 @@ export async function buildApp({ config, store, db, catalog, catalogAdmin, print
     const cat = catalogAdmin;
     /** Run a change, audit it with who/what/old→new, and answer with the new catalog version. */
     const changed = async (req: FastifyRequest, reply: FastifyReply, action: string, run: () => Promise<ChangeResult>) => {
+      // The menu and prices belong to the brand: a franchise or outlet login can read them but not change them.
+      if ((await visibleOutletIds(db, merchantId, req.staff!)) !== null) return reply.code(403).send({ error: "brand_only" });
       const r = await run();
       if (!r.ok) return reply.code(400).send({ error: "invalid_change", problems: r.problems });
       await audit(db, merchantId, req.staff!.id, `catalog.${action}`, r.detail);
@@ -564,7 +675,10 @@ export async function buildApp({ config, store, db, catalog, catalogAdmin, print
     const queue = print;
     const manage = { preHandler: needs("print.manage") };
 
-    app.get("/api/printers", manage, async () => ({ printers: await queue.listPrinters() }));
+    app.get("/api/printers", manage, async (req) => {
+      const visible = await visibleOutletIds(db, merchantId, req.staff!);
+      return { printers: (await queue.listPrinters()).filter((p) => outletAllowed(visible, p.outletId)) };
+    });
 
     app.put<{ Params: { id: string }; Body: Partial<Printer> }>("/api/printers/:id", manage, async (req, reply) => {
       const b = req.body ?? {};
@@ -589,21 +703,31 @@ export async function buildApp({ config, store, db, catalog, catalogAdmin, print
       };
       const problems = validatePrinter(p);
       if (problems.length) return reply.code(400).send({ error: "invalid_printer", problems });
+      const visible = await visibleOutletIds(db, merchantId, req.staff!);
+      const existing = (await queue.listPrinters()).find((x) => x.id === p.id);
+      if (!outletAllowed(visible, p.outletId) || (existing && !outletAllowed(visible, existing.outletId))) return reply.code(403).send({ error: "outside_your_scope" });
       await queue.savePrinter(p);
       await audit(db, merchantId, req.staff!.id, "printer.save", { id: p.id, name: p.name, roles: p.roles });
       return { ok: true };
     });
 
     app.post<{ Params: { id: string } }>("/api/printers/:id/test", manage, async (req, reply) => {
+      const mineOnly = await visibleOutletIds(db, merchantId, req.staff!);
+      const target = (await queue.listPrinters()).find((x) => x.id === req.params.id);
+      if (target && !outletAllowed(mineOnly, target.outletId)) return reply.code(403).send({ error: "outside_your_scope" });
       const ok = await queue.testPage(req.params.id, Date.now());
       return ok ? { ok: true } : reply.code(404).send({ error: "printer_not_found" });
     });
 
-    app.get<{ Querystring: { status?: string; limit?: string; offset?: string; title?: string; orderId?: string } }>("/api/print/jobs", manage, async (req) => ({
-      jobs: await queue.listJobs(req.query.status, Number(req.query.limit) || 100, { offset: Number(req.query.offset) || 0, title: req.query.title || undefined, orderId: req.query.orderId || undefined }),
-    }));
+    app.get<{ Querystring: { status?: string; limit?: string; offset?: string; title?: string; orderId?: string } }>("/api/print/jobs", manage, async (req) => {
+      const visible = await visibleOutletIds(db, merchantId, req.staff!);
+      const jobs = await queue.listJobs(req.query.status, Number(req.query.limit) || 100, { offset: Number(req.query.offset) || 0, title: req.query.title || undefined, orderId: req.query.orderId || undefined });
+      return { jobs: jobs.filter((j) => outletAllowed(visible, j.outlet_id as string)) };
+    });
 
     app.post<{ Params: { id: string } }>("/api/print/jobs/:id/retry", manage, async (req, reply) => {
+      const jobOutlet = await queue.jobOutlet(req.params.id);
+      if (jobOutlet && !outletAllowed(await visibleOutletIds(db, merchantId, req.staff!), jobOutlet)) return reply.code(403).send({ error: "outside_your_scope" });
       const ok = await queue.retryFailed(req.params.id);
       if (ok) await audit(db, merchantId, req.staff!.id, "print.retry", { jobId: req.params.id });
       return ok ? { ok: true } : reply.code(404).send({ error: "not_a_failed_job" });
@@ -621,7 +745,9 @@ export async function buildApp({ config, store, db, catalog, catalogAdmin, print
       if (!orderId || (docType !== "receipt" && docType !== "kitchen")) return reply.code(400).send({ error: "orderId and docType (receipt or kitchen) required" });
       const order = reduceOrder(orderId, await store.eventsForOrder(orderId));
       if (!order) return reply.code(404).send({ error: "order_not_found" });
-      const queued = await queue.reprint(order, docType, { catalog: await catalog.load(), config, print: { merchantName: config.name, outletName: config.outletName, now: Date.now() } }, printerId);
+      const orderOutlet = (await store.outletOfOrder?.(orderId)) ?? undefined;
+      if (orderOutlet && !outletAllowed(await visibleOutletIds(db, merchantId, req.staff!), orderOutlet)) return reply.code(403).send({ error: "outside_your_scope" });
+      const queued = await queue.reprint(order, docType, { catalog: await catalog.load(), config, print: { merchantName: config.name, outletName: config.outletName, now: Date.now() }, outletId: orderOutlet }, printerId);
       await audit(db, merchantId, req.staff!.id, "print.reprint", { orderId, docType, queued });
       return queued ? { queued } : reply.code(409).send({ error: "no_printer_for_this" });
     });

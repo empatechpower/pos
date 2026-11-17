@@ -15,3 +15,4 @@ export * from "./shop.js";
 export * from "./options.js";
 export * from "./tab.js";
 export * from "./print/raster.js";
+export * from "./reports.js";
