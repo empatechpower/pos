@@ -84,6 +84,8 @@ interface MemberView {
   /** Credit is frozen and this member is not on the allowed list: they cannot spend it. */
   creditBlocked?: boolean;
 }
+/** The customer's choice to be alerted when an order moves on. On unless they switched it off. Kept on this phone. */
+const LS_ORDER_UPDATES = "pos.pref.orderUpdates";
 const params = () => new URLSearchParams(location.hash.split("?")[1] ?? "");
 const orderIdFromHash = () => /^#\/shop\/order\/([\w-]+)/.exec(location.hash)?.[1] ?? null;
 
@@ -464,6 +466,7 @@ function Menu({ info, catalog, config, loginError, recheck }: { info: Info; cata
   const [guestForm, setGuestForm] = useState(false);
   const [acctPanel, setAcctPanel] = useState<null | "profile" | "help" | "notif" | "prefs">(null);
   const [langOpen, setLangOpen] = useState(false);
+  const [orderUpdatesOn, setOrderUpdatesOn] = useState(() => localStorage.getItem(LS_ORDER_UPDATES) !== "0");
   const langBox = useDialog(langOpen, () => setLangOpen(false));
   const walletBox = useDialog(wallet, () => setWallet(false));
   const tableBox = useDialog(tableEdit && tableList.length > 0, () => setTableEdit(false));
@@ -1137,7 +1140,22 @@ function Menu({ info, catalog, config, loginError, recheck }: { info: Info; cata
             <button className="e2e-back" onClick={() => setAcctPanel(null)}><Icon name="chevL" size={16} /> {t("backToAccount", "Back to Account")}</button>
             <div className="e2e-card">
               <h3>{t("preferences", "Preferences")}</h3>
-              <button className="sum-link-row" onClick={() => setLangOpen(true)}><span className="sl-ic"><Icon name="globe" size={21} /></span><span className="sl-t">{t("language", "Language")}<span className="sl-d">{t("langLeadShort", "Auto-selects from your phone settings.")}</span></span><span className="sl-v">{LANGS.find((l) => l.code === lang())!.native}</span><span className="chev"><Icon name="chevR" size={16} /></span></button>
+              <button className="sum-link-row" onClick={() => setLangOpen(true)}><span className="sl-ic"><Icon name="globe" size={21} /></span><span className="sl-t">{t("language", "Language")}<span className="sl-d">{t("langLeadShort", "App language")}</span></span><span className="sl-v">{LANGS.find((l) => l.code === lang())!.native}{langMode() === "auto" ? ` · ${t("autoShort", "Auto")}` : ""}</span><span className="chev"><Icon name="chevR" size={16} /></span></button>
+              {/* Order updates: the browser alert when an order is ready. It does nothing by email. Offers & rewards news only shows where rewards are on, so it never promises what this shop does not send. */}
+              <div className="pref-row">
+                <span className="pref-t"><b>{t("prefNotifT", "Order updates")}</b><small>{t("prefNotifD", "Get notified when your order moves to Preparing and Ready.")}</small></span>
+                <button type="button" role="switch" aria-checked={orderUpdatesOn} className={`set-switch ${orderUpdatesOn ? "is-on" : ""}`} onClick={() => { const next = !orderUpdatesOn; localStorage.setItem(LS_ORDER_UPDATES, next ? "1" : "0"); setOrderUpdatesOn(next); if (member) void savePref("orderUpdates", next); }}>
+                  <span className="sw-word">{orderUpdatesOn ? t("onW", "On") : t("offW", "Off")}</span><span className="sw-track"><span className="sw-knob" /></span>
+                </button>
+              </div>
+              {rewardsOn && member && (
+                <div className="pref-row">
+                  <span className="pref-t"><b>{t("prefPromoT", "Offers & rewards news")}</b><small>{t("prefPromoD", "New promotions, coupons and stamp-card news from this outlet.")}</small></span>
+                  <button type="button" role="switch" aria-checked={member.prefs?.promos === true} className={`set-switch ${member.prefs?.promos === true ? "is-on" : ""}`} onClick={() => void savePref("promos", !(member.prefs?.promos === true))}>
+                    <span className="sw-word">{member.prefs?.promos === true ? t("onW", "On") : t("offW", "Off")}</span><span className="sw-track"><span className="sw-knob" /></span>
+                  </button>
+                </div>
+              )}
             </div>
           </>
         ) : acctPanel === "help" ? (
@@ -1783,7 +1801,7 @@ function Status({ orderId, info }: { orderId: string; info: Info }) {
   const [refreshing, setRefreshing] = useState(false);
   // Ready alert: best effort. It works while this page is open (even in the background for a while), not when the phone has closed it.
   const canAlert = typeof Notification !== "undefined";
-  const [alertOn, setAlertOn] = useState(() => canAlert && Notification.permission === "granted" && localStorage.getItem(`pos.alert.${orderId}`) === "1");
+  const [alertOn, setAlertOn] = useState(() => canAlert && Notification.permission === "granted" && (localStorage.getItem(`pos.alert.${orderId}`) === "1" || localStorage.getItem(LS_ORDER_UPDATES) !== "0"));
   const lastStatus = useRef<ShopStatus | null>(null);
 
   const load = async () => {
@@ -1793,7 +1811,7 @@ function Status({ orderId, info }: { orderId: string; info: Info }) {
       if (!res.ok) return setProblem(tx("Couldn't refresh. Retrying…"));
       const next = (await res.json()) as OrderView;
       // The moment it turns ready, tell the customer if they asked to be told.
-      if (next.status === "ready" && lastStatus.current && lastStatus.current !== "ready" && localStorage.getItem(`pos.alert.${orderId}`) === "1" && canAlert && Notification.permission === "granted") {
+      if (next.status === "ready" && lastStatus.current && lastStatus.current !== "ready" && (localStorage.getItem(`pos.alert.${orderId}`) === "1" || localStorage.getItem(LS_ORDER_UPDATES) !== "0") && canAlert && Notification.permission === "granted") {
         try { new Notification(tx("Your order is ready"), { body: tx("Collect number {n} at the counter.", { n: next.queueNumber }), tag: `ready-${orderId}` }); } catch { /* the phone may refuse; the page still shows it */ }
         try { navigator.vibrate?.([200, 100, 200]); } catch { /* not every phone can */ }
       }
