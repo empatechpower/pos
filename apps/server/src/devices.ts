@@ -6,6 +6,10 @@ const sha256 = (s: string) => createHash("sha256").update(s).digest("hex");
 export const ENROLLMENT_MINUTES = 15;
 export const TESTING_CODE_MINUTES = 240;
 export const TESTING_CODE_USES = 25;
+// A code for an app-store reviewer: reviewers cannot ask for a fresh one and may look days later, so it lasts weeks and takes many
+// devices. Made only for a dedicated review outlet (never a real shop) and ended as soon as the review is over.
+export const REVIEWER_CODE_DAYS = 60;
+export const REVIEWER_CODE_USES = 200;
 // No 0/O/1/I/L: a code read aloud or typed from a screen should not be ambiguous.
 const ALPHABET = "ABCDEFGHJKMNPQRSTUVWXYZ23456789";
 
@@ -29,13 +33,15 @@ const newCode = () =>
 /** A manager or owner creates a one-time code and types or shows it on the new device. */
 export async function createEnrollmentCode(
   db: Db,
-  i: { merchantId: string; outletId: string; createdBy: string | null; deviceId?: string; testing?: boolean },
+  i: { merchantId: string; outletId: string; createdBy: string | null; deviceId?: string; testing?: boolean; reviewer?: boolean },
 ): Promise<{ code: string; expiresAt: Date; maxUses: number }> {
   const code = newCode();
   // A testing code enrols many devices over a few hours, for setting up lots of phones and tablets at once. Never for a re-issue.
   const testing = !!i.testing && !i.deviceId;
-  const expiresAt = new Date(Date.now() + (testing ? TESTING_CODE_MINUTES : ENROLLMENT_MINUTES) * 60_000);
-  const maxUses = testing ? TESTING_CODE_USES : 1;
+  const reviewer = !!i.reviewer && !i.deviceId;
+  const minutes = reviewer ? REVIEWER_CODE_DAYS * 24 * 60 : testing ? TESTING_CODE_MINUTES : ENROLLMENT_MINUTES;
+  const expiresAt = new Date(Date.now() + minutes * 60_000);
+  const maxUses = reviewer ? REVIEWER_CODE_USES : testing ? TESTING_CODE_USES : 1;
   await db.query(
     "INSERT INTO enrollment_codes (code_hash, merchant_id, outlet_id, device_id, created_by, expires_at, max_uses) VALUES ($1,$2,$3,$4,$5,$6,$7)",
     [sha256(code), i.merchantId, i.outletId, i.deviceId ?? null, i.createdBy, expiresAt, maxUses],
@@ -148,4 +154,10 @@ export function redeemStreamTicket(ticket: string | undefined): Device | null {
   const t = tickets.get(ticket);
   tickets.delete(ticket);
   return t && t.expires > Date.now() ? t.device : null;
+}
+
+/** End every code still open for an outlet (used when an app-store review is over). Returns how many were ended. */
+export async function revokeEnrollmentCodes(db: Db, merchantId: string, outletId: string): Promise<number> {
+  const r = await db.query("UPDATE enrollment_codes SET expires_at = now() WHERE merchant_id=$1 AND outlet_id=$2 AND used_at IS NULL AND expires_at > now()", [merchantId, outletId]);
+  return r.rowCount ?? 0;
 }

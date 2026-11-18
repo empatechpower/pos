@@ -1,13 +1,14 @@
 /**
  * Create the first staff account (or any later one) straight from the terminal:
  *   DATABASE_URL=... npx tsx src/cli.ts create-staff <code> <name> <cashier|manager|owner> <pin>
- *   DATABASE_URL=... npx tsx src/cli.ts enrollment-code [OUTLET-ID] [testing]
+ *   DATABASE_URL=... npx tsx src/cli.ts enrollment-code [OUTLET-ID] [testing|reviewer]
+ *   DATABASE_URL=... npx tsx src/cli.ts revoke-enrollment-codes OUTLET-ID
  * (OUTLET-ID is the short code from Manager > Outlets; left out, the tablet joins the original outlet)
  * prints a one-time code for the very first device. Later codes come from a manager on an enrolled device.
  */
 import { PRESETS } from "@pos/core";
 import { createStaff, type Role } from "./auth.js";
-import { createEnrollmentCode } from "./devices.js";
+import { createEnrollmentCode, revokeEnrollmentCodes } from "./devices.js";
 import { createPool, migrate } from "./db/pool.js";
 import { ensureDefaultOutlet } from "./tenant.js";
 
@@ -28,15 +29,18 @@ if (cmd === "create-staff" && code && name && role && pin) {
   console.log(`created ${s.role} ${s.name} (${s.code})`);
 } else if (cmd === "enrollment-code") {
   const testing = extra.includes("testing");
-  const outletId = extra.find((x) => x !== "testing") ?? config.outletName;
+  const reviewer = extra.includes("reviewer");
+  const outletId = extra.find((x) => x !== "testing" && x !== "reviewer") ?? config.outletName;
   const known = (await db.query("SELECT 1 FROM outlets WHERE merchant_id=$1 AND id=$2 AND active", [config.businessId, outletId])).rowCount;
   if (!known) {
     console.error(`No open outlet "${outletId}". Add it first under Manager > Outlets.`);
     await db.end();
     process.exit(1);
   }
-  const c = await createEnrollmentCode(db, { merchantId: config.businessId, outletId, createdBy: null, testing });
+  const c = await createEnrollmentCode(db, { merchantId: config.businessId, outletId, createdBy: null, testing, reviewer });
   console.log(`for outlet: ${outletId}`);
   console.log(`enrollment code: ${c.code}  (${c.maxUses === 1 ? "one use" : `${c.maxUses} devices`}, expires ${c.expiresAt.toISOString()})`);
+} else if (cmd === "revoke-enrollment-codes" && code) {
+  console.log(`ended ${await revokeEnrollmentCodes(db, config.businessId, code)} open code(s) for outlet ${code}`);
 } else usage();
 await db.end();
