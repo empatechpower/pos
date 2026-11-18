@@ -74,10 +74,10 @@
 
 /* menu: a fixed header and an inner scrolling list */
 .k-menu { position: relative; height: 100dvh; display: flex; flex-direction: column; overflow: hidden;
-  --cb-pad-t: 9px; --cb-pad-x: 12px; --cb-pad-b: 10px; --cb-gap: 2px; --cb-nm: 17.5px; --cb-from: 13.5px; --cb-price: 21px; --cb-pr-pt: 6px; --cb-ctl-h: 52px; --cb-step: 44px; --cb-qty: 30px; }
-.k-menu[data-fit="1"] { --cb-pad-t: 7px; --cb-pad-x: 10px; --cb-pad-b: 8px; --cb-nm: 16.5px; --cb-price: 19.5px; --cb-pr-pt: 4px; --cb-ctl-h: 48px; --cb-step: 40px; --cb-qty: 26px; }
-.k-menu[data-fit="2"] { --cb-pad-t: 6px; --cb-pad-x: 9px; --cb-pad-b: 7px; --cb-nm: 15.5px; --cb-from: 12px; --cb-price: 18px; --cb-pr-pt: 3px; --cb-ctl-h: 44px; --cb-step: 36px; --cb-qty: 24px; }
-.k-menu[data-fit="3"] { --cb-pad-t: 5px; --cb-pad-x: 8px; --cb-pad-b: 6px; --cb-gap: 1px; --cb-nm: 14.5px; --cb-from: 11px; --cb-price: 16.5px; --cb-pr-pt: 2px; --cb-ctl-h: 40px; --cb-step: 34px; --cb-qty: 22px; }
+  --cb-pad-t: 7px; --cb-pad-x: 10px; --cb-pad-b: 8px; --cb-gap: 2px; --cb-nm: 17.5px; --cb-from: 13.5px; --cb-price: 21px; --cb-pr-pt: 3px; --cb-ctl-h: 52px; --cb-step: 44px; --cb-qty: 30px; }
+.k-menu[data-fit="1"] { --cb-pad-t: 5px; --cb-pad-b: 6px; --cb-gap: 1px; --cb-nm: 16.5px; --cb-from: 12.5px; --cb-price: 19.5px; --cb-pr-pt: 2px; --cb-ctl-h: 46px; --cb-step: 38px; --cb-qty: 26px; }
+.k-menu[data-fit="2"] { --cb-pad-t: 4px; --cb-pad-b: 5px; --cb-gap: 0px; --cb-nm: 15.5px; --cb-from: 12px; --cb-price: 18px; --cb-pr-pt: 1px; --cb-ctl-h: 42px; --cb-step: 34px; --cb-qty: 24px; }
+.k-menu[data-fit="3"] { --cb-pad-t: 3px; --cb-pad-b: 4px; --cb-gap: 0px; --cb-nm: 14.5px; --cb-from: 11.5px; --cb-price: 17px; --cb-pr-pt: 0px; --cb-ctl-h: 38px; --cb-step: 30px; --cb-qty: 20px; }
 .k-head { flex: none; background: #fffefb; }
 .k-top { display: flex; align-items: center; gap: 14px; padding: 12px 18px; min-height: 84px; flex-wrap: nowrap; border-bottom: 2px solid var(--line); }
 .k-brandlock { display: flex; align-items: center; gap: 12px; min-width: 0; flex: 1 1 auto; overflow: hidden; }
@@ -290,7 +290,6 @@
   .k-number b { font-size: 64px; }
 }
 @media (min-width: 561px) and (max-height: 820px) {
-  .k-menu { --cb-ctl-h: 48px; --cb-step: 42px; --cb-qty: 30px; }
   .k-grid { gap: 12px; }
   .k-sec { padding-top: 12px; }
   .k-sec h3 { font-size: 23px; margin-bottom: 8px; }
