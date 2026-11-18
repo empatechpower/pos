@@ -77,10 +77,12 @@ class Http(private val baseUrl: String) {
             conn.connectTimeout = 10_000
             conn.readTimeout = 20_000
             if (token != null) conn.setRequestProperty("x-device-token", token)
-            if (json != null) {
+            // A POST always carries a JSON body, even an empty one: left alone, Android labels a body-less POST as a form and the server refused it.
+            val body = json ?: if (method == "POST") JSONObject() else null
+            if (body != null) {
                 conn.setRequestProperty("content-type", "application/json")
                 conn.doOutput = true
-                conn.outputStream.use { it.write(json.toString().toByteArray(Charsets.UTF_8)) }
+                conn.outputStream.use { it.write(body.toString().toByteArray(Charsets.UTF_8)) }
             }
             val status = conn.responseCode
             val stream = if (status in 200..299) conn.inputStream else conn.errorStream

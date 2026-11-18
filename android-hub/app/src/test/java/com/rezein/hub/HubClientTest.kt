@@ -19,6 +19,8 @@ import kotlin.concurrent.thread
 class MiniHttp(private val handler: (path: String, body: String) -> Pair<Int, String>) {
     private val ss = ServerSocket(0, 20, java.net.InetAddress.getByName("127.0.0.1"))
     val port: Int get() = ss.localPort
+    /** Every request received: path, content type, body. */
+    val seen = CopyOnWriteArrayList<Triple<String, String, String>>()
     init {
         thread(isDaemon = true) {
             try {
@@ -31,8 +33,10 @@ class MiniHttp(private val handler: (path: String, body: String) -> Pair<Int, St
                             val request = line()
                             if (request.isEmpty()) return@use
                             var length = 0
-                            while (true) { val h = line(); if (h.isEmpty()) break; if (h.lowercase().startsWith("content-length:")) length = h.substringAfter(":").trim().toInt() }
+                            var contentType = ""
+                            while (true) { val h = line(); if (h.isEmpty()) break; if (h.lowercase().startsWith("content-length:")) length = h.substringAfter(":").trim().toInt(); if (h.lowercase().startsWith("content-type:")) contentType = h.substringAfter(":").trim() }
                             val body = String(input.readNBytes(length), Charsets.UTF_8)
+                            seen.add(Triple(request.split(" ")[1], contentType, body))
                             val (status, reply) = handler(request.split(" ")[1], body)
                             val bytes = reply.toByteArray()
                             s.getOutputStream().write("HTTP/1.1 $status X\r\ncontent-type: application/json\r\ncontent-length: ${bytes.size}\r\nconnection: close\r\n\r\n".toByteArray() + bytes)
@@ -108,8 +112,18 @@ class HubClientTest {
         assertEquals(RunResult(1, 0), r)
         Thread.sleep(200)
         assertTrue(got().contains("KITCHEN TICKET 42"))
-        assertEquals(listOf(Triple("j1", "done", "")), reports.toList())
+        assertEquals(listOf(Triple("j1", "done", "{}")), reports.toList()) // a "done" report has nothing to say, and still sends an empty JSON body
         assertEquals(RunResult(0, 0), client().runOnce()) // nothing left, nothing printed twice
+    }
+
+    @Test fun aPostWithNothingToSendStillCarriesAnEmptyJsonBody() {
+        // Android labels a body-less POST as a form, which the server refuses. Every POST must say it is JSON, even when empty.
+        val (port, _) = printer()
+        pending.add(job("j1", "kitchen", port, "X"))
+        client().runOnce()
+        val done = server.seen.first { it.first == "/api/print/jobs/j1/done" }
+        assertEquals("application/json", done.second)
+        assertEquals("{}", done.third)
     }
 
     @Test fun sendsEachPrintersJobsToThatPrinter() {
