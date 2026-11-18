@@ -162,7 +162,7 @@ main { flex: 1; padding: 14px 16px; }
 .shop-search { margin: 0 16px 8px; width: calc(100% - 32px); padding: 12px 14px; border-radius: 14px; border: 1.5px solid var(--accent); font: inherit; }
 .shop-note { margin: 8px 16px; padding: 10px 12px; border-radius: 12px; background: var(--soft); font-size: 14px; }
 .shop { --beige-track: #f1e9db; --edge: #e7d9bf; padding-bottom: 150px; }
-.shop-top { display: grid; grid-template-columns: 1fr auto 1fr; align-items: stretch; gap: 6px; padding: 10px 12px 8px; background: #fff; border-bottom: 1px solid #f3ece0; }
+.shop-top { display: grid; grid-template-columns: 1fr auto 1fr; align-items: stretch; gap: 6px; padding: 5px 12px 8px; background: #fff; border-bottom: 1px solid #f3ece0; }
 .shop-left { display: flex; flex-direction: column; align-items: flex-start; gap: 2px; min-width: 0; }
 .shop-greet { font-size: 13px; color: var(--text-2); font-weight: 500; }
 .shop-name { font-size: 24px; line-height: 1.1; font-weight: 800; letter-spacing: -.01em; max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
@@ -507,10 +507,11 @@ html .shop .scroll-body, html .shop .e2e-scroll { overflow-y: visible; overflow-
 .oe-save { color: #1a7a3c; font-weight: 600; }
 .oe-err { color: #b3261e; }
 .tbl-back { position: fixed; inset: 0; background: rgba(33,25,15,.48); display: flex; align-items: center; justify-content: center; padding: 16px; z-index: 30; overscroll-behavior: contain; }
-.tbl-dlg { position: relative; width: min(340px, 100%); max-height: 86dvh; overflow: auto; overscroll-behavior: contain; background: #fff; border-radius: 16px; padding: 18px 18px 14px; box-shadow: 0 16px 44px rgba(40,25,5,.35); display: grid; gap: 10px; }
-.tbl-dlg h3 { margin: 0; font-size: 17.5px; font-weight: 800; padding-right: 36px; }
+.tbl-dlg { position: relative; width: min(340px, 100%); max-height: 86dvh; overflow: visible; overscroll-behavior: contain; background: #fff; border-radius: 16px; padding: 18px 18px 14px; box-shadow: 0 16px 44px rgba(40,25,5,.35); display: grid; gap: 10px; }
+.tbl-dlg h3 { margin: 0; font-size: 17.5px; font-weight: 800; padding-right: 24px; }
 .tbl-dlg p { margin: 0; font-size: 13px; }
-.tbl-x { position: absolute; top: 10px; right: 10px; width: 36px; height: 36px; border: 0; border-radius: 50%; background: var(--beige, #f3ece0); font-size: 15px; cursor: pointer; }
+/* The close button floats over the card's top-right corner, as in the prototype. The card itself does not scroll, only its list, so the button is never clipped. */
+.tbl-x { position: absolute; top: -12px; right: -8px; width: 36px; height: 36px; border: 0; border-radius: 50%; background: #fff; box-shadow: 0 4px 12px rgba(40,25,5,.3); font-size: 15px; cursor: pointer; z-index: 2; }
 .tbl-list { display: flex; flex-direction: column; gap: 7px; }
 .tbl-opt { display: flex; align-items: center; gap: 10px; width: 100%; padding: 11px 13px; border: 1.5px solid #ede4d6; border-radius: 12px; background: #fff; font: inherit; font-weight: 700; text-align: left; cursor: pointer; color: var(--text); }
 .tbl-opt[aria-current="true"] { background: var(--soft); border-color: var(--accent); }
@@ -566,3 +567,13 @@ html .shop .scroll-body, html .shop .e2e-scroll { overflow-y: visible; overflow-
 @keyframes tabWiggle { 0%, 100% { transform: rotate(0deg); } 20% { transform: rotate(-9deg); } 45% { transform: rotate(8deg); } 68% { transform: rotate(-5deg); } 85% { transform: rotate(3deg); } }
 .shop .shop-nav button:nth-of-type(2):not(:last-of-type)[aria-current="page"] svg { animation-name: tabWiggle; }
 @media (prefers-reduced-motion: reduce) { .shop .swipe-hint { animation: none; } }
+
+/* Outside the 480px column (desktop and tablet only) the customer app sits on the prototype's cream canvas, not bare white. */
+body:has(.shop) { background: #f0eadd; }
+
+/* The language chip as in the prototype: 27px tall, 12px text, a soft drop shadow. The tap area stays generous: an invisible margin around it makes it 44px high. */
+.shop .shop-chip { position: relative; padding: 0 10px; height: 27px; font-size: 12px; font-family: inherit; box-shadow: 0 2px 8px rgba(74, 50, 20, .14); }
+.shop .shop-chip::after { content: ""; position: absolute; inset: -8px -6px; }
+.shop .shop-chip.out { margin-top: 8px; }
+
+.tbl-list { max-height: calc(86dvh - 190px); overflow-y: auto; overscroll-behavior: contain; }
