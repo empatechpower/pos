@@ -7,6 +7,8 @@ import { LANGS, detectedLang, greeting, lang, langMode, setLangMode, shortLabel,
 
 interface Info {
   name: string;
+  /** The outlet this customer is ordering from. Absent on an older server. */
+  outletId?: string;
   outletName: string;
   paymentTiming: string;
   /** The shop's tables ("Table 1", ...). When present, ordering is dine-in only and the table must be one of these. */
@@ -87,6 +89,19 @@ interface MemberView {
 /** The customer's choice to be alerted when an order moves on. On unless they switched it off. Kept on this phone. */
 const LS_ORDER_UPDATES = "pos.pref.orderUpdates";
 const params = () => new URLSearchParams(location.hash.split("?")[1] ?? "");
+/**
+ * Which outlet this customer is ordering from. A scanned link (#/shop?table=3&outlet=B1) names it; a link with a table but no
+ * outlet means the original outlet. Moving around the app afterwards keeps the choice for this visit.
+ */
+const linkOutlet = (): string => {
+  const q = params();
+  try {
+    if (q.has("outlet") || q.has("table")) sessionStorage.setItem("pos.outlet", q.get("outlet") ?? "");
+    return sessionStorage.getItem("pos.outlet") ?? "";
+  } catch {
+    return q.get("outlet") ?? "";
+  }
+};
 const orderIdFromHash = () => /^#\/shop\/order\/([\w-]+)/.exec(location.hash)?.[1] ?? null;
 
 /** A pale version of a colour, for card backgrounds and chips. */
@@ -340,7 +355,7 @@ export function Shop() {
   }, []);
 
   useEffect(() => {
-    Promise.all([fetch("/api/shop/info"), fetch("/api/catalog"), fetch("/api/config")])
+    Promise.all([fetch(`/api/shop/info${linkOutlet() ? `?outlet=${encodeURIComponent(linkOutlet())}` : ""}`), fetch("/api/catalog"), fetch("/api/config")])
       .then(async ([i, c, k]) => {
         if (!i.ok || !c.ok || !k.ok) throw new Error("bad response");
         setInfo((await i.json()) as Info);
@@ -588,8 +603,8 @@ function Menu({ info, catalog, config, loginError, recheck }: { info: Info; cata
     setScreen("login");
   };
 
-  const ctx = { outletId: info.outletName, channelId };
-  const menu = useMemo(() => menuFor(catalog, ctx), [catalog, info.outletName, channelId]);
+  const ctx = { outletId: info.outletId ?? info.outletName, channelId };
+  const menu = useMemo(() => menuFor(catalog, ctx), [catalog, info.outletId, info.outletName, channelId]);
   const byId = useMemo(() => new Map(menu.map((m) => [m.id, m])), [menu]);
   const channel = channels.find((c) => c.id === channelId);
   const categories = useMemo(() => ["All", ...new Set(menu.map((m) => m.category))], [menu]);
@@ -692,7 +707,7 @@ function Menu({ info, catalog, config, loginError, recheck }: { info: Info; cata
       const res = await fetch("/api/shop/orders", {
         method: "POST",
         headers: { "content-type": "application/json", ...(member ? { authorization: `Bearer ${localStorage.getItem(LS_MEMBER) ?? ""}` } : {}) },
-        body: JSON.stringify({ channelId, items, customerName: name, customerPhone: phone, spot, expectedTotalCents: agreed ?? total, ...(payMethod === "credit" && member ? { payWithCredit: true, idempotencyKey: purchaseKey(JSON.stringify({ channelId, items, spot, m: member.id })) } : {}), ...(pointsAsk ? { usePoints: reqPts ?? "max" } : {}), ...(chosen && chosenOk ? { couponId: chosen.id } : {}) }),
+        body: JSON.stringify({ channelId, outletId: info.outletId, items, customerName: name, customerPhone: phone, spot, expectedTotalCents: agreed ?? total, ...(payMethod === "credit" && member ? { payWithCredit: true, idempotencyKey: purchaseKey(JSON.stringify({ channelId, items, spot, m: member.id })) } : {}), ...(pointsAsk ? { usePoints: reqPts ?? "max" } : {}), ...(chosen && chosenOk ? { couponId: chosen.id } : {}) }),
       });
       const j = (await res.json().catch(() => ({}))) as { orderId?: string; error?: string; totalCents?: number };
       if (res.ok && j.orderId) {

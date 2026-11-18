@@ -25,7 +25,7 @@ interface ShopDeps {
   catalogAdmin?: PgCatalogStore;
   brand: BrandStore;
   /** Stores events, nudges live screens, queues prints (same path as a till's push). */
-  ingest: (events: OrderEvent[]) => Promise<unknown>;
+  ingest: (events: OrderEvent[], outletId?: string) => Promise<unknown>;
   /** Customer accounts and points (needs a database). */
   members?: MemberStore;
   needs: (p: Permission) => (req: FastifyRequest, reply: FastifyReply) => Promise<unknown>;
@@ -134,19 +134,32 @@ export function registerShop(app: FastifyInstance, d: ShopDeps) {
   }
   /** The number customers text to sign in: the SIM of a tablet running Rezein right now, else the server's own setting. */
   const smsNumber = async () => (await liveSmsNumber(d.db, merchantId)) ?? integ.sms?.number ?? null;
+  /**
+   * Which outlet a customer is ordering from: the one in the link (?outlet=B1, or outletId in the order) when it is a real, open
+   * outlet of this brand; otherwise the original outlet. A made-up or closed outlet quietly falls back, so a bad link still works.
+   */
+  const outletFor = async (asked: unknown): Promise<{ id: string; name: string; hours?: string; phone?: string; address?: string }> => {
+    const all = await listOutlets(d.db, merchantId);
+    const want = typeof asked === "string" && asked ? all.find((o) => o.id === asked && o.active) : undefined;
+    const o = want ?? all.find((x) => x.id === d.config.outletName);
+    return { id: o?.id ?? d.config.outletName, name: o?.name ?? d.config.outletName, hours: o?.hours?.trim() || undefined, phone: o?.phone?.trim() || undefined, address: o?.address?.trim() || undefined };
+  };
+  /** The outlet an existing order belongs to. */
+  const outletOfOrder = async (orderId: string) => (await d.store.outletOfOrder?.(orderId)) ?? d.config.outletName;
   /** Everything the ordering page needs to dress itself. Public. */
-  app.get("/api/shop/info", async (req, reply) => {
+  app.get<{ Querystring: { outlet?: string } }>("/api/shop/info", async (req, reply) => {
     if (limited(readLimit, req, reply)) return;
     const cat = await d.catalog.load();
     const smsTo = await smsNumber();
     // Hours, phone and address come from the outlet's own setup; the old server settings are only a fallback until it is filled in.
-    const outlet = (await listOutlets(d.db, merchantId)).find((o) => o.id === d.config.outletName);
-    const hours = outlet?.hours?.trim() || process.env.OUTLET_HOURS?.trim() || undefined;
-    const phone = outlet?.phone?.trim() || process.env.OUTLET_PHONE?.trim() || undefined;
-    const addr = outlet?.address?.trim() || process.env.OUTLET_ADDRESS?.trim() || undefined;
+    const outlet = await outletFor(req.query.outlet);
+    const hours = outlet.hours || process.env.OUTLET_HOURS?.trim() || undefined;
+    const phone = outlet.phone || process.env.OUTLET_PHONE?.trim() || undefined;
+    const addr = outlet.address || process.env.OUTLET_ADDRESS?.trim() || undefined;
     return {
       name: d.config.name,
-      outletName: d.config.outletName,
+      outletId: outlet.id,
+      outletName: outlet.name,
       // Set OUTLET_HOURS (e.g. "Daily 8am-9pm") and OUTLET_PHONE on the server to show them under Help & support.
       // Shown at the top of the order details on the staff Online page. Set OUTLET_ADDRESS and GST_REG_NO on the server.
       address: addr,
@@ -462,7 +475,8 @@ export function registerShop(app: FastifyInstance, d: ShopDeps) {
       if (!coupon) return reply.code(400).send({ error: "coupon_not_available" });
     }
     if (tables.length && cat.channels.find((c) => c.id === b.channelId)?.kind !== "dine_in") return reply.code(400).send({ error: "this shop takes dine-in orders only" });
-    const quote = quoteOrder(cat, d.config, { outletId: d.config.outletName, channelId: b.channelId }, items, pointsAsk, coupon ? { amountCents: coupon.amountCents, minSpendCents: coupon.minSpendCents } : null);
+    const outlet = await outletFor((b as { outletId?: unknown }).outletId);
+    const quote = quoteOrder(cat, d.config, { outletId: outlet.id, channelId: b.channelId }, items, pointsAsk, coupon ? { amountCents: coupon.amountCents, minSpendCents: coupon.minSpendCents } : null);
     if (!quote.ok) return reply.code(400).send({ error: quote.error, productId: quote.productId });
     if (b.expectedTotalCents !== undefined && b.expectedTotalCents !== quote.priced.total) {
       return reply.code(409).send({ error: "price_changed", totalCents: quote.priced.total });
@@ -512,10 +526,10 @@ export function registerShop(app: FastifyInstance, d: ShopDeps) {
     // Credit first: if it is short, nothing else has been touched. Taken in one step that cannot go below zero.
     const creditCents = b.payWithCredit && member ? quote.priced.total : 0;
     if (creditCents > 0) {
-      const paid = await spendCredit(d.db, { merchantId, customerId: member!.id, amountCents: creditCents, idempotencyKey: `credit-order:${orderId}`, orderId, deviceId: SHOP_DEVICE, outletId: d.config.outletName, note: "Order paid with credit" });
+      const paid = await spendCredit(d.db, { merchantId, customerId: member!.id, amountCents: creditCents, idempotencyKey: `credit-order:${orderId}`, orderId, deviceId: SHOP_DEVICE, outletId: outlet.id, note: "Order paid with credit" });
       if (!paid.ok) return reply.code(409).send({ error: "not_enough_credit", balanceCents: paid.balanceCents, neededCents: creditCents });
     }
-    const giveCreditBack = () => (creditCents > 0 ? refundCredit(d.db, { merchantId, customerId: member!.id, amountCents: creditCents, idempotencyKey: `credit-back:${orderId}`, orderId, deviceId: SHOP_DEVICE, outletId: d.config.outletName, note: "Order not placed" }) : Promise.resolve());
+    const giveCreditBack = () => (creditCents > 0 ? refundCredit(d.db, { merchantId, customerId: member!.id, amountCents: creditCents, idempotencyKey: `credit-back:${orderId}`, orderId, deviceId: SHOP_DEVICE, outletId: outlet.id, note: "Order not placed" }) : Promise.resolve());
     const pointsUsed = quote.priced.pointsUsed;
     if (member && pointsUsed > 0) {
       // Spent before the order exists, atomically: two orders cannot spend the same points.
@@ -552,7 +566,7 @@ export function registerShop(app: FastifyInstance, d: ShopDeps) {
       ...(creditCents > 0 ? [mk({ type: "OrderAccepted" }), mk({ type: "PaymentRecorded", paymentId: `credit:${orderId}`, method: "credit", amountCents: creditCents, confirmed: true })] : []),
     ];
     try {
-      await d.ingest(events);
+      await d.ingest(events, outlet.id);
     } catch (err) {
       await giveCreditBack(); // the order was not recorded, so the customer keeps their credit
       throw err;
@@ -616,11 +630,13 @@ export function registerShop(app: FastifyInstance, d: ShopDeps) {
   // Every order, rebuilt from the log at most once every 5 seconds however many phones are asking, for the queue position.
   // A count a few seconds out of date is fine for "about how long". QUEUE_CACHE_MS changes it (0 = always fresh).
   const queueCacheMs = Number.isFinite(Number(process.env.QUEUE_CACHE_MS)) && process.env.QUEUE_CACHE_MS !== undefined ? Number(process.env.QUEUE_CACHE_MS) : 5000;
-  let queueSnap: { at: number; orders: OrderState[] } | null = null;
-  const everyOrder = async () => {
-    if (queueSnap && Date.now() - queueSnap.at < queueCacheMs) return queueSnap.orders;
-    const orders = reduceAll((await d.store.after(0)).map((x) => x.event));
-    queueSnap = { at: Date.now(), orders };
+  const queueSnaps = new Map<string, { at: number; orders: OrderState[] }>();
+  /** The orders of one outlet: a queue never counts another store's orders. */
+  const everyOrder = async (outletId: string) => {
+    const snap = queueSnaps.get(outletId);
+    if (snap && Date.now() - snap.at < queueCacheMs) return snap.orders;
+    const orders = reduceAll((await d.store.afterAll(0)).filter((x) => !x.outletId || x.outletId === outletId).map((x) => x.event));
+    queueSnaps.set(outletId, { at: Date.now(), orders });
     return orders;
   };
 
@@ -643,7 +659,7 @@ export function registerShop(app: FastifyInstance, d: ShopDeps) {
       pointsRedeemed: order.pointsRedeemed ?? 0,
       canCancel: cancellable(order),
       // Where this order is in line and about how long: only while it is waiting for or being made by the kitchen.
-      queue: ["queued", "preparing"].includes(shopStatus(order, d.config)) ? queueView(await everyOrder(), order, d.config, Date.now(), Number(process.env.QUEUE_FALLBACK_MINUTES) || undefined) : null,
+      queue: ["queued", "preparing"].includes(shopStatus(order, d.config)) ? queueView(await everyOrder(await outletOfOrder(order.orderId)), order, d.config, Date.now(), Number(process.env.QUEUE_FALLBACK_MINUTES) || undefined) : null,
       canPayOnline: !!integ.stripe && order.stage !== "cancelled" && order.stage !== "completed" && total - paid > 0,
     };
   });
@@ -658,7 +674,7 @@ export function registerShop(app: FastifyInstance, d: ShopDeps) {
     if (order.stage === "cancelled") return { status: "cancelled" };
     if (!cancellable(order)) return reply.code(409).send({ error: "cannot_cancel" });
     // A fixed id: pressing twice, or a retry, cancels once.
-    await d.ingest([{ id: `shop-cancel-${order.orderId}`, orderId: order.orderId, deviceId: SHOP_DEVICE, ts: Date.now(), seq: Date.now(), type: "StageSet", stage: "cancelled" } as unknown as OrderEvent]);
+    await d.ingest([{ id: `shop-cancel-${order.orderId}`, orderId: order.orderId, deviceId: SHOP_DEVICE, ts: Date.now(), seq: Date.now(), type: "StageSet", stage: "cancelled" } as unknown as OrderEvent], await outletOfOrder(order.orderId));
     return { status: "cancelled" };
   });
 
@@ -702,7 +718,7 @@ export function registerShop(app: FastifyInstance, d: ShopDeps) {
           console.error(`[stripe] payment ${obj.id} for order ${obj.client_reference_id} not applied (amount ${obj.amount_total} ${obj.currency}, due ${due}); ${back ? "refunded" : "REFUND FAILED - refund it by hand in Stripe"}`);
         } else {
           // A fixed id per payment: Stripe may send the same message more than once.
-          await d.ingest([{ id: `stripe-${obj.id}`, orderId: order.orderId, deviceId: SHOP_DEVICE, ts: Date.now(), seq: Date.now(), type: "PaymentRecorded", paymentId: `stripe:${obj.id}`, method, amountCents: obj.amount_total!, confirmed: true } as unknown as OrderEvent]);
+          await d.ingest([{ id: `stripe-${obj.id}`, orderId: order.orderId, deviceId: SHOP_DEVICE, ts: Date.now(), seq: Date.now(), type: "PaymentRecorded", paymentId: `stripe:${obj.id}`, method, amountCents: obj.amount_total!, confirmed: true } as unknown as OrderEvent], await outletOfOrder(order.orderId));
         }
       }
       return { received: true };

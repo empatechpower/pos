@@ -1,4 +1,7 @@
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
+
+process.env.ORDER_LIMIT_IP = "30";
+process.env.QUEUE_CACHE_MS = "0";
 import { PRESETS } from "@pos/core";
 import { buildApp } from "../src/app.js";
 import { createStaff } from "../src/auth.js";
@@ -191,5 +194,54 @@ describe("brand, franchise and outlet access", () => {
     await call("/api/outlets/EV", { method: "PUT", body: { name: "EV", hours: "Mon-Fri 9am-6pm", phone: "+65 6000 2222", address: "2 Village Way" }, staff: login.owner, device: dev.EV!.token });
     const info = (await call("/api/shop/info")).json;
     expect(info.contact).toEqual({ hours: "Mon-Fri 9am-6pm", phone: "+65 6000 2222", address: "2 Village Way" });
+  });
+});
+
+describe("a customer orders from a store's own link", () => {
+  const kaya = { productId: "kaya-toast", qty: 1 };
+  const shopOrder = (extra: object) => call("/api/shop/orders", { body: { channelId: "take-away", items: [kaya], customerName: "Guest", ...extra } });
+
+  it("shows that store's own hours, and an unknown or closed outlet falls back to the original one", async () => {
+    await call("/api/outlets/A1", { method: "PUT", body: { name: "Alpha One", franchiseId: "FA", hours: "Daily 7am-10pm" }, staff: login.owner, device: dev.EV!.token });
+    const a1 = (await call("/api/shop/info?outlet=A1")).json;
+    expect(a1).toMatchObject({ outletId: "A1", outletName: "Alpha One" });
+    expect(a1.contact.hours).toBe("Daily 7am-10pm");
+    expect((await call("/api/shop/info?outlet=NOPE")).json).toMatchObject({ outletId: "EV" });
+    expect((await call("/api/shop/info")).json.outletId).toBe("EV");
+  });
+
+  it("an order placed from a store's link is recorded at that store, queues there and prints only there", async () => {
+    const r = await shopOrder({ outletId: "A1" });
+    expect(r.status).toBe(200);
+    const id = r.json.orderId as string;
+    const mine = (await call("/api/reports/orders?from=2000-01-01&to=2100-01-01&outlet=A1", { staff: login.fa, device: dev.A1!.token })).json.orders as Array<{ orderId: string; outletId: string }>;
+    expect(mine.find((o) => o.orderId === id)?.outletId).toBe("A1");
+    const elsewhere = (await call("/api/reports/orders?from=2000-01-01&to=2100-01-01&outlet=EV", { staff: login.owner, device: dev.EV!.token })).json.orders as Array<{ orderId: string }>;
+    expect(elsewhere.some((o) => o.orderId === id)).toBe(false);
+    // the tablet at that store receives it; a tablet at another store does not
+    const pullA1 = (await call("/api/sync/pull?after=0", { device: dev.A1!.token })).json.events as Array<{ event: { orderId: string } }>;
+    const pullB1 = (await call("/api/sync/pull?after=0", { device: dev.B1!.token })).json.events as Array<{ event: { orderId: string } }>;
+    expect(pullA1.some((e) => e.event.orderId === id)).toBe(true);
+    expect(pullB1.some((e) => e.event.orderId === id)).toBe(false);
+    // its status page works whichever outlet it is at
+    expect((await call(`/api/shop/orders/${id}`)).json.queueNumber).toBeTruthy();
+  });
+
+  it("the queue counts only that store's orders", async () => {
+    const accept = async (orderId: string, outlet: string, cents: number) => {
+      const d = dev[outlet]!;
+      const mk = (extra: object) => ({ id: `q${++n}`, orderId, deviceId: d.id, ts: Date.now() + n, seq: n, ...extra });
+      const r = await call("/api/sync/push", { body: { events: [mk({ type: "OrderAccepted" }), mk({ type: "PaymentRecorded", paymentId: `qp${n}`, method: "cash", amountCents: cents, confirmed: true })] }, device: d.token });
+      expect(r.status).toBe(200);
+    };
+    const b1 = await shopOrder({ outletId: "B1" });
+    const b2 = await shopOrder({ outletId: "B1" });
+    await accept(b1.json.orderId, "B1", b1.json.totalCents);
+    await accept(b2.json.orderId, "B1", b2.json.totalCents);
+    const a = await shopOrder({ outletId: "A1" });
+    await accept(a.json.orderId, "A1", a.json.totalCents);
+    // Earlier in this file each store took 2 till sales that are still waiting (A1: 2, B1: 2, the original: 1). Each queue counts only its own store's.
+    expect((await call(`/api/shop/orders/${a.json.orderId}`)).json.queue).toMatchObject({ ahead: 2 });
+    expect((await call(`/api/shop/orders/${b2.json.orderId}`)).json.queue).toMatchObject({ ahead: 3 });
   });
 });

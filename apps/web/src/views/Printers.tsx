@@ -6,6 +6,8 @@ interface Printer {
   id: string;
   name: string;
   language: "escpos" | "zpl" | "epl";
+  /** The outlet the printer is in. Orders print only at printers of the outlet that took them. */
+  outletId?: string;
   roles: Array<"receipt" | "kitchen" | "label">;
   categories: string[];
   widthChars: number;
@@ -57,11 +59,14 @@ export function Printers({ catalog }: { catalog: Catalog }) {
   const [editing, setEditing] = useState<Printer | null>(null);
   const [isNew, setIsNew] = useState(false);
   const [msg, setMsg] = useState<string | null>(null);
+  const [outlets, setOutlets] = useState<Array<{ id: string; name: string }>>([]);
 
   const load = useCallback(async () => {
     const [p, j, d] = await Promise.all([staffFetch("/api/printers"), staffFetch("/api/print/jobs"), staffFetch("/api/devices")]);
     if ("res" in p && p.res.ok) setPrinters(((await p.res.json()) as { printers: Printer[] }).printers);
     if ("res" in j && j.res.ok) setJobs(((await j.res.json()) as { jobs: Job[] }).jobs);
+    const o = await staffFetch("/api/outlets");
+    if ("res" in o && o.res.ok) setOutlets(((await o.res.json()) as { outlets: Array<{ id: string; name: string }> }).outlets);
     if ("res" in d && d.res.ok) setDevices(((await d.res.json()) as { devices: DeviceRow[] }).devices.filter((x) => x.active));
   }, []);
 
@@ -148,7 +153,7 @@ export function Printers({ catalog }: { catalog: Catalog }) {
           <div>
             <b>{p.name}</b> {!p.active && <span className="muted">· off</span>}
             <div className="muted">
-              {KIND_LABEL[kindOf(p)]} · {p.connection.host}:{p.connection.port}
+              {outlets.length > 1 && p.outletId ? `${outlets.find((o) => o.id === p.outletId)?.name ?? p.outletId} · ` : ""}{KIND_LABEL[kindOf(p)]} · {p.connection.host}:{p.connection.port}
               {p.categories.length ? ` · only ${p.categories.join(", ")}` : ""}
             </div>
           </div>
@@ -159,12 +164,20 @@ export function Printers({ catalog }: { catalog: Catalog }) {
           </div>
         </div>
       ))}
-      {!editing && <button className="primary" onClick={() => { setEditing(blank()); setIsNew(true); setMsg(null); }}>Add a printer</button>}
+      {!editing && <button className="primary" onClick={() => { setEditing({ ...blank(), ...(outlets.length ? { outletId: outlets[0]!.id } : {}) }); setIsNew(true); setMsg(null); }}>Add a printer</button>}
 
       {editing && (
         <div className="editor">
           <h3>{isNew ? "New printer" : `Edit ${editing.name}`}</h3>
           <label className="field">Name (e.g. Front receipt, Kitchen, Bar)<input value={editing.name} onChange={(e) => set({ name: e.target.value })} /></label>
+          {outlets.length > 1 && (
+            <label className="field">
+              Which outlet is it in?
+              <select value={editing.outletId ?? outlets[0]!.id} onChange={(e) => set({ outletId: e.target.value })}>
+                {outlets.map((o) => <option key={o.id} value={o.id}>{o.name}</option>)}
+              </select>
+            </label>
+          )}
           <label className="field">
             What is it for?
             <select
