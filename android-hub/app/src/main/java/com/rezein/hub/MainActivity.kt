@@ -112,7 +112,9 @@ class MainActivity : Activity() {
         val testButton = button("Print a test page") { testPrint() }
         log = text("", 12f).apply { typeface = Typeface.MONOSPACE }
         val unlink = button("Disconnect from the shop") { unlink() }
-        listOf(status, detail, toggle, battery, text("Customer sign-in by text: the number of the SIM in this tablet is shown to customers, who text it a code.", 14f, true), smsNumber, smsSave, smsMessage, smsButton, chatButton, text("Check a printer is reachable from this tablet:"), printerIp, testButton, text("Recent activity", 14f, true), log, unlink).forEach { statusGroup.addView(it) }
+        // The Play Store build has no sign-in by text, so its screen does not offer it.
+        val signInByText = if (BuildConfig.SMS_SIGNIN) listOf(text("Customer sign-in by text: the number of the SIM in this tablet is shown to customers, who text it a code.", 14f, true), smsNumber, smsSave, smsMessage, smsButton, chatButton) else emptyList()
+        (listOf(status, detail, toggle, battery) + signInByText + listOf(text("Check a printer is reachable from this tablet:"), printerIp, testButton, text("Recent activity", 14f, true), log, unlink)).forEach { statusGroup.addView(it) }
         root.addView(statusGroup)
 
         setContentView(ScrollView(this).apply { addView(root) })

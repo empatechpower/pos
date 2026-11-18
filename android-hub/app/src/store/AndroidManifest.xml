@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  The Google Play build leaves out customer sign-in by text: Play restricts reading texts and notifications to apps whose main
+  purpose needs them. The version installed straight from the shop's site keeps both (see src/main/AndroidManifest.xml).
+-->
+<manifest xmlns:android="http://schemas.android.com/apk/res/android" xmlns:tools="http://schemas.android.com/tools">
+    <uses-permission android:name="android.permission.RECEIVE_SMS" tools:node="remove" />
+    <application>
+        <receiver android:name=".SmsReceiver" tools:node="remove" />
+        <service android:name=".MessageNotificationService" tools:node="remove" />
+    </application>
+</manifest>

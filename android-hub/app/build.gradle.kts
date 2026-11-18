@@ -15,8 +15,8 @@ android {
         // 35, as the Play Store now requires. The background service is declared "specialUse" for that reason: from 35 Android
         // limits "dataSync" services to 6 hours a day.
         targetSdk = 36
-        versionCode = 3
-        versionName = "0.1.2"
+        versionCode = 4
+        versionName = "0.1.3"
     }
 
     // The key the Play Store build is signed with. Kept in keystore.properties and keystore/ (never committed).
@@ -34,6 +34,8 @@ android {
         }
     }
 
+    buildFeatures { buildConfig = true }
+
     buildTypes {
         // `./gradlew bundleStore` makes the file for the Play Store (an .aab signed with the upload key).
         if (keystoreFile.exists()) {
@@ -41,9 +43,15 @@ android {
                 initWith(getByName("release"))
                 signingConfig = signingConfigs.getByName("store")
                 matchingFallbacks += "release"
+                // No sign-in by text in the Play build (the manifest in src/store removes the permission and receivers).
+                buildConfigField("boolean", "SMS_SIGNIN", "false")
             }
         }
+        debug {
+            buildConfigField("boolean", "SMS_SIGNIN", "true")
+        }
         release {
+            buildConfigField("boolean", "SMS_SIGNIN", "true")
             isMinifyEnabled = false
             // Signed with the standard test key so the file can be sent to a tablet and installed directly. A store build
             // needs a real signing key instead.
