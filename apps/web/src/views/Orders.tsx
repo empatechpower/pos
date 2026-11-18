@@ -26,7 +26,7 @@ export function Orders({ config }: { config: BusinessConfig }) {
   return (
     <div className="credit prices">
       <h2>Recent orders</h2>
-      {!staff && <div className="flash">Sign in to reprint. <a href="#/login">Sign in</a></div>}
+      {!staff && <div className="flash">Sign in to reprint. <a href="/login">Sign in</a></div>}
       {msg && <div className="flash">{msg}</div>}
       {recent.length === 0 && <p className="muted">No orders yet.</p>}
       {recent.map((o) => {

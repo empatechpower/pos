@@ -74,7 +74,7 @@ is down, kitchen screens working without internet, backup internet, and an Andro
 
 ## The Manager page (orders and members)
 
-Open `https://YOUR-SHOP-ADDRESS/#/manager` on a computer or tablet, sign in with a staff code and PIN, and use:
+Open `https://YOUR-SHOP-ADDRESS/manager` on a computer or tablet, sign in with a staff code and PIN, and use:
 
 - **Transactions**: every order (till and online) with its time, number, channel, status, payment and amount. Pick Today, Yesterday,
   Last 7 days or Everything, search by number, name or phone, and see the totals for paid and unpaid. **Kitchen ticket** sends an order to the

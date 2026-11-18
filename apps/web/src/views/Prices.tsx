@@ -49,7 +49,7 @@ export function Prices({ catalog, outletId }: { catalog: Catalog; outletId: stri
     return (
       <div className="credit">
         <h2>Prices</h2>
-        <p className="muted">{staff ? "Only managers and owners can change prices." : "Sign in as a manager or owner to change prices."} {!staff && <a href="#/login">Sign in</a>}</p>
+        <p className="muted">{staff ? "Only managers and owners can change prices." : "Sign in as a manager or owner to change prices."} {!staff && <a href="/login">Sign in</a>}</p>
       </div>
     );
 
@@ -123,7 +123,7 @@ export function Prices({ catalog, outletId }: { catalog: Catalog; outletId: stri
           ))}
         </select>
       </label>
-      <p><a href={`#/pricebook/${book.id}`}>Edit all items in a table →</a></p>
+      <p><a href={`/pricebook/${book.id}`}>Edit all items in a table →</a></p>
       <div className="row">
         {book.id !== catalog.defaultPricebookId && (
           <button className="secondary sm" onClick={() => void send("PUT", "default-pricebook", { pricebookId: book.id }, `${book.name} is now the default.`)}>Make default</button>
@@ -293,7 +293,7 @@ export function Prices({ catalog, outletId }: { catalog: Catalog; outletId: stri
       </div>
 
       <h3>Shop look</h3>
-      <p className="muted">How the page customers order from looks. Share <b>{location.origin}/#/shop</b>, or add <b>?table=Table%205</b> for a table's QR code.</p>
+      <p className="muted">How the page customers order from looks. Share <b>{location.origin}/shop</b>, or add <b>?table=Table%205</b> for a table's QR code.</p>
       {brand && (
         <div className="brandbox">
           <div className="row brand">

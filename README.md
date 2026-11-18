@@ -24,7 +24,7 @@ npm test                      # core tests
 npm run dev:server            # http://localhost:8787  (POS_MODE=fastServe|restaurant|delivery)
 npm run dev:web               # http://localhost:5173
 ```
-Screens: `#/pos`, `#/kitchen`, `#/queue` (public display).
+Screens: `/pos`, `/kitchen`, `/queue` (public display).
 
 ## How offline works
 Every action is an event written to the device's IndexedDB first. A sync loop pushes unsynced
@@ -43,9 +43,9 @@ Four terminals, no Docker or Postgres install needed:
     npm run dev:server:pg                                       # 3. the server on :8787
     npm run dev:web                                             # 4. the app on :5173
 
-Open http://localhost:5173/#/pos in Chrome, enter the code, then sign in (top right). More devices (kitchen, queue
+Open http://localhost:5173/pos in Chrome, enter the code, then sign in (top right). More devices (kitchen, queue
 display) enrol with codes from **Devices**; use a private window per device, because each keeps its own storage.
-The customer page is http://localhost:5173/#/shop (works in any window, no enrolment). To start fresh, stop
+The customer page is http://localhost:5173/shop (works in any window, no enrolment). To start fresh, stop
 everything and delete `apps/server/data/pg`. `npm run dev:server` + `npm run dev:web` without a database still runs
 the till, kitchen and queue offline-first, but without sign-in, credit, catalog editing, printing or the shop.
 
@@ -111,7 +111,7 @@ failed ones, with a red count on the nav link when something failed for good. **
 lists recent orders with Receipt / Kitchen ticket reprint buttons.
 
 ## Customer ordering (needs `DATABASE_URL`)
-Public page at `/#/shop` (add `?table=Table%205` for a table QR code, `?channel=grab` to preselect a channel): no
+Public page at `/shop` (add `?table=Table%205` for a table QR code, `?channel=grab` to preselect a channel): no
 sign-in, no device enrolment. It uses the catalog, so each channel shows its own prices, and it dresses itself in the
 merchant's colours and logo (set under **Prices → Shop look**; PNG/JPEG/WebP up to 300 KB, SVG refused).
 The customer's device sends only product ids and quantities; **the server prices the order** (`quoteOrder`, shared

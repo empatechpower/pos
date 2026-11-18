@@ -133,7 +133,7 @@ describe("Google and Microsoft sign-in", () => {
   };
   const finish = async (provider: string, state: string, code = "c1") => {
     const cb = await call(`/api/shop/auth/oauth/${provider}/callback?code=${code}&state=${state}`, { manual: true });
-    return { cb, ticket: new URLSearchParams(new URL(cb.location!).hash.split("?")[1] ?? "").get("ticket") };
+    return { cb, ticket: new URL(cb.location!).searchParams.get("ticket") };
   };
 
   it("sends the browser to the provider with PKCE and our return address", async () => {
@@ -149,7 +149,7 @@ describe("Google and Microsoft sign-in", () => {
     fake.profile = { sub: "g-new", email: "gina@example.com", email_verified: true, name: "Gina" };
     const { state } = await go("google");
     const { cb, ticket } = await finish("google", state);
-    expect(cb.location).toMatch(/^https:\/\/shop\.example\/#\/shop\?ticket=/);
+    expect(cb.location).toMatch(/^https:\/\/shop\.example\/shop\?ticket=/);
     const t = await call("/api/shop/auth/ticket", { body: { ticket } });
     expect(t.status).toBe(200);
     expect(t.json.member).toMatchObject({ email: "gina@example.com", name: "Gina", pointsBalance: 500 });
@@ -417,7 +417,7 @@ describe("paying online", () => {
     expect(sent.get("line_items[0][price_data][currency]")).toBe("sgd");
     expect(sent.get("payment_method_types[0]")).toBe("paynow");
     expect(sent.get("client_reference_id")).toBe(o.json.orderId);
-    expect(sent.get("success_url")).toBe(`https://shop.example/#/shop/order/${o.json.orderId}`);
+    expect(sent.get("success_url")).toBe(`https://shop.example/shop/order/${o.json.orderId}`);
     expect((await call(`/api/shop/orders/${o.json.orderId}/pay`, { body: { method: "bitcoin" } })).status).toBe(400);
     expect((await call("/api/shop/orders/nope/pay", { body: { method: "card" } })).status).toBe(404);
     expect((await call(`/api/shop/orders/${o.json.orderId}/pay`, { body: { method: "card" }, root: baseBare })).status).toBe(404);

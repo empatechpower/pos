@@ -45,7 +45,7 @@ export function Devices() {
     return () => window.clearInterval(t);
   }, [staff]);
 
-  if (!staff) return <div className="credit"><h2>Devices</h2><p className="muted">Sign in as a manager or owner to manage devices. <a href="#/login">Sign in</a></p></div>;
+  if (!staff) return <div className="credit"><h2>Devices</h2><p className="muted">Sign in as a manager or owner to manage devices. <a href="/login">Sign in</a></p></div>;
   if (staff.role === "cashier") return <div className="credit"><h2>Devices</h2><p className="muted">Only managers and owners can manage devices.</p></div>;
 
   const outletName = (id?: string) => outlets.find((o) => o.id === id)?.name ?? id ?? "";

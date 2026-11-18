@@ -27,7 +27,7 @@ for (const part of list.split(",").map((x) => x.trim()).filter(Boolean)) {
 }
 const unique = [...new Set(tables)];
 mkdirSync(out, { recursive: true });
-const link = (n) => `${origin}/#/shop?table=${n}`;
+const link = (n) => `${origin}/shop?table=${n}`;
 
 let cards = "";
 for (const n of unique) {

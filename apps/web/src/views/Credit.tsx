@@ -56,7 +56,7 @@ export function Credit({ customerId, setCustomerId, online }: { customerId: stri
           Balance: <b>{balance === null ? "—" : formatMoney(balance)}</b>
         </p>
       )}
-      {!staff && <div className="flash">Sign in as staff to top up credit. <a href="#/login">Sign in</a></div>}
+      {!staff && <div className="flash">Sign in as staff to top up credit. <a href="/login">Sign in</a></div>}
       {!online && <div className="flash">Credit needs a connection. Cash top-ups can't be recorded offline.</div>}
       <div className="presets">
         {PRESETS.map((c) => (

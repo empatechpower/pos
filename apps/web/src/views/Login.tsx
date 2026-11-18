@@ -1,3 +1,4 @@
+import { go } from "../nav";
 import { useState } from "react";
 import { signIn, signOut, useStaff } from "../auth";
 
@@ -27,7 +28,7 @@ export function Login({ online }: { online: boolean }) {
     setBusy(false);
     if (r.ok) {
       setPin("");
-      location.hash = "#/pos";
+      go("/pos");
     } else {
       setPin("");
       setMsg(

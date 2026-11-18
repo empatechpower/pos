@@ -261,7 +261,7 @@ export function registerTelegram(app: FastifyInstance, d: TelegramDeps): void {
   const webCode = async (who: Who, target: string) => {
     const code = newCode();
     await d.db.query("INSERT INTO telegram_codes (code_hash, merchant_id, staff_id, kind, target, expires_at) VALUES ($1,$2,$3,'web',$4, now() + make_interval(mins => $5))", [sha256(code), d.merchantId, who.staffId, target, WEB_MINUTES]);
-    return `${d.integ.publicUrl}/#/tg?code=${code}`;
+    return `${d.integ.publicUrl}/tg?code=${code}`;
   };
 
   const money = formatMoney;

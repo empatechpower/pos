@@ -192,12 +192,19 @@ main { flex: 1; padding: 14px 16px; }
 .shop-sec { margin: 0; padding: 18px 3px 8px; font-size: 17px; font-weight: 800; }
 .shop-promo { margin: 0 0 4px; padding: 12px 14px; border-radius: 14px; background: #faf3e3; border: 1.5px solid #e2d0ab; }
 .shop-promo h3 { margin: 0; font-size: 15px; line-height: 19px; font-weight: 800; } .shop-promo p { margin: 2px 0 0; font-size: 12.5px; line-height: 17px; color: #6f6455; }
-.shop-chips { display: flex; gap: 7px; margin: 0 -11px; padding: 10px 11px 8px; overflow-x: auto; scrollbar-width: none; position: sticky; top: 0; background: var(--page); z-index: 7; border-radius: 20px 20px 0 0; }
-.shop-chips::-webkit-scrollbar { display: none; }
-.shop-chips button { padding: 8px 12px; border-radius: 999px; border: 1.5px solid transparent; background: var(--beige); white-space: nowrap; font-weight: 600; font-size: 14px; color: #575046; cursor: pointer; }
-.shop-chips button.on { border-color: var(--accent); background: var(--soft); color: var(--text); }
-.shop-chips button.search { position: sticky; left: 0; z-index: 1; display: flex; align-items: center; justify-content: center; flex: none; width: 36px; height: 36px; padding: 0; background: #fff; border-color: var(--accent); color: #b85c0a; box-shadow: 0 2px 8px rgba(120,80,20,.14); }
-.shop-chips button.search.on { background: var(--accent); color: var(--accent-ink); }
+.shop-chips .cats-row { display: flex; align-items: center; gap: 6px; }
+.shop-chips .search-bar { margin-top: 8px; }
+.shop-chips { margin: 0 -11px; padding: 10px 11px 8px; position: sticky; top: 0; background: var(--page); z-index: 7; border-radius: 20px 20px 0 0; }
+.shop-chips .cats { display: flex; gap: 7px; flex: 1; min-width: 0; overflow-x: auto; scrollbar-width: none; padding: 2px 1px; }
+.shop-chips .cats::-webkit-scrollbar { display: none; }
+.shop-chips .cats button { font-family: inherit; font-size: 14px; font-weight: 600; color: #575046; background: #fff; border: 1.5px solid #e8ddc9; border-radius: 999px; padding: 8px 12px; cursor: pointer; white-space: nowrap; display: inline-flex; align-items: center; gap: 7px; }
+.shop-chips .cats button[aria-pressed="true"] { background: var(--accent); border-color: var(--accent); color: var(--accent-ink); box-shadow: 0 2px 10px rgba(234,112,22,.28); }
+.shop .cat-count, .shop .cat-section-count { display: inline-flex; align-items: center; justify-content: center; min-width: 24px; height: 22px; padding: 0 6px; border-radius: 999px; background: #f1e9db; color: #6d5c47; font-size: 12px; line-height: 1; font-weight: 700; font-variant-numeric: tabular-nums; }
+.shop-chips .cats button[aria-pressed="true"] .cat-count { background: rgba(255,255,255,.30); color: #fff; }
+.shop .cat-section-head { display: flex; align-items: center; gap: 8px; padding: 13px 2px 1px; }
+.shop .cat-section-head h3 { margin: 0; font-size: 16.5px; line-height: 21px; font-weight: 800; color: var(--ink, #21252a); letter-spacing: -.01em; }
+.shop-chips button.search { flex: none; display: flex; align-items: center; justify-content: center; width: 38px; height: 38px; padding: 0; border-radius: 50%; background: transparent; border: 1.5px solid transparent; color: #b85c0a; cursor: pointer; }
+.shop-chips button.search.on { background: var(--accent); border-color: var(--accent); color: var(--accent-ink); box-shadow: 0 2px 10px rgba(234,112,22,.28); }
 .shop-search { margin: 0 0 8px; width: 100%; padding: 0 16px; height: 42px; border-radius: 999px; border: 1.5px solid var(--accent); font: inherit; font-size: 14.5px; }
 .shop-note { margin: 8px 0; }
 .shop-list { display: flex; flex-direction: column; padding: 0; margin-top: 4px; }
@@ -221,7 +228,7 @@ main { flex: 1; padding: 14px 16px; }
 .sc-step button { width: 26px; height: 25px; border-radius: 50%; border: 0; padding: 0; font-size: 15px; font-weight: 700; line-height: 1; cursor: pointer; }
 .sc-step .minus { background: var(--soft); color: #b85c0a; }
 .sc-step .plus { background: var(--accent); color: var(--accent-ink); box-shadow: 0 2px 10px rgba(234,112,22,.28); }
-.shop-bar { position: fixed; left: 50%; transform: translateX(-50%); bottom: 68px; width: min(536px, calc(100% - 24px)); height: 49px; display: flex; align-items: center; gap: 10px; padding: 0 18px; border-radius: 24px; border: 0; background: var(--brand); color: var(--brand-ink); font-size: 15px; font-weight: 700; box-shadow: 0 6px 18px rgba(225,82,62,.35); z-index: 5; cursor: pointer; }
+.shop-bar { position: fixed; left: 50%; transform: translateX(-50%); bottom: 68px; width: calc(min(var(--shop-max), 100%) - 16px); height: 43px; display: flex; align-items: center; gap: 10px; padding: 0 14px; border-radius: 22px; border: 1.5px solid #b03a26; background: var(--brand); color: var(--brand-ink); font-size: 15px; font-weight: 700; box-shadow: 0 6px 18px rgba(225,82,62,.35); z-index: 5; cursor: pointer; }
 .shop-bar .amt { margin-left: auto; display: flex; align-items: center; gap: 12px; font-variant-numeric: tabular-nums; }
 .shop-bar .div { width: 1px; height: 22px; background: rgba(255,255,255,.4); }
 .shop-nav { position: fixed; left: 50%; transform: translateX(-50%); bottom: 0; width: min(var(--shop-max), 100%); display: flex; gap: 6px; padding: 5px 6px calc(5px + env(safe-area-inset-bottom)); background: #fff; border-top: 1px solid #ede4d6; z-index: 6; }
@@ -337,7 +344,9 @@ main { flex: 1; padding: 14px 16px; }
 .shop-headwrap .page-title { margin: 0; }
 .shop-body { padding: 0 12px 24px; }
 .shop .e2e-scroll.shop-body { padding-top: 6px; }
-.shop .login-page { padding-top: 24px; min-height: 100dvh; }
+.shop .login-page { padding-top: 24px; min-height: 0; height: 100dvh; box-sizing: border-box; overflow-y: auto; overscroll-behavior: none; }
+/* The Welcome / sign-in screen is one fixed screen, as in the prototype: the page itself does not scroll (only the screen's own content, if a very short phone cannot fit it). */
+.shop:has(> .login-page) { padding-bottom: 0; height: 100dvh; overflow: hidden; }
 .shop .e2e-cta { text-decoration: none; }
 .shop .signout-btn { display: flex; align-items: center; justify-content: center; gap: 8px; width: 100%; margin-top: 14px; height: 46px; border-radius: 23px; border: 1.5px solid #f2c4b8; background: #fff; color: #b03a26; font: inherit; font-weight: 700; cursor: pointer; }
 .shop .order-hist { margin: 0 0 4px; }
@@ -577,3 +586,20 @@ body:has(.shop) { background: #f0eadd; }
 .shop .shop-chip.out { margin-top: 8px; }
 
 .tbl-list { max-height: calc(86dvh - 190px); overflow-y: auto; overscroll-behavior: contain; }
+
+/* Take away has no table: the slot where the table button sits shows a plain "Take away" label, as in the prototype (no pulse, not tappable). */
+.shop .shop-spot-label { display: inline-flex; align-items: center; justify-content: center; width: 100%; gap: 6px; font-size: 17px; line-height: 22px; font-weight: 700; color: var(--ink, #21252a); padding: 5px 6px; white-space: nowrap; }
+.shop .shop-spot-label svg { flex: none; color: #b85c0a; }
+
+/* Account: the guest's points line wraps inside the card instead of running under the MEMBER box; an empty order history is a plain rule under its heading */
+.shop .member-card .member-main .pts-line { white-space: normal; overflow-wrap: anywhere; }
+.shop .order-hist:empty { background: none; border: 0; border-top: 1.5px solid #e8ddc9; border-radius: 0; margin: 8px 14px 0; height: 0; }
+
+/* Account: the header, the title and the member card stay put; only the lists under them scroll */
+.shop .acct-fixed { position: sticky; top: 0; z-index: 8; background: var(--page); }
+.shop .acct-fixed-card { padding: 0 12px; }
+.shop .acct-fixed-card .member-card { margin-left: 0; margin-right: 0; margin-bottom: 4px; }
+
+/* Language dialog: a centered card with the floating close button, like the Change table dialog; the list scrolls inside it */
+.tbl-dlg .lang-list { max-height: calc(86dvh - 150px); overflow-y: auto; overscroll-behavior: contain; padding-bottom: 4px; }
+.shop .tbl-dlg .lang-opt { border-radius: 14px; }

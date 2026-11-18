@@ -1,3 +1,4 @@
+import { queryParams } from "../nav";
 import { useEffect, useState } from "react";
 import { adoptSession, type StaffInfo } from "../auth";
 import { adoptLinkedDevice } from "../device";
@@ -6,7 +7,7 @@ import { adoptLinkedDevice } from "../device";
 export function TelegramSignIn() {
   const [problem, setProblem] = useState<string | null>(null);
   useEffect(() => {
-    const code = new URLSearchParams(location.hash.split("?")[1] ?? "").get("code");
+    const code = queryParams().get("code");
     if (!code) return setProblem("This link is missing its code. Ask the bot for a new one.");
     let alive = true;
     (async () => {
@@ -18,7 +19,7 @@ export function TelegramSignIn() {
       const j = (await res.json()) as { deviceToken: string; deviceId: string; token: string; staff: StaffInfo; to: string };
       await adoptLinkedDevice(j.deviceToken, j.deviceId);
       adoptSession(j.token, j.staff);
-      location.replace(`${location.pathname}#/${j.to}`);
+      location.replace(`/${j.to}`);
       location.reload();
     })();
     return () => {

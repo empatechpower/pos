@@ -24,7 +24,7 @@ export function Manager({ config, catalog }: { config: BusinessConfig; catalog?:
     <div className="credit prices">
       <h2>Manager</h2>
       {!staff ? (
-        <div className="flash">Sign in to see orders and manage members. <a href="#/login">Sign in</a></div>
+        <div className="flash">Sign in to see orders and manage members. <a href="/login">Sign in</a></div>
       ) : (
         <>
           <div className="seg" style={{ margin: "4px 0 12px" }}>

@@ -256,7 +256,7 @@ describe("a new pricebook from Telegram", () => {
     expect(c.assignments).toContainEqual({ pricebookId: book.id, channelId: ch.id });
     // the link in the message works once and lands on that pricebook
     const url = buttons(made[0]).find((b) => b.url)!.url!;
-    expect(url).toMatch(/^https:\/\/shop\.example\/#\/tg\?code=[A-Z2-9]{8}$/);
+    expect(url).toMatch(/^https:\/\/shop\.example\/tg\?code=[A-Z2-9]{8}$/);
     const code = url.split("code=")[1]!;
     const web = await call("POST", "/api/telegram/redeem", { body: { code }, device: null });
     expect(web.status).toBe(200);
@@ -291,7 +291,7 @@ describe("opening the web editor", () => {
     const ask = (await say(1001, "/edit")).said[0];
     expect(buttons(ask).map((b) => b.callback_data)).toContain("ed:standard");
     const link = await press(1001, "ed:standard");
-    expect(buttons(link[0]).find((b) => b.url)!.url).toMatch(/#\/tg\?code=/);
+    expect(buttons(link[0]).find((b) => b.url)!.url).toMatch(/\/tg\?code=/);
   });
 
   it("a wrong, expired or used code gets nothing, and wrong tries are limited", async () => {
@@ -342,7 +342,7 @@ describe("opening the staff pages from Telegram", () => {
     const r = await say(777, "/manager");
     expect(r.said).toHaveLength(1);
     const url = buttons(r.said[0]).find((b) => b.url)?.url!;
-    expect(url).toMatch(/^https:\/\/shop\.example\/#\/tg\?code=[A-Z0-9]{8}$/);
+    expect(url).toMatch(/^https:\/\/shop\.example\/tg\?code=[A-Z0-9]{8}$/);
     const code = url.split("code=")[1]!;
     const redeemed = await call("POST", "/api/telegram/redeem", { body: { code }, device: null });
     expect(redeemed.status).toBe(200);

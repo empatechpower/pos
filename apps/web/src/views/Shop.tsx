@@ -3,9 +3,10 @@ import { cleanNote, comboSaving, defaultSelection, formatMoney, isCombo, menuFor
 import { OptionSheet } from "./OptionSheet";
 import { RollMoney } from "./RollMoney";
 import "../shopProto.css";
+import { go, onRouteChange, queryParams } from "../nav";
 import { LANGS, detectedLang, greeting, lang, langMode, setLangMode, shortLabel, t, tx, useLang } from "../shopI18n";
 
-interface Info {
+export interface Info {
   name: string;
   /** The outlet this customer is ordering from. Absent on an older server. */
   outletId?: string;
@@ -25,7 +26,7 @@ interface Info {
   auth: { google: boolean; microsoft: boolean; phone: { number: string; simulated?: boolean; manual?: boolean; open?: boolean } | null };
   payments: { online: boolean; methods: string[] };
 }
-interface OrderView {
+export interface OrderView {
   orderId: string;
   queueNumber: string;
   status: ShopStatus;
@@ -49,7 +50,7 @@ interface PastOrder {
   itemCount: number;
   totalCents: number;
 }
-interface BagLine {
+export interface BagLine {
   key: string;
   productId: string;
   qty: number;
@@ -88,12 +89,12 @@ interface MemberView {
 }
 /** The customer's choice to be alerted when an order moves on. On unless they switched it off. Kept on this phone. */
 const LS_ORDER_UPDATES = "pos.pref.orderUpdates";
-const params = () => new URLSearchParams(location.hash.split("?")[1] ?? "");
+const params = queryParams;
 /**
- * Which outlet this customer is ordering from. A scanned link (#/shop?table=3&outlet=B1) names it; a link with a table but no
+ * Which outlet this customer is ordering from. A scanned link (/shop?table=3&outlet=B1) names it; a link with a table but no
  * outlet means the original outlet. Moving around the app afterwards keeps the choice for this visit.
  */
-const linkOutlet = (): string => {
+export const linkOutlet = (): string => {
   const q = params();
   try {
     if (q.has("outlet") || q.has("table")) sessionStorage.setItem("pos.outlet", q.get("outlet") ?? "");
@@ -102,10 +103,10 @@ const linkOutlet = (): string => {
     return q.get("outlet") ?? "";
   }
 };
-const orderIdFromHash = () => /^#\/shop\/order\/([\w-]+)/.exec(location.hash)?.[1] ?? null;
+const orderIdFromHash = () => /^\/shop\/order\/([\w-]+)/.exec(location.pathname)?.[1] ?? null;
 
 /** A pale version of a colour, for card backgrounds and chips. */
-const tint = (hex: string, amount = 0.88) => {
+export const tint = (hex: string, amount = 0.88) => {
   const c = [1, 3, 5].map((i) => parseInt(hex.slice(i, i + 2), 16));
   return "#" + c.map((v) => Math.round(v + (255 - v) * amount).toString(16).padStart(2, "0")).join("");
 };
@@ -144,6 +145,7 @@ const ICONS: Record<string, string> = {
   card: '<rect x="3.5" y="6" width="17" height="12.5" rx="2"/><path d="M3.5 10h17"/>',
   help: '<circle cx="12" cy="12" r="8.6"/><path d="M9.6 9.4A2.5 2.5 0 1 1 12 12.4V14"/><circle cx="12" cy="17" r=".4" fill="currentColor"/>',
   bell: '<path d="M6 9.5a6 6 0 1 1 12 0c0 4 1.2 5.4 2 6.5H4c.8-1.1 2-2.5 2-6.5"/><path d="M10 20a2.2 2.2 0 0 0 4 0"/>',
+  gear: '<circle cx="12" cy="12" r="3.2"/><path d="M12 3.8v2.4M12 17.8v2.4M3.8 12h2.4M17.8 12h2.4M6.2 6.2l1.7 1.7M16.1 16.1l1.7 1.7M17.8 6.2l-1.7 1.7M7.9 16.1l-1.7 1.7"/>',
   sliders: '<path d="M4 7h9M17 7h3M4 17h3M11 17h9"/><circle cx="15" cy="7" r="2"/><circle cx="9" cy="17" r="2"/>',
   trash: '<path d="M4.5 6.5h15M9.5 6V4.5A1.5 1.5 0 0 1 11 3h2a1.5 1.5 0 0 1 1.5 1.5V6M6.5 6.5l.8 13a1.5 1.5 0 0 0 1.5 1.4h6.4a1.5 1.5 0 0 0 1.5-1.4l.8-13"/><path d="M10 10.5v6M14 10.5v6"/>',
   can: '<rect x="7" y="3.5" width="10" height="17" rx="1.5"/><path d="M7 7.2h10M7 16.8h10"/>',
@@ -158,7 +160,7 @@ let scrollBefore = "";
  * A dialog that behaves like one: the page behind it cannot scroll, Tab stays inside it, Escape closes it,
  * focus starts inside and goes back to what opened it. Attach the returned ref to the dialog's box.
  */
-function useDialog(open: boolean, onClose: () => void) {
+export function useDialog(open: boolean, onClose: () => void) {
   const box = useRef<HTMLDivElement>(null);
   const close = useRef(onClose);
   close.current = onClose;
@@ -189,7 +191,7 @@ function useDialog(open: boolean, onClose: () => void) {
   return box;
 }
 
-function SwipeRow({ children, onRemove, label }: { children: ReactNode; onRemove: () => void; label: string }) {
+export function SwipeRow({ children, onRemove, label }: { children: ReactNode; onRemove: () => void; label: string }) {
   const OPEN = 84;
   const [open, setOpen] = useState(false);
   const [x, setX] = useState<number | null>(null); // live offset while a finger or mouse is dragging
@@ -253,12 +255,12 @@ function SwipeRow({ children, onRemove, label }: { children: ReactNode; onRemove
     </div>
   );
 }
-function Icon({ name, size = 20 }: { name: keyof typeof ICONS; size?: number }) {
+export function Icon({ name, size = 20 }: { name: keyof typeof ICONS; size?: number }) {
   return <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true" dangerouslySetInnerHTML={{ __html: ICONS[name]! }} />;
 }
 const channelIcon = (kind: string): keyof typeof ICONS => (kind === "dine_in" ? "cutlery" : "bag");
 
-const photo = (p: { id: string; imageVersion?: number }) => (p.imageVersion ? `/api/products/${p.id}/image?v=${p.imageVersion}` : null);
+export const photo = (p: { id: string; imageVersion?: number }) => (p.imageVersion ? `/api/products/${p.id}/image?v=${p.imageVersion}` : null);
 // The card shows the plain lower price; Variants are chosen on the sheet (no ranges on cards).
 const cardPrice = (m: MenuEntry, saving = 0) => {
   if (isCombo(m.options)) return `${formatMoney(m.priceCents)}${saving > 0 ? ` · Save ${formatMoney(saving)}` : ""}`; // a combo is one price; swaps are chosen on the sheet
@@ -334,7 +336,7 @@ export function Shop() {
     const err = p.get("login_error");
     if (err) setLoginError(err === "cancelled" ? "Sign-in was cancelled." : "That sign-in didn't work. Please try again, or use another way.");
     if (!ticket && !err) return;
-    history.replaceState(null, "", "#/shop");
+    history.replaceState(null, "", "/shop");
     if (!ticket) return;
     fetch("/api/shop/auth/ticket", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ ticket }) })
       .then(async (r) => {
@@ -350,8 +352,7 @@ export function Shop() {
 
   useEffect(() => {
     const onHash = () => setOrderId(orderIdFromHash());
-    window.addEventListener("hashchange", onHash);
-    return () => window.removeEventListener("hashchange", onHash);
+    return onRouteChange(onHash);
   }, []);
 
   useEffect(() => {
@@ -425,9 +426,11 @@ function Menu({ info, catalog, config, loginError, recheck }: { info: Info; cata
   const q = params();
   const channels = info.channels;
   const wanted = q.get("channel");
-  const table = q.get("table") ?? "";
+  // A link may name the table by number only (…?table=12): it reads "Table 12" either way.
+  const table = (() => { const t = (q.get("table") ?? "").trim(); return /^\d{1,3}$/.test(t) ? `Table ${t}` : t; })();
   const startTab = q.get("tab");
-  const entered = () => !!localStorage.getItem(LS_MEMBER) || sessionStorage.getItem(LS_ENTERED) === "1";
+  // (Development only: ?enter=1 skips the Welcome screen, for screenshots.)
+  const entered = () => !!localStorage.getItem(LS_MEMBER) || sessionStorage.getItem(LS_ENTERED) === "1" || (import.meta.env.DEV && params().get("enter") === "1");
   const [screen, setScreenRaw] = useState<Screen>(startTab === "account" ? "account" : entered() ? "order" : "login");
   const [channelId, setChannelId] = useState(channels.find((c) => c.id === wanted)?.id ?? (table ? channels.find((c) => c.kind === "dine_in")?.id : undefined) ?? channels[0]?.id ?? "");
   const [category, setCategory] = useState("All");
@@ -455,8 +458,7 @@ function Menu({ info, catalog, config, loginError, recheck }: { info: Info; cata
   const [, bumpLink] = useState(0);
   useEffect(() => {
     const f = () => bumpLink((n) => n + 1);
-    window.addEventListener("hashchange", f);
-    return () => window.removeEventListener("hashchange", f);
+    return onRouteChange(f);
   }, []);
   const [spot, setSpot] = useState(linkTable ?? (tableList.length ? (tableList.includes(saved?.spot ?? "") ? saved!.spot : "") : table || saved?.spot || ""));
   const [tableEdit, setTableEdit] = useState(false);
@@ -479,13 +481,23 @@ function Menu({ info, catalog, config, loginError, recheck }: { info: Info; cata
   const [wallet, setWallet] = useState(false);
   const [guestOk, setGuestOk] = useState(false);
   const [guestForm, setGuestForm] = useState(false);
-  const [acctPanel, setAcctPanel] = useState<null | "profile" | "help" | "notif" | "prefs">(null);
-  const [langOpen, setLangOpen] = useState(false);
+  const [acctPanel, setAcctPanel] = useState<null | "profile" | "help" | "notif" | "prefs" | "pay" | "addr">(import.meta.env.DEV ? ((params().get("panel") as "profile" | "help" | "notif" | "prefs" | "pay" | "addr" | null) ?? null) : null); // (development only: ?panel=profile opens a panel, for screenshots)
+  // What the customer saved on this device: how they like to pay, and an address. Only the kind of payment is kept, never card details.
+  const [savedPay, setSavedPay] = useState<string>(() => { try { return localStorage.getItem("shop.savedPay") ?? ""; } catch { return ""; } });
+  type AddrBook = { home: string; office: string; pick: "" | "home" | "office" };
+  const [addrBook, setAddrBook] = useState<AddrBook>(() => { try { const j = JSON.parse(localStorage.getItem("shop.addrBook") ?? "null") as Partial<AddrBook> | null; return { home: j?.home ?? "", office: j?.office ?? "", pick: j?.pick === "home" || j?.pick === "office" ? j.pick : "" }; } catch { return { home: "", office: "", pick: "" }; } });
+  const saveBook = (b: AddrBook) => { setAddrBook(b); try { localStorage.setItem("shop.addrBook", JSON.stringify(b)); } catch { /* not kept */ } };
+  const addrLabel = (k: "home" | "office") => (k === "home" ? tx("Home") : tx("Office"));
+  const savedAddr = addrBook.pick && addrBook[addrBook.pick] ? `${addrLabel(addrBook.pick)} — ${addrBook[addrBook.pick]}` : "";
+  const [addrEdit, setAddrEdit] = useState<"" | "home" | "office">("");
+  const [guestPromo, setGuestPromo] = useState(() => { try { return localStorage.getItem("shop.guestPromo") === "1"; } catch { return false; } });
+  const [addrDraft, setAddrDraft] = useState("");
+  const [langOpen, setLangOpen] = useState(import.meta.env.DEV && params().get("dialog") === "lang"); // (development only: ?dialog=lang opens the language dialog, for screenshots)
   const [orderUpdatesOn, setOrderUpdatesOn] = useState(() => localStorage.getItem(LS_ORDER_UPDATES) !== "0");
   const langBox = useDialog(langOpen, () => setLangOpen(false));
   const walletBox = useDialog(wallet, () => setWallet(false));
   const tableBox = useDialog(tableEdit && tableList.length > 0, () => setTableEdit(false));
-  const [payMethod, setPayMethod] = useState<"counter" | "card" | "paynow" | "credit">(info.membersOnly ? "credit" : "counter");
+  const [payMethod, setPayMethod] = useState<"counter" | "card" | "paynow" | "credit">(info.membersOnly ? "credit" : (() => { try { const v = localStorage.getItem("shop.savedPay"); return v === "card" || v === "paynow" ? (info.payments.online && info.payments.methods.includes(v) ? v : "counter") : "counter"; } catch { return "counter"; } })());
   const [history, setHistory] = useState<PastOrder[] | null>(null);
   const [editName, setEditName] = useState("");
   const [editPhone, setEditPhone] = useState("");
@@ -608,6 +620,24 @@ function Menu({ info, catalog, config, loginError, recheck }: { info: Info; cata
   const byId = useMemo(() => new Map(menu.map((m) => [m.id, m])), [menu]);
   const channel = channels.find((c) => c.id === channelId);
   const categories = useMemo(() => ["All", ...new Set(menu.map((m) => m.category))], [menu]);
+  // The rail lights the category whose heading is at the top of the list (the last one when the page ends).
+  useEffect(() => {
+    if (screen !== "order") return;
+    const onScroll = () => {
+      if (search !== null && search.trim()) return;
+      const rail = document.querySelector<HTMLElement>(".shop-chips");
+      const line = (rail?.getBoundingClientRect().bottom ?? 0) + 14;
+      const secs = [...document.querySelectorAll<HTMLElement>(".cat-section[data-cat]")];
+      if (!secs.length) return;
+      const atEnd = window.innerHeight + window.scrollY >= document.documentElement.scrollHeight - 4;
+      let cur = "All";
+      if (window.scrollY > 8) for (const sec of secs) if (sec.getBoundingClientRect().top <= line) cur = sec.dataset.cat!;
+      if (atEnd) cur = secs[secs.length - 1]!.dataset.cat!;
+      setCategory((c) => (c === cur ? c : cur));
+    };
+    window.addEventListener("scroll", onScroll, { passive: true });
+    return () => window.removeEventListener("scroll", onScroll);
+  }, [screen, search]);
 
   // Before the customer pays, make sure the menu is current (the server checks again when the order is placed).
   useEffect(() => { if (screen === "bag" || screen === "summary" || screen === "checkout" || screen === "payment") recheck(); }, [screen]); // eslint-disable-line react-hooks/exhaustive-deps
@@ -634,6 +664,10 @@ function Menu({ info, catalog, config, loginError, recheck }: { info: Info; cata
   const count = bag.reduce((n, l) => n + l.qty, 0);
   // Rewards (points, coupons, stamps) can be switched off for a shop. Then none of their screens or wording shows.
   const rewardsOn = config.rewards.pointsEnabled || config.rewards.welcomeVoucherCents > 0 || config.rewards.stampCard.enabled;
+  // Prototype preview, for demos: ?preview=1 shows the prototype's sign-up wording to guests (welcome offers and a sample earning rate of
+  // 100 points a dollar) even where the shop has rewards off; ?preview=0 turns it off. Remembered on this device. Real customers never see it.
+  const [protoPreview] = useState(() => { try { const q = params().get("preview"); if (q === "1") localStorage.setItem("shop.preview", "1"); if (q === "0") localStorage.removeItem("shop.preview"); return localStorage.getItem("shop.preview") === "1"; } catch { return false; } });
+  const guestRewards = rewardsOn || protoPreview;
   const credit = member?.creditCents ?? 0;
   const canUsePoints = !!member && config.rewards.pointsEnabled && member.pointsBalance >= config.pricing.minPointsRedeem;
   const chosen = coupons.find((c) => c.id === couponId) ?? null;
@@ -652,7 +686,7 @@ function Menu({ info, catalog, config, loginError, recheck }: { info: Info; cata
   const total = quote?.ok ? quote.priced.total : 0;
   const shownTotal = agreed ?? total;
   const inBag = (id: string) => bag.filter((l) => l.productId === id).reduce((n, l) => n + l.qty, 0);
-  const earnPts = Math.floor((itemsSubtotal / 100) * config.rewards.earnPointsPerDollar);
+  const earnPts = rewardsOn || !protoPreview ? Math.floor((itemsSubtotal / 100) * config.rewards.earnPointsPerDollar) : quote?.ok ? Math.floor(quote.priced.total) : 0; // preview: dollars paid × 100 = the cents paid
 
   const addLine = (m: MenuEntry, selection: ChosenOptionInput[], d = 1, rawNote = "") => {
     const r = resolveOptions(m.options, selection);
@@ -698,6 +732,14 @@ function Menu({ info, catalog, config, loginError, recheck }: { info: Info; cata
     setAgreed(null);
   };
   const addSimple = (m: MenuEntry, d: number) => addLine(m, m.options?.length ? defaultSelection(m.options) : [], d);
+  // (Development only, for screenshots: ?bag=3 puts three items in the bag.)
+  const devSeeded = useRef(false);
+  useEffect(() => {
+    const n = import.meta.env.DEV ? Number(params().get("bag") ?? 0) : 0;
+    if (!n || devSeeded.current || !menu.length) return;
+    devSeeded.current = true;
+    menu.slice(0, n).forEach((m) => addLine(m, m.options?.length ? defaultSelection(m.options) : [], 1));
+  }, [menu]);
 
   async function place() {
     if (!quote?.ok || busy) return;
@@ -726,7 +768,7 @@ function Menu({ info, catalog, config, loginError, recheck }: { info: Info; cata
             return;
           }
         }
-        location.hash = `#/shop/order/${j.orderId}`;
+        go(`/shop/order/${j.orderId}`);
       } else if (res.status === 409 && j.error === "price_changed") {
         setAgreed(j.totalCents ?? null);
         setNote(`Prices changed while you were ordering. The new total is ${formatMoney(j.totalCents ?? 0)}. Tap Pay again to confirm.`);
@@ -772,7 +814,18 @@ function Menu({ info, catalog, config, loginError, recheck }: { info: Info; cata
   const last = localStorage.getItem(LS_LAST);
   const phoneOk = /^[+\d][\d\s-]{5,19}$/.test(phone) && phone.replace(/\D/g, "").length >= 8;
   const needle = (search ?? "").trim().toLowerCase();
-  const shown = menu.filter((m) => (category === "All" || m.category === category) && (!needle || m.name.toLowerCase().includes(needle) || (m.altName ?? "").toLowerCase().includes(needle)));
+  const shown = menu.filter((m) => !needle || m.name.toLowerCase().includes(needle) || (m.altName ?? "").toLowerCase().includes(needle));
+  // The whole menu is one list under category headings. The category rail jumps to a heading and lights the one in view.
+  const sections: Array<{ c: string | null; items: MenuEntry[] }> = needle ? [{ c: null, items: shown }] : categories.slice(1).map((c) => ({ c, items: shown.filter((m) => m.category === c) })).filter((g) => g.items.length);
+  const catCounts = new Map(categories.slice(1).map((c) => [c, menu.filter((m) => m.category === c).length]));
+  const jumpTo = (c: string) => {
+    setCategory(c);
+    if (searchCleared && search !== null && !search.trim()) { setSearch(null); setSearchCleared(false); }
+    const rail = document.querySelector<HTMLElement>(".shop-chips");
+    const railBottom = rail?.getBoundingClientRect().bottom ?? 0;
+    const target = c === "All" ? document.querySelector<HTMLElement>(".shop-list") : document.querySelector<HTMLElement>(`.cat-section[data-cat="${CSS.escape(c)}"]`);
+    if (target) window.scrollTo({ top: Math.max(0, target.getBoundingClientRect().top + window.scrollY - railBottom - 2), behavior: "smooth" });
+  };
   const dine = channel?.kind === "dine_in";
   const spotText = dine ? spot || tx("Add table") : tx("Pickup counter");
   const loadingMember = memberPending && !member;
@@ -795,12 +848,13 @@ function Menu({ info, catalog, config, loginError, recheck }: { info: Info; cata
             <Icon name="table" size={16} />{spot || tx("Add table")}
           </button>
         )}
+        {!dine && !noSpot && <span className="shop-spot-label"><Icon name="bag" size={16} />{t("takeAway", "Take away")}</span>}
         {loadingMember ? (
           <span className="shop-pts" aria-hidden="true">&nbsp;<br />&nbsp;</span>
         ) : member ? (
           rewardsOn ? (config.rewards.pointsEnabled && <span className="shop-pts">{member.pointsBalance.toLocaleString()} points</span>) : <span className="shop-pts">{formatMoney(credit)} {tx("credit")}</span>
-        ) : rewardsOn ? (
-          <button className="shop-pts link" onClick={() => setScreen("login")}>{t("signUpNow", "Sign up now")}<br /><WelcomeLine points={config.rewards.welcomePoints} voucherCents={config.rewards.welcomeVoucherCents} /></button>
+        ) : guestRewards ? (
+          <button className="shop-pts link" onClick={() => setScreen("login")}>{t("signUpNow", "Sign up now")}<br /><WelcomeLine points={rewardsOn ? config.rewards.welcomePoints : 500} voucherCents={rewardsOn ? config.rewards.welcomeVoucherCents : 200} /></button>
         ) : (
           <button className="shop-pts link" onClick={() => setScreen("login")}>{t("signInW", "Sign in")}<br />{tx("to pay with credit")}</button>
         )}
@@ -864,16 +918,17 @@ function Menu({ info, catalog, config, loginError, recheck }: { info: Info; cata
 
   const nav = (
     <nav className="shop-nav" aria-label="Sections">
-      {([["order", "basket", screen !== "order" && count > 0 && navActive === "order" ? tx("Add More") : t("order", "Order")], ...(rewardsOn ? [["rewards", "gift", t("rewards", "Rewards")] as const] : []), ["account", "user", t("account", "Account")]] as const).map(([id, ic, label]) => (
+      {([["order", "basket", screen !== "order" && count > 0 ? tx("Add More") : t("order", "Order")], ...(rewardsOn ? [["rewards", "gift", t("rewards", "Rewards")] as const] : []), ["account", "user", t("account", "Account")]] as const).map(([id, ic, label]) => (
         <button key={id} aria-current={navActive === id ? "page" : undefined} onClick={() => setScreen(id)}><Icon name={ic} size={20} /><span>{label}</span></button>
       ))}
     </nav>
   );
 
   const langSheet = langOpen && (
-    <div className="shop-sheet" role="dialog" aria-modal="true" aria-label={t("language", "Language")}>
-      <div className="shop-sheet-in" ref={langBox}>
-        <div className="shop-sheet-head"><h2>{t("language", "Language")}</h2><button onClick={() => setLangOpen(false)} aria-label={t("close", "Close")}>✕</button></div>
+    <div className="tbl-back" onClick={() => setLangOpen(false)}>
+      <div className="tbl-dlg" ref={langBox} role="dialog" aria-modal="true" aria-label={t("language", "Language")} onClick={(e) => e.stopPropagation()}>
+        <button className="tbl-x" onClick={() => setLangOpen(false)} aria-label={t("close", "Close")}>✕</button>
+        <h3>{t("language", "Language")}</h3>
         <p className="muted">{t("langLead", "Choose the language for this app.")}</p>
         <div className="lang-list">
           <button className="lang-opt" aria-current={langMode() === "auto"} onClick={() => { setLangMode("auto"); setLangOpen(false); }}>
@@ -887,7 +942,6 @@ function Menu({ info, catalog, config, loginError, recheck }: { info: Info; cata
             </button>
           ))}
         </div>
-        <button className="shop-primary" onClick={() => setLangOpen(false)}>{t("close", "Close")}</button>
       </div>
     </div>
   );
@@ -959,7 +1013,7 @@ function Menu({ info, catalog, config, loginError, recheck }: { info: Info; cata
         )}
         {seg}
       </div>
-      {last && <a className="shop-last" href={`#/shop/order/${last}`}>{tx("View my last order →")}</a>}
+      {last && <a className="shop-last" href={`/shop/order/${last}`}>{tx("View my last order →")}</a>}
       {b.heroUrl && (
         <div className="shop-hero">
           <img src={b.heroUrl} alt="" />
@@ -967,30 +1021,43 @@ function Menu({ info, catalog, config, loginError, recheck }: { info: Info; cata
         </div>
       )}
       <div className="shop-catalog">
-        {(b.promoTitle || b.promoBody) && (
-          <>
-            <h2 className="shop-sec">{t("specialOffer", "Special Offer")}</h2>
-            <section className="shop-promo">
+        {/* The merchant's own Special Offer slot. Until the merchant writes one, the prototype's placeholder shows. */}
+        <h2 className="shop-sec">{t("specialOffer", "Special Offer")}</h2>
+        <section className="shop-promo">
+          {b.promoTitle || b.promoBody ? (
+            <>
               {b.promoTitle && <h3>{b.promoTitle}</h3>}
               {b.promoBody && <p>{b.promoBody}</p>}
-            </section>
-          </>
-        )}
+            </>
+          ) : (
+            <>
+              <h3>{tx("Your special offer here")}</h3>
+              <p>{tx("This space is the merchant’s — add a promotion, bundle, seasonal special or announcement here. The merchant sets this content; it is not tied to any menu category.")}</p>
+            </>
+          )}
+        </section>
         <div className="shop-chips">
-          <button className={`search ${search !== null ? "on" : ""}`} aria-label={tx("Search the menu")} aria-expanded={search !== null} onClick={() => { setSearchCleared(false); setSearch((s) => (s === null ? "" : null)); }}><Icon name="search" size={18} /></button>
-          {categories.map((c) => <button key={c} className={c === category ? "on" : ""} onClick={() => { setCategory(c); if (searchCleared && search !== null && !search.trim()) { setSearch(null); setSearchCleared(false); } }}>{c === "All" ? t("all", "All") : tx(c)}</button>)}
-        </div>
-        {search !== null && (
-          <div className="search-bar">
-            <Icon name="search" size={17} />
-            <input className="search-input" type="search" autoFocus autoComplete="off" enterKeyHint="search" placeholder={tx("Search the menu")} aria-label={tx("Search the menu")} value={search} onChange={(e) => { setSearch(e.target.value); setSearchCleared(false); }} />
-            {search !== "" && <button className="search-clear" aria-label={`${tx("Search the menu")}: ${t("clear", "Clear")}`} onClick={() => { setSearch(""); setSearchCleared(true); }}>&times;</button>}
+          <div className="cats-row">
+          <div className="cats">
+            {categories.map((c) => <button key={c} aria-pressed={c === category} onClick={() => jumpTo(c)}>{c === "All" ? t("all", "All") : tx(c)}<span className="cat-count">{c === "All" ? menu.length : catCounts.get(c)}</span></button>)}
           </div>
-        )}
+          <button className={`search ${search !== null ? "on" : ""}`} aria-label={tx("Search the menu")} aria-expanded={search !== null} onClick={() => { setSearchCleared(false); setSearch((x) => (x === null ? "" : null)); }}><Icon name="search" size={18} /></button>
+          </div>
+        {search !== null && (
+            <div className="search-bar">
+              <Icon name="search" size={17} />
+              <input className="search-input" type="search" autoFocus autoComplete="off" enterKeyHint="search" placeholder={tx("Search the menu")} aria-label={tx("Search the menu")} value={search} onChange={(e) => { setSearch(e.target.value); setSearchCleared(false); }} />
+              {search !== "" && <button className="search-clear" aria-label={`${tx("Search the menu")}: ${t("clear", "Clear")}`} onClick={() => { setSearch(""); setSearchCleared(true); }}>&times;</button>}
+            </div>
+          )}
+        </div>
         {noteEl}
         <div className="shop-list">
           {shown.length === 0 && <p className="shop-msg">{tx("No items match your search.")}</p>}
-          {shown.map((m) => {
+          {sections.map((g) => (
+            <div key={g.c ?? "results"} className="cat-section" data-cat={g.c ?? undefined}>
+              {g.c && <div className="cat-section-head"><h3>{tx(g.c)}</h3><span className="cat-section-count">{g.items.length}</span></div>}
+          {g.items.map((m) => {
             const n = inBag(m.id);
             const img = photo(m);
             const hasOpts = !!m.options?.length || bag.some((l) => l.productId === m.id && !!l.note);
@@ -1020,6 +1087,8 @@ function Menu({ info, catalog, config, loginError, recheck }: { info: Info; cata
             // An item that is already in the bag slides left to take it out, like the prototype. That removes every variant of it.
             return n > 0 ? <SwipeRow key={m.id} label={m.name} onRemove={() => { setBag((cur) => cur.filter((x) => x.productId !== m.id)); setAgreed(null); }}>{card}</SwipeRow> : card;
           })}
+            </div>
+          ))}
         </div>
       </div>
       {count > 0 && (
@@ -1110,12 +1179,36 @@ function Menu({ info, catalog, config, loginError, recheck }: { info: Info; cata
   }
 
   /* ================= Account ================= */
+  const payName = (m: string) => (m === "card" ? tx("Card") : m === "paynow" ? "PayNow" : tx("Cash on pickup"));
   const acctRow = (ic: keyof typeof ICONS, title: string, desc: string, onClick: () => void) => (
     <button className="acct-row" onClick={onClick}><span className="aic"><Icon name={ic} size={21} /></span><span className="at">{tx(title)}{desc && <span className="ad">{tx(desc)}</span>}</span><span className="chev"><Icon name="chevR" size={16} /></span></button>
   );
+  // The member card sits with the header and the Account title: they stay put, and only the lists below scroll.
+  const acctMemberCard = (
+    <div className="member-card">
+      <div className="member-top">
+        <span className="avatar">{b.logoUrl ? <img src={b.logoUrl} alt="" /> : <Icon name="user" size={26} />}</span>
+        {member ? (
+          <div className="member-main">
+            <div className="name">{who}</div>
+            {member.phone && <div className="acct-phone">{member.phone}</div>}
+            <div className="pts-stack"><span className="pts-line"><b><RollMoney cents={credit} /></b><span>{tx("credit")}</span></span></div>
+            {config.rewards.pointsEnabled && <div className="pts-stack"><span className="pts-line"><b>{member.pointsBalance.toLocaleString()}</b><span>{t("points", "points")}</span></span><span className="pts-worth">{tx("{amt} worth", { amt: formatMoney(member.pointsBalance) })}</span></div>}
+          </div>
+        ) : (
+          <div className="member-main">
+            <div className="name">{t("guestW", "Guest")}</div>
+            <div className="pts-stack"><span className="pts-line" style={{ fontSize: 14, lineHeight: "18px", fontWeight: 600 }}>{!guestRewards ? tx("Sign in to pay with your member credit") : earnPts > 0 ? tx("Sign up to earn {n} points on this order", { n: earnPts.toLocaleString() }) : tx("Sign up to earn points on this order")}</span></div>
+            <button className="history" onClick={() => setScreen("login")}>{t("signUpBtn", "Sign up")} <Icon name="chevR" size={14} /></button>
+          </div>
+        )}
+        <div className="member-soon is-brand"><span className="k">{t("member", "Member")}</span><span className="v">{info.name}</span><span className="d">{info.outletName}</span></div>
+      </div>
+    </div>
+  );
   const accountScreen = (
     <>
-      {pageHead(t("account", "Account"))}
+      <div className="acct-fixed">{pageHead(t("account", "Account"))}<div className="acct-fixed-card">{acctMemberCard}</div></div>
       <div className="scroll-body shop-body">
         {acctPanel === "profile" ? (
           <>
@@ -1133,6 +1226,8 @@ function Menu({ info, catalog, config, loginError, recheck }: { info: Info; cata
               ) : (
                 <>
                   <div className="sum-row"><span className="k">{t("signedInAs", "Signed in as")}</span><span className="v">{t("guestW", "Guest")}</span></div>
+                  <p className="e2e-sub" style={{ textAlign: "left", margin: "8px 0" }}>{tx("You are browsing as a guest, so there is no profile yet. Sign up to save your name, phone and email, and to earn points on your orders.")}</p>
+                  {guestRewards ? (earnPts > 0 && <div className="ready-banner" role="status">{tx("Sign up to earn {n} points on this order", { n: earnPts.toLocaleString() })}</div>) : <div className="ready-banner" role="status">{tx("Sign in to pay with your member credit")}</div>}
                   <button className="e2e-cta" onClick={() => setScreen("login")}><span>{t("signUpBtn", "Sign up")}</span><Icon name="arrowR" size={19} /></button>
                 </>
               )}
@@ -1151,7 +1246,7 @@ function Menu({ info, catalog, config, loginError, recheck }: { info: Info; cata
                 <p className="e2e-sub" style={{ textAlign: "left", padding: "10px 14px" }}>{t("notifNone", "No updates yet. Updates about your orders will show here.")}</p>
               ) : (
                 history.slice(0, 15).map((o) => (
-                  <a key={o.orderId} className="acct-row" href={`#/shop/order/${o.orderId}`}>
+                  <a key={o.orderId} className="acct-row" href={`/shop/order/${o.orderId}`}>
                     <span className="aic"><Icon name="bell" size={21} /></span>
                     <span className="at">{o.queueNumber} — {STATUS_TEXT[o.status].title.split(":")[0]}<span className="ad">{o.channelName ?? tx("Order")}{o.spot ? ` · ${o.spot}` : ""} · {tx(o.itemCount === 1 ? "{n} item" : "{n} items", { n: o.itemCount })}</span></span>
                     <span className="ad" style={{ flex: "none" }}>{new Date(o.at).toLocaleDateString()}</span>
@@ -1173,14 +1268,18 @@ function Menu({ info, catalog, config, loginError, recheck }: { info: Info; cata
                   <span className="sw-word">{orderUpdatesOn ? t("onW", "On") : t("offW", "Off")}</span><span className="sw-track"><span className="sw-knob" /></span>
                 </button>
               </div>
-              {rewardsOn && member && (
-                <div className="pref-row">
-                  <span className="pref-t"><b>{t("prefPromoT", "Offers & rewards news")}</b><small>{t("prefPromoD", "New promotions, coupons and stamp-card news from this outlet.")}</small></span>
-                  <button type="button" role="switch" aria-checked={member.prefs?.promos === true} className={`set-switch ${member.prefs?.promos === true ? "is-on" : ""}`} onClick={() => void savePref("promos", !(member.prefs?.promos === true))}>
-                    <span className="sw-word">{member.prefs?.promos === true ? t("onW", "On") : t("offW", "Off")}</span><span className="sw-track"><span className="sw-knob" /></span>
-                  </button>
-                </div>
-              )}
+              {guestRewards && (() => {
+                // A member's choice is kept with their account; a guest's is kept on this device.
+                const promosOn = member ? member.prefs?.promos === true : guestPromo;
+                return (
+                  <div className="pref-row">
+                    <span className="pref-t"><b>{t("prefPromoT", "Offers & rewards news")}</b><small>{t("prefPromoD", "New promotions, coupons and stamp-card news from this outlet.")}</small></span>
+                    <button type="button" role="switch" aria-checked={promosOn} className={`set-switch ${promosOn ? "is-on" : ""}`} onClick={() => { if (member) void savePref("promos", !promosOn); else { const next = !guestPromo; setGuestPromo(next); try { localStorage.setItem("shop.guestPromo", next ? "1" : "0"); } catch { /* not kept */ } } }}>
+                      <span className="sw-word">{promosOn ? t("onW", "On") : t("offW", "Off")}</span><span className="sw-track"><span className="sw-knob" /></span>
+                    </button>
+                  </div>
+                );
+              })()}
             </div>
           </>
         ) : acctPanel === "help" ? (
@@ -1200,44 +1299,67 @@ function Menu({ info, catalog, config, loginError, recheck }: { info: Info; cata
           </>
         ) : (
           <>
-            <div className="member-card">
-              <div className="member-top">
-                <span className="avatar">{b.logoUrl ? <img src={b.logoUrl} alt="" /> : <Icon name="user" size={26} />}</span>
-                {member ? (
-                  <div className="member-main">
-                    <div className="name">{who}</div>
-                    {member.phone && <div className="acct-phone">{member.phone}</div>}
-                    <div className="pts-stack"><span className="pts-line"><b><RollMoney cents={credit} /></b><span>{tx("credit")}</span></span></div>
-                    {config.rewards.pointsEnabled && <div className="pts-stack"><span className="pts-line"><b>{member.pointsBalance.toLocaleString()}</b><span>{t("points", "points")}</span></span><span className="pts-worth">{tx("{amt} worth", { amt: formatMoney(member.pointsBalance) })}</span></div>}
-                  </div>
-                ) : (
-                  <div className="member-main">
-                    <div className="name">{t("guestW", "Guest")}</div>
-                    <div className="pts-stack"><span className="pts-line" style={{ fontSize: 14, lineHeight: "18px", fontWeight: 600 }}>{!rewardsOn ? tx("Sign in to pay with your member credit") : earnPts > 0 ? tx("Sign up to earn {n} points on this order", { n: earnPts.toLocaleString() }) : tx("Sign up to earn points on this order")}</span></div>
-                    <button className="history" onClick={() => setScreen("login")}>{t("signUpBtn", "Sign up")} <Icon name="chevR" size={14} /></button>
-                  </div>
-                )}
-              </div>
-            </div>
             <div className="acct-sec">{t("myAccount", "My account")}</div>
             <div className="acct-list">
               {acctRow("user", t("profile", "Profile details"), "Name, phone and email on this account", () => { setEditName(member?.name ?? ""); setEditPhone(member?.phone ?? ""); setProfileMsg(null); setAcctPanel("profile"); })}
+              {acctRow("card", t("payment", "Payment methods"), savedPay ? `${payName(savedPay)} · ${tx("saved — reused at checkout")}` : "Cards and wallets for checkout", () => setAcctPanel((p) => (p === "pay" ? null : "pay")))}
+              {acctRow("pin", t("addresses", "Addresses"), savedAddr || "Saved pickup and delivery addresses", () => { setAddrEdit(""); setAcctPanel((p) => (p === "addr" ? null : "addr")); })}
+              {acctRow("bell", t("notifications", "Notifications"), "Order updates and reward reminders", () => { setAcctPanel("notif"); })}
+            </div>
+            {acctPanel === "pay" && (
+              <div className="acct-panel">
+                <h3>{tx("Payment methods")}</h3>
+                <p className="e2e-sub" style={{ textAlign: "left", margin: 0 }}>{tx("No card details are stored. The saved method is pre-selected at payment.")}</p>
+                {(["card", "paynow", "counter"] as const).map((m) => {
+                  const offered = m === "counter" || protoPreview || (info.payments.online && info.payments.methods.includes(m)); // (in the demo preview all three can be saved; at payment only what the shop takes is used)
+                  return (
+                    <button key={m} className="pay-opt" aria-pressed={savedPay === m && offered} disabled={!offered} style={offered ? undefined : { opacity: 0.55, cursor: "default" }} onClick={() => { setSavedPay(m); try { localStorage.setItem("shop.savedPay", m); } catch { /* not kept */ } if (!info.membersOnly) setPayMethod(m); }}>
+                      <span style={{ display: "flex", color: "var(--orange-dark)" }}><Icon name={m === "card" ? "card" : m === "paynow" ? "stack" : "ticket"} size={24} /></span>
+                      <span className="pt"><b>{payName(m)}</b><span>{!offered ? tx("Not offered at this shop yet.") : m === "card" ? tx("Saved as your default card payment — no card number kept.") : m === "paynow" ? tx("Saved as your default PayNow payment.") : tx("Saved as your default — pay at the counter.")}</span></span>
+                      <span className="radio" />
+                    </button>
+                  );
+                })}
+                <button className="popup-close" onClick={() => setAcctPanel(null)} style={{ marginTop: 10 }}>{t("close", "Close")}</button>
+              </div>
+            )}
+            {acctPanel === "addr" && (
+              <div className="acct-panel">
+                <h3>{tx("Addresses")}</h3>
+                <p className="e2e-sub" style={{ textAlign: "left", margin: 0 }}>{tx("The saved address is kept on this device. Tap Home or Office to choose it, or to add or change it.")}</p>
+                {(["home", "office"] as const).map((k) => (
+                  <button key={k} className="pay-opt" aria-pressed={addrBook.pick === k && !!addrBook[k]} onClick={() => { setAddrEdit(k); setAddrDraft(addrBook[k]); if (addrBook[k]) saveBook({ ...addrBook, pick: k }); }}>
+                    <span style={{ display: "flex", color: "var(--orange-dark)" }}><Icon name="pin" size={24} /></span>
+                    <span className="pt"><b>{addrLabel(k)}</b><span>{addrBook[k] ? `${addrLabel(k)} — ${addrBook[k]}` : tx("Tap to add an address.")}</span></span>
+                    <span className="radio" />
+                  </button>
+                ))}
+                {addrEdit && (
+                  <>
+                    <input className="e2e-input" style={{ marginTop: 10 }} value={addrDraft} maxLength={120} placeholder={`${addrLabel(addrEdit)}: ${tx("street, unit and postcode")}`} onChange={(e) => setAddrDraft(e.target.value)} />
+                    <button className="e2e-cta" style={{ marginTop: 10 }} onClick={() => { const v = addrDraft.trim(); saveBook({ ...addrBook, [addrEdit]: v, pick: v ? addrEdit : addrBook.pick === addrEdit ? "" : addrBook.pick }); setAddrEdit(""); }}><span>{tx("Save address")}</span></button>
+                  </>
+                )}
+                <button className="popup-close" onClick={() => setAcctPanel(null)} style={{ marginTop: 10 }}>{t("close", "Close")}</button>
+              </div>
+            )}
+            <div className="acct-sec">{t("preferences", "Preferences")}</div>
+            <div className="acct-list">
               {acctRow("globe", t("language", "Language"), LANGS.find((l) => l.code === lang())!.native + (langMode() === "auto" ? " · " + t("autoShort", "Auto") : ""), () => setLangOpen(true))}
-              {acctRow("bell", t("notifications", "Notifications"), t("notificationsD", "Updates about your orders"), () => { setAcctPanel("notif"); })}
-              {acctRow("sliders", t("preferences", "Preferences"), t("language", "Language"), () => setAcctPanel("prefs"))}
+              {acctRow("gear", t("settings", "Settings"), "App preferences", () => setAcctPanel("prefs"))}
               {acctRow("help", "Help & support", "FAQs and contacting the outlet", () => setAcctPanel("help"))}
             </div>
             <div className="acct-sec">{t("orderHistory", "Order history")}</div>
             <div className="order-hist">
               {!member ? (
-                last ? <a className="acct-row" href={`#/shop/order/${last}`}><span className="aic"><Icon name="ticket" size={21} /></span><span className="at">{tx("View my last order")}<span className="ad">{tx("See its status and items")}</span></span><span className="chev"><Icon name="chevR" size={16} /></span></a> : <p className="e2e-sub" style={{ textAlign: "left" }}>{tx("Sign in to see your past orders.")}</p>
+                last ? <a className="acct-row" href={`/shop/order/${last}`}><span className="aic"><Icon name="ticket" size={21} /></span><span className="at">{tx("View my last order")}<span className="ad">{tx("See its status and items")}</span></span><span className="chev"><Icon name="chevR" size={16} /></span></a> : null
               ) : history === null ? (
                 <p className="e2e-sub" style={{ textAlign: "left" }}>{tx("Loading…")}</p>
               ) : history.length === 0 ? (
                 <p className="e2e-sub" style={{ textAlign: "left" }}>{tx("No orders yet.")}</p>
               ) : (
                 history.map((o) => (
-                  <a key={o.orderId} className="acct-row" href={`#/shop/order/${o.orderId}`}>
+                  <a key={o.orderId} className="acct-row" href={`/shop/order/${o.orderId}`}>
                     <span className="aic"><Icon name="ticket" size={21} /></span>
                     <span className="at">{o.queueNumber} — {o.channelName ?? tx("Order")}{o.spot ? ` · ${o.spot}` : ""}<span className="ad">{STATUS_TEXT[o.status].title.split(":")[0]} · {new Date(o.at).toLocaleDateString()} · {tx(o.itemCount === 1 ? "{n} item" : "{n} items", { n: o.itemCount })}</span></span>
                     <span className="v" style={{ fontWeight: 700 }}>{formatMoney(o.totalCents)}</span>
@@ -1904,7 +2026,7 @@ function Status({ orderId, info }: { orderId: string; info: Info }) {
     else setProblem(tx("Online payment isn't available right now. You can pay at the counter."));
   }
 
-  const goBack = () => { location.hash = "#/shop"; };
+  const goBack = () => { go("/shop"); };
   const head = <div className="shop-headwrap"><h2 className="page-title" style={{ padding: "14px 16px 10px" }}>{t("orderStatusW", "Order status")}</h2></div>;
   if (!o) return <>{head}<div className="e2e-scroll shop-body"><button className="e2e-back" onClick={goBack}><Icon name="chevL" size={16} /> {tx("Back")}</button><p className="e2e-sub">{problem ?? "Loading your order…"}</p></div></>;
   const text = STATUS_TEXT[o.status];
@@ -1984,8 +2106,8 @@ function Status({ orderId, info }: { orderId: string; info: Info }) {
           <button className="login-btn" style={{ justifyContent: "center", color: "#b03a26", borderColor: "#f2c4b8", marginTop: 10 }} onClick={() => setConfirmCancel(true)}><span>{t("cancelOrder", "Cancel order")}</span></button>
         ))}
         {problem && <div className="shop-note">{problem}</div>}
-        <a className="login-btn" style={{ justifyContent: "center", marginTop: 10, textDecoration: "none" }} href="#/shop?tab=account">{tx("View in Account")}</a>
-        <a className="e2e-cta" style={{ textDecoration: "none" }} href={`#/shop${/^Table\s+\d+$/i.test(o?.spot ?? "") ? `?table=${o!.spot!.replace(/\D/g, "")}` : ""}`} onClick={() => localStorage.removeItem(LS_LAST)}><span>{t("backToOrder", "Back to Order")}</span><Icon name="arrowR" size={19} /></a>
+        <a className="login-btn" style={{ justifyContent: "center", marginTop: 10, textDecoration: "none" }} href="/shop?tab=account">{tx("View in Account")}</a>
+        <a className="e2e-cta" style={{ textDecoration: "none" }} href={`/shop${/^Table\s+\d+$/i.test(o?.spot ?? "") ? `?table=${o!.spot!.replace(/\D/g, "")}` : ""}`} onClick={() => localStorage.removeItem(LS_LAST)}><span>{t("backToOrder", "Back to Order")}</span><Icon name="arrowR" size={19} /></a>
       </div>
     </>
   );

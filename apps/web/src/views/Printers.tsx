@@ -81,7 +81,7 @@ export function Printers({ catalog }: { catalog: Catalog }) {
     return (
       <div className="credit">
         <h2>Printers</h2>
-        <p className="muted">{staff ? "Only managers and owners can set up printers." : "Sign in as a manager or owner to set up printers."} {!staff && <a href="#/login">Sign in</a>}</p>
+        <p className="muted">{staff ? "Only managers and owners can set up printers." : "Sign in as a manager or owner to set up printers."} {!staff && <a href="/login">Sign in</a>}</p>
       </div>
     );
 

@@ -305,7 +305,7 @@ export function registerShop(app: FastifyInstance, d: ShopDeps) {
   if (members) {
     // ---- Google and Microsoft ----------------------------------------------------------------------
     const oauthLimit = new FailureLimiter(30, 10 * 60_000);
-    const back = (q: string) => `${integ.publicUrl}/#/shop?${q}`;
+    const back = (q: string) => `${integ.publicUrl}/shop?${q}`;
 
     /** Send the browser to the provider's sign-in page. */
     app.get<{ Params: { provider: string } }>("/api/shop/auth/oauth/:provider/start", async (req, reply) => {
@@ -691,7 +691,7 @@ export function registerShop(app: FastifyInstance, d: ShopDeps) {
     if (order.stage === "cancelled" || order.stage === "completed") return reply.code(409).send({ error: "order_closed" });
     const due = orderTotals(order, d.config).total - confirmedPaid(order);
     if (due <= 0) return reply.code(409).send({ error: "already_paid" });
-    const s = await createStripeCheckout(integ, { orderId: order.orderId, queueNumber: order.queueNumber ?? "", amountCents: due, method, returnUrl: `${integ.publicUrl}/#/shop/order/${order.orderId}`, description: `${d.config.name} order ${order.queueNumber ?? ""}`.trim() });
+    const s = await createStripeCheckout(integ, { orderId: order.orderId, queueNumber: order.queueNumber ?? "", amountCents: due, method, returnUrl: `${integ.publicUrl}/shop/order/${order.orderId}`, description: `${d.config.name} order ${order.queueNumber ?? ""}`.trim() });
     if (!s) return reply.code(502).send({ error: "payment_provider_unavailable" });
     return { url: s.url };
   });

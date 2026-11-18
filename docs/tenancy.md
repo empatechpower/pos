@@ -51,6 +51,6 @@ Customers see them under Help & support, from the outlet's own setup. `OUTLET_HO
 2. **A login for the store** (optional): create staff with that outlet (`POST /api/staff` with `outletId`) so its manager sees only that store.
 3. **Link the tablet:** Manager → Devices, choose the outlet, press **Add a device**, and type the code into the Rezein app on that tablet. From a computer: `npx tsx apps/server/src/cli.ts enrollment-code AMK-01`.
 4. **Printers:** Printers → Add a printer, and choose the outlet. Orders print only at printers of the outlet that took them.
-5. **Customer QR codes** carry the outlet: `https://YOUR-SHOP-ADDRESS/#/shop?table=5&outlet=AMK-01`. A link without `outlet` is the original outlet. The page then shows that store's name, address and hours, prices it with that outlet's pricebook, records the order at that store, and counts only that store's orders in the queue.
+5. **Customer QR codes** carry the outlet: `https://YOUR-SHOP-ADDRESS/shop?table=5&outlet=AMK-01`. A link without `outlet` is the original outlet. The page then shows that store's name, address and hours, prices it with that outlet's pricebook, records the order at that store, and counts only that store's orders in the queue.
 
 Still shared by every store: the table list (`SHOP_TABLES`), the menu, members and credit.

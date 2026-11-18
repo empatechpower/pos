@@ -27,8 +27,8 @@ export function PricebookEditor({ catalog, bookId }: { catalog: Catalog; bookId:
   const [busy, setBusy] = useState(false);
   const categories = useMemo(() => [...new Set(catalog.products.map((p) => p.category))], [catalog]);
 
-  if (!staff || staff.role === "cashier") return <div className="credit"><h2>Edit prices</h2><p className="muted">Sign in as a manager or owner to edit prices. <a href="#/login">Sign in</a></p></div>;
-  if (!book) return <div className="credit"><h2>Edit prices</h2><p className="muted">That pricebook doesn't exist (any more). <a href="#/prices">Back to Prices</a></p></div>;
+  if (!staff || staff.role === "cashier") return <div className="credit"><h2>Edit prices</h2><p className="muted">Sign in as a manager or owner to edit prices. <a href="/login">Sign in</a></p></div>;
+  if (!book) return <div className="credit"><h2>Edit prices</h2><p className="muted">That pricebook doesn't exist (any more). <a href="/prices">Back to Prices</a></p></div>;
 
   const current = (id: string) => (book.prices[id] === undefined ? "" : (book.prices[id]! / 100).toFixed(2));
   const shownPrice = (id: string) => price[id] ?? current(id);
@@ -112,7 +112,7 @@ export function PricebookEditor({ catalog, bookId }: { catalog: Catalog; bookId:
           );
         })}
       </div>
-      <p><a href="#/prices">← Back to Prices</a></p>
+      <p><a href="/prices">← Back to Prices</a></p>
     </div>
   );
 }

@@ -18,14 +18,16 @@ import { Printers } from "./views/Printers";
 import { Prices } from "./views/Prices";
 import { PricebookEditor } from "./views/PricebookEditor";
 import { TelegramSignIn } from "./views/TelegramSignIn";
+import { Kiosk } from "./views/Kiosk";
+import { onRouteChange, routeParts } from "./nav";
 import { Kitchen } from "./views/Kitchen";
 import { Pos } from "./views/Pos";
 import { Queue } from "./views/Queue";
 
-type Route = "pos" | "kitchen" | "queue" | "credit" | "login" | "devices" | "prices" | "printers" | "orders" | "online" | "shop" | "manager" | "tg" | "pricebook";
+type Route = "pos" | "kitchen" | "queue" | "credit" | "login" | "devices" | "prices" | "printers" | "orders" | "online" | "shop" | "kiosk" | "manager" | "tg" | "pricebook";
 const routeFromHash = (): Route => {
-  const h = location.hash.replace("#/", "").split("?")[0]!.split("/")[0]!;
-  return h === "kitchen" || h === "queue" || h === "credit" || h === "login" || h === "devices" || h === "prices" || h === "printers" || h === "orders" || h === "online" || h === "shop" || h === "manager" || h === "pos" || h === "tg" || h === "pricebook" ? h : "manager";
+  const h = routeParts()[0] ?? "";
+  return h === "kitchen" || h === "queue" || h === "credit" || h === "login" || h === "devices" || h === "prices" || h === "printers" || h === "orders" || h === "online" || h === "shop" || h === "kiosk" || h === "manager" || h === "pos" || h === "tg" || h === "pricebook" ? h : "manager";
 };
 
 export function App() {
@@ -42,16 +44,18 @@ export function App() {
 
   useEffect(() => {
     const onHash = () => setRoute(routeFromHash());
-    window.addEventListener("hashchange", onHash);
+    const off = onRouteChange(onHash);
     const stop = startSync();
     return () => {
-      window.removeEventListener("hashchange", onHash);
+      off();
       stop();
     };
   }, []);
 
   // The customer ordering page is public: no enrolment, no sign-in, none of the staff chrome.
   if (route === "shop") return <ErrorBoundary><Shop /></ErrorBoundary>;
+  // The in-store self-order kiosk is public too: it is opened full screen on the kiosk tablet (/kiosk?outlet=CODE).
+  if (route === "kiosk") return <ErrorBoundary><Kiosk /></ErrorBoundary>;
 
   // A one-time link from the Telegram bot: it enrols this browser and signs the person in, so it comes before the enrolment screen.
   if (route === "tg") return <TelegramSignIn />;
@@ -72,15 +76,15 @@ export function App() {
         </div>
         <nav>
           {/* This version is for running the shop: orders, printing, members, menu and devices. The till (POS), Kitchen, Credit,
-              Orders and Queue screens still exist at #/pos, #/kitchen, #/credit, #/orders and #/queue; they are just not in the bar. */}
-          {device.required && staff && <a href="#/manager" className={route === "manager" ? "on" : ""}>Manager</a>}
-          <a href="#/online" className={route === "online" ? "on" : ""}>Online{newOnline > 0 ? <b className="dot">{newOnline}</b> : null}</a>
-          {staff && staff.role !== "cashier" && catalog && <a href="#/printers" className={route === "printers" ? "on" : ""}>Printers{failedJobs > 0 ? <b className="dot">{failedJobs}</b> : null}</a>}
-          {staff && staff.role !== "cashier" && catalog && <a href="#/prices" className={route === "prices" ? "on" : ""}>Prices</a>}
-          {device.required && staff && staff.role !== "cashier" && <a href="#/devices" className={route === "devices" ? "on" : ""}>Devices</a>}
+              Orders and Queue screens still exist at /pos, /kitchen, /credit, /orders and /queue; they are just not in the bar. */}
+          {device.required && staff && <a href="/manager" className={route === "manager" ? "on" : ""}>Manager</a>}
+          <a href="/online" className={route === "online" ? "on" : ""}>Online{newOnline > 0 ? <b className="dot">{newOnline}</b> : null}</a>
+          {staff && staff.role !== "cashier" && catalog && <a href="/printers" className={route === "printers" ? "on" : ""}>Printers{failedJobs > 0 ? <b className="dot">{failedJobs}</b> : null}</a>}
+          {staff && staff.role !== "cashier" && catalog && <a href="/prices" className={route === "prices" ? "on" : ""}>Prices</a>}
+          {device.required && staff && staff.role !== "cashier" && <a href="/devices" className={route === "devices" ? "on" : ""}>Devices</a>}
         </nav>
         <div className="right">
-          <a href="#/login" className="staffbtn" title={staff ? "Signed in" : "Sign in"}>{staff ? `${staff.name} · ${staff.role}` : "Sign in"}</a>
+          <a href="/login" className="staffbtn" title={staff ? "Signed in" : "Sign in"}>{staff ? `${staff.name} · ${staff.role}` : "Sign in"}</a>
           <label className="dev" title="Each device has its own letter so queue numbers never clash offline">
             Device
             <select
@@ -120,7 +124,7 @@ export function App() {
         ) : route === "orders" ? (
           <Orders config={config} />
         ) : route === "pricebook" ? (
-          <PricebookEditor catalog={catalog} bookId={decodeURIComponent(location.hash.replace("#/", "").split("?")[0]!.split("/")[1] ?? "")} />
+          <PricebookEditor catalog={catalog} bookId={routeParts()[1] ?? ""} />
         ) : route === "prices" ? (
           <Prices catalog={catalog} outletId={config.outletName} />
         ) : route === "devices" ? (
