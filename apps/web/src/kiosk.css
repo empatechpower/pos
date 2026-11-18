@@ -342,3 +342,9 @@
   .k-bar h2 { font-size: 22px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
   .k-back { font-size: 17px; white-space: nowrap; }
 }
+
+/* Dine in / Take away: a pair of buttons with the same glow pulse as the language and Reset buttons */
+.k-seg.pulse { animation: k-seg-glow 1.2s ease-in-out infinite; }
+@keyframes k-seg-glow { 0%,100% { box-shadow: 0 0 0 0 rgba(234,112,22,0); } 50% { box-shadow: 0 0 0 6px rgba(234,112,22,.22), 0 4px 18px rgba(234,112,22,.35); } }
+.k-seg button:active { transform: scale(.96); }
+@media (prefers-reduced-motion: reduce) { .k-seg.pulse { animation: none; } }

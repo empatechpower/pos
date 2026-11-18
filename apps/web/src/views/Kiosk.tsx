@@ -108,6 +108,8 @@ function KioskSession({ info, catalog, config }: { info: Info; catalog: Catalog;
   const [screen, setScreen] = useState<Screen>(() => (import.meta.env.DEV && new URLSearchParams(location.search).get("screen") === "menu" ? "menu" : "start"));
   const [bag, setBag] = useState<BagLine[]>([]);
   const channels = info.channels.filter((c) => c.kind === "dine_in" || c.kind === "takeaway");
+  // Dine in and Take away are always both shown as a pair; one the shop does not offer says so when tapped.
+  const options = [{ kind: "dine_in" as const, ch: channels.find((c) => c.kind === "dine_in") }, { kind: "takeaway" as const, ch: channels.find((c) => c.kind === "takeaway") }];
   const [channelId, setChannelId] = useState(channels.find((c) => c.kind === "dine_in")?.id ?? channels[0]?.id ?? info.channels[0]?.id ?? "");
   const [langOpen, setLangOpen] = useState(() => import.meta.env.DEV && new URLSearchParams(location.search).get("dialog") === "lang"); // (development only: ?dialog=lang)
   const [settingsOpen, setSettingsOpen] = useState(false);
@@ -117,12 +119,12 @@ function KioskSession({ info, catalog, config }: { info: Info; catalog: Catalog;
   const [idleMin, setIdleMin] = useState(() => readNum(LS_IDLE, 1));
   const [chips, setChips] = useState(readChips);
   const [signinBlock, setSigninBlock] = useState(readSignin);
-  const [soon, setSoon] = useState(false);
+  const [soon, setSoon] = useState<string | null>(null);
   const [startQr, setStartQr] = useState<string | null>(null);
   useEffect(() => { void QRCode.toDataURL(`${location.origin}/shop`, { margin: 1, width: 160 }).then(setStartQr).catch(() => undefined); }, []);
   useEffect(() => {
     if (!soon) return;
-    const id = window.setTimeout(() => setSoon(false), 3500);
+    const id = window.setTimeout(() => setSoon(null), 3500);
     return () => window.clearTimeout(id);
   }, [soon]);
   const [order, setOrder] = useState<{ id: string; qr: string | null; view: OrderView | null } | null>(null);
@@ -339,15 +341,15 @@ function KioskSession({ info, catalog, config }: { info: Info; catalog: Catalog;
           )}
           {signinBlock && (
             <>
-              <button className="k-qrhero" onClick={() => setSoon(true)}>
+              <button className="k-qrhero" onClick={() => setSoon(tx("Member sign-in is coming soon. You can still order as a guest."))}>
                 {startQr && <img src={startQr} alt="" />}
                 <span><b>{tx("Scan with your phone to sign in")}</b><small>{tx("Point your phone camera at the code — no typing on this screen")}</small></span>
                 <i aria-hidden>›</i>
               </button>
-              <button className="k-ghost-wide" onClick={() => setSoon(true)}>{tx("Sign in with phone number")}</button>
+              <button className="k-ghost-wide" onClick={() => setSoon(tx("Member sign-in is coming soon. You can still order as a guest."))}>{tx("Sign in with phone number")}</button>
               <div className="k-social">
-                <button className="k-ghost-wide" onClick={() => setSoon(true)}><span className="g">G</span> Google</button>
-                <button className="k-ghost-wide" onClick={() => setSoon(true)}><span className="m">▦</span> Microsoft</button>
+                <button className="k-ghost-wide" onClick={() => setSoon(tx("Member sign-in is coming soon. You can still order as a guest."))}><span className="g">G</span> Google</button>
+                <button className="k-ghost-wide" onClick={() => setSoon(tx("Member sign-in is coming soon. You can still order as a guest."))}><span className="m">▦</span> Microsoft</button>
               </div>
             </>
           )}
@@ -356,7 +358,7 @@ function KioskSession({ info, catalog, config }: { info: Info; catalog: Catalog;
       </div>
     );
   } else if (screen === "menu") {
-    body = <KioskMenu info={info} menu={menu} channels={channels} channelId={channelId} setChannelId={setChannelId} count={count} total={total} qtyOf={qtyOf} addQuick={addQuick} lessOf={lessOf} open={(m) => (m.options?.length ? setPicking(m) : addQuick(m, 1))} onCheckout={() => go("review")} floating={floating} logo={logo} showSignin={signinBlock} onSignin={() => setSoon(true)} scrolling={scrolling} />;
+    body = <KioskMenu info={info} menu={menu} options={options} channelId={channelId} setChannelId={setChannelId} notify={setSoon} count={count} total={total} qtyOf={qtyOf} addQuick={addQuick} lessOf={lessOf} open={(m) => (m.options?.length ? setPicking(m) : addQuick(m, 1))} onCheckout={() => go("review")} floating={floating} logo={logo} showSignin={signinBlock} onSignin={() => setSoon(tx("Member sign-in is coming soon. You can still order as a guest."))} scrolling={scrolling} />;
   } else if (screen === "review") {
     const q = quote?.ok ? quote : null;
     body = (
@@ -448,7 +450,7 @@ function KioskSession({ info, catalog, config }: { info: Info; catalog: Catalog;
         const em = byId.get(editing.productId)!;
         return <OptionSheet notes cta={tx("Save changes")} name={em.name} description={em.description} photoUrl={photo(em)} baseCents={em.priceCents} groups={em.options ?? []} initial={editing.selection} initialNote={editing.note ?? ""} onClose={() => setEditing(null)} onAdd={(sel, note) => { setBag((cur) => cur.filter((x) => x.key !== editing.key)); addLine(em, sel, editing.qty, note); setEditing(null); }} />;
       })()}
-      {soon && <div className="k-toast" role="status">{tx("Member sign-in is coming soon. You can still order as a guest.")}</div>}
+      {soon && <div className="k-toast" role="status">{soon}</div>}
       <ResetDialog open={resetAsk || devDialog === "reset"} onNo={() => setResetAsk(false)} onYes={wipe} />
       <StillThere open={warning || devDialog === "idle"} left={devDialog === "idle" ? 6 : warnLeft} />
       <LanguageDialog open={langOpen} onClose={() => setLangOpen(false)} />
@@ -457,8 +459,8 @@ function KioskSession({ info, catalog, config }: { info: Info; catalog: Catalog;
   );
 }
 
-function KioskMenu({ info, menu, channels, channelId, setChannelId, count, total, qtyOf, addQuick, lessOf, open, onCheckout, floating, logo, showSignin, onSignin, scrolling }: {
-  info: Info; menu: MenuEntry[]; channels: Info["channels"]; channelId: string; setChannelId: (id: string) => void; count: number; total: number;
+function KioskMenu({ info, menu, options, channelId, setChannelId, notify, count, total, qtyOf, addQuick, lessOf, open, onCheckout, floating, logo, showSignin, onSignin, scrolling }: {
+  info: Info; menu: MenuEntry[]; options: Array<{ kind: "dine_in" | "takeaway"; ch?: Info["channels"][number] }>; channelId: string; setChannelId: (id: string) => void; notify: (m: string) => void; count: number; total: number;
   qtyOf: (m: MenuEntry) => number; addQuick: (m: MenuEntry, d: number) => void; lessOf: (m: MenuEntry) => void; open: (m: MenuEntry) => void; onCheckout: () => void; floating: React.ReactNode; logo: React.ReactNode; showSignin: boolean; onSignin: () => void; scrolling: boolean;
 }) {
   const [search, setSearch] = useState<string | null>(null);
@@ -560,7 +562,9 @@ function KioskMenu({ info, menu, channels, channelId, setChannelId, count, total
       <div className="k-head" ref={headRef}>
         <div className="k-top">
           <div className="k-brandlock">{logo}<div className="k-mt">{info.name}<small>{info.outletName}</small></div></div>
-          <div className="k-seg">{channels.map((c) => <button key={c.id} className={c.id === channelId ? "on" : ""} onClick={() => setChannelId(c.id)}>{c.kind === "dine_in" ? t("dineIn", "Dine in") : t("takeAway", "Take away")}</button>)}</div>
+          <div className="k-seg pulse" role="group" aria-label={tx("Dining option")}>{options.map((o) => (
+            <button key={o.kind} className={o.ch && o.ch.id === channelId ? "on" : ""} aria-pressed={!!o.ch && o.ch.id === channelId} onClick={() => (o.ch ? setChannelId(o.ch.id) : notify(tx("{x} isn't offered at this shop yet.", { x: o.kind === "dine_in" ? t("dineIn", "Dine in") : t("takeAway", "Take away") })))}>{o.kind === "dine_in" ? t("dineIn", "Dine in") : t("takeAway", "Take away")}</button>
+          ))}</div>
           {showSignin && <button className="k-session" onClick={onSignin}>{tx("Guest")} · {tx("Sign in")}</button>}
           <button className={`k-checkout ${count ? "live" : "none"} ${popping ? "pop" : ""}`} onClick={onCheckout} aria-label={tx("Checkout")}>
             <Icon name="bag" size={30} />
