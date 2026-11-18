@@ -9,13 +9,20 @@ export default defineConfig({
     VitePWA({
       registerType: "autoUpdate",
       manifest: {
-        name: "POS",
-        short_name: "POS",
+        // Chrome only offers "Install" when the manifest has real icons (192 and 512 px); with none, it offers a shortcut only.
+        id: "/",
+        name: "Bailey & Patch",
+        short_name: "Bailey & Patch",
         start_url: "/",
+        scope: "/",
         display: "standalone",
         background_color: "#FFFEFB",
         theme_color: "#EA7016",
-        icons: [],
+        icons: [
+          { src: "/icons/icon-192.png", sizes: "192x192", type: "image/png", purpose: "any" },
+          { src: "/icons/icon-512.png", sizes: "512x512", type: "image/png", purpose: "any" },
+          { src: "/icons/icon-maskable-512.png", sizes: "512x512", type: "image/png", purpose: "maskable" },
+        ],
       },
       workbox: { navigateFallback: "/index.html", navigateFallbackDenylist: [/^\/hub\.mjs$/, /\.apk$/, /^\/api\//, /^\/about(\/|$)/], globPatterns: ["**/*.{js,css,html,svg,png,woff2}"] },
     }),
