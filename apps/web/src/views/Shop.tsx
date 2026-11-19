@@ -14,6 +14,8 @@ export interface Info {
   paymentTiming: string;
   /** The shop's tables ("Table 1", ...). When present, ordering is dine-in only and the table must be one of these. */
   tables?: string[];
+  /** Quick service (no table) or table service (a table is required). Absent on an older server: a table list means table service. */
+  serviceMode?: "qsr" | "tsr";
   /** Members only: phone sign-in is the only way in, and an order is paid from member credit. */
   membersOnly?: boolean;
   /** Member credit is frozen: it cannot be spent, so no order can be paid with it. */
@@ -749,7 +751,7 @@ function Menu({ info, catalog, config, loginError, recheck }: { info: Info; cata
       const res = await fetch("/api/shop/orders", {
         method: "POST",
         headers: { "content-type": "application/json", ...(member ? { authorization: `Bearer ${localStorage.getItem(LS_MEMBER) ?? ""}` } : {}) },
-        body: JSON.stringify({ channelId, outletId: info.outletId, items, customerName: name, customerPhone: phone, spot, expectedTotalCents: agreed ?? total, ...(payMethod === "credit" && member ? { payWithCredit: true, idempotencyKey: purchaseKey(JSON.stringify({ channelId, items, spot, m: member.id })) } : {}), ...(pointsAsk ? { usePoints: reqPts ?? "max" } : {}), ...(chosen && chosenOk ? { couponId: chosen.id } : {}) }),
+        body: JSON.stringify({ channelId, outletId: info.outletId, items, customerName: name, customerPhone: phone, spot: tableMode ? spot : "", expectedTotalCents: agreed ?? total, ...(payMethod === "credit" && member ? { payWithCredit: true, idempotencyKey: purchaseKey(JSON.stringify({ channelId, items, spot, m: member.id })) } : {}), ...(pointsAsk ? { usePoints: reqPts ?? "max" } : {}), ...(chosen && chosenOk ? { couponId: chosen.id } : {}) }),
       });
       const j = (await res.json().catch(() => ({}))) as { orderId?: string; error?: string; totalCents?: number };
       if (res.ok && j.orderId) {
@@ -827,6 +829,8 @@ function Menu({ info, catalog, config, loginError, recheck }: { info: Info; cata
     if (target) window.scrollTo({ top: Math.max(0, target.getBoundingClientRect().top + window.scrollY - railBottom - 2), behavior: "smooth" });
   };
   const dine = channel?.kind === "dine_in";
+  // Quick service has no table at all; table service needs one.
+  const tableMode = dine && info.serviceMode !== "qsr";
   const spotText = dine ? spot || tx("Add table") : tx("Pickup counter");
   const loadingMember = memberPending && !member;
   const who = member ? member.name || (member.email ?? member.phone ?? "Member").split("@")[0] : loadingMember ? "\u00A0" : t("guestW", "Guest");
@@ -843,12 +847,12 @@ function Menu({ info, catalog, config, loginError, recheck }: { info: Info; cata
       </div>
       <div className="shop-logo">{b.logoUrl ? <img src={b.logoUrl} alt={info.name} /> : <b>{info.name}</b>}</div>
       <div className="shop-meta">
-        {dine && !noSpot && (
+        {tableMode && !noSpot && (
           <button className={`shop-table ${spot ? "on" : ""}`} disabled={tableLocked} style={tableLocked ? { opacity: 1, cursor: "default" } : undefined} onClick={() => setTableEdit((v) => !v)} aria-label={tableLocked ? spot : "Change table"}>
             <Icon name="table" size={16} />{spot || tx("Add table")}
           </button>
         )}
-        {!dine && !noSpot && <span className="shop-spot-label"><Icon name="bag" size={16} />{t("takeAway", "Take away")}</span>}
+        {!tableMode && !noSpot && <span className="shop-spot-label"><Icon name={dine ? "cutlery" : "bag"} size={16} />{dine ? t("dineIn", "Dine in") : t("takeAway", "Take away")}</span>}
         {loadingMember ? (
           <span className="shop-pts" aria-hidden="true">&nbsp;<br />&nbsp;</span>
         ) : member ? (
@@ -945,7 +949,7 @@ function Menu({ info, catalog, config, loginError, recheck }: { info: Info; cata
       </div>
     </div>
   );
-  const tableDialog = tableEdit && dine && tableList.length > 0 && !tableLocked && (
+  const tableDialog = tableEdit && tableMode && tableList.length > 0 && !tableLocked && (
     <div className="tbl-back" onClick={() => setTableEdit(false)}>
       <div className="tbl-dlg" ref={tableBox} role="dialog" aria-modal="true" aria-label={tx("Change table")} onClick={(e) => e.stopPropagation()}>
         <button className="tbl-x" onClick={() => setTableEdit(false)} aria-label={t("close", "Close")}>✕</button>
@@ -1006,7 +1010,7 @@ function Menu({ info, catalog, config, loginError, recheck }: { info: Info; cata
     <>
       <div className="shop-fixedhead" ref={headRef}>
         {header(false)}
-        {tableEdit && dine && !tableLocked && (
+        {tableEdit && tableMode && !tableLocked && (
           tableList.length ? null : (
           <div className="shop-tableedit"><input autoFocus value={spot} maxLength={30} placeholder={tx("e.g. Table 12")} onChange={(e) => setSpot(e.target.value)} onKeyDown={(e) => e.key === "Enter" && setTableEdit(false)} /><button onClick={() => setTableEdit(false)}>{t("done", "Done")}</button></div>
           )
@@ -1421,7 +1425,7 @@ function Menu({ info, catalog, config, loginError, recheck }: { info: Info; cata
         <div className="title-row">
           <button className="back-btn" onClick={() => setScreen("order")} aria-label={tx("Back")}><Icon name="chevL" size={20} /></button>
           <h2 className="page-title">{t("yourBag", "Your bag")}</h2>
-          {dine && tableList.length > 0 && !tableLocked ? (
+          {tableMode && tableList.length > 0 && !tableLocked ? (
             <button className="table-tag tag-with-icon table-tag-btn" onClick={() => setTableEdit(true)} aria-label={`${tx("Change table")}: ${spotText}`}><Icon name="table" size={15} />{spotText}</button>
           ) : (
             <span className="table-tag tag-with-icon"><Icon name={dine ? "table" : "bag"} size={15} />{spotText}</span>
@@ -1520,7 +1524,7 @@ function Menu({ info, catalog, config, loginError, recheck }: { info: Info; cata
           <div className="sum-link-row" style={{ cursor: "default" }}><span className="sl-ic"><Icon name="pin" size={21} /></span><span className="sl-t">{dine ? `${channel?.name} · ${spot || tx("no table yet")}` : `${channel?.name} · Pickup counter`}<span className="sl-d">{info.outletName}</span></span></div>
         </div>
         {detailsCard}
-        {dine && !tableLocked && (
+        {tableMode && !tableLocked && (
           <div className="e2e-card"><h3>{t("typeTableW", "Table")}</h3><div className="e2e-field"><label htmlFor="sum-table">{tx("Table number")}</label>
             {tableList.length ? (
               <button className="e2e-input tbl-open" id="sum-table" type="button" onClick={() => setTableEdit(true)}>{spot || tx("Choose your table")} <span aria-hidden>›</span></button>
@@ -1553,15 +1557,15 @@ function Menu({ info, catalog, config, loginError, recheck }: { info: Info; cata
         {info.membersOnly && member ? (
           <div className="pay-sticky">
             {noteEl}
-            {dine && !spot && <p className="e2e-sub">{tx("Choose your table to continue.")}</p>}
+            {tableMode && !spot && <p className="e2e-sub">{tx("Choose your table to continue.")}</p>}
             {member?.creditBlocked && <p className="e2e-sub">{tx("Ordering with credit is paused right now. Please see our staff.")}</p>}
             {!member?.creditBlocked && credit < shownTotal && <p className="e2e-sub">{tx("Your credit is not enough for this order. Please top up at the counter.")}</p>}
-            <button className={`e2e-cta ${canOrder && (!dine || !!spot) && credit >= shownTotal && !member?.creditBlocked ? "" : "off"}`} disabled={!canOrder || (dine && !spot) || credit < shownTotal || busy || !!member?.creditBlocked} onClick={() => void place()}>
+            <button className={`e2e-cta ${canOrder && (!tableMode || !!spot) && credit >= shownTotal && !member?.creditBlocked ? "" : "off"}`} disabled={!canOrder || (tableMode && !spot) || credit < shownTotal || busy || !!member?.creditBlocked} onClick={() => void place()}>
               <span>{busy ? tx("Placing your order…") : tx("Pay with credit")}</span><span>{formatMoney(shownTotal)}</span>
             </button>
           </div>
         ) : (
-        <button className={`e2e-cta ${canOrder && (!dine || !!spot) ? "" : "off"}`} disabled={!canOrder || (dine && !spot)} onClick={() => setScreen("checkout")}>
+        <button className={`e2e-cta ${canOrder && (!tableMode || !!spot) ? "" : "off"}`} disabled={!canOrder || (tableMode && !spot)} onClick={() => setScreen("checkout")}>
           <span>{tx(count === 1 ? "Order Now · {n} item" : "Order Now · {n} items", { n: count })}</span><span><RollMoney cents={shownTotal} /></span>
         </button>
         )}
@@ -1622,7 +1626,7 @@ function Menu({ info, catalog, config, loginError, recheck }: { info: Info; cata
               );
             })}
             {!info.membersOnly && <button className="pay-opt" aria-pressed={payMethod === "counter"} onClick={() => setPayMethod("counter")}><span style={{ display: "flex", color: "var(--orange-dark)" }}><Icon name="ticket" size={24} /></span><span className="pt"><b>{info.paymentTiming === "prepay" ? "Pay at the counter" : "Cash on pickup"}</b><span>{info.paymentTiming === "prepay" ? "Quote your number at the counter. We start your order once it is paid." : "Pay at the counter when you collect."}</span></span><span className="radio" /></button>}
-            <button className={`e2e-cta ${canOrder && (!dine || !!spot) ? "" : "off"}`} disabled={!canOrder || (dine && !spot) || (!!info.membersOnly && credit < shownTotal)} onClick={() => void place()}><span>{payMethod === "counter" ? "Place order" : payMethod === "credit" ? tx("Pay with credit") : "Pay"} · {formatMoney(shownTotal)}</span><Icon name="arrowR" size={19} /></button>
+            <button className={`e2e-cta ${canOrder && (!tableMode || !!spot) ? "" : "off"}`} disabled={!canOrder || (tableMode && !spot) || (!!info.membersOnly && credit < shownTotal)} onClick={() => void place()}><span>{payMethod === "counter" ? "Place order" : payMethod === "credit" ? tx("Pay with credit") : "Pay"} · {formatMoney(shownTotal)}</span><Icon name="arrowR" size={19} /></button>
           </>
         )}
       </div>

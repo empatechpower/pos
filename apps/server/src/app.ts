@@ -11,6 +11,7 @@ import { authenticateDevice, createEnrollmentCode, enroll, markPrintPoll, setSms
 import { BrandStore } from "./brand.js";
 import { PrintStore, validatePrinter, type Printer } from "./print.js";
 import { registerShop } from "./shop.js";
+import { optionsOf, saveSetting } from "./settings.js";
 import { sendMail, type Integrations } from "./integrations.js";
 import { registerTelegram } from "./telegram.js";
 import { MemberStore } from "./members.js";
@@ -441,7 +442,7 @@ export async function buildApp({ config, store, db, catalog, catalogAdmin, print
    * Create or change an outlet. Adding an outlet, moving it between franchises and switching it off are for the brand owner;
    * a manager of an outlet (or of its franchise) can update its name, address, phone and opening hours.
    */
-  app.put<{ Params: { id: string }; Body: { name?: string; franchiseId?: string | null; address?: string | null; phone?: string | null; hours?: string | null; active?: boolean } }>("/api/outlets/:id", { preHandler: needs("device.manage") }, async (req, reply) => {
+  app.put<{ Params: { id: string }; Body: { name?: string; franchiseId?: string | null; address?: string | null; phone?: string | null; hours?: string | null; active?: boolean; serviceMode?: string | null } }>("/api/outlets/:id", { preHandler: needs("device.manage") }, async (req, reply) => {
     const visible = await visibleOutletIds(db, merchantId, req.staff!);
     const id = req.params.id;
     const b = req.body ?? {};
@@ -458,9 +459,25 @@ export async function buildApp({ config, store, db, catalog, catalogAdmin, print
       if (b.active !== undefined) active = b.active !== false;
       if (franchiseId && !(await listFranchises(db, merchantId)).some((f) => f.id === franchiseId)) return reply.code(400).send({ error: "unknown_franchise" });
     }
-    await upsertOutlet(db, merchantId, { id, name, franchiseId, address: text(b.address, 200), phone: text(b.phone, 40), hours: text(b.hours, 120), active });
-    await audit(db, merchantId, req.staff!.id, "outlet.save", { id, name, franchiseId, created: !existing });
+    if (b.serviceMode != null && b.serviceMode !== "qsr" && b.serviceMode !== "tsr") return reply.code(400).send({ error: "service mode is qsr (quick service, no table) or tsr (table service)" });
+    const serviceMode = b.serviceMode === "qsr" || b.serviceMode === "tsr" ? b.serviceMode : null;
+    await upsertOutlet(db, merchantId, { id, name, franchiseId, address: text(b.address, 200), phone: text(b.phone, 40), hours: text(b.hours, 120), active, serviceMode });
+    await audit(db, merchantId, req.staff!.id, "outlet.save", { id, name, franchiseId, serviceMode, created: !existing });
     return { ok: true };
+  });
+
+  // ---- options the owner can switch: service charge and tax ------------------------------------
+
+  app.get("/api/settings", { preHandler: needs("wallet.read") }, async () => ({ ...optionsOf(config), serviceRate: config.pricing.serviceRate, gstRate: config.pricing.gstRate }));
+  app.put<{ Body: { serviceChargeOn?: boolean; gstOn?: boolean } }>("/api/settings", { preHandler: needs("staff.manage") }, async (req, reply) => {
+    if ((await visibleOutletIds(db, merchantId, req.staff!)) !== null) return reply.code(403).send({ error: "brand_only" });
+    const b = req.body ?? {};
+    if (b.serviceChargeOn !== undefined && typeof b.serviceChargeOn !== "boolean") return reply.code(400).send({ error: "serviceChargeOn must be true or false" });
+    if (b.gstOn !== undefined && typeof b.gstOn !== "boolean") return reply.code(400).send({ error: "gstOn must be true or false" });
+    if (b.serviceChargeOn !== undefined) { await saveSetting(db, merchantId, "serviceChargeOn", b.serviceChargeOn); config.pricing.serviceOn = b.serviceChargeOn; }
+    if (b.gstOn !== undefined) { await saveSetting(db, merchantId, "gstOn", b.gstOn); config.pricing.gstOn = b.gstOn; }
+    await audit(db, merchantId, req.staff!.id, "settings.save", { serviceChargeOn: b.serviceChargeOn, gstOn: b.gstOn });
+    return { ...optionsOf(config), serviceRate: config.pricing.serviceRate, gstRate: config.pricing.gstRate };
   });
 
   // ---- agents: limited API access for an AI helper or script (owner only) ---------------------

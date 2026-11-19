@@ -3,13 +3,14 @@ import { formatMoney } from "@pos/core";
 import { staffFetch } from "../auth";
 
 interface Franchise { id: string; name: string; active: boolean }
-interface Outlet { id: string; name: string; franchiseId: string | null; address: string | null; phone: string | null; hours: string | null; active: boolean }
+interface Outlet { id: string; name: string; franchiseId: string | null; address: string | null; phone: string | null; hours: string | null; active: boolean; serviceMode: "qsr" | "tsr" | null }
 interface Summary { orders: number; netCents: number; netToAccountForCents: number; discountsCents: number; voided: { orders: number } }
 interface Row { outletId: string; name: string; franchiseId: string | null; summary: Summary }
 interface Info { brand: { id: string; name: string }; scope: { franchiseId: string | null; outletId: string | null; brandWide: boolean }; franchises: Franchise[]; outlets: Outlet[] }
 
 const TZ = "Asia/Singapore";
 const day = (offset: number) => new Date(Date.now() - offset * 86_400_000).toLocaleDateString("en-CA", { timeZone: TZ });
+const MODE = { qsr: "Quick service (no table)", tsr: "Table service (a table is required)" } as const;
 const RANGES = { today: ["Today", 0], week: ["Last 7 days", 6], month: ["Last 30 days", 29] } as const;
 
 /**
@@ -24,12 +25,23 @@ export function Outlets() {
   const [editing, setEditing] = useState<Outlet | null>(null);
   const [isNew, setIsNew] = useState(false);
   const [fr, setFr] = useState({ id: "", name: "" });
+  const [opts, setOpts] = useState<{ serviceChargeOn: boolean; gstOn: boolean; serviceRate: number; gstRate: number } | null>(null);
 
   const load = useCallback(async () => {
     const r = await staffFetch("/api/outlets");
     if ("res" in r && r.res.ok) setInfo((await r.res.json()) as Info);
   }, []);
   useEffect(() => { void load(); }, [load]);
+  useEffect(() => {
+    void (async () => {
+      const r = await staffFetch("/api/settings");
+      if ("res" in r && r.res.ok) setOpts((await r.res.json()) as NonNullable<typeof opts>);
+    })();
+  }, []);
+  async function setOption(body: { serviceChargeOn?: boolean; gstOn?: boolean }) {
+    const r = await staffFetch("/api/settings", { method: "PUT", body });
+    if ("res" in r && r.res.ok) { setOpts((await r.res.json()) as NonNullable<typeof opts>); say("Saved. Open screens pick it up on their next reload."); } else say("Could not save.");
+  }
   useEffect(() => {
     void (async () => {
       const r = await staffFetch(`/api/reports/outlets?from=${day(RANGES[range][1])}&to=${day(0)}`);
@@ -79,12 +91,12 @@ export function Outlets() {
           const s = row(o.id)?.summary;
           return (
             <button key={o.id} className="rp-row" onClick={() => { setEditing(o); setIsNew(false); }}>
-              <span className="rp-main"><b>{o.name}{!o.active ? " (off)" : ""}</b><small>{frName(o.franchiseId) ?? "No franchise"}{o.hours ? ` · ${o.hours}` : ""}{s ? ` · ${s.orders} order${s.orders === 1 ? "" : "s"}` : ""}</small></span>
+              <span className="rp-main"><b>{o.name}{!o.active ? " (off)" : ""}</b><small>{o.serviceMode === "qsr" ? "Quick service · " : o.serviceMode === "tsr" ? "Table service · " : ""}{frName(o.franchiseId) ?? "No franchise"}{o.hours ? ` · ${o.hours}` : ""}{s ? ` · ${s.orders} order${s.orders === 1 ? "" : "s"}` : ""}</small></span>
               <span className="rp-amt">{s ? formatMoney(s.netToAccountForCents) : "—"}</span><span className="rp-chev">›</span>
             </button>
           );
         })}
-        {brandWide && <button className="secondary sm" style={{ marginTop: 8 }} onClick={() => { setEditing({ id: "", name: "", franchiseId: null, address: null, phone: null, hours: null, active: true }); setIsNew(true); }}>Add outlet</button>}
+        {brandWide && <button className="secondary sm" style={{ marginTop: 8 }} onClick={() => { setEditing({ id: "", name: "", franchiseId: null, address: null, phone: null, hours: null, active: true, serviceMode: "qsr" }); setIsNew(true); }}>Add outlet</button>}
       </div>
 
       {editing && (
@@ -95,6 +107,14 @@ export function Outlets() {
           <label className="cust"><span>Address</span><input value={editing.address ?? ""} onChange={(e) => setEditing({ ...editing, address: e.target.value })} /></label>
           <label className="cust"><span>Phone</span><input value={editing.phone ?? ""} onChange={(e) => setEditing({ ...editing, phone: e.target.value })} inputMode="tel" /></label>
           <label className="cust"><span>Opening hours</span><input value={editing.hours ?? ""} onChange={(e) => setEditing({ ...editing, hours: e.target.value })} placeholder="e.g. Daily 8am-9pm" /></label>
+          <label className="cust"><span>Service mode</span>
+            <select value={editing.serviceMode ?? ""} onChange={(e) => setEditing({ ...editing, serviceMode: (e.target.value || null) as Outlet["serviceMode"] })}>
+              <option value="">Not chosen (follows the server's table list)</option>
+              <option value="qsr">{MODE.qsr}</option>
+              <option value="tsr">{MODE.tsr}</option>
+            </select>
+          </label>
+          <p className="muted">Quick service: customers order with no table, and Dine in and Take away are both offered. Table service: Dine in only, and a table is required.</p>
           {brandWide && (
             <label className="cust"><span>Franchise</span>
               <select value={editing.franchiseId ?? ""} onChange={(e) => setEditing({ ...editing, franchiseId: e.target.value || null })}>
@@ -107,11 +127,20 @@ export function Outlets() {
           <p className="muted">Customers see the address, phone and hours under Help &amp; support.</p>
           <div style={{ display: "flex", gap: 8 }}>
             <button className="primary" disabled={!editing.name.trim() || (isNew && !editing.id)} onClick={async () => {
-              const body = brandWide ? { name: editing.name, address: editing.address, phone: editing.phone, hours: editing.hours, franchiseId: editing.franchiseId, active: editing.active } : { name: editing.name, address: editing.address, phone: editing.phone, hours: editing.hours };
+              const body = brandWide ? { name: editing.name, address: editing.address, phone: editing.phone, hours: editing.hours, franchiseId: editing.franchiseId, active: editing.active, serviceMode: editing.serviceMode } : { name: editing.name, address: editing.address, phone: editing.phone, hours: editing.hours, serviceMode: editing.serviceMode };
               if (await save(`/api/outlets/${encodeURIComponent(editing.id)}`, body, "Saved.")) setEditing(null);
             }}>Save</button>
             <button className="secondary" onClick={() => setEditing(null)}>Cancel</button>
           </div>
+        </div>
+      )}
+
+      {brandWide && opts && (
+        <div className="rp-card">
+          <h3>Charges</h3>
+          <p className="muted">Off by default. Most quick-service shops have neither; turn them on only if you charge them.</p>
+          <label className="inline"><input type="checkbox" checked={opts.serviceChargeOn} onChange={(e) => void setOption({ serviceChargeOn: e.target.checked })} /> Service charge ({Math.round(opts.serviceRate * 1000) / 10}%, dine-in only)</label>
+          <label className="inline" style={{ marginTop: 6 }}><input type="checkbox" checked={opts.gstOn} onChange={(e) => void setOption({ gstOn: e.target.checked })} /> Tax (GST {Math.round(opts.gstRate * 1000) / 10}%)</label>
         </div>
       )}
 

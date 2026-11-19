@@ -138,11 +138,12 @@ export function registerShop(app: FastifyInstance, d: ShopDeps) {
    * Which outlet a customer is ordering from: the one in the link (?outlet=B1, or outletId in the order) when it is a real, open
    * outlet of this brand; otherwise the original outlet. A made-up or closed outlet quietly falls back, so a bad link still works.
    */
-  const outletFor = async (asked: unknown): Promise<{ id: string; name: string; hours?: string; phone?: string; address?: string }> => {
+  const outletFor = async (asked: unknown): Promise<{ id: string; name: string; hours?: string; phone?: string; address?: string; mode: "qsr" | "tsr"; chosen: boolean }> => {
     const all = await listOutlets(d.db, merchantId);
     const want = typeof asked === "string" && asked ? all.find((o) => o.id === asked && o.active) : undefined;
     const o = want ?? all.find((x) => x.id === d.config.outletName);
-    return { id: o?.id ?? d.config.outletName, name: o?.name ?? d.config.outletName, hours: o?.hours?.trim() || undefined, phone: o?.phone?.trim() || undefined, address: o?.address?.trim() || undefined };
+    // Quick service (no table) or table service (a table is required). Until an outlet is set, a table list on the server means table service.
+    return { id: o?.id ?? d.config.outletName, name: o?.name ?? d.config.outletName, hours: o?.hours?.trim() || undefined, phone: o?.phone?.trim() || undefined, address: o?.address?.trim() || undefined, mode: o?.serviceMode ?? (tables.length ? "tsr" : "qsr"), chosen: !!o?.serviceMode };
   };
   /** The outlet an existing order belongs to. */
   const outletOfOrder = async (orderId: string) => (await d.store.outletOfOrder?.(orderId)) ?? d.config.outletName;
@@ -166,11 +167,13 @@ export function registerShop(app: FastifyInstance, d: ShopDeps) {
       gstRegNo: process.env.GST_REG_NO?.trim() || undefined,
       contact: hours || phone || addr ? { hours, phone, address: addr } : undefined,
       paymentTiming: d.config.paymentTiming,
-      // With a table list set, ordering is dine-in only, one fixed list of tables.
-      tables,
+      // Quick service: no table, every channel. Table service: dine-in only, and a table is required (from the shop's list when it has one).
+      // Until an outlet has chosen, a shop with no table list behaves as before (an optional table name), so no mode is announced.
+      serviceMode: outlet.chosen ? outlet.mode : tables.length ? "tsr" : undefined,
+      tables: outlet.mode === "tsr" ? tables : [],
       membersOnly,
       creditFrozen: await creditFrozen(d.db, merchantId),
-      channels: cat.channels.filter((c) => c.active && (!tables.length || c.kind === "dine_in")).map((c) => ({ id: c.id, name: c.name, kind: c.kind })),
+      channels: cat.channels.filter((c) => c.active && (outlet.mode === "qsr" || c.kind === "dine_in")).map((c) => ({ id: c.id, name: c.name, kind: c.kind })),
       brand: await brandPayload(),
       // What this deployment can do beyond email sign-in and paying at the counter. The page enables only these.
       auth: { google: !!integ.google && !!d.members, microsoft: !!integ.microsoft && !!d.members, phone: !!d.members && (openSignin ? { number: "", open: true } : smsTo ? { number: smsTo } : membersOnly ? { number: "", manual: true } : showCodes ? { number: "+65 8000 0000", simulated: true } : null) },
@@ -446,12 +449,18 @@ export function registerShop(app: FastifyInstance, d: ShopDeps) {
       options: (Array.isArray(i?.options) ? i.options.slice(0, 40) : []).map((o) => ({ groupId: String(o?.groupId ?? ""), choiceId: String(o?.choiceId ?? ""), qty: o?.qty === undefined ? undefined : Number(o.qty) })),
     }));
 
-    // Dine-in only, at one of the shop's own tables, when a table list is set.
+    // Quick service takes no table. Table service takes dine-in only, at one of the shop's own tables (any table name when it has no list).
+    const outlet = await outletFor((b as { outletId?: unknown }).outletId);
     let table: string | undefined;
-    if (tables.length) {
-      const wanted = String(b.spot ?? "").trim().replace(/^table\s*/i, "");
-      table = tables.find((x) => x === `Table ${Number(wanted)}`);
-      if (!/^\d{1,3}$/.test(wanted) || !table) return reply.code(400).send({ error: "choose your table" });
+    if (outlet.mode === "tsr") {
+      if (tables.length) {
+        const wanted = String(b.spot ?? "").trim().replace(/^table\s*/i, "");
+        table = tables.find((x) => x === `Table ${Number(wanted)}`);
+        if (!/^\d{1,3}$/.test(wanted) || !table) return reply.code(400).send({ error: "choose your table" });
+      } else {
+        table = clean(b.spot, 30) || undefined;
+        if (!table) return reply.code(400).send({ error: "choose your table" });
+      }
     }
     const phone = clean(b.customerPhone, 20);
     if (phone && !/^[+\d][\d\s-]{5,19}$/.test(phone)) return reply.code(400).send({ error: "phone number looks wrong" });
@@ -474,8 +483,7 @@ export function registerShop(app: FastifyInstance, d: ShopDeps) {
       coupon = await members!.coupon(member.id, String(b.couponId));
       if (!coupon) return reply.code(400).send({ error: "coupon_not_available" });
     }
-    if (tables.length && cat.channels.find((c) => c.id === b.channelId)?.kind !== "dine_in") return reply.code(400).send({ error: "this shop takes dine-in orders only" });
-    const outlet = await outletFor((b as { outletId?: unknown }).outletId);
+    if (outlet.mode === "tsr" && cat.channels.find((c) => c.id === b.channelId)?.kind !== "dine_in") return reply.code(400).send({ error: "this shop takes dine-in orders only" });
     const quote = quoteOrder(cat, d.config, { outletId: outlet.id, channelId: b.channelId }, items, pointsAsk, coupon ? { amountCents: coupon.amountCents, minSpendCents: coupon.minSpendCents } : null);
     if (!quote.ok) return reply.code(400).send({ error: quote.error, productId: quote.productId });
     if (b.expectedTotalCents !== undefined && b.expectedTotalCents !== quote.priced.total) {
@@ -556,7 +564,7 @@ export function registerShop(app: FastifyInstance, d: ShopDeps) {
         customerName: clean(b.customerName, 40) ?? member?.name ?? undefined,
         customerPhone: phone ?? member?.phone ?? undefined,
         memberId: member?.id,
-        spot: quote.channel.kind === "dine_in" ? table ?? clean(b.spot, 30)?.replace(/[^\w #-]/g, "") : undefined,
+        spot: quote.channel.kind === "dine_in" && (outlet.mode === "tsr" || !outlet.chosen) ? table ?? clean(b.spot, 30)?.replace(/[^\w #-]/g, "") : undefined,
         queueNumber,
       }),
       ...(couponUsed ? [mk({ type: "CouponApplied", title: coupon!.title, amountCents: coupon!.amountCents, minSpendCents: coupon!.minSpendCents })] : []),

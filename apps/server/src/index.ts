@@ -12,6 +12,7 @@ import { loadBaileyPatch } from "./seed.js";
 import { PrintStore } from "./print.js";
 import { createPool, migrate } from "./db/pool.js";
 import { PgEventStore } from "./pgStore.js";
+import { loadSettings } from "./settings.js";
 import { JsonFileEventStore, type EventStore } from "./store.js";
 
 const dataFile = fileURLToPath(new URL("../data/events.json", import.meta.url));
@@ -27,6 +28,7 @@ const db = process.env.DATABASE_URL ? createPool(process.env.DATABASE_URL) : nul
 if (db) await migrate(db);
 const store: EventStore = db ? new PgEventStore(db, config.businessId, config.outletName) : new JsonFileEventStore(dataFile);
 
+await loadSettings(db, config.businessId, config); // service charge and tax as the owner last set them
 const pgCatalog = db ? new PgCatalogStore(db, config.businessId) : null;
 // A brand-new database starts with the Bailey & Patch menu from the prototype (SEED=sample for a tiny demo menu).
 const bp = process.env.SEED === "sample" ? null : loadBaileyPatch();

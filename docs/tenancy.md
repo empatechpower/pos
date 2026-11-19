@@ -45,6 +45,11 @@ Customers see them under Help & support, from the outlet's own setup. `OUTLET_HO
 - **Members and credit** are brand-level; whether they work across franchises is a rule for the handover.
 - Fine-grained permissions (to be discussed).
 
+## Service mode and charges
+
+- **Service mode, per outlet** (Manager → Outlets → the outlet): **Quick service (QSR)** takes orders with **no table** and offers Dine in and Take away. **Table service (TSR)** is **Dine in only and a table is required** (from the `SHOP_TABLES` list when the server has one, any table name otherwise). An outlet that has not chosen follows the old rule: a `SHOP_TABLES` list means table service. For kiosk testing, set the outlet to Quick service.
+- **Charges** (Manager → Outlets → Charges, brand owner only): the **service charge** (dine-in only) is **off by default** and can be switched on, like tax (GST). Setting `SERVICE_CHARGE=on` on the server only sets the starting value; once the owner has set it in Manager, that is what applies. The per-channel service charge tick under Prices still decides which channels carry it when it is on.
+
 ## Adding a store (outlet) and putting its hub in
 
 1. **Manager → Outlets → Add outlet.** Give it a short code (for example `AMK-01`), a name, address, phone and hours. Pick a franchise if it belongs to one.

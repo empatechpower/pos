@@ -8,6 +8,8 @@ import { type Cents, percentOf } from "./money.js";
 export interface PricingConfig {
   /** Dine-in only. 0.09 = 9%. */
   serviceRate: number;
+  /** The owner can switch the service charge off for the whole brand (most quick-service shops have none). Missing means on. */
+  serviceOn?: boolean;
   gstRate: number;
   gstOn: boolean;
   /** Charged per unit of any line flagged bcrs (an item setting; very old lines with no flag fall back to "BCRS" in the name). */
@@ -105,7 +107,7 @@ export function priceOrder(input: PriceInput): PriceResult {
 
   // Service charge: dine-in only, on the items AFTER the bill discount, never on the deposit (owner rule, 16 Nov 2026).
   // Points are paid like money at the end, so they do not lower it.
-  const service = (input.serviceCharge ?? input.fulfilment === "dine_in") ? percentOf(Math.max(0, subtotal - couponDiscount), cfg.serviceRate) : 0;
+  const service = cfg.serviceOn !== false && (input.serviceCharge ?? input.fulfilment === "dine_in") ? percentOf(Math.max(0, subtotal - couponDiscount), cfg.serviceRate) : 0;
 
   // GST is never charged on the deposit. For points, it is fixed on the full items + service.
   const gstBase = points
