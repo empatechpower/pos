@@ -188,6 +188,7 @@ function KioskSession({ info, catalog, config }: { info: Info; catalog: Catalog;
     if (!import.meta.env.DEV || seeded.current || !menu.length) return;
     const q = new URLSearchParams(location.search);
     const n = Number(q.get("bag") ?? (q.get("screen") === "review" ? 3 : 0));
+    if (q.has("item") && menu[Number(q.get("item"))]) setPicking(menu[Number(q.get("item"))]!); // (development only: ?item=0 opens that product, for screenshots)
     if (!n && q.get("screen") !== "review") return;
     seeded.current = true;
     menu.slice(0, n).forEach((m) => addLine(m, m.options?.length ? defaultSelection(m.options) : [], 1));
@@ -368,7 +369,7 @@ function KioskSession({ info, catalog, config }: { info: Info; catalog: Catalog;
       </div>
     );
   } else if (screen === "menu") {
-    body = <KioskMenu info={info} menu={menu} options={options} channelId={channelId} setChannelId={setChannelId} notify={setSoon} count={count} total={total} qtyOf={qtyOf} addQuick={addQuick} lessOf={lessOf} open={(m) => (m.options?.length ? setPicking(m) : addQuick(m, 1))} onCheckout={() => go("review")} floating={floating} logo={logo} showSignin={signinBlock} onSignin={() => setSoon(tx("Member sign-in is coming soon. You can still order as a guest."))} scrolling={scrolling} />;
+    body = <KioskMenu info={info} menu={menu} options={options} channelId={channelId} setChannelId={setChannelId} notify={setSoon} count={count} total={total} qtyOf={qtyOf} addQuick={addQuick} lessOf={lessOf} open={(m) => setPicking(m)} onCheckout={() => go("review")} floating={floating} logo={logo} showSignin={signinBlock} onSignin={() => setSoon(tx("Member sign-in is coming soon. You can still order as a guest."))} scrolling={scrolling} />;
   } else if (screen === "review") {
     const q = quote?.ok ? quote : null;
     body = (
