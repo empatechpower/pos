@@ -48,3 +48,11 @@ services:
         sync: false
       - key: STRIPE_WEBHOOK_SECRET
         sync: false
+
+  # The rezein.com company website: plain static pages in apps/corporate (no build, no server).
+  # In Render, add the custom domains rezein.com and www.rezein.com to this service.
+  - type: web
+    name: rezein-corporate
+    runtime: static
+    staticPublishPath: apps/corporate
+    buildCommand: echo "static site, nothing to build"
