@@ -613,8 +613,10 @@ function KioskMenu({ info, menu, options, channelId, setChannelId, notify, count
                     <div className="k-body">
                       <div className="k-nm">{m.name}</div>
                       <div className="k-pr">
-                        {hi > lo ? <span className="k-from">{tx("From")}</span> : null}
-                        <span className="k-p">{formatMoney(lo)}</span>
+                        <span className="k-pricebox">
+                          {hi > lo ? <span className="k-from">{tx("From")}</span> : null}
+                          <span className="k-p">{formatMoney(lo)}</span>
+                        </span>
                         {deposit && <span className="k-bcrs">+10c {tx("deposit")}</span>}
                         {n > 0 ? <span className="k-cstep" onClick={(e) => e.stopPropagation()}><button aria-label="−" onClick={() => lessOf(m)}>−</button><span>{n}</span><button className="plus" aria-label="+" onClick={() => addQuick(m, 1)}>+</button></span> : <button className="k-add" aria-label={tx("Add")} onClick={(e) => { e.stopPropagation(); addQuick(m, 1); }}>+</button>}
                       </div>

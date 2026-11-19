@@ -360,3 +360,10 @@
   .k-chips { gap: 5px; } .k-chips span { padding: 5px 9px; }
 }
 @media (max-height: 560px) { .k-start { --hero-h: 11dvh; --hero-min: 76px; --logo: 32px; --brand-b: 16px; --brand-s: 0px; --h1: 17px; --g-min: 48px; --g-fs: 17px; --qr-img: 44px; } .k-bt span { display: none; } .k-start .k-sub { display: none; } }
+
+/* "From" and the price share a line where there is room; on a phone "From" sits on top of the price, so neither is squeezed */
+.k-pricebox { display: flex; align-items: baseline; gap: 6px; min-width: 0; }
+@media (max-width: 560px) {
+  .k-pricebox { flex-direction: column; align-items: flex-start; gap: 0; line-height: 1.05; }
+  .k-from { font-size: 9.5px; line-height: 1; }
+}
