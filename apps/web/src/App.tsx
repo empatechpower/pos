@@ -99,7 +99,7 @@ export function App() {
               ))}
             </select>
           </label>
-          <button className={`pill ${connected ? "ok" : "off"}`} onClick={() => void syncNow()} title="Tap to sync now">
+          <button className={`pill ${connected ? "ok" : "off"}`} onClick={() => void syncNow()} title={status.error ? `Last sync problem: ${status.error}. Tap to try again.` : "Tap to sync now"}>
             <i /> {connected ? "Online" : "Offline"}
             {pending > 0 ? ` · ${pending} to sync` : ""}
           </button>
@@ -130,7 +130,7 @@ export function App() {
         ) : route === "devices" ? (
           <Devices />
         ) : route === "login" ? (
-          <Login online={connected} />
+          <Login online={connected} problem={status.error} />
         ) : route === "credit" ? (
           <Credit customerId={customerId} setCustomerId={setCustomerId} online={connected} />
         ) : (

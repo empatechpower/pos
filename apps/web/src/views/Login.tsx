@@ -2,7 +2,7 @@ import { go } from "../nav";
 import { useState } from "react";
 import { signIn, signOut, useStaff } from "../auth";
 
-export function Login({ online }: { online: boolean }) {
+export function Login({ online, problem }: { online: boolean; problem?: string | null }) {
   const staff = useStaff();
   const [code, setCode] = useState("");
   const [pin, setPin] = useState("");
@@ -53,9 +53,9 @@ export function Login({ online }: { online: boolean }) {
         PIN
         <input value={pin} onChange={(e) => setPin(e.target.value.replace(/\D/g, ""))} type="password" inputMode="numeric" autoComplete="current-password" maxLength={8} />
       </label>
-      {!online && <div className="flash">No connection. Signing in needs the server.</div>}
+      {!online && <div className="flash">The app is not in sync with the shop server right now{problem ? ` (${problem})` : ""}. You can still try to sign in.</div>}
       {msg && <div className="flash">{msg}</div>}
-      <button className="primary" disabled={!code || pin.length < 4 || !online || busy}>
+      <button className="primary" disabled={!code || pin.length < 4 || busy}>
         {busy ? "Signing in…" : "Sign in"}
       </button>
     </form>
