@@ -21,13 +21,14 @@ import { TelegramSignIn } from "./views/TelegramSignIn";
 import { Kiosk } from "./views/Kiosk";
 import { onRouteChange, routeParts } from "./nav";
 import { Kitchen } from "./views/Kitchen";
+import { Pair } from "./views/Pair";
 import { Pos } from "./views/Pos";
 import { Queue } from "./views/Queue";
 
-type Route = "pos" | "kitchen" | "queue" | "credit" | "login" | "devices" | "prices" | "printers" | "orders" | "online" | "shop" | "kiosk" | "manager" | "tg" | "pricebook";
+type Route = "pos" | "kitchen" | "queue" | "credit" | "login" | "devices" | "prices" | "printers" | "orders" | "online" | "shop" | "kiosk" | "manager" | "tg" | "pricebook" | "pair";
 const routeFromHash = (): Route => {
   const h = routeParts()[0] ?? "";
-  return h === "kitchen" || h === "queue" || h === "credit" || h === "login" || h === "devices" || h === "prices" || h === "printers" || h === "orders" || h === "online" || h === "shop" || h === "kiosk" || h === "manager" || h === "pos" || h === "tg" || h === "pricebook" ? h : "manager";
+  return h === "kitchen" || h === "queue" || h === "credit" || h === "login" || h === "devices" || h === "prices" || h === "printers" || h === "orders" || h === "online" || h === "shop" || h === "kiosk" || h === "manager" || h === "pos" || h === "tg" || h === "pricebook" || h === "pair" ? h : "manager";
 };
 
 export function App() {
@@ -54,6 +55,8 @@ export function App() {
 
   // The customer ordering page is public: no enrolment, no sign-in, none of the staff chrome.
   if (route === "shop") return <ErrorBoundary><Shop /></ErrorBoundary>;
+  // The page a customer's phone opens from the kiosk's QR code: public, like the shop.
+  if (route === "pair") return <ErrorBoundary><Pair /></ErrorBoundary>;
   // The in-store self-order kiosk is public too: it is opened full screen on the kiosk tablet (/kiosk?outlet=CODE).
   if (route === "kiosk") return <ErrorBoundary><Kiosk /></ErrorBoundary>;
 

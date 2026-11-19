@@ -11,7 +11,7 @@ import { normaliseEmail, type MemberStore } from "./members.js";
 import { authorizeUrl, createStripeCheckout, createStripeRefund, fetchProfile, sendMail, newState, newVerifier, sameSecret, verifyStripeSignature, type Integrations, type OAuthProvider } from "./integrations.js";
 import type { EventStore } from "./store.js";
 import { listOutlets } from "./tenant.js";
-import { createHash } from "node:crypto";
+import { createHash, randomBytes } from "node:crypto";
 
 /** The server's own device id on events it creates for customers. */
 export const SHOP_DEVICE = "shop";
@@ -341,6 +341,54 @@ export function registerShop(app: FastifyInstance, d: ShopDeps) {
       const r = await members.redeemTicket(String(req.body?.ticket ?? ""));
       if (!r) return reply.code(401).send({ error: "ticket_invalid" });
       return r;
+    });
+
+    // ---- the kiosk QR bridge ---------------------------------------------------------------------------
+    // The kiosk shows a QR code and a 6-character code. Neither proves who anyone is: the customer opens the link on their own phone,
+    // signs in THERE (the phone's own proof), and confirms. Only then does the kiosk session receive that member's session.
+    // A pairing lives 5 minutes, is single use, and is kept in memory (it is a short handshake, not a record).
+    const PAIR_SECONDS = 300;
+    const PAIR_CHARS = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789"; // 32 characters, no 0/O/1/I, so a byte maps evenly
+    const pairs = new Map<string, { code: string; expires: number; memberId?: string }>();
+    const prunePairs = () => { const now = Date.now(); for (const [k, v] of pairs) if (v.expires <= now) pairs.delete(k); };
+    const pairStartLimit = new FailureLimiter(envNum("PAIR_START_LIMIT", 200), 10 * 60_000);
+    const pairPollLimit = new FailureLimiter(envNum("PAIR_POLL_LIMIT", 3000), 10 * 60_000);
+
+    app.post("/api/shop/auth/kiosk/start", async (req, reply) => {
+      if (limited(pairStartLimit, req, reply)) return;
+      prunePairs();
+      if (pairs.size >= 2000) return reply.code(503).send({ error: "busy" });
+      const id = randomBytes(16).toString("base64url");
+      let code = "";
+      do code = Array.from(randomBytes(6), (b) => PAIR_CHARS[b % PAIR_CHARS.length]).join(""); while ([...pairs.values()].some((v) => v.code === code));
+      pairs.set(id, { code, expires: Date.now() + PAIR_SECONDS * 1000 });
+      return { id, code, url: `${integ.publicUrl}/pair?code=${code}`, expiresInSeconds: PAIR_SECONDS };
+    });
+
+    /** The kiosk asks whether the phone has confirmed. The member's session is handed over once, then the pairing is gone. */
+    app.get<{ Params: { id: string } }>("/api/shop/auth/kiosk/:id", async (req, reply) => {
+      if (limited(pairPollLimit, req, reply)) return;
+      const p = pairs.get(req.params.id);
+      if (!p || p.expires <= Date.now()) { pairs.delete(req.params.id); return { state: "expired" }; }
+      if (!p.memberId) return { state: "waiting", secondsLeft: Math.max(0, Math.ceil((p.expires - Date.now()) / 1000)) };
+      pairs.delete(req.params.id);
+      const member = await members.byId(p.memberId);
+      if (!member) return { state: "expired" };
+      return { state: "attached", token: await members.openSession(member.id), member };
+    });
+
+    /** The customer's phone, already signed in, confirms "this is me". */
+    app.post<{ Body: { code?: string } }>("/api/shop/auth/kiosk/attach", async (req, reply) => {
+      if (limited(authLimit, req, reply)) return;
+      const m = await members.fromToken(bearer(req));
+      if (!m) return reply.code(401).send({ error: "not_signed_in" });
+      const code = String(req.body?.code ?? "").toUpperCase().replace(/[^A-Z0-9]/g, "");
+      prunePairs();
+      const p = code.length === 6 ? [...pairs.values()].find((v) => v.code === code) : undefined;
+      if (!p) return reply.code(404).send({ error: "code_not_found" });
+      if (p.memberId) return reply.code(409).send({ error: "already_used" });
+      p.memberId = m.id;
+      return { ok: true };
     });
 
     // ---- phone number, "reverse SMS": the customer texts us a code --------------------------------

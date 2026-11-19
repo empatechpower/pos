@@ -370,3 +370,24 @@
   .k-pricebox { flex-direction: column; align-items: flex-start; gap: 0; line-height: 1.05; }
   .k-from { font-size: 9.5px; line-height: 1; }
 }
+
+/* member sign-in (QR bridge) */
+.k-session.member { background: var(--orange); color: #fff; border-color: var(--orange); }
+.k-signin { position: relative; height: 100dvh; display: flex; flex-direction: column; overflow-y: auto; background: var(--page); }
+.k-signin-back { align-self: flex-start; margin: 14px 12px 0; flex: none; }
+.k-signin-body { flex: 1 0 auto; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 10px; padding: 8px 28px 28px; text-align: center; }
+.k-silogo { width: 96px; height: 96px; object-fit: contain; border-radius: 22px; background: #fff; box-shadow: 0 6px 22px rgba(33,37,42,.08); padding: 6px; }
+.k-signin h2 { margin: 6px 0 0; font-size: clamp(26px, 4.4vw, 40px); font-weight: 800; line-height: 1.15; }
+.k-signin p { margin: 0; max-width: 560px; color: var(--muted); font-size: clamp(16px, 2.2vw, 21px); line-height: 1.5; }
+.k-qrcard { background: #fff; border: 2px solid var(--line); border-radius: 30px; padding: 22px; box-shadow: 0 6px 26px rgba(33,37,42,.06); margin: 8px 0 4px; }
+.k-qrcard img, .k-qrwait { display: block; width: min(40dvh, 64vw, 400px); height: min(40dvh, 64vw, 400px); }
+.k-qrwait { display: grid; place-content: center; }
+.k-sialt { font-size: clamp(15px, 2vw, 19px) !important; }
+.k-sialt b { color: var(--ink); }
+.k-code { display: inline-flex; gap: clamp(6px, 1.4vw, 14px); padding: 10px 22px; background: var(--beige); border: 2px solid var(--line); border-radius: 18px; }
+.k-code span { font-size: clamp(26px, 4.4vw, 40px); font-weight: 800; letter-spacing: .02em; font-variant-numeric: tabular-nums; }
+.k-prog { width: min(78vw, 480px); height: 8px; border-radius: 99px; background: var(--beige); overflow: hidden; margin-top: 6px; }
+.k-prog i { display: block; height: 100%; background: var(--orange); border-radius: 99px; transition: width 1s linear; }
+.k-signin .k-wait { margin: 4px 0 0; justify-content: center; }
+@media (max-height: 760px) { .k-silogo { width: 64px; height: 64px; } .k-signin-body { gap: 6px; padding-bottom: 16px; } .k-qrcard { padding: 14px; } }
+@media (max-height: 900px) { .k-silogo { width: 72px; height: 72px; } .k-qrcard img, .k-qrwait { width: min(34dvh, 60vw, 400px); height: min(34dvh, 60vw, 400px); } }

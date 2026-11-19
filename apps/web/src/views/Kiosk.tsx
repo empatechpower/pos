@@ -12,10 +12,12 @@ import "../kiosk.css";
  * language system; what is here is only what the kiosk does differently: a start screen, one merged Review & pay screen, a session
  * that wipes itself when nobody is there, and payment shown as a QR for the customer's own phone.
  *
- * Not built yet: member sign-in and points/coupons (waiting for the CRM handover) and the 30-language picker (8 languages today).
+ * Member sign-in works through the QR bridge (the phone proves who the customer is; see KioskSignin). Not built yet: points redemption and
+ * the coupon wallet (waiting for the CRM handover) and the 30-language picker (8 languages today).
  */
 
-type Screen = "start" | "menu" | "review" | "pay" | "done";
+type Screen = "start" | "menu" | "review" | "pay" | "done" | "signin";
+interface KioskMember { name: string | null; phone: string | null; pointsBalance: number }
 
 // The kiosk lists languages in the product's source-market order (the handover's list); the ones we have, in that order.
 const KIOSK_LANG_ORDER = ["en", "id", "zh", "ms", "ta", "ja", "de", "fr"];
@@ -105,7 +107,7 @@ function KioskSession({ info, catalog, config }: { info: Info; catalog: Catalog;
   const theme = { "--brand": b.primary, "--accent": b.accent, "--accent-ink": readableOn(b.accent), "--soft": tint(b.accent), "--brand-ink": b.ink } as React.CSSProperties;
 
   // (Development only: ?screen=menu opens the menu directly, for screenshots.)
-  const [screen, setScreen] = useState<Screen>(() => (import.meta.env.DEV && new URLSearchParams(location.search).get("screen") === "menu" ? "menu" : "start"));
+  const [screen, setScreen] = useState<Screen>(() => (import.meta.env.DEV && new URLSearchParams(location.search).get("screen") === "menu" ? "menu" : import.meta.env.DEV && new URLSearchParams(location.search).get("screen") === "signin" ? "signin" : "start"));
   const [bag, setBag] = useState<BagLine[]>([]);
   const channels = info.channels.filter((c) => c.kind === "dine_in" || c.kind === "takeaway");
   // Dine in and Take away are always both shown as a pair; one the shop does not offer says so when tapped.
@@ -120,6 +122,12 @@ function KioskSession({ info, catalog, config }: { info: Info; catalog: Catalog;
   const [chips, setChips] = useState(readChips);
   const [signinBlock, setSigninBlock] = useState(readSignin);
   const [soon, setSoon] = useState<string | null>(null);
+  // The signed-in member (kept in memory only: any session end drops it) and the screen to go back to from the sign-in screen.
+  const [member, setMember] = useState<KioskMember | null>(null);
+  const memberToken = useRef<string | null>(null);
+  const [memberAsk, setMemberAsk] = useState(false);
+  const signinFrom = useRef<Screen>("start");
+  const openSignin = (from: Screen) => { signinFrom.current = from; go("signin"); };
   const [startQr, setStartQr] = useState<string | null>(null);
   useEffect(() => { void QRCode.toDataURL(`${location.origin}/shop`, { margin: 1, width: 160 }).then(setStartQr).catch(() => undefined); }, []);
   useEffect(() => {
@@ -147,7 +155,9 @@ function KioskSession({ info, catalog, config }: { info: Info; catalog: Catalog;
   // What a guest would earn if they signed up, on the amount they would pay (the prototype shows 522 for a S$5.22 order). The shop's own earning rule when points are on; while the sign-in block is shown as a
   // preview and points are off, the prototype's sample rate (100 points a dollar), so the screen can be compared with the prototype.
   const earnRate = config.rewards.pointsEnabled ? config.rewards.earnPointsPerDollar : signinBlock ? 100 : 0;
-  const earnPts = earnRate > 0 && quote?.ok ? Math.floor((quote.priced.total / 100) * earnRate) : 0;
+  // A signed-in member earns by the shop's real rule (and only when points are on); the guest note shows the invitation.
+  const memberRate = config.rewards.pointsEnabled ? config.rewards.earnPointsPerDollar : 0;
+  const earnPts = (member ? memberRate : earnRate) > 0 && quote?.ok ? Math.floor((quote.priced.total / 100) * (member ? memberRate : earnRate)) : 0;
 
   // ---- the bag
   const addLine = (m: MenuEntry, selection: ChosenOptionInput[], d = 1, rawNote = "") => {
@@ -197,7 +207,15 @@ function KioskSession({ info, catalog, config }: { info: Info; catalog: Catalog;
 
   // ---- the session: wipe when nobody is there
   const touch = useRef(Date.now());
+  const detach = useCallback(() => {
+    const t = memberToken.current;
+    memberToken.current = null;
+    setMember(null);
+    setMemberAsk(false);
+    if (t) void fetch("/api/shop/auth/logout", { method: "POST", headers: { authorization: `Bearer ${t}` } }).catch(() => undefined);
+  }, []);
   const wipe = useCallback(() => {
+    detach();
     setBag([]);
     setOrder(null);
     setPicking(null);
@@ -209,7 +227,7 @@ function KioskSession({ info, catalog, config }: { info: Info; catalog: Catalog;
     setIdle(0);
     setScreen("start");
     window.scrollTo(0, 0);
-  }, []);
+  }, [detach]);
   useEffect(() => {
     const mark = () => { touch.current = Date.now(); setIdle(0); };
     const ev = ["pointerdown", "keydown", "scroll", "touchstart"] as const;
@@ -223,7 +241,7 @@ function KioskSession({ info, catalog, config }: { info: Info; catalog: Catalog;
     document.addEventListener("scroll", on, { capture: true, passive: true });
     return () => { document.removeEventListener("scroll", on, true); window.clearTimeout(timer); };
   }, []);
-  const watching = screen === "menu" || screen === "review";
+  const watching = screen === "menu" || screen === "review" || screen === "signin";
   useEffect(() => {
     if (!watching) { setIdle(0); return; }
     touch.current = Date.now();
@@ -255,15 +273,16 @@ function KioskSession({ info, catalog, config }: { info: Info; catalog: Catalog;
     try {
       const res = await fetch("/api/shop/orders", {
         method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({ channelId, outletId: info.outletId, items, customerName: "Kiosk", customerPhone: "", spot: "", expectedTotalCents: total }),
+        headers: { "content-type": "application/json", ...(memberToken.current ? { authorization: `Bearer ${memberToken.current}` } : {}) },
+        body: JSON.stringify({ channelId, outletId: info.outletId, items, customerName: member?.name || "Kiosk", customerPhone: "", spot: "", expectedTotalCents: total }),
       });
       const j = (await res.json().catch(() => ({}))) as { orderId?: string; error?: string; totalCents?: number };
       if (!res.ok || !j.orderId) {
         const e = String(j.error ?? "");
         const bad = (j as { productId?: string }).productId;
         setProblem(
-          e === "sign_in_to_order" || e === "pay_with_credit" ? tx("This shop takes orders from members only. Please order at the counter.")
+          res.status === 401 && memberToken.current ? tx("Your sign-in ran out. Tap the member button to sign in again, or place the order as a guest.")
+          : e === "sign_in_to_order" || e === "pay_with_credit" ? tx("This shop takes orders from members only. Please order at the counter.")
           : /table/i.test(e) ? tx("This shop only takes table orders, so the kiosk can't place this order yet. Please order at the counter.")
           : /dine-in only/i.test(e) ? tx("This shop takes dine-in orders only. Switch to Dine in, or order at the counter.")
           : res.status === 409 ? tx("Prices changed while you were ordering. The new total is {amt}. Tap Pay again to confirm.", { amt: formatMoney(j.totalCents ?? 0) })
@@ -352,15 +371,15 @@ function KioskSession({ info, catalog, config }: { info: Info; catalog: Catalog;
           )}
           {signinBlock && (
             <>
-              <button className="k-qrhero" onClick={() => setSoon(tx("Member sign-in is coming soon. You can still order as a guest."))}>
+              <button className="k-qrhero" onClick={() => openSignin("start")}>
                 {startQr && <img src={startQr} alt="" />}
                 <span><b>{tx("Scan with your phone to sign in")}</b><small>{tx("Point your phone camera at the code — no typing on this screen")}</small></span>
                 <i aria-hidden>›</i>
               </button>
-              <button className="k-ghost-wide" onClick={() => setSoon(tx("Member sign-in is coming soon. You can still order as a guest."))}>{tx("Sign in with phone number")}</button>
+              <button className="k-ghost-wide" onClick={() => openSignin("start")}>{tx("Sign in with phone number")}</button>
               <div className="k-social">
-                <button className="k-ghost-wide" onClick={() => setSoon(tx("Member sign-in is coming soon. You can still order as a guest."))}><span className="g">G</span> Google</button>
-                <button className="k-ghost-wide" onClick={() => setSoon(tx("Member sign-in is coming soon. You can still order as a guest."))}><span className="m">▦</span> Microsoft</button>
+                <button className="k-ghost-wide" onClick={() => openSignin("start")}><span className="g">G</span> Google</button>
+                <button className="k-ghost-wide" onClick={() => openSignin("start")}><span className="m">▦</span> Microsoft</button>
               </div>
             </>
           )}
@@ -369,7 +388,7 @@ function KioskSession({ info, catalog, config }: { info: Info; catalog: Catalog;
       </div>
     );
   } else if (screen === "menu") {
-    body = <KioskMenu info={info} menu={menu} options={options} channelId={channelId} setChannelId={setChannelId} notify={setSoon} count={count} total={total} qtyOf={qtyOf} addQuick={addQuick} lessOf={lessOf} open={(m) => setPicking(m)} onCheckout={() => go("review")} floating={floating} logo={logo} showSignin={signinBlock} onSignin={() => setSoon(tx("Member sign-in is coming soon. You can still order as a guest."))} scrolling={scrolling} />;
+    body = <KioskMenu info={info} menu={menu} options={options} channelId={channelId} setChannelId={setChannelId} notify={setSoon} count={count} total={total} qtyOf={qtyOf} addQuick={addQuick} lessOf={lessOf} open={(m) => setPicking(m)} onCheckout={() => go("review")} floating={floating} logo={logo} showSignin={signinBlock || !!member} onSignin={() => (member ? setMemberAsk(true) : openSignin("menu"))} memberLabel={member ? `${member.name || member.phone || tx("Member")}${config.rewards.pointsEnabled ? ` · ${member.pointsBalance.toLocaleString()} ${tx("points")}` : ""}` : null} scrolling={scrolling} />;
   } else if (screen === "review") {
     const q = quote?.ok ? quote : null;
     body = (
@@ -397,7 +416,9 @@ function KioskSession({ info, catalog, config }: { info: Info; catalog: Catalog;
               </SwipeRow>
             );
           })}
-          {earnPts > 0 && <div className="k-guestnote">{tx("Ordering as a guest — sign up as a member to earn")} <b>{earnPts.toLocaleString()}</b> {tx("points on this order.")}</div>}
+          {earnPts > 0 && (member
+            ? <div className="k-guestnote">{tx("You'll earn")} <b>{earnPts.toLocaleString()}</b> {tx("points on this order.")}</div>
+            : <div className="k-guestnote">{tx("Ordering as a guest — sign up as a member to earn")} <b>{earnPts.toLocaleString()}</b> {tx("points on this order.")}</div>)}
           <div className="k-totals">
             <div><span>{tx("Items")}</span><span><RollMoney cents={q?.priced.subtotal ?? 0} /></span></div>
             {q && q.priced.service > 0 && <div><span>{t("pmService", "Service charge")} ({Math.round(config.pricing.serviceRate * 1000) / 10}%)</span><span><RollMoney cents={q.priced.service} /></span></div>}
@@ -413,6 +434,21 @@ function KioskSession({ info, catalog, config }: { info: Info; catalog: Catalog;
         </div></footer>
         <div className={`k-corner ${scrolling ? "fade" : ""}`}>{langOnly}</div>
       </div>
+    );
+  } else if (screen === "signin") {
+    body = (
+      <KioskSignin
+        logoUrl={b.logoUrl}
+        name={info.name}
+        onBack={() => go(signinFrom.current)}
+        onAttached={(token, m) => {
+          memberToken.current = token;
+          setMember({ name: m.name, phone: m.phone, pointsBalance: m.pointsBalance });
+          setSoon(config.rewards.pointsEnabled ? tx("Welcome back, {x} — {n} points", { x: m.name || tx("member"), n: m.pointsBalance.toLocaleString() }) : tx("Welcome back, {x}", { x: m.name || tx("member") }));
+          go(signinFrom.current === "start" ? "menu" : signinFrom.current);
+        }}
+        corner={<div className={`k-corner ${scrolling ? "fade" : ""}`}>{langOnly}</div>}
+      />
     );
   } else if (screen === "pay") {
     body = (
@@ -462,6 +498,7 @@ function KioskSession({ info, catalog, config }: { info: Info; catalog: Catalog;
         return <OptionSheet notes cta={tx("Save changes")} name={em.name} description={em.description} photoUrl={photo(em)} baseCents={em.priceCents} groups={em.options ?? []} initial={editing.selection} initialNote={editing.note ?? ""} onClose={() => setEditing(null)} onAdd={(sel, note) => { setBag((cur) => cur.filter((x) => x.key !== editing.key)); addLine(em, sel, editing.qty, note); setEditing(null); }} />;
       })()}
       {soon && <div className="k-toast" role="status">{soon}</div>}
+      <MemberDialog open={memberAsk} name={member?.name || member?.phone || tx("Member")} points={config.rewards.pointsEnabled ? member?.pointsBalance ?? null : null} onClose={() => setMemberAsk(false)} onSignOut={detach} />
       <ResetDialog open={resetAsk || devDialog === "reset"} onNo={() => setResetAsk(false)} onYes={wipe} />
       <StillThere open={warning || devDialog === "idle"} left={devDialog === "idle" ? 6 : warnLeft} />
       <LanguageDialog open={langOpen} onClose={() => setLangOpen(false)} />
@@ -470,9 +507,9 @@ function KioskSession({ info, catalog, config }: { info: Info; catalog: Catalog;
   );
 }
 
-function KioskMenu({ info, menu, options, channelId, setChannelId, notify, count, total, qtyOf, addQuick, lessOf, open, onCheckout, floating, logo, showSignin, onSignin, scrolling }: {
+function KioskMenu({ info, menu, options, channelId, setChannelId, notify, count, total, qtyOf, addQuick, lessOf, open, onCheckout, floating, logo, showSignin, onSignin, memberLabel, scrolling }: {
   info: Info; menu: MenuEntry[]; options: Array<{ kind: "dine_in" | "takeaway"; ch?: Info["channels"][number] }>; channelId: string; setChannelId: (id: string) => void; notify: (m: string) => void; count: number; total: number;
-  qtyOf: (m: MenuEntry) => number; addQuick: (m: MenuEntry, d: number) => void; lessOf: (m: MenuEntry) => void; open: (m: MenuEntry) => void; onCheckout: () => void; floating: React.ReactNode; logo: React.ReactNode; showSignin: boolean; onSignin: () => void; scrolling: boolean;
+  qtyOf: (m: MenuEntry) => number; addQuick: (m: MenuEntry, d: number) => void; lessOf: (m: MenuEntry) => void; open: (m: MenuEntry) => void; onCheckout: () => void; floating: React.ReactNode; logo: React.ReactNode; showSignin: boolean; onSignin: () => void; memberLabel: string | null; scrolling: boolean;
 }) {
   const [search, setSearch] = useState<string | null>(() => (import.meta.env.DEV && new URLSearchParams(location.search).has("search") ? "" : null)); // (development only: ?search opens the search bar)
   const [cat, setCat] = useState("All");
@@ -576,7 +613,7 @@ function KioskMenu({ info, menu, options, channelId, setChannelId, notify, count
           <div className="k-seg pulse" role="group" aria-label={tx("Dining option")}>{options.map((o) => (
             <button key={o.kind} className={o.ch && o.ch.id === channelId ? "on" : ""} aria-pressed={!!o.ch && o.ch.id === channelId} onClick={() => (o.ch ? setChannelId(o.ch.id) : notify(tx("{x} isn't offered at this shop yet.", { x: o.kind === "dine_in" ? t("dineIn", "Dine in") : t("takeAway", "Take away") })))}>{o.kind === "dine_in" ? t("dineIn", "Dine in") : t("takeAway", "Take away")}</button>
           ))}</div>
-          {showSignin && <button className="k-session" onClick={onSignin}>{tx("Guest")} · {tx("Sign in")}</button>}
+          {showSignin && <button className={`k-session ${memberLabel ? "member" : ""}`} onClick={onSignin}>{memberLabel ?? <>{tx("Guest")} · {tx("Sign in")}</>}</button>}
           <button className={`k-checkout ${count ? "live" : "none"} ${popping ? "pop" : ""}`} onClick={onCheckout} aria-label={tx("Checkout")}>
             <Icon name="bag" size={30} />
             <span className="k-checkout-label">{tx("Checkout")}</span>
@@ -711,9 +748,92 @@ function SettingsDialog({ open, idleMin, chips, signin, onSignin, onIdle, onChip
           <label key={c.id} className="k-toggle"><span>{tx(c.text)}</span><input type="checkbox" checked={!!chips[c.id]} onChange={(e) => onChip(c.id, e.target.checked)} /><i /></label>
         ))}
         <h4>{tx("Member sign-in buttons")}</h4>
-        <label className="k-toggle"><span>{tx("Show the sign-in block (preview: not connected yet)")}</span><input type="checkbox" checked={signin} onChange={(e) => onSignin(e.target.checked)} /><i /></label>
+        <label className="k-toggle"><span>{tx("Show the sign-in block")}</span><input type="checkbox" checked={signin} onChange={(e) => onSignin(e.target.checked)} /><i /></label>
         <button className="k-cta-sm" onClick={onClose}>{t("done", "Done")}</button>
       </div>
+    </div>
+  );
+}
+
+function MemberDialog({ open, name, points, onClose, onSignOut }: { open: boolean; name: string; points: number | null; onClose: () => void; onSignOut: () => void }) {
+  const box = useDialog(open, onClose);
+  if (!open) return null;
+  return (
+    <div className="k-scrim reset" role="presentation">
+      <div className="k-idle reset-card" ref={box} role="dialog" aria-modal="true" aria-labelledby="k-member-h">
+        <h2 id="k-member-h">{name}</h2>
+        <p>{points !== null ? `${points.toLocaleString()} ${tx("points")}` : tx("Signed in as a member.")}</p>
+        <div className="k-reset-actions"><button className="k-ghost-sm" onClick={onClose}>{tx("Close")}</button><button className="k-danger" onClick={onSignOut}>{tx("Sign out")}</button></div>
+      </div>
+    </div>
+  );
+}
+
+/**
+ * Member sign-in on the kiosk: a QR code and a 6-character code. Neither proves who anyone is: the customer opens the link on their own
+ * phone, signs in there, and confirms. The kiosk only waits and then receives that member. A code lasts 5 minutes and is used once;
+ * when it runs out a fresh one appears by itself.
+ */
+function KioskSignin({ logoUrl, name, onBack, onAttached, corner }: { logoUrl: string | null; name: string; onBack: () => void; onAttached: (token: string, m: { name: string | null; phone: string | null; pointsBalance: number }) => void; corner: React.ReactNode }) {
+  const [pair, setPair] = useState<{ code: string; qr: string; ends: number; total: number } | null>(null);
+  const [left, setLeft] = useState(0);
+  const [failed, setFailed] = useState(false);
+  const [round, setRound] = useState(0);
+  const done = useRef(onAttached);
+  done.current = onAttached;
+  useEffect(() => {
+    let dead = false;
+    let timer = 0;
+    setPair(null);
+    setFailed(false);
+    void (async () => {
+      const r = await fetch("/api/shop/auth/kiosk/start", { method: "POST" }).catch(() => null);
+      if (!r || !r.ok) return void (!dead && setFailed(true));
+      const j = (await r.json()) as { id: string; code: string; url: string; expiresInSeconds: number };
+      const qr = await QRCode.toDataURL(j.url, { margin: 1, width: 560 }).catch(() => null);
+      if (dead) return;
+      if (!qr) return setFailed(true);
+      const ends = Date.now() + j.expiresInSeconds * 1000;
+      setPair({ code: j.code, qr, ends, total: j.expiresInSeconds });
+      const tick = async () => {
+        if (dead) return;
+        const secs = Math.max(0, Math.ceil((ends - Date.now()) / 1000));
+        setLeft(secs);
+        if (secs <= 0) return setRound((n) => n + 1);
+        const st = (await fetch(`/api/shop/auth/kiosk/${j.id}`).then((x) => x.json()).catch(() => null)) as { state?: string; token?: string; member?: { name: string | null; phone: string | null; pointsBalance: number } } | null;
+        if (dead) return;
+        if (st?.state === "attached" && st.token && st.member) return done.current(st.token, st.member);
+        if (st?.state === "expired") return setRound((n) => n + 1);
+        timer = window.setTimeout(tick, 1500);
+      };
+      void tick();
+    })();
+    return () => { dead = true; window.clearTimeout(timer); };
+  }, [round]);
+  const pct = pair ? Math.max(0, Math.min(100, (left / pair.total) * 100)) : 100;
+  return (
+    <div className="k-signin">
+      <button className="k-back k-signin-back" onClick={onBack}>‹ {tx("Back")}</button>
+      <div className="k-signin-body">
+        {logoUrl && <img className="k-silogo" src={logoUrl} alt={name} />}
+        <h2>{tx("Scan with your phone to sign in")}</h2>
+        {failed ? (
+          <>
+            <p>{tx("Member sign-in isn't available right now. You can still order as a guest.")}</p>
+            <button className="k-cta-sm" style={{ flex: "none", marginTop: 18, minWidth: 280 }} onClick={onBack}>{tx("Continue as guest")}</button>
+          </>
+        ) : (
+          <>
+            <p>{tx("Open your phone camera and point it at this code. Your member account signs in here automatically — nothing to type.")}</p>
+            <div className="k-qrcard">{pair ? <img src={pair.qr} alt="" /> : <div className="k-qrwait"><i className="k-spin" /></div>}</div>
+            <p className="k-sialt">{tx("Or open")} <b>{location.host}/pair</b> {tx("and enter code")}</p>
+            <div className="k-code" aria-label={tx("Code")}>{(pair?.code ?? "······").split("").map((c, i) => <span key={i}>{c}</span>)}</div>
+            <div className="k-prog" aria-hidden="true"><i style={{ width: `${pct}%` }} /></div>
+            <p className="k-wait"><i className="k-spin" /> {tx("Waiting for your phone…")}</p>
+          </>
+        )}
+      </div>
+      {corner}
     </div>
   );
 }

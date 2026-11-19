@@ -1715,7 +1715,8 @@ function WelcomeLine({ points, voucherCents }: { points: number; voucherCents: n
   );
 }
 
-function Login({ info, welcome, loginError, onGuest, onDone }: { info: Info; welcome: number; loginError: string | null; onGuest: () => void; onDone: (token: string) => void }) {
+/** Also used by the kiosk's pairing page on the customer's phone (noGuest: there is no guest option when signing in to a kiosk). */
+export function Login({ info, welcome, loginError, onGuest, onDone, noGuest }: { info: Info; welcome: number; loginError: string | null; onGuest: () => void; onDone: (token: string) => void; noGuest?: boolean }) {
   const [view, setView] = useState<"home" | "email" | "otp" | "phone" | "sms">("home");
   const [mode, setMode] = useState<"login" | "signup">("login");
   const [email, setEmail] = useState("");
@@ -1842,7 +1843,7 @@ function Login({ info, welcome, loginError, onGuest, onDone }: { info: Info; wel
               )}
               <button className="login-btn" style={{ marginTop: 12 }} onClick={() => (phoneOn ? (setErr(null), setView("phone")) : setErr(tx("Phone sign-in isn't set up for this shop yet. Please use Email, or continue as guest.")))}><span className="lb-ic" style={{ color: "var(--orange-dark)" }}><Icon name="phone" size={24} /></span><span>{t("phoneNumT", "Phone number")}<span className="lb-sub">{info.auth.phone?.open ? tx("Enter your mobile number") : t("phoneSub", "Verify by sending an SMS from your phone")}</span></span></button>
               {err && <p className="login-err" role="alert">{err}</p>}
-              {!info.membersOnly && (
+              {!info.membersOnly && !noGuest && (
               <button className="login-btn" style={{ marginTop: 12 }} onClick={onGuest}><span className="lb-ic" style={{ color: "var(--orange-dark)" }}><Icon name="bag" size={24} /></span><span>{t("guestCta", "Continue as guest")}<span className="lb-sub">{tx("Browse & order as guest — sign-up (or guest checkout) is asked at Order Summary")}</span></span></button>
               )}
             </>
