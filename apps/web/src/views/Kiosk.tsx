@@ -473,7 +473,7 @@ function KioskMenu({ info, menu, options, channelId, setChannelId, notify, count
   info: Info; menu: MenuEntry[]; options: Array<{ kind: "dine_in" | "takeaway"; ch?: Info["channels"][number] }>; channelId: string; setChannelId: (id: string) => void; notify: (m: string) => void; count: number; total: number;
   qtyOf: (m: MenuEntry) => number; addQuick: (m: MenuEntry, d: number) => void; lessOf: (m: MenuEntry) => void; open: (m: MenuEntry) => void; onCheckout: () => void; floating: React.ReactNode; logo: React.ReactNode; showSignin: boolean; onSignin: () => void; scrolling: boolean;
 }) {
-  const [search, setSearch] = useState<string | null>(null);
+  const [search, setSearch] = useState<string | null>(() => (import.meta.env.DEV && new URLSearchParams(location.search).has("search") ? "" : null)); // (development only: ?search opens the search bar)
   const [cat, setCat] = useState("All");
   const menuRef = useRef<HTMLDivElement>(null);
   const headRef = useRef<HTMLDivElement>(null);
@@ -590,7 +590,12 @@ function KioskMenu({ info, menu, options, channelId, setChannelId, notify, count
           </div>
           <button className={`k-search ${search !== null ? "on" : ""}`} aria-label={tx("Search the menu")} onClick={() => setSearch((x) => (x === null ? "" : null))}><Icon name="search" size={24} /></button>
         </div>
-        {search !== null && <div className="k-searchrow"><input autoFocus value={search} onChange={(e) => setSearch(e.target.value)} placeholder={tx("Search the menu")} /></div>}
+        {search !== null && (
+          <div className="k-searchrow">
+            <input autoFocus value={search} onChange={(e) => setSearch(e.target.value)} placeholder={tx("Type an item name…")} aria-label={tx("Search the menu")} enterKeyHint="search" autoComplete="off" autoCapitalize="none" spellCheck={false} />
+            <button className="k-search-clear" aria-label={tx("Close search")} onClick={() => setSearch(null)}>✕</button>
+          </div>
+        )}
       </div>
       <div className={`k-floatwrap ${scrolling ? "fade" : ""}`} ref={pairRef} style={{ top: headH + 10 }}>{floating}</div>
       <div className="k-gridwrap" ref={wrapRef}>
