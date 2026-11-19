@@ -11,7 +11,7 @@ import { authenticateDevice, createEnrollmentCode, enroll, markPrintPoll, setSms
 import { BrandStore } from "./brand.js";
 import { PrintStore, validatePrinter, type Printer } from "./print.js";
 import { registerShop } from "./shop.js";
-import { optionsOf, saveSetting } from "./settings.js";
+import { loadKiosk, optionsOf, saveKiosk, saveSetting } from "./settings.js";
 import { sendMail, type Integrations } from "./integrations.js";
 import { registerTelegram } from "./telegram.js";
 import { MemberStore } from "./members.js";
@@ -480,6 +480,14 @@ export async function buildApp({ config, store, db, catalog, catalogAdmin, print
     return { ...optionsOf(config), serviceRate: config.pricing.serviceRate, gstRate: config.pricing.gstRate };
   });
 
+  app.get("/api/settings/kiosk", { preHandler: needs("wallet.read") }, async () => loadKiosk(db, merchantId));
+  app.put<{ Body: unknown }>("/api/settings/kiosk", { preHandler: needs("staff.manage") }, async (req, reply) => {
+    if ((await visibleOutletIds(db, merchantId, req.staff!)) !== null) return reply.code(403).send({ error: "brand_only" });
+    const next = await saveKiosk(db, merchantId, req.body);
+    await audit(db, merchantId, req.staff!.id, "settings.kiosk", next);
+    return next;
+  });
+
   // ---- agents: limited API access for an AI helper or script (owner only) ---------------------
 
   app.get("/api/agents", { preHandler: needs("staff.manage") }, async () => ({ agents: await listAgents(db, merchantId) }));
@@ -643,15 +651,16 @@ export async function buildApp({ config, store, db, catalog, catalogAdmin, print
       return changed(req, reply, "category", () => cat.renameCategory(from, to));
     });
 
-    app.post<{ Body: { id?: string; name?: string; category?: string; soldOut?: boolean; pointsExempt?: boolean; bcrs?: boolean; priceCents?: number; description?: string; altName?: string; options?: OptionGroup[] } }>(
+    app.post<{ Body: { id?: string; name?: string; category?: string; soldOut?: boolean; pointsExempt?: boolean; bcrs?: boolean; priceCents?: number; description?: string; altName?: string; names?: Record<string, string>; options?: OptionGroup[] } }>(
       "/api/catalog/products",
       manage,
       async (req, reply) => {
         const b = req.body ?? {};
         if (!b.name?.trim() || !b.category?.trim()) return bad(reply, "name and category are required");
         if (b.priceCents !== undefined && !isCents(b.priceCents)) return bad(reply, "priceCents must be a whole number of cents, 0 or more");
+        if (b.names !== undefined && (!b.names || typeof b.names !== "object" || Array.isArray(b.names))) return bad(reply, "names must be an object of language code to name");
         return changed(req, reply, "product", () =>
-          cat.upsertProduct({ id: b.id, name: b.name!.trim(), category: b.category!.trim(), soldOut: b.soldOut, pointsExempt: b.pointsExempt, bcrs: b.bcrs, priceCents: b.priceCents, description: b.description, altName: b.altName, options: b.options }),
+          cat.upsertProduct({ id: b.id, name: b.name!.trim(), category: b.category!.trim(), soldOut: b.soldOut, pointsExempt: b.pointsExempt, bcrs: b.bcrs, priceCents: b.priceCents, description: b.description, altName: b.altName, names: b.names, options: b.options }),
         );
       },
     );

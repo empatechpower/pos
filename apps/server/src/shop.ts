@@ -10,6 +10,7 @@ import { FailureLimiter } from "./rateLimit.js";
 import { normaliseEmail, type MemberStore } from "./members.js";
 import { authorizeUrl, createStripeCheckout, createStripeRefund, fetchProfile, sendMail, newState, newVerifier, sameSecret, verifyStripeSignature, type Integrations, type OAuthProvider } from "./integrations.js";
 import type { EventStore } from "./store.js";
+import { loadKiosk } from "./settings.js";
 import { listOutlets } from "./tenant.js";
 import { createHash, randomBytes } from "node:crypto";
 
@@ -178,6 +179,8 @@ export function registerShop(app: FastifyInstance, d: ShopDeps) {
       // What this deployment can do beyond email sign-in and paying at the counter. The page enables only these.
       auth: { google: !!integ.google && !!d.members, microsoft: !!integ.microsoft && !!d.members, phone: !!d.members && (openSignin ? { number: "", open: true } : smsTo ? { number: smsTo } : membersOnly ? { number: "", manual: true } : showCodes ? { number: "+65 8000 0000", simulated: true } : null) },
       payments: { online: !!integ.stripe, methods: integ.stripe ? ["card", "paynow"] : [] },
+      // The kiosk's operator settings, as the owner set them in Manager.
+      kiosk: await loadKiosk(d.db, merchantId),
     };
   });
 

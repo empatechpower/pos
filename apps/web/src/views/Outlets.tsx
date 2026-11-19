@@ -26,6 +26,7 @@ export function Outlets() {
   const [isNew, setIsNew] = useState(false);
   const [fr, setFr] = useState({ id: "", name: "" });
   const [opts, setOpts] = useState<{ serviceChargeOn: boolean; gstOn: boolean; serviceRate: number; gstRate: number } | null>(null);
+  const [kiosk, setKiosk] = useState<{ idleMinutes: number; signinBlock: boolean; chips: { earn: boolean; rate: boolean; stamps: boolean } } | null>(null);
 
   const load = useCallback(async () => {
     const r = await staffFetch("/api/outlets");
@@ -38,6 +39,16 @@ export function Outlets() {
       if ("res" in r && r.res.ok) setOpts((await r.res.json()) as NonNullable<typeof opts>);
     })();
   }, []);
+  useEffect(() => {
+    void (async () => {
+      const r = await staffFetch("/api/settings/kiosk");
+      if ("res" in r && r.res.ok) setKiosk((await r.res.json()) as NonNullable<typeof kiosk>);
+    })();
+  }, []);
+  async function setKioskOption(body: object) {
+    const r = await staffFetch("/api/settings/kiosk", { method: "PUT", body });
+    if ("res" in r && r.res.ok) { setKiosk((await r.res.json()) as NonNullable<typeof kiosk>); say("Saved. A kiosk picks it up when its screen is next reloaded."); } else say("Could not save.");
+  }
   async function setOption(body: { serviceChargeOn?: boolean; gstOn?: boolean }) {
     const r = await staffFetch("/api/settings", { method: "PUT", body });
     if ("res" in r && r.res.ok) { setOpts((await r.res.json()) as NonNullable<typeof opts>); say("Saved. Open screens pick it up on their next reload."); } else say("Could not save.");
@@ -141,6 +152,26 @@ export function Outlets() {
           <p className="muted">Off by default. Most quick-service shops have neither; turn them on only if you charge them.</p>
           <label className="inline"><input type="checkbox" checked={opts.serviceChargeOn} onChange={(e) => void setOption({ serviceChargeOn: e.target.checked })} /> Service charge ({Math.round(opts.serviceRate * 1000) / 10}%, dine-in only)</label>
           <label className="inline" style={{ marginTop: 6 }}><input type="checkbox" checked={opts.gstOn} onChange={(e) => void setOption({ gstOn: e.target.checked })} /> Tax (GST {Math.round(opts.gstRate * 1000) / 10}%)</label>
+        </div>
+      )}
+
+      {brandWide && kiosk && (
+        <div className="rp-card">
+          <h3>Self-order kiosk</h3>
+          <p className="muted">Applies to every kiosk. A single tablet can still override these from its own settings (double-tap the logo).</p>
+          <label className="inline">Clears itself after{" "}
+            <select value={kiosk.idleMinutes} onChange={(e) => void setKioskOption({ idleMinutes: Number(e.target.value) })}>
+              {[1, 2, 3, 5].map((n) => <option key={n} value={n}>{n} minute{n > 1 ? "s" : ""} untouched</option>)}
+            </select>
+          </label>
+          <label className="inline" style={{ marginTop: 6 }}><input type="checkbox" checked={kiosk.signinBlock} onChange={(e) => void setKioskOption({ signinBlock: e.target.checked })} /> Show the member sign-in block on the start screen</label>
+          {kiosk.signinBlock && (
+            <div style={{ marginLeft: 22 }}>
+              <label className="inline" style={{ marginTop: 6 }}><input type="checkbox" checked={kiosk.chips.earn} onChange={(e) => void setKioskOption({ chips: { earn: e.target.checked } })} /> "Earn points on every order"</label>
+              <label className="inline" style={{ marginTop: 6 }}><input type="checkbox" checked={kiosk.chips.rate} onChange={(e) => void setKioskOption({ chips: { rate: e.target.checked } })} /> "100 points = S$1 off"</label>
+              <label className="inline" style={{ marginTop: 6 }}><input type="checkbox" checked={kiosk.chips.stamps} onChange={(e) => void setKioskOption({ chips: { stamps: e.target.checked } })} /> "Collect stamps &amp; rewards"</label>
+            </div>
+          )}
         </div>
       )}
 

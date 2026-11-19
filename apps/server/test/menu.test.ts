@@ -246,3 +246,35 @@ describe("the shop look", () => {
     expect((await call("/api/brand/hero", { method: "PUT", raw: PNG, type: "image/png" })).status).toBe(401);
   });
 });
+
+describe("item names in other languages (the merchant's own words)", () => {
+  const body = (extra: object) => ({ id: "p0", name: "Kaya Toast", category: "Toast", ...extra });
+  const names = async () => (await catalog()).products.find((p) => p.id === "p0")!.names;
+
+  it("saves the names as written, drops blank ones, and keeps them when another field is edited", async () => {
+    expect(await names()).toBeUndefined();
+    expect((await staffPost("/api/catalog/products", body({ names: { zh: "咖椰面包", ms: " Roti Kaya ", id: "  " } }))).status).toBe(200);
+    expect(await names()).toEqual({ zh: "咖椰面包", ms: "Roti Kaya" });
+    // A sold-out toggle, a rename or an options save does not send `names`, so they are left alone.
+    expect((await staffPost("/api/catalog/products", body({ soldOut: true }))).status).toBe(200);
+    expect(await names()).toEqual({ zh: "咖椰面包", ms: "Roti Kaya" });
+    expect((await staffPost("/api/catalog/products", body({ soldOut: false }))).status).toBe(200);
+  });
+
+  it("an empty list clears them, and the base name is untouched throughout", async () => {
+    expect((await staffPost("/api/catalog/products", body({ names: {} }))).status).toBe(200);
+    expect(await names()).toBeUndefined();
+    expect((await catalog()).products.find((p) => p.id === "p0")!.name).toBe("Kaya Toast");
+  });
+
+  it("refuses a name list that is not a list, and a name that is too long", async () => {
+    expect((await staffPost("/api/catalog/products", body({ names: "咖椰面包" }))).status).toBe(400);
+    expect((await staffPost("/api/catalog/products", body({ names: ["x"] }))).status).toBe(400);
+    expect((await staffPost("/api/catalog/products", body({ names: { zh: "x".repeat(81) } }))).status).toBe(400);
+    expect(await names()).toBeUndefined();
+  });
+
+  it("only a manager can set them", async () => {
+    expect((await call("/api/catalog/products", { body: body({ names: { zh: "x" } }), staff: cashier })).status).toBe(403);
+  });
+});

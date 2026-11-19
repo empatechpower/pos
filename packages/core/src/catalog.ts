@@ -28,6 +28,8 @@ export interface Product {
   description?: string;
   /** The name in another language, e.g. the Chinese name. */
   altName?: string;
+  /** The merchant's own name for this item in each language (code -> name), e.g. { zh: "咖椰面包" }. Never machine-translated on the fly; a language with no entry shows `name`. */
+  names?: Record<string, string>;
   /** 0 or absent = no photo. Changes whenever the photo does, so devices refetch it. */
   imageVersion?: number;
   /** Hot/cold, protein, extras... Prices here are deltas on top of the pricebook's price. */
@@ -170,6 +172,10 @@ export function validateCatalog(c: Catalog): string[] {
   for (const p of c.products) {
     if (p.description && p.description.length > 200) problems.push(`${p.id}: description is too long`);
     if (p.altName && p.altName.length > 80) problems.push(`${p.id}: alternative name is too long`);
+    for (const [code, n] of Object.entries(p.names ?? {})) {
+      if (!/^[a-z]{2,3}$/.test(code)) problems.push(`${p.id}: "${code}" is not a language code`);
+      if (typeof n !== "string" || n.length > 80) problems.push(`${p.id}: the ${code} name is too long`);
+    }
     problems.push(...validateOptions(p.id, p.options));
     for (const g of p.options ?? []) {
       for (const ch of g.choices ?? []) {

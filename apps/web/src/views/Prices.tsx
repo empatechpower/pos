@@ -1,3 +1,4 @@
+import { LANGS } from "../shopI18n";
 import { useEffect, useState } from "react";
 import { formatMoney, isCombo, type Catalog, type ChannelKind, type OptionGroup } from "@pos/core";
 import { OptionsEditor } from "./OptionsEditor";
@@ -39,7 +40,7 @@ export function Prices({ catalog, outletId }: { catalog: Catalog; outletId: stri
   const [newKind, setNewKind] = useState<ChannelKind>("delivery");
   const [brand, setBrand] = useState<Brand | null>(null);
   const [find, setFind] = useState("");
-  const [renaming, setRenaming] = useState<{ id: string; name: string } | null>(null);
+  const [renaming, setRenaming] = useState<{ id: string; name: string; names: Record<string, string> } | null>(null);
   const [editingOptions, setEditingOptions] = useState<string | null>(null);
   useEffect(() => {
     void fetch("/api/brand").then(async (r) => r.ok && setBrand((await r.json()) as Brand));
@@ -158,7 +159,7 @@ export function Prices({ catalog, outletId }: { catalog: Catalog; outletId: stri
           return (
             <div className="pricerow" key={p.id}>
               <span className="nm">{p.name}{p.soldOut ? <i className="muted"> · sold out</i> : null}{" "}
-                <button className="pencil" aria-label={`Rename ${p.name}`} title="Rename" onClick={() => setRenaming({ id: p.id, name: p.name })}>
+                <button className="pencil" aria-label={`Rename ${p.name}`} title="Rename" onClick={() => setRenaming({ id: p.id, name: p.name, names: { ...(p.names ?? {}) } })}>
                   <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M12 20h9" /><path d="M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4Z" /></svg>
                 </button>
               </span>
@@ -233,10 +234,13 @@ export function Prices({ catalog, outletId }: { catalog: Catalog; outletId: stri
         const p = catalog.products.find((x) => x.id === renaming.id);
         if (!p) return null;
         const name = renaming.name.trim();
+        const clean = (m: Record<string, string>) => Object.fromEntries(Object.entries(m).map(([k, v]) => [k, v.trim()]).filter(([, v]) => v));
+        const namesNow = clean(renaming.names);
+        const namesChanged = JSON.stringify(Object.entries(namesNow).sort()) !== JSON.stringify(Object.entries(clean(p.names ?? {})).sort());
         const save = () => {
           if (!name) return;
           setRenaming(null);
-          if (name !== p.name) void send("POST", "products", { id: p.id, name, category: p.category, pointsExempt: p.pointsExempt, soldOut: p.soldOut }, `Renamed to ${name}.`);
+          if (name !== p.name || namesChanged) void send("POST", "products", { id: p.id, name, category: p.category, pointsExempt: p.pointsExempt, soldOut: p.soldOut, ...(namesChanged ? { names: namesNow } : {}) }, name !== p.name ? `Renamed to ${name}.` : "Names saved.");
         };
         return (
           <div className="rn-back" onClick={() => setRenaming(null)}>
@@ -244,9 +248,19 @@ export function Prices({ catalog, outletId }: { catalog: Catalog; outletId: stri
               <h3>Rename item</h3>
               <p className="muted">Currently “{p.name}”. Its photo, options and prices stay as they are.</p>
               <input autoFocus value={renaming.name} maxLength={120} aria-label="New name" onChange={(e) => setRenaming({ ...renaming, name: e.target.value })} onKeyDown={(e) => { if (e.key === "Enter") save(); if (e.key === "Escape") setRenaming(null); }} />
+              <details style={{ marginTop: 10 }} open={Object.keys(namesNow).length > 0}>
+                <summary>Name in other languages <span className="muted">(optional)</span></summary>
+                <p className="muted" style={{ margin: "6px 0" }}>Shown to customers who pick that language. Leave one blank to show the name above. Nothing is translated automatically.</p>
+                {LANGS.filter((l) => l.code !== "en").map((l) => (
+                  <label key={l.code} style={{ display: "flex", alignItems: "center", gap: 8, margin: "4px 0" }}>
+                    <span style={{ width: 120, flex: "none" }}>{l.native}</span>
+                    <input style={{ flex: 1 }} value={renaming.names[l.code] ?? ""} maxLength={80} aria-label={`Name in ${l.en}`} onChange={(e) => setRenaming({ ...renaming, names: { ...renaming.names, [l.code]: e.target.value } })} />
+                  </label>
+                ))}
+              </details>
               <div className="rn-actions">
                 <button className="secondary" onClick={() => setRenaming(null)}>Cancel</button>
-                <button className="primary" disabled={!name || name === p.name} onClick={save}>Save</button>
+                <button className="primary" disabled={!name || (name === p.name && !namesChanged)} onClick={save}>Save</button>
               </div>
             </div>
           </div>
