@@ -1,0 +1,115 @@
+0|Ekle
+1|Daha fazla ürün ekle
+2|Tümü
+4|BCRS depozitosu
+5|Menüye dön
+6|İptal
+7|Kioskta devam edin. Telefonunuzu kaldırabilirsiniz.
+8|Değiştir
+9|Dilinizi seçin
+10|Aşağıdan seçeneklerinizi belirleyin — fiyat siz seçtikçe güncellenir.
+11|Kapat
+12|Aramayı kapat
+13|Teslim alma numarası
+14|Devam
+15|Misafir olarak devam et
+16|Misafir olarak devam et — giriş gerekmez
+17|Ürün başına depozito
+18|Burada ye
+19|Yeme şekli
+20|Tamam
+21|Azalt
+22|Başlangıç
+23|KDV
+24|Misafir
+25|Ürünler
+26|Hâlâ buradayım
+27|Dil
+28|Üye
+30|Üyeler — puan ve ödüller için giriş yapın
+31|Artır
+32|Burada yeni misiniz?
+33|Ben değilim — başka hesap kullan
+34|Bu aramayla eşleşen bir şey yok.
+35|Bankacılık uygulamanızı açın, bu PayNow QR kodunu tarayın ve tutarı onaylayın. Ödemeniz ulaştığında bu ekran kendiliğinden güncellenir.
+36|Telefonunuzun kamerasını açıp bu koda tutun. Üye hesabınız burada otomatik olarak giriş yapar — yazmanız gerekmez.
+37|İsteğe bağlı
+38|Veya şunu açın
+39|Bunun yerine telefonumdan sipariş ver
+40|Sipariş özeti
+41|Misafir olarak sipariş veriyorsunuz — üye olup kazanın
+42|Bunun yerine kasada öde
+43|Sipariş ver ve öde
+45|Lütfen biraz bekleyin…
+48|Adet
+49|Kaldır
+50|Sıfırla
+51|Ekranı sıfırla
+52|Ödemek için tarayın
+53|Giriş yapmak için telefonunuzla tarayın
+54|Arama sonuçları
+55|Servis ücreti
+56|Giriş yap
+57|Telefonunuzda giriş yapın veya ücretsiz kaydolun — bir dakikadan az sürer.
+58|Kioska giriş yap
+59|Kioska giriş yapılsın mı?
+60|Telefon numarasıyla giriş yap
+61|Çıkış yap
+63|Üye olarak giriş yapıldı.
+64|Giriş yapılıyor…
+66|Özel istek
+67|Siparişimi başlat
+68|Baştan başlansın mı?
+69|Hâlâ orada mısınız?
+70|Paket
+71|Sipariş vermek için dokunun, burada ödeyin ve tezgâhta numaranızı dinleyin.
+72|Teşekkürler!
+75|Bu ekran {n} sn içinde temizlenecek
+79|Ödenen toplam
+80|Ödenecek toplam
+81|Bir ürün adı yazın…
+82|Kiosk ekranında gösterilen 6 karakterlik kodu yazın.
+83|Yükseltme sürüyor
+84|Ödemeniz bekleniyor…
+85|Telefonunuz bekleniyor…
+86|Tekrar hoş geldiniz, {x}
+87|Tekrar hoş geldiniz, {x} — {n} puan
+88|Bugün ne istersiniz?
+89|Evet, benim
+90|Kazanacaksınız:
+91|Kioska giriş yaptınız
+92|Kiosk siparişiniz bu hesaba kaydedilecek.
+93|Siparişiniz hazırlanıyor. Tezgâhta numaranızı dinleyin.
+94|Siparişiniz boş.
+95|Siparişiniz alındı. Lütfen kasada ödeyin ve numaranızı dinleyin.
+96|Siparişiniz silinecek ve bu ekran şu süre sonra sıfırlanacak:
+97|Siparişiniz silinecek.
+99|ve kodu girin
+101|adet
+102|siparişinizde
+103|ürün
+104|ürün
+105|üye
+106|puan
+107|puan (bu siparişten).
+108|saniye — giriş bilgileri dahil ekrandaki her şey gizliliğiniz için silinir.
+111|+ {amt} adet
+112|Geri
+113|Ödeme
+114|1 seçin
+115|İstediğinizi seçin
+116|En fazla 1 seçin
+117|{x} seçin
+118|Özelleştir
+119|Yükleniyor…
+122|Ödeme
+123|Siparişiniz veriliyor…
+125|Değişiklikleri kaydet
+126|Menüde ara
+127|Tükendi
+129|Toplam
+130|En fazla {n}
+133|Her siparişte puan kazanın
+134|100 puan = S$1 indirim
+135|Pul ve ödül biriktirin
+136|Siparişe ekle

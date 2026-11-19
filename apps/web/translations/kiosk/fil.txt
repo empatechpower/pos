@@ -1,0 +1,115 @@
+0|Idagdag
+1|Magdagdag pa ng item
+2|Lahat
+4|BCRS Deposit
+5|Bumalik sa menu
+6|Kanselahin
+7|Magpatuloy sa kiosk. Maaari mo nang itabi ang iyong telepono.
+8|Baguhin
+9|Piliin ang iyong wika
+10|Piliin ang iyong mga opsyon sa ibaba — nag-a-update ang presyo habang pumipili ka.
+11|Isara
+12|Isara ang paghahanap
+13|Numero ng pagkuha
+14|Magpatuloy
+15|Magpatuloy bilang bisita
+16|Magpatuloy bilang bisita — hindi kailangang mag-sign in
+17|Deposit kada item
+18|Kakain dito
+19|Paraan ng pagkain
+20|Tapos na
+21|Bawasan
+22|Mula
+23|GST
+24|Bisita
+25|Mga item
+26|Nandito pa ako
+27|Wika
+28|Miyembro
+30|Mga miyembro — mag-sign in para sa points at rewards
+31|Dagdagan
+32|Bago ka rito?
+33|Hindi ako ito — gumamit ng ibang account
+34|Walang tumugma sa hinahanap mo.
+35|Buksan ang iyong banking app, i-scan ang PayNow QR na ito, at kumpirmahin ang halaga. Awtomatikong mag-a-update ang screen na ito kapag pumasok na ang bayad mo.
+36|Buksan ang camera ng iyong telepono at itutok sa code na ito. Awtomatikong magsa-sign in dito ang account mo bilang miyembro — walang kailangang i-type.
+37|Opsyonal
+38|O buksan ang
+39|Mag-order na lang sa aking telepono
+40|Buod ng order
+41|Nag-o-order ka bilang bisita — mag-sign up bilang miyembro para makakuha ng
+42|Magbayad na lang sa counter
+43|Mag-order at magbayad
+45|Sandali lang po…
+48|Dami
+49|Alisin
+50|I-reset
+51|I-reset ang screen
+52|I-scan para magbayad
+53|I-scan gamit ang iyong telepono para mag-sign in
+54|Mga resulta ng paghahanap
+55|Service charge
+56|Mag-sign in
+57|Mag-sign in o mag-sign up nang libre sa iyong telepono — wala pang isang minuto.
+58|Mag-sign in sa kiosk
+59|Mag-sign in sa kiosk?
+60|Mag-sign in gamit ang numero ng telepono
+61|Mag-sign out
+63|Naka-sign in bilang miyembro.
+64|Nagsa-sign in…
+66|Espesyal na kahilingan
+67|Simulan ang aking order
+68|Magsimula ulit?
+69|Nandiyan pa ba kayo?
+70|Take away
+71|I-tap para mag-order, magbayad dito, at pakinggan ang numero mo sa counter.
+72|Salamat!
+75|Mawawala ang laman ng screen na ito sa loob ng {n}s
+79|Kabuuang nabayaran
+80|Kabuuang babayaran
+81|I-type ang pangalan ng item…
+82|I-type ang 6-na-character na code na ipinapakita sa screen ng kiosk.
+83|Isinasagawa ang pag-upgrade
+84|Naghihintay sa bayad mo…
+85|Naghihintay sa telepono mo…
+86|Welcome back, {x}
+87|Welcome back, {x} — {n} points
+88|Ano ang gusto mo ngayon?
+89|Oo, ako ito
+90|Makakakuha ka ng
+91|Naka-sign in ka na sa kiosk
+92|Mapupunta sa account na ito ang order mo sa kiosk.
+93|Inihahanda na ang iyong order. Pakinggan ang numero mo sa counter.
+94|Walang laman ang iyong order.
+95|Natanggap na ang iyong order. Magbayad sa counter at pakinggan ang numero mo.
+96|Buburahin ang iyong order at magre-reset ang screen na ito sa loob ng
+97|Buburahin ang iyong order.
+99|at ilagay ang code
+101|bawat isa
+102|sa iyong order
+103|item
+104|mga item
+105|miyembro
+106|points
+107|points sa order na ito.
+108|segundo — lahat ng nasa screen, kasama ang mga detalye ng sign-in, ay buburahin para sa iyong privacy.
+111|+ {amt} bawat isa
+112|Bumalik
+113|Checkout
+114|Pumili ng 1
+115|Pumili ng kahit ilan
+116|Pumili ng hanggang 1
+117|Pumili ng {x}
+118|I-customize
+119|Naglo-load…
+122|Bayad
+123|Inilalagay ang iyong order…
+125|I-save ang mga pagbabago
+126|Maghanap sa menu
+127|Ubos na
+129|Kabuuan
+130|Hanggang {n}
+133|Kumita ng points sa bawat order
+134|100 points = S$1 diskwento
+135|Mangolekta ng stamps at rewards
+136|Idagdag sa order

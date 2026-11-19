@@ -1,16 +1,43 @@
 /** Interface language for the customer shop: the prototype's eight languages, remembered on this device. */
 import { useEffect, useState } from "react";
+import { KIOSK_EN, KIOSK_TR } from "./kioskPhrases";
 import { PHRASES } from "./shopPhrases";
 
+/**
+ * The product's 30 languages, in the handover's source-market order (section 5). Each is shown with its flag and its own name.
+ * `dir: "rtl"` languages mirror the layout. English carries the United Nations flag by the owner's decision.
+ */
 export const LANGS = [
-  { code: "en", native: "English", en: "English" },
-  { code: "ms", native: "Bahasa Melayu", en: "Malay (Malaysia)" },
-  { code: "id", native: "Bahasa Indonesia", en: "Indonesian" },
-  { code: "zh", native: "中文", en: "Mandarin" },
-  { code: "ja", native: "日本語", en: "Japanese" },
-  { code: "fr", native: "Français", en: "French" },
-  { code: "de", native: "Deutsch", en: "German" },
-  { code: "ta", native: "தமிழ்", en: "Tamil" },
+  { code: "en", native: "English", en: "English", flag: "🇺🇳" },
+  { code: "id", native: "Bahasa Indonesia", en: "Indonesian", flag: "🇮🇩" },
+  { code: "zh", native: "简体中文", en: "Mandarin (Simplified)", flag: "🇨🇳" },
+  { code: "ms", native: "Bahasa Melayu", en: "Malay (Malaysia)", flag: "🇲🇾" },
+  { code: "hi", native: "हिन्दी", en: "Hindi", flag: "🇮🇳" },
+  { code: "ta", native: "தமிழ்", en: "Tamil", flag: "🇮🇳" },
+  { code: "fil", native: "Filipino", en: "Filipino", flag: "🇵🇭" },
+  { code: "vi", native: "Tiếng Việt", en: "Vietnamese", flag: "🇻🇳" },
+  { code: "th", native: "ไทย", en: "Thai", flag: "🇹🇭" },
+  { code: "ja", native: "日本語", en: "Japanese", flag: "🇯🇵" },
+  { code: "ko", native: "한국어", en: "Korean", flag: "🇰🇷" },
+  { code: "zht", native: "繁體中文", en: "Mandarin (Traditional)", flag: "🇹🇼" },
+  { code: "de", native: "Deutsch", en: "German", flag: "🇩🇪" },
+  { code: "fr", native: "Français", en: "French", flag: "🇫🇷" },
+  { code: "nl", native: "Nederlands", en: "Dutch", flag: "🇳🇱" },
+  { code: "ar", native: "العربية", en: "Arabic", flag: "🇸🇦", dir: "rtl" },
+  { code: "my", native: "မြန်မာ", en: "Burmese", flag: "🇲🇲" },
+  { code: "bn", native: "বাংলা", en: "Bengali", flag: "🇧🇩" },
+  { code: "km", native: "ខ្មែរ", en: "Khmer", flag: "🇰🇭" },
+  { code: "it", native: "Italiano", en: "Italian", flag: "🇮🇹" },
+  { code: "es", native: "Español", en: "Spanish", flag: "🇪🇸" },
+  { code: "ru", native: "Русский", en: "Russian", flag: "🇷🇺" },
+  { code: "si", native: "සිංහල", en: "Sinhala", flag: "🇱🇰" },
+  { code: "ur", native: "اردو", en: "Urdu", flag: "🇵🇰", dir: "rtl" },
+  { code: "tr", native: "Türkçe", en: "Turkish", flag: "🇹🇷" },
+  { code: "pt", native: "Português", en: "Portuguese", flag: "🇵🇹" },
+  { code: "pl", native: "Polski", en: "Polish", flag: "🇵🇱" },
+  { code: "sv", native: "Svenska", en: "Swedish", flag: "🇸🇪" },
+  { code: "he", native: "עברית", en: "Hebrew", flag: "🇮🇱", dir: "rtl" },
+  { code: "pa", native: "ਪੰਜਾਬੀ", en: "Punjabi", flag: "🇮🇳" },
 ] as const;
 export type LangCode = (typeof LANGS)[number]["code"];
 
@@ -18,9 +45,12 @@ const DICT: Record<string, Record<string, string>> = {"en": {"typeTableW": "Tabl
 const GREETING: Record<"m" | "a" | "e", Record<string, string>> = {"m": {"en": "Good morning!", "ms": "Selamat pagi!", "id": "Selamat pagi!", "zh": "早上好！", "ja": "おはようございます！", "fr": "Bonjour !", "de": "Guten Morgen!", "ta": "காலை வணக்கம்!"}, "a": {"en": "Good afternoon!", "ms": "Selamat tengah hari!", "id": "Selamat siang!", "zh": "下午好！", "ja": "こんにちは！", "fr": "Bonjour !", "de": "Guten Tag!", "ta": "மதிய வணக்கம்!"}, "e": {"en": "Good evening!", "ms": "Selamat malam!", "id": "Selamat malam!", "zh": "晚上好！", "ja": "こんばんは！", "fr": "Bonsoir !", "de": "Guten Abend!", "ta": "மாலை வணக்கம்!"}};
 
 const KEY = "shop.lang";
+const ALIAS: Record<string, LangCode> = { "zh-tw": "zht", "zh-hk": "zht", "zh-mo": "zht", "zh-hant": "zht", tl: "fil", iw: "he", nb: "sv" };
 const detect = (): LangCode => {
   for (const l of navigator.languages?.length ? navigator.languages : [navigator.language || "en"]) {
     const c = l.toLowerCase();
+    const alias = Object.keys(ALIAS).find((k) => c === k || c.startsWith(k + "-"));
+    if (alias && alias !== "nb") return ALIAS[alias]!;
     const hit = LANGS.find((x) => c === x.code || c.startsWith(x.code + "-"));
     if (hit) return hit.code;
   }
@@ -37,6 +67,15 @@ const stored = (): "auto" | LangCode => {
 
 let mode: "auto" | LangCode = stored();
 let current: LangCode = mode === "auto" ? detect() : mode;
+/** The page's language and reading direction follow the language: Arabic, Hebrew and Urdu read right to left. */
+const applyDir = () => {
+  try {
+    const l = LANGS.find((x) => x.code === current) as { dir?: string } | undefined;
+    document.documentElement.lang = current === "zht" ? "zh-Hant" : current === "zh" ? "zh-Hans" : current;
+    document.documentElement.dir = l?.dir === "rtl" ? "rtl" : "ltr";
+  } catch { /* no document */ }
+};
+applyDir();
 const listeners = new Set<() => void>();
 
 export const langMode = () => mode;
@@ -44,7 +83,8 @@ export const lang = () => current;
 export function setLangMode(m: "auto" | LangCode) {
   mode = m;
   current = m === "auto" ? detect() : m;
-  try { localStorage.setItem(KEY, m); document.documentElement.lang = current; } catch { /* storage can be unavailable */ }
+  try { localStorage.setItem(KEY, m); } catch { /* storage can be unavailable */ }
+  applyDir();
   listeners.forEach((f) => f());
 }
 /** Re-renders the component whenever the language changes. */
@@ -57,11 +97,17 @@ export function useLang() {
   }, []);
   return current;
 }
+const KIOSK_AT = new Map(KIOSK_EN.map((e, i) => [e, i]));
+const kioskText = (english: string): string | undefined => {
+  const i = KIOSK_AT.get(english);
+  return i === undefined ? undefined : KIOSK_TR[current]?.[i];
+};
 const PHRASE_AT: Partial<Record<LangCode, number>> = { ms: 0, id: 1, zh: 2, ja: 3, fr: 4, de: 5, ta: 6 };
 /** An English sentence in the current language, with {name} blanks filled in. Anything not translated stays in English. */
 export function tx(english: string, vars?: Record<string, string | number>): string {
   const at = PHRASE_AT[current];
-  let out = (at !== undefined ? PHRASES[english]?.[at] : undefined) ?? english;
+  // The prototype's own wording first, then the kiosk's draft translations, then English.
+  let out = (at !== undefined ? PHRASES[english]?.[at] : undefined) ?? kioskText(english) ?? english;
   if (vars) for (const [k, v] of Object.entries(vars)) out = out.split(`{${k}}`).join(String(v));
   return out;
 }
@@ -72,5 +118,8 @@ export const greeting = (h = new Date().getHours()): string => {
   return g[current] ?? g.en!;
 };
 /** Short label on the header button: the native name for scripts that are not Latin, otherwise the code. */
-export const shortLabel = () => (current === "zh" || current === "ja" || current === "ta" ? LANGS.find((l) => l.code === current)!.native : current.toUpperCase());
+export const shortLabel = () => {
+  const l = LANGS.find((x) => x.code === current)!;
+  return /^[\p{Script=Latin}\s]+$/u.test(l.native) ? current.toUpperCase() : l.native;
+};
 export const detectedLang = detect;

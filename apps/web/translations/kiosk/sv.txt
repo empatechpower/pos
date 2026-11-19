@@ -1,0 +1,115 @@
+0|Lägg till
+1|Lägg till fler artiklar
+2|Alla
+4|BCRS-pant
+5|Tillbaka till menyn
+6|Avbryt
+7|Fortsätt vid kiosken. Du kan stoppa undan telefonen.
+8|Ändra
+9|Välj ditt språk
+10|Välj dina alternativ nedan — priset uppdateras medan du väljer.
+11|Stäng
+12|Stäng sökning
+13|Avhämtningsnummer
+14|Fortsätt
+15|Fortsätt som gäst
+16|Fortsätt som gäst — ingen inloggning behövs
+17|Pant per artikel
+18|Äta här
+19|Sätt att äta
+20|Klart
+21|Färre
+22|Från
+23|Moms
+24|Gäst
+25|Artiklar
+26|Jag är kvar
+27|Språk
+28|Medlem
+30|Medlemmar — logga in för poäng och belöningar
+31|Fler
+32|Ny här?
+33|Det är inte jag — använd ett annat konto
+34|Inga träffar för den sökningen.
+35|Öppna din bankapp, skanna den här PayNow-QR-koden och bekräfta beloppet. Den här skärmen uppdateras av sig själv när din betalning kommit in.
+36|Öppna telefonens kamera och rikta den mot koden. Ditt medlemskonto loggas in här automatiskt — inget att skriva.
+37|Valfritt
+38|Eller öppna
+39|Beställ från min telefon i stället
+40|Ordersammanfattning
+41|Du beställer som gäst — bli medlem för att få
+42|Betala i kassan i stället
+43|Beställ & betala
+45|Vänta ett ögonblick…
+48|Antal
+49|Ta bort
+50|Återställ
+51|Återställ skärmen
+52|Skanna för att betala
+53|Skanna med telefonen för att logga in
+54|Sökresultat
+55|Serviceavgift
+56|Logga in
+57|Logga in eller registrera dig gratis på telefonen — det tar mindre än en minut.
+58|Logga in på kiosken
+59|Logga in på kiosken?
+60|Logga in med telefonnummer
+61|Logga ut
+63|Inloggad som medlem.
+64|Loggar in…
+66|Särskild önskan
+67|Starta min beställning
+68|Börja om?
+69|Är du kvar?
+70|Avhämtning
+71|Tryck för att beställa, betala här och lyssna efter ditt nummer vid disken.
+72|Tack!
+75|Den här skärmen rensas om {n} s
+79|Totalt betalt
+80|Totalt att betala
+81|Skriv ett artikelnamn…
+82|Skriv den sexteckenskod som visas på kioskskärmen.
+83|Uppgradering pågår
+84|Väntar på din betalning…
+85|Väntar på din telefon…
+86|Välkommen tillbaka, {x}
+87|Välkommen tillbaka, {x} — {n} poäng
+88|Vad vill du ha idag?
+89|Ja, det är jag
+90|Du får
+91|Du är inloggad på kiosken
+92|Din kioskbeställning hamnar på det här kontot.
+93|Din beställning förbereds. Lyssna efter ditt nummer vid disken.
+94|Din beställning är tom.
+95|Din beställning har kommit in. Betala vid kassan och lyssna efter ditt nummer.
+96|Din beställning rensas och den här skärmen återställs om
+97|Din beställning rensas.
+99|och ange koden
+101|per st
+102|i din beställning
+103|artikel
+104|artiklar
+105|medlem
+106|poäng
+107|poäng på den här beställningen.
+108|sekunder — allt på skärmen, inklusive inloggningsuppgifter, tas bort för din integritet.
+111|+ {amt} per st
+112|Tillbaka
+113|Till kassan
+114|Välj 1
+115|Välj valfritt
+116|Välj upp till 1
+117|Välj {x}
+118|Anpassa
+119|Läser in…
+122|Betalning
+123|Lägger din beställning…
+125|Spara ändringar
+126|Sök i menyn
+127|Slutsåld
+129|Totalt
+130|Upp till {n}
+133|Samla poäng på varje beställning
+134|100 poäng = S$1 rabatt
+135|Samla stämplar & belöningar
+136|Lägg till i beställningen

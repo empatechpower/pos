@@ -391,3 +391,46 @@
 .k-signin .k-wait { margin: 4px 0 0; justify-content: center; }
 @media (max-height: 760px) { .k-silogo { width: 64px; height: 64px; } .k-signin-body { gap: 6px; padding-bottom: 16px; } .k-qrcard { padding: 14px; } }
 @media (max-height: 900px) { .k-silogo { width: 72px; height: 72px; } .k-qrcard img, .k-qrwait { width: min(34dvh, 60vw, 400px); height: min(34dvh, 60vw, 400px); } }
+
+/* the item sheet on the kiosk: price under the name, a Quantity row, Cancel beside "Add to order · total" */
+.kiosk .opt-price { margin: 0 0 6px; font-size: 26px; font-weight: 800; color: var(--orange-dark); }
+.kiosk .opt-body { padding: 0 22px 22px; }
+.kiosk .opt-photo { height: auto; aspect-ratio: 16 / 9; max-height: 34dvh; }
+.kiosk .opt-body h2 { font-size: 32px; margin-top: 18px; }
+.kiosk .opt-body .muted { font-size: 18px; line-height: 1.5; }
+.kiosk .opt-gh b { font-size: 22px; }
+.kiosk .opt-pills button { padding: 18px 16px; font-size: 20px; border-radius: 18px; }
+.kiosk .opt-pills button small { font-size: 18px; font-weight: 700; color: var(--orange-dark); }
+.kiosk .opt-qty { display: flex; align-items: center; justify-content: space-between; padding-top: 18px; border-top: 2px solid var(--line); }
+.kiosk .opt-qty > b { font-size: 24px; }
+.kiosk .opt-qty .opt-step { gap: 6px; background: var(--beige); border: 2px solid var(--line); padding: 5px; }
+.kiosk .opt-qty .opt-step button { width: 52px; height: 52px; border-radius: 50%; background: #fff; font-size: 28px; font-weight: 700; color: var(--ink); }
+.kiosk .opt-qty .opt-step button:disabled { opacity: .45; }
+.kiosk .opt-qty .opt-step b { min-width: 44px; text-align: center; font-size: 26px; }
+.kiosk .opt-foot.kq { gap: 16px; padding: 14px 22px calc(14px + env(safe-area-inset-bottom)); background: var(--page); }
+.kiosk .opt-cancel { flex: 0 0 auto; min-height: 76px; padding: 0 30px; border-radius: 24px; border: 2.5px solid var(--line); background: #fff; color: var(--ink); font-size: 22px; font-weight: 700; }
+.kiosk .opt-foot.kq .opt-cta { min-height: 76px; border-radius: 24px; font-size: 24px; background: var(--orange); color: var(--accent-ink, #fff); box-shadow: 0 4px 18px rgba(234,112,22,.30); }
+@media (max-width: 560px) { .kiosk .opt-body h2 { font-size: 26px; } .kiosk .opt-cancel { min-height: 62px; padding: 0 20px; font-size: 18px; } .kiosk .opt-foot.kq .opt-cta { min-height: 62px; font-size: 19px; } .kiosk .opt-price { font-size: 22px; } }
+
+/* a new version is being installed: covers everything, then the page reloads once */
+.k-upgrade { position: fixed; inset: 0; z-index: 300; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 14px; background: var(--page); text-align: center; padding: 24px; }
+.k-upgrade h2 { margin: 6px 0 0; font-size: clamp(26px, 4.4vw, 40px); font-weight: 800; }
+.k-upgrade p { margin: 0; color: var(--muted); font-size: clamp(16px, 2.2vw, 22px); }
+.k-upgrade .k-spin { width: 46px; height: 46px; border-width: 5px; }
+
+/* right-to-left languages (Arabic, Hebrew, Urdu): what is pinned to a side moves to the other side */
+[dir="rtl"] .k-corner, [dir="rtl"] .k-floatwrap { right: auto; left: 14px; }
+[dir="rtl"] .k-bagbadge { right: auto; left: -7px; }
+[dir="rtl"] .k-badge { left: auto; right: 8px; }
+[dir="rtl"] .k-bcrs { right: auto; left: 5px; }
+[dir="rtl"] .k-card, [dir="rtl"] .k-qrhero { text-align: right; }
+[dir="rtl"] .k-add, [dir="rtl"] .k-cstep, [dir="rtl"] .k-qrhero i { margin-left: 0; margin-right: auto; }
+[dir="rtl"] .k-line-price { text-align: left; }
+[dir="rtl"] .kiosk .swipe-shell.is-swiped > .k-line { transform: translateX(84px); }
+[dir="rtl"] .k-lang-grid button em { right: auto; left: 10px; }
+[dir="rtl"] .k-toggle i::after { left: auto; right: 3px; }
+[dir="rtl"] .k-toggle input:checked + i::after { transform: translateX(-26px); }
+@media (max-width: 560px) {
+  [dir="rtl"] .k-bar { padding-right: 14px; padding-left: 175px; }
+  [dir="rtl"] .k-badge { left: auto; right: 5px; }
+}

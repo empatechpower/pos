@@ -3,7 +3,8 @@ import QRCode from "qrcode";
 import { cleanNote, defaultSelection, formatMoney, menuFor, priceRange, quoteOrder, readableOn, resolveOptions, type BusinessConfig, type Catalog, type ChosenOptionInput, type MenuEntry } from "@pos/core";
 import { OptionSheet } from "./OptionSheet";
 import { RollMoney } from "./RollMoney";
-import { Icon, SwipeRow, linkOutlet, photo, tint, useDialog, type BagLine, type Info, type OrderView } from "./Shop";
+import { Icon, SwipeRow, itemMatches, itemName, linkOutlet, photo, tint, useDialog, type BagLine, type Info, type OrderView } from "./Shop";
+import { applyUpdate, useUpdatePending } from "../pwaUpdate";
 import { LANGS, lang, setLangMode, t, tx, useLang } from "../shopI18n";
 import "../kiosk.css";
 
@@ -19,9 +20,6 @@ import "../kiosk.css";
 type Screen = "start" | "menu" | "review" | "pay" | "done" | "signin";
 interface KioskMember { name: string | null; phone: string | null; pointsBalance: number }
 
-// The kiosk lists languages in the product's source-market order (the handover's list); the ones we have, in that order.
-const KIOSK_LANG_ORDER = ["en", "id", "zh", "ms", "ta", "ja", "de", "fr"];
-const FLAG: Record<string, string> = { en: "🇺🇳", ms: "🇲🇾", id: "🇮🇩", zh: "🇨🇳", ja: "🇯🇵", fr: "🇫🇷", de: "🇩🇪", ta: "🇮🇳" };
 const NUDGE_AFTER_S = 20; // the Reset button starts pulsing
 const WARN_FOR_S = 10; // "Still there?" shows for the last ten seconds before the wipe
 const DONE_CLEARS_S = 20; // the confirmation clears itself
@@ -43,18 +41,20 @@ const readNum = (k: string, d: number) => {
     return d;
   }
 };
-const readSignin = (): boolean => {
+// What the owner set in Manager is the default; a tablet's own settings (double-tap on the logo) override it on that tablet only.
+const readSignin = (d: boolean): boolean => {
   try {
-    return localStorage.getItem(LS_SIGNIN) !== "0";
+    const v = localStorage.getItem(LS_SIGNIN);
+    return v === null ? d : v !== "0";
   } catch {
-    return true;
+    return d;
   }
 };
-const readChips = (): Record<string, boolean> => {
+const readChips = (d: Record<string, boolean>): Record<string, boolean> => {
   try {
-    return { earn: true, rate: true, stamps: true, ...(JSON.parse(localStorage.getItem(LS_CHIPS) ?? "{}") as Record<string, boolean>) };
+    return { earn: true, rate: true, stamps: true, ...d, ...(JSON.parse(localStorage.getItem(LS_CHIPS) ?? "{}") as Record<string, boolean>) };
   } catch {
-    return { earn: true, rate: true, stamps: true };
+    return { earn: true, rate: true, stamps: true, ...d };
   }
 };
 
@@ -118,9 +118,9 @@ function KioskSession({ info, catalog, config }: { info: Info; catalog: Catalog;
   const [resetAsk, setResetAsk] = useState(false);
   const [picking, setPicking] = useState<MenuEntry | null>(null);
   const [editing, setEditing] = useState<BagLine | null>(null);
-  const [idleMin, setIdleMin] = useState(() => readNum(LS_IDLE, 1));
-  const [chips, setChips] = useState(readChips);
-  const [signinBlock, setSigninBlock] = useState(readSignin);
+  const [idleMin, setIdleMin] = useState(() => readNum(LS_IDLE, info.kiosk?.idleMinutes ?? 1));
+  const [chips, setChips] = useState(() => readChips(info.kiosk?.chips ?? {}));
+  const [signinBlock, setSigninBlock] = useState(() => readSignin(info.kiosk?.signinBlock ?? true));
   const [soon, setSoon] = useState<string | null>(null);
   // The signed-in member (kept in memory only: any session end drops it) and the screen to go back to from the sign-in screen.
   const [member, setMember] = useState<KioskMember | null>(null);
@@ -256,6 +256,25 @@ function KioskSession({ info, catalog, config }: { info: Info; catalog: Catalog;
   const warning = watching && warnLeft <= WARN_FOR_S && warnLeft > 0;
   const nudge = screen === "menu" && idle >= NUDGE_AFTER_S && !resetAsk;
 
+  // A new version of the app is held until the kiosk is back on its start screen and nobody has touched it for 20 seconds; then a full-screen
+  // "Upgrading in progress" shows and the page reloads exactly once (a reload in the last minute is never repeated).
+  const updateWaiting = useUpdatePending();
+  const [upgrading, setUpgrading] = useState(false);
+  useEffect(() => {
+    if (!updateWaiting || screen !== "start" || upgrading) return;
+    const id = window.setInterval(() => {
+      if (Date.now() - touch.current < 20_000) return;
+      let recent = false;
+      try { recent = Date.now() - Number(sessionStorage.getItem("kiosk.upgradedAt") ?? 0) < 60_000; } catch { /* no storage */ }
+      if (recent) return;
+      window.clearInterval(id);
+      try { sessionStorage.setItem("kiosk.upgradedAt", String(Date.now())); } catch { /* no storage */ }
+      setUpgrading(true);
+      window.setTimeout(applyUpdate, 1500);
+    }, 2000);
+    return () => window.clearInterval(id);
+  }, [updateWaiting, screen, upgrading]);
+
   // The confirmation clears itself.
   useEffect(() => {
     if (screen !== "done") return;
@@ -287,7 +306,7 @@ function KioskSession({ info, catalog, config }: { info: Info; catalog: Catalog;
           : /dine-in only/i.test(e) ? tx("This shop takes dine-in orders only. Switch to Dine in, or order at the counter.")
           : res.status === 409 ? tx("Prices changed while you were ordering. The new total is {amt}. Tap Pay again to confirm.", { amt: formatMoney(j.totalCents ?? 0) })
           : res.status === 429 ? tx("Too many orders from this device. Please wait a few minutes or order at the counter.")
-          : bad ? tx("{x} is no longer available. Please remove it and try again.", { x: byId.get(bad)?.name ?? tx("An item") })
+          : bad ? tx("{x} is no longer available. Please remove it and try again.", { x: byId.get(bad) ? itemName(byId.get(bad)!) : tx("An item") })
           : tx("We couldn't place your order. Please try again, or order at the counter.") + (e ? ` (${e})` : ""),
         );
         return;
@@ -331,9 +350,10 @@ function KioskSession({ info, catalog, config }: { info: Info; catalog: Catalog;
     void fetch(`/api/shop/orders/${order.id}`).then((r) => (r.ok ? (r.json() as Promise<OrderView>) : null)).then((v) => v && setOrder((o) => (o ? { ...o, view: v } : o))).catch(() => undefined);
   }, [screen, order]);
 
-  const langNative = LANGS.find((l) => l.code === lang())!.native;
+  const langNow = LANGS.find((l) => l.code === lang())!;
+  const langNative = langNow.native;
   // The language button is on every screen; Reset screen only on the menu, where an order is being built.
-  const langButton = <button className="k-lang pulse" onClick={() => setLangOpen(true)} aria-label={t("language", "Language")}><span aria-hidden>{FLAG[lang()]}</span> {langNative} <span aria-hidden>▾</span></button>;
+  const langButton = <button className="k-lang pulse" onClick={() => setLangOpen(true)} aria-label={t("language", "Language")}><span aria-hidden>{langNow.flag}</span> {langNative} <span aria-hidden>▾</span></button>;
   const floating = (
     <div className="k-float">
       <button className={`k-reset ${nudge ? "pulse" : ""}`} onClick={() => setResetAsk(true)}><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.6" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M21 12a9 9 0 1 1-2.64-6.36" /><path d="M21 3v6h-6" /></svg><span>{tx("Reset screen")}</span></button>
@@ -405,7 +425,7 @@ function KioskSession({ info, catalog, config }: { info: Info; catalog: Catalog;
                 <div className="k-line">
                   {photo(m) && <img src={photo(m)!} alt="" />}
                   <div className="k-line-name" onClick={() => m.options?.length && setEditing(l)}>
-                    <b>{pl?.name ?? m.name}</b>
+                    <b>{itemName(m)}</b>
                     {pl?.bcrs ? <small>+{config.pricing.bcrsDepositCents}c BCRS {tx("Deposit per item")}</small> : null}
                     <small>{formatMoney(pl?.unitCents ?? m.priceCents)} {tx("each")}</small>
                     {m.options?.length ? <small className="k-edit">{tx("Change")}</small> : null}
@@ -491,13 +511,14 @@ function KioskSession({ info, catalog, config }: { info: Info; catalog: Catalog;
     <div className="kiosk shop" style={theme}>
       {body}
       {picking && (
-        <OptionSheet notes cta={tx("Add to order")} name={picking.name} description={picking.description} photoUrl={photo(picking)} baseCents={picking.priceCents} groups={picking.options ?? []} onClose={() => setPicking(null)} onAdd={(sel, note) => { addLine(picking, sel, 1, note); setPicking(null); }} />
+        <OptionSheet kiosk notes cta="Add to order" name={itemName(picking)} description={picking.description} photoUrl={photo(picking)} baseCents={picking.priceCents} groups={picking.options ?? []} onClose={() => setPicking(null)} onAdd={(sel, note, qty) => { addLine(picking, sel, qty, note); setPicking(null); }} />
       )}
       {editing && byId.get(editing.productId) && (() => {
         const em = byId.get(editing.productId)!;
-        return <OptionSheet notes cta={tx("Save changes")} name={em.name} description={em.description} photoUrl={photo(em)} baseCents={em.priceCents} groups={em.options ?? []} initial={editing.selection} initialNote={editing.note ?? ""} onClose={() => setEditing(null)} onAdd={(sel, note) => { setBag((cur) => cur.filter((x) => x.key !== editing.key)); addLine(em, sel, editing.qty, note); setEditing(null); }} />;
+        return <OptionSheet notes cta={tx("Save changes")} name={itemName(em)} description={em.description} photoUrl={photo(em)} baseCents={em.priceCents} groups={em.options ?? []} initial={editing.selection} initialNote={editing.note ?? ""} onClose={() => setEditing(null)} onAdd={(sel, note) => { setBag((cur) => cur.filter((x) => x.key !== editing.key)); addLine(em, sel, editing.qty, note); setEditing(null); }} />;
       })()}
       {soon && <div className="k-toast" role="status">{soon}</div>}
+      {upgrading && <div className="k-upgrade" role="alert"><i className="k-spin" /><h2>{tx("Upgrading in progress")}</h2><p>{tx("Please wait a moment…")}</p></div>}
       <MemberDialog open={memberAsk} name={member?.name || member?.phone || tx("Member")} points={config.rewards.pointsEnabled ? member?.pointsBalance ?? null : null} onClose={() => setMemberAsk(false)} onSignOut={detach} />
       <ResetDialog open={resetAsk || devDialog === "reset"} onNo={() => setResetAsk(false)} onYes={wipe} />
       <StillThere open={warning || devDialog === "idle"} left={devDialog === "idle" ? 6 : warnLeft} />
@@ -531,7 +552,7 @@ function KioskMenu({ info, menu, options, channelId, setChannelId, notify, count
   const [headH, setHeadH] = useState(150);
   const [pairH, setPairH] = useState(56);
   const q = (search ?? "").trim().toLowerCase();
-  const shown = q ? menu.filter((m) => `${m.name} ${m.description ?? ""} ${m.category}`.toLowerCase().includes(q)) : menu;
+  const shown = q ? menu.filter((m) => itemMatches(m, q) || `${m.description ?? ""} ${m.category}`.toLowerCase().includes(q)) : menu;
   const cats = useMemo(() => [...new Set(menu.map((m) => m.category))], [menu]);
   const groups = useMemo(() => (q ? [{ c: tx("Search results"), items: shown }] : cats.map((c) => ({ c, items: shown.filter((m) => m.category === c) })).filter((g) => g.items.length)), [cats, shown, q]);
   const counts = useMemo(() => new Map(cats.map((c) => [c, menu.filter((m) => m.category === c).length])), [cats, menu]);
@@ -654,7 +675,7 @@ function KioskMenu({ info, menu, options, channelId, setChannelId, notify, count
                       {n > 0 && <span className="k-badge">×{n} {tx("in your order")}</span>}
                     </div>
                     <div className="k-body">
-                      <div className="k-nm">{m.name}</div>
+                      <div className="k-nm">{itemName(m)}</div>
                       <div className="k-pr">
                         <span className="k-pricebox">
                           {hi > lo ? <span className="k-from">{tx("From")}</span> : null}
@@ -722,11 +743,11 @@ function LanguageDialog({ open, onClose }: { open: boolean; onClose: () => void 
     <div className="k-lang-screen" ref={box} role="dialog" aria-modal="true" aria-labelledby="k-lang-h">
       <header><h3 id="k-lang-h">{tx("Choose your language")}</h3><button aria-label={t("close", "Close")} onClick={onClose}>×</button></header>
       <div className="k-lang-grid" style={{ gridTemplateColumns: `repeat(${cols}, minmax(0, 1fr))`, gridTemplateRows: `repeat(${rows}, ${rowSize})` }}>
-        {[...LANGS].sort((a, b) => KIOSK_LANG_ORDER.indexOf(a.code) - KIOSK_LANG_ORDER.indexOf(b.code)).map((l) => (
+        {LANGS.map((l) => (
           <button key={l.code} className={l.code === lang() ? "on" : ""} onClick={() => { setLangMode(l.code); onClose(); }}>
             {l.code === lang() && <em aria-hidden>✓</em>}
-            <span aria-hidden>{FLAG[l.code]}</span>
-            <b>{l.code === "zh" ? "简体中文" : l.native}</b>
+            <span aria-hidden>{l.flag}</span>
+            <b>{l.native}</b>
           </button>
         ))}
       </div>

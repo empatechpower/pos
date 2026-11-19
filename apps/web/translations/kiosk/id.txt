@@ -1,0 +1,115 @@
+0|Tambah
+1|Tambah item lagi
+2|Semua
+3|Satu item
+4|Deposit BCRS
+5|Kembali ke menu
+6|Batal
+7|Lanjutkan di kios. Anda bisa menyimpan ponsel Anda.
+8|Ubah
+9|Pilih bahasa Anda
+10|Pilih opsi Anda di bawah — harga diperbarui saat Anda memilih.
+11|Tutup
+12|Tutup pencarian
+13|Nomor pengambilan
+14|Lanjutkan
+15|Lanjutkan sebagai tamu
+16|Lanjutkan sebagai tamu — tanpa perlu masuk
+17|Deposit per item
+18|Makan di tempat
+19|Pilihan penyajian
+20|Selesai
+21|Kurangi
+22|Mulai
+23|GST
+24|Tamu
+25|Item
+26|Saya masih di sini
+27|Bahasa
+28|Anggota
+29|Masuk sebagai anggota sedang tidak tersedia. Anda tetap bisa memesan sebagai tamu.
+30|Anggota — masuk untuk poin & hadiah
+31|Tambah
+32|Baru di sini?
+33|Bukan saya — gunakan akun lain
+34|Tidak ada yang cocok dengan pencarian itu.
+35|Buka aplikasi perbankan Anda, pindai kode QR PayNow ini, lalu konfirmasi jumlahnya. Layar ini diperbarui otomatis setelah pembayaran Anda masuk.
+36|Buka kamera ponsel Anda dan arahkan ke kode ini. Akun anggota Anda masuk di sini secara otomatis — tidak perlu mengetik.
+37|Opsional
+38|Atau buka
+39|Pesan dari ponsel saya
+40|Ringkasan pesanan
+41|Memesan sebagai tamu — daftar sebagai anggota untuk mendapatkan
+42|Bayar di kasir saja
+43|Pesan & bayar
+44|Silakan coba lagi sebentar lagi.
+45|Mohon tunggu sebentar…
+46|Arahkan kamera ponsel Anda ke kode ini — tanpa mengetik di layar ini
+47|Harga berubah saat Anda memesan. Total baru adalah {amt}. Ketuk Bayar lagi untuk mengonfirmasi.
+48|Jumlah
+49|Hapus
+50|Atur ulang
+51|Atur ulang layar
+52|Pindai untuk membayar
+53|Pindai dengan ponsel Anda untuk masuk
+54|Hasil pencarian
+55|Biaya layanan
+56|Masuk
+57|Masuk atau daftar gratis di ponsel Anda — kurang dari satu menit.
+58|Masuk ke kios
+59|Masuk ke kios?
+60|Masuk dengan nomor telepon
+61|Keluar
+62|Masuk sedang tidak tersedia
+63|Masuk sebagai anggota.
+64|Sedang masuk…
+65|Terjadi kesalahan. Silakan coba lagi.
+66|Permintaan khusus
+67|Mulai pesanan saya
+68|Mulai dari awal?
+69|Masih di sana?
+70|Bawa pulang
+71|Ketuk untuk memesan, bayar di sini, lalu dengarkan nomor Anda di kasir.
+72|Terima kasih!
+73|Kode itu sudah dipakai. Ketuk Mulai di kios untuk kode baru.
+74|Kode tidak ditemukan atau sudah kedaluwarsa. Periksa kode di layar kios.
+75|Layar ini dibersihkan dalam {n} dtk
+76|Toko ini hanya menerima pesanan meja, jadi kios belum bisa memproses pesanan ini. Silakan pesan di kasir.
+77|Toko ini hanya menerima pesanan makan di tempat. Ganti ke Makan di tempat atau pesan di kasir.
+78|Toko ini hanya menerima pesanan dari anggota. Silakan pesan di kasir.
+79|Total dibayar
+80|Total yang harus dibayar
+81|Ketik nama item…
+82|Ketik kode 6 karakter yang tampil di layar kios.
+83|Pembaruan sedang berlangsung
+84|Menunggu pembayaran Anda…
+85|Menunggu ponsel Anda…
+86|Selamat datang kembali, {x}
+87|Selamat datang kembali, {x} — {n} poin
+88|Apa yang ingin Anda pesan hari ini?
+89|Ya, itu saya
+90|Anda akan mendapat
+91|Anda sudah masuk di kios
+92|Pesanan kios Anda akan tercatat di akun ini.
+93|Pesanan Anda sedang disiapkan. Dengarkan nomor Anda di kasir.
+94|Pesanan Anda kosong.
+95|Pesanan Anda sudah masuk. Silakan bayar di kasir dan dengarkan nomor Anda.
+96|Pesanan Anda akan dihapus dan layar ini akan diatur ulang dalam
+97|Pesanan Anda akan dihapus.
+98|Sesi masuk Anda berakhir. Ketuk tombol anggota untuk masuk lagi, atau pesan sebagai tamu.
+99|lalu masukkan kode
+100|deposit
+101|per item
+102|di pesanan Anda
+103|item
+104|item
+105|anggota
+106|poin
+107|poin dari pesanan ini.
+108|detik — semua yang ada di layar, termasuk data masuk, dihapus demi privasi Anda.
+109|{x} sudah tidak tersedia. Silakan hapus dan coba lagi.
+110|{x} belum tersedia di toko ini.
+133|Dapat poin di setiap pesanan
+134|100 poin = diskon S$1
+135|Kumpulkan stempel & hadiah
+136|Tambahkan ke pesanan

@@ -1,0 +1,115 @@
+0|Añadir
+1|Añadir más artículos
+2|Todo
+4|Depósito BCRS
+5|Volver al menú
+6|Cancelar
+7|Continúe en el quiosco. Puede guardar su teléfono.
+8|Cambiar
+9|Elija su idioma
+10|Elija sus opciones abajo: el precio se actualiza mientras elige.
+11|Cerrar
+12|Cerrar búsqueda
+13|Número de recogida
+14|Continuar
+15|Continuar como invitado
+16|Continuar como invitado — no hace falta iniciar sesión
+17|Depósito por artículo
+18|Para tomar aquí
+19|Modalidad de consumo
+20|Listo
+21|Menos
+22|Desde
+23|IVA
+24|Invitado
+25|Artículos
+26|Sigo aquí
+27|Idioma
+28|Socio
+30|Socios — inicie sesión para obtener puntos y recompensas
+31|Más
+32|¿Es nuevo aquí?
+33|No soy yo — usar otra cuenta
+34|No hay resultados para esa búsqueda.
+35|Abra su app del banco, escanee este QR de PayNow y confirme el importe. Esta pantalla se actualiza sola cuando llega su pago.
+36|Abra la cámara de su teléfono y apúntela a este código. Su cuenta de socio inicia sesión aquí automáticamente: no hay que escribir nada.
+37|Opcional
+38|O abra
+39|Pedir mejor desde mi teléfono
+40|Resumen del pedido
+41|Está pidiendo como invitado: hágase socio para ganar
+42|Pagar mejor en caja
+43|Pedir y pagar
+45|Espere un momento…
+48|Cantidad
+49|Quitar
+50|Reiniciar
+51|Reiniciar pantalla
+52|Escanee para pagar
+53|Escanee con su teléfono para iniciar sesión
+54|Resultados de la búsqueda
+55|Cargo por servicio
+56|Iniciar sesión
+57|Inicie sesión o regístrese gratis desde su teléfono: lleva menos de un minuto.
+58|Iniciar sesión en el quiosco
+59|¿Iniciar sesión en el quiosco?
+60|Iniciar sesión con número de teléfono
+61|Cerrar sesión
+63|Sesión iniciada como socio.
+64|Iniciando sesión…
+66|Petición especial
+67|Empezar mi pedido
+68|¿Empezar de nuevo?
+69|¿Sigue ahí?
+70|Para llevar
+71|Toque para pedir, pague aquí y escuche su número en el mostrador.
+72|¡Gracias!
+75|Esta pantalla se borrará en {n} s
+79|Total pagado
+80|Total a pagar
+81|Escriba el nombre de un artículo…
+82|Escriba el código de 6 caracteres que aparece en la pantalla del quiosco.
+83|Actualización en curso
+84|Esperando su pago…
+85|Esperando su teléfono…
+86|Le damos la bienvenida de nuevo, {x}
+87|Le damos la bienvenida de nuevo, {x} — {n} puntos
+88|¿Qué le apetece hoy?
+89|Sí, soy yo
+90|Ganará
+91|Ha iniciado sesión en el quiosco
+92|Su pedido del quiosco quedará a nombre de esta cuenta.
+93|Su pedido se está preparando. Esté atento a su número en el mostrador.
+94|Su pedido está vacío.
+95|Su pedido ha entrado. Pague en caja y escuche su número.
+96|Su pedido se borrará y esta pantalla se reiniciará en
+97|Su pedido se borrará.
+99|e introduzca el código
+101|c/u
+102|en su pedido
+103|artículo
+104|artículos
+105|socio
+106|puntos
+107|puntos con este pedido.
+108|segundos: todo lo que hay en pantalla, incluidos los datos de inicio de sesión, se borra por su privacidad.
+111|+ {amt} c/u
+112|Atrás
+113|Pagar
+114|Elija 1
+115|Elija los que quiera
+116|Elija hasta 1
+117|Elija {x}
+118|Personalizar
+119|Cargando…
+122|Pago
+123|Enviando su pedido…
+125|Guardar cambios
+126|Buscar en el menú
+127|Agotado
+129|Total
+130|Hasta {n}
+133|Gane puntos en cada pedido
+134|100 puntos = S$1 de descuento
+135|Acumule sellos y recompensas
+136|Añadir al pedido

@@ -25,6 +25,8 @@ export interface Info {
   channels: Array<{ id: string; name: string; kind: string }>;
   brand: { primary: string; accent: string; ink: string; logoUrl: string | null; heroUrl: string | null; tagline: string | null; promoTitle: string | null; promoBody: string | null };
   /** What this shop can do beyond email sign-in and paying at the counter. */
+  /** The kiosk's operator settings from Manager (the kiosk lets a tablet override them locally). */
+  kiosk?: { idleMinutes: number; signinBlock: boolean; chips: { earn: boolean; rate: boolean; stamps: boolean } };
   auth: { google: boolean; microsoft: boolean; phone: { number: string; simulated?: boolean; manual?: boolean; open?: boolean } | null };
   payments: { online: boolean; methods: string[] };
 }
@@ -262,6 +264,10 @@ export function Icon({ name, size = 20 }: { name: keyof typeof ICONS; size?: num
 }
 const channelIcon = (kind: string): keyof typeof ICONS => (kind === "dine_in" ? "cutlery" : "bag");
 
+/** An item's name in the language on screen: the merchant's own wording for it when they wrote one, otherwise the name exactly as entered. Never machine-translated. */
+export const itemName = (p: { name: string; names?: Record<string, string> }) => p.names?.[lang()]?.trim() || p.name;
+/** Whether a search matches an item in any of its names. */
+export const itemMatches = (p: { name: string; altName?: string; names?: Record<string, string> }, needle: string) => [p.name, p.altName ?? "", ...Object.values(p.names ?? {})].some((n) => n.toLowerCase().includes(needle));
 export const photo = (p: { id: string; imageVersion?: number }) => (p.imageVersion ? `/api/products/${p.id}/image?v=${p.imageVersion}` : null);
 // The card shows the plain lower price; Variants are chosen on the sheet (no ranges on cards).
 const cardPrice = (m: MenuEntry, saving = 0) => {
@@ -816,7 +822,7 @@ function Menu({ info, catalog, config, loginError, recheck }: { info: Info; cata
   const last = localStorage.getItem(LS_LAST);
   const phoneOk = /^[+\d][\d\s-]{5,19}$/.test(phone) && phone.replace(/\D/g, "").length >= 8;
   const needle = (search ?? "").trim().toLowerCase();
-  const shown = menu.filter((m) => !needle || m.name.toLowerCase().includes(needle) || (m.altName ?? "").toLowerCase().includes(needle));
+  const shown = menu.filter((m) => !needle || itemMatches(m, needle));
   // The whole menu is one list under category headings. The category rail jumps to a heading and lights the one in view.
   const sections: Array<{ c: string | null; items: MenuEntry[] }> = needle ? [{ c: null, items: shown }] : categories.slice(1).map((c) => ({ c, items: shown.filter((m) => m.category === c) })).filter((g) => g.items.length);
   const catCounts = new Map(categories.slice(1).map((c) => [c, menu.filter((m) => m.category === c).length]));
@@ -905,7 +911,7 @@ function Menu({ info, catalog, config, loginError, recheck }: { info: Info; cata
       const img = photo(v.m) ?? b.heroUrl;
       return (
         <div className="sum-row" key={l.key}>
-          <span className="k with-thumb">{thumbs && img && <img className="status-thumb" src={img} alt="" />}<span>{v.m.name} × {l.qty}{v.opts && <small className="muted" style={{ display: "block" }}>{v.opts}</small>}{v.note && <small className="muted" style={{ display: "block" }}>{v.note}</small>}</span></span>
+          <span className="k with-thumb">{thumbs && img && <img className="status-thumb" src={img} alt="" />}<span>{itemName(v.m)} × {l.qty}{v.opts && <small className="muted" style={{ display: "block" }}>{v.opts}</small>}{v.note && <small className="muted" style={{ display: "block" }}>{v.note}</small>}</span></span>
           <span className="v"><RollMoney cents={v.lineCents} /></span>
         </div>
       );
@@ -1072,7 +1078,7 @@ function Menu({ info, catalog, config, loginError, recheck }: { info: Info; cata
                   {n > 0 && <span className="sc-badge">×{n} {tx("in bag")}</span>}
                 </div>
                 <div className="sc-main" onClick={() => { if (!m.soldOut) setPicking(m); }}>
-                  <b>{m.name}</b>
+                  <b>{itemName(m)}</b>
                   <span className="muted">{m.description ?? m.category}</span>
                   <span className="sc-price">{m.soldOut ? "Sold out" : cardPrice(m, isCombo(m.options) ? comboSaving(m.priceCents, m.options, (id) => menu.find((x) => x.id === id)?.priceCents ?? null) : 0)}{!m.soldOut && m.bcrs && <em className="bcrs-badge"><Icon name="can" size={11} />+{config.pricing.bcrsDepositCents}c BCRS Deposit</em>}</span>
                 </div>
@@ -1445,11 +1451,11 @@ function Menu({ info, catalog, config, loginError, recheck }: { info: Info; cata
           if (!v) return null;
           const img = photo(v.m);
           return (
-            <SwipeRow key={l.key} label={v.m.name} onRemove={() => setBag(bag.filter((x) => x.key !== l.key))}>
+            <SwipeRow key={l.key} label={itemName(v.m)} onRemove={() => setBag(bag.filter((x) => x.key !== l.key))}>
             <div className="bag-card">
               {img ? <img className="bag-photo" src={img} alt={v.m.name} /> : <span className="bag-photo-ph"><Icon name="paw" size={26} /></span>}
               <div className="bag-copy2">
-                <h3 className="bag-name">{v.m.name}</h3>
+                <h3 className="bag-name">{itemName(v.m)}</h3>
                 {(v.opts || !v.note) && <p className="bag-desc">{v.opts || v.m.description || v.m.category}</p>}
                 {v.note && <p className="bag-desc bag-note">{v.note}</p>}
                 <div className="bag-pricerow"><RollMoney cents={v.lineCents} /></div>
@@ -1653,7 +1659,7 @@ function Menu({ info, catalog, config, loginError, recheck }: { info: Info; cata
       {picking && (
         <OptionSheet
           notes
-          name={picking.name}
+          name={itemName(picking)}
           description={picking.description}
           photoUrl={photo(picking)}
           baseCents={picking.priceCents}
@@ -1668,7 +1674,7 @@ function Menu({ info, catalog, config, loginError, recheck }: { info: Info; cata
           <OptionSheet
             notes
             cta={tx("Save changes")}
-            name={em.name}
+            name={itemName(em)}
             description={em.description}
             photoUrl={photo(em)}
             baseCents={em.priceCents}

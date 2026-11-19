@@ -1,0 +1,115 @@
+0|Thêm
+1|Thêm món
+2|Tất cả
+4|Tiền ký quỹ BCRS
+5|Quay lại thực đơn
+6|Hủy
+7|Tiếp tục tại máy tự phục vụ. Bạn có thể cất điện thoại.
+8|Thay đổi
+9|Chọn ngôn ngữ của bạn
+10|Chọn tùy chọn bên dưới — giá sẽ cập nhật khi bạn chọn.
+11|Đóng
+12|Đóng tìm kiếm
+13|Số nhận món
+14|Tiếp tục
+15|Tiếp tục với tư cách khách
+16|Tiếp tục với tư cách khách — không cần đăng nhập
+17|Tiền ký quỹ mỗi món
+18|Dùng tại chỗ
+19|Hình thức dùng bữa
+20|Xong
+21|Bớt
+22|Từ
+23|GST
+24|Khách
+25|Món
+26|Tôi vẫn ở đây
+27|Ngôn ngữ
+28|Thành viên
+30|Thành viên — đăng nhập để nhận điểm & ưu đãi
+31|Thêm
+32|Bạn mới đến?
+33|Không phải tôi — dùng tài khoản khác
+34|Không có kết quả nào khớp với tìm kiếm.
+35|Mở ứng dụng ngân hàng, quét mã QR PayNow này và xác nhận số tiền. Màn hình này sẽ tự cập nhật khi thanh toán của bạn được ghi nhận.
+36|Mở camera điện thoại và hướng vào mã này. Tài khoản thành viên của bạn sẽ tự động đăng nhập tại đây — không cần nhập gì.
+37|Tùy chọn
+38|Hoặc mở
+39|Đặt món bằng điện thoại của tôi
+40|Tóm tắt đơn hàng
+41|Bạn đang đặt món với tư cách khách — đăng ký thành viên để nhận
+42|Thanh toán tại quầy
+43|Đặt món & thanh toán
+45|Vui lòng đợi một chút…
+48|Số lượng
+49|Xóa
+50|Đặt lại
+51|Đặt lại màn hình
+52|Quét để thanh toán
+53|Quét bằng điện thoại để đăng nhập
+54|Kết quả tìm kiếm
+55|Phí dịch vụ
+56|Đăng nhập
+57|Đăng nhập hoặc đăng ký miễn phí trên điện thoại — chưa đến một phút.
+58|Đăng nhập vào máy tự phục vụ
+59|Đăng nhập vào máy tự phục vụ?
+60|Đăng nhập bằng số điện thoại
+61|Đăng xuất
+63|Đã đăng nhập với tư cách thành viên.
+64|Đang đăng nhập…
+66|Yêu cầu đặc biệt
+67|Bắt đầu đặt món
+68|Bắt đầu lại?
+69|Bạn còn ở đó không?
+70|Mang đi
+71|Chạm để đặt món, thanh toán tại đây và chờ nghe số của bạn ở quầy.
+72|Cảm ơn bạn!
+75|Màn hình này sẽ xóa sau {n} giây
+79|Tổng đã thanh toán
+80|Tổng cần thanh toán
+81|Nhập tên món…
+82|Nhập mã 6 ký tự hiển thị trên màn hình máy tự phục vụ.
+83|Đang nâng cấp
+84|Đang chờ thanh toán của bạn…
+85|Đang chờ điện thoại của bạn…
+86|Chào mừng trở lại, {x}
+87|Chào mừng trở lại, {x} — {n} điểm
+88|Hôm nay bạn muốn dùng gì?
+89|Vâng, là tôi
+90|Bạn sẽ nhận được
+91|Bạn đã đăng nhập tại máy tự phục vụ
+92|Đơn hàng tại máy tự phục vụ sẽ thuộc tài khoản này.
+93|Đơn hàng của bạn đang được chuẩn bị. Hãy chờ nghe số của bạn ở quầy.
+94|Đơn hàng của bạn đang trống.
+95|Đã nhận đơn hàng. Vui lòng thanh toán tại quầy và chờ nghe số của bạn.
+96|Đơn hàng của bạn sẽ bị xóa và màn hình này sẽ được đặt lại sau
+97|Đơn hàng của bạn sẽ bị xóa.
+99|và nhập mã
+101|mỗi món
+102|trong đơn hàng của bạn
+103|món
+104|món
+105|thành viên
+106|điểm
+107|điểm cho đơn hàng này.
+108|giây — mọi thứ trên màn hình, kể cả thông tin đăng nhập, sẽ bị xóa để bảo vệ quyền riêng tư của bạn.
+111|+ {amt} mỗi món
+112|Quay lại
+113|Thanh toán
+114|Chọn 1
+115|Chọn tùy ý
+116|Chọn tối đa 1
+117|Chọn {x}
+118|Tùy chỉnh
+119|Đang tải…
+122|Thanh toán
+123|Đang gửi đơn hàng của bạn…
+125|Lưu thay đổi
+126|Tìm trong thực đơn
+127|Hết hàng
+129|Tổng
+130|Tối đa {n}
+133|Tích điểm cho mỗi đơn hàng
+134|100 điểm = giảm S$1
+135|Sưu tầm tem & ưu đãi
+136|Thêm vào đơn hàng

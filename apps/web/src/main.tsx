@@ -3,6 +3,7 @@ import { createRoot } from "react-dom/client";
 import { registerSW } from "virtual:pwa-register";
 import { App } from "./App";
 import { adoptLegacyHash, installLinkHandler } from "./nav";
+import { markUpdateReady, setUpdater } from "./pwaUpdate";
 import "./styles.css";
 
 adoptLegacyHash();
@@ -12,7 +13,15 @@ if (location.pathname === "/kiosk" || location.pathname.startsWith("/kiosk/")) {
   link.href = "/manifest-kiosk.webmanifest";
 }
 installLinkHandler();
-registerSW({ immediate: true });
+const onKiosk = location.pathname === "/kiosk" || location.pathname.startsWith("/kiosk/");
+const updateSW = registerSW({
+  immediate: true,
+  // A new version waits here. Everywhere but the kiosk it is taken at once; the kiosk holds it for a quiet start screen.
+  onNeedRefresh() { if (onKiosk) markUpdateReady(); else void updateSW(true); },
+  // A kiosk is never reloaded by a visit, so it asks for a new version itself every ten minutes.
+  onRegisteredSW(_url, reg) { if (onKiosk && reg) window.setInterval(() => void reg.update().catch(() => undefined), 10 * 60_000); },
+});
+setUpdater(updateSW);
 createRoot(document.getElementById("root")!).render(
   <StrictMode>
     <App />

@@ -1,0 +1,115 @@
+0|Dodaj
+1|Dodaj więcej pozycji
+2|Wszystko
+4|Kaucja BCRS
+5|Wróć do menu
+6|Anuluj
+7|Kontynuuj przy kiosku. Możesz schować telefon.
+8|Zmień
+9|Wybierz język
+10|Wybierz opcje poniżej — cena aktualizuje się na bieżąco.
+11|Zamknij
+12|Zamknij wyszukiwanie
+13|Numer odbioru
+14|Dalej
+15|Kontynuuj jako gość
+16|Kontynuuj jako gość — logowanie niepotrzebne
+17|Kaucja za sztukę
+18|Na miejscu
+19|Sposób spożycia
+20|Gotowe
+21|Mniej
+22|Od
+23|VAT
+24|Gość
+25|Pozycje
+26|Nadal tu jestem
+27|Język
+28|Członek
+30|Członkowie — zaloguj się, aby zbierać punkty i nagrody
+31|Więcej
+32|Jesteś tu nowy?
+33|To nie ja — użyj innego konta
+34|Brak wyników dla tego wyszukiwania.
+35|Otwórz aplikację bankową, zeskanuj ten kod QR PayNow i potwierdź kwotę. Ten ekran odświeży się sam, gdy wpłynie płatność.
+36|Otwórz aparat w telefonie i skieruj go na ten kod. Twoje konto członka zaloguje się tutaj automatycznie — nic nie trzeba wpisywać.
+37|Opcjonalnie
+38|Lub otwórz
+39|Zamów raczej z mojego telefonu
+40|Podsumowanie zamówienia
+41|Zamawiasz jako gość — zostań członkiem, aby zdobyć
+42|Zapłać raczej przy kasie
+43|Zamów i zapłać
+45|Chwileczkę…
+48|Ilość
+49|Usuń
+50|Resetuj
+51|Resetuj ekran
+52|Zeskanuj, aby zapłacić
+53|Zeskanuj telefonem, aby się zalogować
+54|Wyniki wyszukiwania
+55|Opłata serwisowa
+56|Zaloguj się
+57|Zaloguj się lub zarejestruj za darmo w telefonie — zajmie to mniej niż minutę.
+58|Zaloguj się do kiosku
+59|Zalogować się do kiosku?
+60|Zaloguj się numerem telefonu
+61|Wyloguj się
+63|Zalogowano jako członek.
+64|Logowanie…
+66|Specjalna prośba
+67|Rozpocznij zamówienie
+68|Zacząć od nowa?
+69|Nadal tu jesteś?
+70|Na wynos
+71|Dotknij, aby zamówić, zapłać tutaj i słuchaj swojego numeru przy ladzie.
+72|Dziękujemy!
+75|Ten ekran wyczyści się za {n} s
+79|Razem zapłacono
+80|Do zapłaty
+81|Wpisz nazwę pozycji…
+82|Wpisz 6-znakowy kod widoczny na ekranie kiosku.
+83|Trwa aktualizacja
+84|Oczekiwanie na płatność…
+85|Oczekiwanie na telefon…
+86|Witaj ponownie, {x}
+87|Witaj ponownie, {x} — {n} pkt
+88|Na co masz dziś ochotę?
+89|Tak, to ja
+90|Zdobędziesz
+91|Jesteś zalogowany w kiosku
+92|Twoje zamówienie z kiosku zostanie przypisane do tego konta.
+93|Twoje zamówienie jest przygotowywane. Słuchaj swojego numeru przy ladzie.
+94|Twoje zamówienie jest puste.
+95|Twoje zamówienie wpłynęło. Zapłać przy kasie i słuchaj swojego numeru.
+96|Twoje zamówienie zostanie usunięte, a ten ekran zresetuje się za
+97|Twoje zamówienie zostanie usunięte.
+99|i wpisz kod
+101|za szt.
+102|w Twoim zamówieniu
+103|pozycja
+104|pozycje
+105|członek
+106|punkty
+107|punktów za to zamówienie.
+108|sekund — wszystko na ekranie, w tym dane logowania, zostanie usunięte dla Twojej prywatności.
+111|+ {amt} za szt.
+112|Wstecz
+113|Do kasy
+114|Wybierz 1
+115|Wybierz dowolne
+116|Wybierz maksymalnie 1
+117|Wybierz: {x}
+118|Dostosuj
+119|Ładowanie…
+122|Płatność
+123|Składanie zamówienia…
+125|Zapisz zmiany
+126|Szukaj w menu
+127|Wyprzedane
+129|Razem
+130|Do {n}
+133|Zdobywaj punkty przy każdym zamówieniu
+134|100 punktów = rabat S$1
+135|Zbieraj pieczątki i nagrody
+136|Dodaj do zamówienia

@@ -1,0 +1,115 @@
+0|Aggiungi
+1|Aggiungi altri articoli
+2|Tutto
+4|Cauzione BCRS
+5|Torna al menu
+6|Annulla
+7|Continua al chiosco. Puoi riporre il telefono.
+8|Modifica
+9|Scegli la tua lingua
+10|Scegli le opzioni qui sotto: il prezzo si aggiorna mentre scegli.
+11|Chiudi
+12|Chiudi la ricerca
+13|Numero di ritiro
+14|Continua
+15|Continua come ospite
+16|Continua come ospite — non serve accedere
+17|Cauzione per articolo
+18|Al tavolo
+19|Modalità di consumo
+20|Fatto
+21|Meno
+22|Da
+23|IVA
+24|Ospite
+25|Articoli
+26|Sono ancora qui
+27|Lingua
+28|Socio
+30|Soci — accedi per punti e premi
+31|Altro
+32|Sei nuovo?
+33|Non sono io — usa un altro account
+34|Nessun risultato per questa ricerca.
+35|Apri la tua app bancaria, inquadra questo QR PayNow e conferma l’importo. Questa schermata si aggiorna da sola quando il pagamento arriva.
+36|Apri la fotocamera del telefono e inquadra questo codice. Il tuo account socio accede qui automaticamente: non devi digitare nulla.
+37|Facoltativo
+38|Oppure apri
+39|Ordina invece dal mio telefono
+40|Riepilogo ordine
+41|Stai ordinando come ospite: iscriviti come socio per guadagnare
+42|Paga invece alla cassa
+43|Ordina e paga
+45|Attendi un momento…
+48|Quantità
+49|Rimuovi
+50|Reimposta
+51|Reimposta lo schermo
+52|Inquadra per pagare
+53|Inquadra con il telefono per accedere
+54|Risultati della ricerca
+55|Costo del servizio
+56|Accedi
+57|Accedi o iscriviti gratis dal telefono: ci vuole meno di un minuto.
+58|Accedi al chiosco
+59|Accedere al chiosco?
+60|Accedi con il numero di telefono
+61|Esci
+63|Accesso eseguito come socio.
+64|Accesso in corso…
+66|Richiesta speciale
+67|Inizia il mio ordine
+68|Ricominciare?
+69|Sei ancora lì?
+70|Da asporto
+71|Tocca per ordinare, paga qui e ascolta il tuo numero al banco.
+72|Grazie!
+75|Questa schermata si cancella tra {n} s
+79|Totale pagato
+80|Totale da pagare
+81|Digita il nome di un articolo…
+82|Digita il codice di 6 caratteri mostrato sullo schermo del chiosco.
+83|Aggiornamento in corso
+84|In attesa del tuo pagamento…
+85|In attesa del tuo telefono…
+86|Bentornato, {x}
+87|Bentornato, {x} — {n} punti
+88|Cosa vuoi oggi?
+89|Sì, sono io
+90|Guadagnerai
+91|Hai effettuato l’accesso al chiosco
+92|Il tuo ordine al chiosco sarà associato a questo account.
+93|Il tuo ordine è in preparazione. Ascolta il tuo numero al banco.
+94|Il tuo ordine è vuoto.
+95|Il tuo ordine è arrivato. Paga alla cassa e ascolta il tuo numero.
+96|Il tuo ordine verrà cancellato e questa schermata si reimposterà tra
+97|Il tuo ordine verrà cancellato.
+99|e inserisci il codice
+101|cad.
+102|nel tuo ordine
+103|articolo
+104|articoli
+105|socio
+106|punti
+107|punti con questo ordine.
+108|secondi: tutto ciò che è sullo schermo, compresi i dati di accesso, viene rimosso per la tua privacy.
+111|+ {amt} cad.
+112|Indietro
+113|Cassa
+114|Scegline 1
+115|Scegli quanti vuoi
+116|Scegline fino a 1
+117|Scegli {x}
+118|Personalizza
+119|Caricamento…
+122|Pagamento
+123|Invio del tuo ordine…
+125|Salva le modifiche
+126|Cerca nel menu
+127|Esaurito
+129|Totale
+130|Fino a {n}
+133|Guadagna punti a ogni ordine
+134|100 punti = S$1 di sconto
+135|Raccogli timbri e premi
+136|Aggiungi all’ordine

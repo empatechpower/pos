@@ -1,0 +1,115 @@
+0|Toevoegen
+1|Meer artikelen toevoegen
+2|Alles
+4|BCRS-statiegeld
+5|Terug naar menu
+6|Annuleren
+7|Ga verder op de kiosk. U kunt uw telefoon opbergen.
+8|Wijzigen
+9|Kies uw taal
+10|Kies hieronder uw opties — de prijs wordt bijgewerkt terwijl u kiest.
+11|Sluiten
+12|Zoeken sluiten
+13|Afhaalnummer
+14|Doorgaan
+15|Doorgaan als gast
+16|Doorgaan als gast — inloggen is niet nodig
+17|Statiegeld per artikel
+18|Hier eten
+19|Manier van eten
+20|Klaar
+21|Minder
+22|Vanaf
+23|BTW
+24|Gast
+25|Artikelen
+26|Ik ben er nog
+27|Taal
+28|Lid
+30|Leden — log in voor punten en beloningen
+31|Meer
+32|Nieuw hier?
+33|Ik ben het niet — ander account gebruiken
+34|Niets gevonden voor deze zoekopdracht.
+35|Open uw bankapp, scan deze PayNow-QR-code en bevestig het bedrag. Dit scherm wordt vanzelf bijgewerkt zodra uw betaling binnen is.
+36|Open de camera van uw telefoon en richt deze op deze code. Uw lidmaatschapsaccount wordt hier automatisch ingelogd — typen is niet nodig.
+37|Optioneel
+38|Of open
+39|Liever bestellen met mijn telefoon
+40|Overzicht van de bestelling
+41|U bestelt als gast — word lid om te verdienen
+42|Liever aan de kassa betalen
+43|Bestellen & betalen
+45|Een moment geduld…
+48|Aantal
+49|Verwijderen
+50|Resetten
+51|Scherm resetten
+52|Scan om te betalen
+53|Scan met uw telefoon om in te loggen
+54|Zoekresultaten
+55|Servicekosten
+56|Inloggen
+57|Log in of meld u gratis aan op uw telefoon — het duurt minder dan een minuut.
+58|Inloggen op de kiosk
+59|Inloggen op de kiosk?
+60|Inloggen met telefoonnummer
+61|Uitloggen
+63|Ingelogd als lid.
+64|Inloggen…
+66|Speciaal verzoek
+67|Mijn bestelling starten
+68|Opnieuw beginnen?
+69|Bent u er nog?
+70|Meenemen
+71|Tik om te bestellen, betaal hier en let aan de balie op uw nummer.
+72|Bedankt!
+75|Dit scherm wordt over {n} s gewist
+79|Totaal betaald
+80|Totaal te betalen
+81|Typ een artikelnaam…
+82|Typ de code van 6 tekens die op het kioskscherm staat.
+83|Upgrade bezig
+84|Wachten op uw betaling…
+85|Wachten op uw telefoon…
+86|Welkom terug, {x}
+87|Welkom terug, {x} — {n} punten
+88|Waar heeft u vandaag zin in?
+89|Ja, dat ben ik
+90|U verdient
+91|U bent ingelogd op de kiosk
+92|Uw kioskbestelling wordt aan dit account gekoppeld.
+93|Uw bestelling wordt bereid. Let aan de balie op uw nummer.
+94|Uw bestelling is leeg.
+95|Uw bestelling is binnen. Betaal aan de kassa en let op uw nummer.
+96|Uw bestelling wordt gewist en dit scherm wordt gereset over
+97|Uw bestelling wordt gewist.
+99|en voer de code in
+101|per stuk
+102|in uw bestelling
+103|artikel
+104|artikelen
+105|lid
+106|punten
+107|punten met deze bestelling.
+108|seconden — alles op het scherm, ook inloggegevens, wordt voor uw privacy verwijderd.
+111|+ {amt} per stuk
+112|Terug
+113|Afrekenen
+114|Kies 1
+115|Kies naar wens
+116|Kies maximaal 1
+117|Kies {x}
+118|Aanpassen
+119|Laden…
+122|Betaling
+123|Uw bestelling wordt geplaatst…
+125|Wijzigingen opslaan
+126|Zoeken in het menu
+127|Uitverkocht
+129|Totaal
+130|Maximaal {n}
+133|Verdien punten bij elke bestelling
+134|100 punten = S$1 korting
+135|Spaar stempels & beloningen
+136|Toevoegen aan bestelling

@@ -1,0 +1,115 @@
+0|Hinzufügen
+1|Weitere Artikel hinzufügen
+2|Alle
+3|Ein Artikel
+4|BCRS-Pfand
+5|Zurück zum Menü
+6|Abbrechen
+7|Machen Sie am Kiosk weiter. Sie können Ihr Handy wegstecken.
+8|Ändern
+9|Sprache wählen
+10|Wählen Sie unten Ihre Optionen — der Preis aktualisiert sich dabei.
+11|Schließen
+12|Suche schließen
+13|Abholnummer
+14|Weiter
+15|Als Gast fortfahren
+16|Als Gast fortfahren — keine Anmeldung nötig
+17|Pfand pro Artikel
+18|Vor Ort
+19|Verzehrart
+20|Fertig
+21|Weniger
+22|Ab
+23|MwSt.
+24|Gast
+25|Artikel
+26|Ich bin noch da
+27|Sprache
+28|Mitglied
+29|Die Mitgliederanmeldung ist derzeit nicht verfügbar. Sie können trotzdem als Gast bestellen.
+30|Mitglieder — melden Sie sich an für Punkte & Prämien
+31|Mehr
+32|Neu hier?
+33|Das bin nicht ich — anderes Konto verwenden
+34|Keine Treffer für diese Suche.
+35|Öffnen Sie Ihre Banking-App, scannen Sie diesen PayNow-QR-Code und bestätigen Sie den Betrag. Dieser Bildschirm aktualisiert sich von selbst, sobald Ihre Zahlung eingeht.
+36|Öffnen Sie die Kamera Ihres Handys und richten Sie sie auf diesen Code. Ihr Mitgliedskonto wird hier automatisch angemeldet — nichts einzutippen.
+37|Optional
+38|Oder öffnen Sie
+39|Stattdessen am Handy bestellen
+40|Bestellübersicht
+41|Sie bestellen als Gast — werden Sie Mitglied und sammeln Sie
+42|Stattdessen an der Kasse zahlen
+43|Bestellen & bezahlen
+44|Bitte versuchen Sie es gleich noch einmal.
+45|Einen Moment bitte…
+46|Richten Sie die Handykamera auf den Code — kein Tippen auf diesem Bildschirm nötig
+47|Die Preise haben sich während Ihrer Bestellung geändert. Der neue Gesamtbetrag ist {amt}. Tippen Sie zur Bestätigung erneut auf Bezahlen.
+48|Menge
+49|Entfernen
+50|Zurücksetzen
+51|Bildschirm zurücksetzen
+52|Zum Bezahlen scannen
+53|Zum Anmelden mit dem Handy scannen
+54|Suchergebnisse
+55|Servicegebühr
+56|Anmelden
+57|Melden Sie sich an oder registrieren Sie sich kostenlos auf Ihrem Handy — das dauert weniger als eine Minute.
+58|Am Kiosk anmelden
+59|Am Kiosk anmelden?
+60|Mit Telefonnummer anmelden
+61|Abmelden
+62|Die Anmeldung ist derzeit nicht verfügbar
+63|Als Mitglied angemeldet.
+64|Anmeldung läuft…
+65|Etwas ist schiefgelaufen. Bitte versuchen Sie es erneut.
+66|Sonderwunsch
+67|Meine Bestellung starten
+68|Neu beginnen?
+69|Noch da?
+70|Zum Mitnehmen
+71|Tippen, um zu bestellen, hier bezahlen und an der Theke auf Ihre Nummer warten.
+72|Vielen Dank!
+73|Dieser Code wurde bereits verwendet. Tippen Sie am Kiosk auf Start, um einen neuen zu erhalten.
+74|Der Code wurde nicht gefunden oder ist abgelaufen. Prüfen Sie den Code auf dem Kiosk-Bildschirm.
+75|Dieser Bildschirm wird in {n} s geleert
+76|Dieses Geschäft nimmt nur Tischbestellungen an, daher kann der Kiosk diese Bestellung nicht aufgeben. Bitte bestellen Sie an der Theke.
+77|Dieses Geschäft nimmt nur Bestellungen zum Verzehr vor Ort an. Wechseln Sie zu Vor Ort oder bestellen Sie an der Theke.
+78|Dieses Geschäft nimmt nur Bestellungen von Mitgliedern an. Bitte bestellen Sie an der Theke.
+79|Gesamt bezahlt
+80|Zu zahlender Betrag
+81|Artikelnamen eingeben…
+82|Geben Sie den 6-stelligen Code ein, der auf dem Kiosk-Bildschirm angezeigt wird.
+83|Update läuft
+84|Warte auf Ihre Zahlung…
+85|Warte auf Ihr Handy…
+86|Willkommen zurück, {x}
+87|Willkommen zurück, {x} — {n} Punkte
+88|Was möchten Sie heute?
+89|Ja, das bin ich
+90|Sie sammeln
+91|Sie sind am Kiosk angemeldet
+92|Ihre Kiosk-Bestellung wird diesem Konto zugeordnet.
+93|Ihre Bestellung wird zubereitet. Achten Sie an der Theke auf Ihre Nummer.
+94|Ihre Bestellung ist leer.
+95|Ihre Bestellung ist eingegangen. Bitte zahlen Sie an der Kasse und achten Sie auf Ihre Nummer.
+96|Ihre Bestellung wird gelöscht und dieser Bildschirm wird zurückgesetzt in
+97|Ihre Bestellung wird gelöscht.
+98|Ihre Anmeldung ist abgelaufen. Tippen Sie auf die Mitglieder-Schaltfläche, um sich erneut anzumelden, oder bestellen Sie als Gast.
+99|und geben Sie den Code ein
+100|Pfand
+101|je
+102|in Ihrer Bestellung
+103|Artikel
+104|Artikel
+105|Mitglied
+106|Punkte
+107|Punkte mit dieser Bestellung.
+108|Sekunden — alles auf dem Bildschirm, auch Anmeldedaten, wird zum Schutz Ihrer Privatsphäre entfernt.
+109|{x} ist nicht mehr verfügbar. Bitte entfernen Sie es und versuchen Sie es erneut.
+110|{x} wird in diesem Geschäft noch nicht angeboten.
+133|Bei jeder Bestellung Punkte sammeln
+134|100 Punkte = S$ 1 Rabatt
+135|Stempel & Prämien sammeln
+136|Zur Bestellung hinzufügen

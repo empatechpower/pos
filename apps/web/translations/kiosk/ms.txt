@@ -1,0 +1,115 @@
+0|Tambah
+1|Tambah lagi item
+2|Semua
+3|Satu item
+4|Deposit BCRS
+5|Kembali ke menu
+6|Batal
+7|Teruskan di kiosk. Anda boleh simpan telefon anda.
+8|Tukar
+9|Pilih bahasa anda
+10|Pilih pilihan anda di bawah — harga dikemas kini sewaktu anda memilih.
+11|Tutup
+12|Tutup carian
+13|Nombor pengambilan
+14|Teruskan
+15|Teruskan sebagai tetamu
+16|Teruskan sebagai tetamu — tidak perlu log masuk
+17|Deposit setiap item
+18|Makan di sini
+19|Pilihan hidangan
+20|Selesai
+21|Kurang
+22|Dari
+23|GST
+24|Tetamu
+25|Item
+26|Saya masih di sini
+27|Bahasa
+28|Ahli
+29|Log masuk ahli tidak tersedia sekarang. Anda masih boleh membuat pesanan sebagai tetamu.
+30|Ahli — log masuk untuk mata & ganjaran
+31|Lagi
+32|Baru di sini?
+33|Bukan saya — guna akaun lain
+34|Tiada yang sepadan dengan carian itu.
+35|Buka aplikasi perbankan anda, imbas kod QR PayNow ini dan sahkan jumlahnya. Skrin ini dikemas kini sendiri apabila pembayaran anda diterima.
+36|Buka kamera telefon anda dan halakan ke kod ini. Akaun ahli anda akan log masuk di sini secara automatik — tiada apa untuk ditaip.
+37|Pilihan
+38|Atau buka
+39|Pesan dari telefon saya
+40|Ringkasan pesanan
+41|Memesan sebagai tetamu — daftar sebagai ahli untuk memperoleh
+42|Bayar di kaunter sahaja
+43|Buat pesanan & bayar
+44|Sila cuba lagi sebentar nanti.
+45|Sila tunggu sebentar…
+46|Halakan kamera telefon anda ke kod ini — tidak perlu menaip pada skrin ini
+47|Harga telah berubah semasa anda memesan. Jumlah baharu ialah {amt}. Ketik Bayar sekali lagi untuk mengesahkan.
+48|Kuantiti
+49|Buang
+50|Set semula
+51|Set semula skrin
+52|Imbas untuk bayar
+53|Imbas dengan telefon anda untuk log masuk
+54|Hasil carian
+55|Caj perkhidmatan
+56|Log masuk
+57|Log masuk atau daftar percuma pada telefon anda — kurang daripada seminit.
+58|Log masuk ke kiosk
+59|Log masuk ke kiosk?
+60|Log masuk dengan nombor telefon
+61|Log keluar
+62|Log masuk tidak tersedia sekarang
+63|Log masuk sebagai ahli.
+64|Sedang log masuk…
+65|Sesuatu telah berlaku. Sila cuba lagi.
+66|Permintaan khas
+67|Mulakan pesanan saya
+68|Mula semula?
+69|Masih di sana?
+70|Bawa pulang
+71|Ketik untuk memesan, bayar di sini dan dengar nombor anda di kaunter.
+72|Terima kasih!
+73|Kod itu sudah digunakan. Ketik Mula di kiosk untuk kod baharu.
+74|Kod itu tidak ditemui atau telah tamat tempoh. Semak kod pada skrin kiosk.
+75|Skrin ini dikosongkan dalam {n}s
+76|Kedai ini hanya menerima pesanan meja, jadi kiosk belum dapat membuat pesanan ini. Sila pesan di kaunter.
+77|Kedai ini hanya menerima pesanan makan di sini. Tukar kepada Makan di sini atau pesan di kaunter.
+78|Kedai ini hanya menerima pesanan daripada ahli. Sila pesan di kaunter.
+79|Jumlah dibayar
+80|Jumlah untuk dibayar
+81|Taip nama item…
+82|Taip kod 6 aksara yang dipaparkan pada skrin kiosk.
+83|Peningkatan sedang dijalankan
+84|Menunggu pembayaran anda…
+85|Menunggu telefon anda…
+86|Selamat kembali, {x}
+87|Selamat kembali, {x} — {n} mata
+88|Apa yang anda mahu hari ini?
+89|Ya, itu saya
+90|Anda akan memperoleh
+91|Anda telah log masuk di kiosk
+92|Pesanan kiosk anda akan berada di bawah akaun ini.
+93|Pesanan anda sedang disediakan. Dengar nombor anda di kaunter.
+94|Pesanan anda kosong.
+95|Pesanan anda telah diterima. Sila bayar di kaunter dan dengar nombor anda.
+96|Pesanan anda akan dikosongkan dan skrin ini akan ditetapkan semula dalam
+97|Pesanan anda akan dikosongkan.
+98|Log masuk anda telah tamat. Ketik butang ahli untuk log masuk semula, atau buat pesanan sebagai tetamu.
+99|dan masukkan kod
+100|deposit
+101|setiap satu
+102|dalam pesanan anda
+103|item
+104|item
+105|ahli
+106|mata
+107|mata untuk pesanan ini.
+108|saat — apa sahaja pada skrin, termasuk butiran log masuk, dibuang demi privasi anda.
+109|{x} sudah tidak tersedia. Sila buangnya dan cuba lagi.
+110|{x} belum ditawarkan di kedai ini.
+133|Dapat mata setiap pesanan
+134|100 mata = S$1 diskaun
+135|Kumpul setem & ganjaran
+136|Tambah ke pesanan

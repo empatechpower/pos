@@ -1,0 +1,115 @@
+0|Ajouter
+1|Ajouter d’autres articles
+2|Tout
+3|Un article
+4|Consigne BCRS
+5|Retour au menu
+6|Annuler
+7|Continuez sur la borne. Vous pouvez ranger votre téléphone.
+8|Modifier
+9|Choisissez votre langue
+10|Choisissez vos options ci-dessous — le prix se met à jour au fur et à mesure.
+11|Fermer
+12|Fermer la recherche
+13|Numéro de retrait
+14|Continuer
+15|Continuer en tant qu’invité
+16|Continuer en tant qu’invité — connexion inutile
+17|Consigne par article
+18|Sur place
+19|Mode de consommation
+20|Terminé
+21|Moins
+22|À partir de
+23|TVA
+24|Invité
+25|Articles
+26|Je suis toujours là
+27|Langue
+28|Membre
+29|La connexion membre n’est pas disponible pour le moment. Vous pouvez quand même commander en tant qu’invité.
+30|Membres — connectez-vous pour gagner des points et des récompenses
+31|Plus
+32|Nouveau ici ?
+33|Ce n’est pas moi — utiliser un autre compte
+34|Aucun résultat pour cette recherche.
+35|Ouvrez votre application bancaire, scannez ce QR PayNow et confirmez le montant. Cet écran se met à jour tout seul dès que votre paiement arrive.
+36|Ouvrez l’appareil photo de votre téléphone et pointez-le vers ce code. Votre compte membre se connecte ici automatiquement — rien à saisir.
+37|Facultatif
+38|Ou ouvrez
+39|Commander plutôt depuis mon téléphone
+40|Récapitulatif de la commande
+41|Vous commandez en tant qu’invité — devenez membre pour gagner
+42|Payer plutôt au comptoir
+43|Commander et payer
+44|Veuillez réessayer dans un instant.
+45|Veuillez patienter un instant…
+46|Pointez l’appareil photo de votre téléphone vers le code — rien à saisir sur cet écran
+47|Les prix ont changé pendant votre commande. Le nouveau total est de {amt}. Touchez Payer à nouveau pour confirmer.
+48|Quantité
+49|Supprimer
+50|Réinitialiser
+51|Réinitialiser l’écran
+52|Scanner pour payer
+53|Scannez avec votre téléphone pour vous connecter
+54|Résultats de la recherche
+55|Frais de service
+56|Se connecter
+57|Connectez-vous ou inscrivez-vous gratuitement sur votre téléphone — moins d’une minute.
+58|Se connecter à la borne
+59|Se connecter à la borne ?
+60|Se connecter avec un numéro de téléphone
+61|Se déconnecter
+62|La connexion n’est pas disponible pour le moment
+63|Connecté en tant que membre.
+64|Connexion en cours…
+65|Une erreur s’est produite. Veuillez réessayer.
+66|Demande spéciale
+67|Commencer ma commande
+68|Recommencer ?
+69|Vous êtes toujours là ?
+70|À emporter
+71|Touchez pour commander, payez ici et écoutez votre numéro au comptoir.
+72|Merci !
+73|Ce code a déjà été utilisé. Touchez Démarrer sur la borne pour en obtenir un nouveau.
+74|Code introuvable ou expiré. Vérifiez le code affiché sur l’écran de la borne.
+75|Cet écran s’efface dans {n} s
+76|Ce restaurant ne prend que les commandes à table ; la borne ne peut donc pas passer cette commande. Veuillez commander au comptoir.
+77|Ce restaurant ne prend que les commandes sur place. Passez à Sur place ou commandez au comptoir.
+78|Ce restaurant ne prend que les commandes des membres. Veuillez commander au comptoir.
+79|Total payé
+80|Total à payer
+81|Saisissez le nom d’un article…
+82|Saisissez le code à 6 caractères affiché sur l’écran de la borne.
+83|Mise à jour en cours
+84|En attente de votre paiement…
+85|En attente de votre téléphone…
+86|Bon retour, {x}
+87|Bon retour, {x} — {n} points
+88|Que souhaitez-vous aujourd’hui ?
+89|Oui, c’est moi
+90|Vous gagnerez
+91|Vous êtes connecté sur la borne
+92|Votre commande sur la borne sera rattachée à ce compte.
+93|Votre commande est en préparation. Écoutez votre numéro au comptoir.
+94|Votre commande est vide.
+95|Votre commande est enregistrée. Veuillez payer au comptoir et écouter votre numéro.
+96|Votre commande sera effacée et cet écran sera réinitialisé dans
+97|Votre commande sera effacée.
+98|Votre connexion a expiré. Touchez le bouton membre pour vous reconnecter, ou passez la commande en tant qu’invité.
+99|et saisissez le code
+100|consigne
+101|l’unité
+102|dans votre commande
+103|article
+104|articles
+105|membre
+106|points
+107|points sur cette commande.
+108|secondes — tout ce qui est à l’écran, y compris les informations de connexion, est effacé pour protéger votre vie privée.
+109|{x} n’est plus disponible. Veuillez le retirer et réessayer.
+110|{x} n’est pas encore proposé dans ce restaurant.
+133|Gagnez des points à chaque commande
+134|100 points = 1 S$ de réduction
+135|Collectez des tampons et des récompenses
+136|Ajouter à la commande

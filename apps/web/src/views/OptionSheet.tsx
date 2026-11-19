@@ -16,20 +16,24 @@ interface Props {
   cta?: string;
   /** Show the free-text Special request box (the customer shop; not the till). */
   notes?: boolean;
-  onAdd: (selection: ChosenOptionInput[], note: string) => void;
+  /** The kiosk's version: the price under the name, a Quantity stepper, and Cancel beside "Add to order · total". */
+  kiosk?: boolean;
+  onAdd: (selection: ChosenOptionInput[], note: string, qty: number) => void;
   onClose: () => void;
 }
 
 const MAX_EACH = 5;
+const MAX_QTY = 20;
 const countOf = (sel: ChosenOptionInput[], g: string, c: string) => sel.filter((s) => s.groupId === g && s.choiceId === c).reduce((n, s) => n + (s.qty ?? 1), 0);
 
 /**
  * The customise screen: choose-one groups as pills, "pick any" as toggles, extras as steppers. The total and
  * the Add button follow the same rules the server applies, so what is shown is what is charged.
  */
-export function OptionSheet({ name, description, photoUrl, baseCents, groups, initial, initialNote, cta = "Add to bag", notes, onAdd, onClose }: Props) {
+export function OptionSheet({ name, description, photoUrl, baseCents, groups, initial, initialNote, cta = "Add to bag", notes, kiosk, onAdd, onClose }: Props) {
   const [sel, setSel] = useState<ChosenOptionInput[]>(initial ?? defaultSelection(groups));
   const [note, setNote] = useState(initialNote ?? "");
+  const [qty, setQty] = useState(1);
   const r = useMemo(() => resolveOptions(groups, sel), [groups, sel]);
   const total = baseCents + (r.ok ? r.extraCents : 0);
   const missing = !r.ok && r.error === "missing_required" ? groups.find((g) => g.id === r.groupId)?.name : null;
@@ -59,7 +63,9 @@ export function OptionSheet({ name, description, photoUrl, baseCents, groups, in
         <div className="opt-body">
           {photoUrl && <img className="opt-photo" src={photoUrl} alt="" />}
           <h2>{name}</h2>
+          {kiosk && <div className="opt-price">{formatMoney(total)}</div>}
           {description && <p className="muted">{description}</p>}
+          {kiosk && groups.length > 0 && <p className="muted">{tx("Choose your options below — the price updates as you go.")}</p>}
           {groups.map((g) => {
             const max = g.max ?? (g.kind === "multi" ? g.choices.length : 10);
             const full = g.kind !== "single" && used(g) >= max;
@@ -109,16 +115,35 @@ export function OptionSheet({ name, description, photoUrl, baseCents, groups, in
             <div className="opt-gh"><b>{tx("Special request")}</b><span className="muted">{tx("Optional")}</span></div>
             <textarea className="opt-note" rows={2} maxLength={MAX_NOTE} value={note} onChange={(e) => setNote(e.target.value)} aria-label={tx("Special request")} />
           </section>}
+          {kiosk && (
+            <section className="opt-group opt-qty">
+              <b>{tx("Quantity")}</b>
+              <span className="opt-step">
+                <button disabled={qty <= 1} onClick={() => setQty((n) => Math.max(1, n - 1))} aria-label={tx("Fewer")}>−</button>
+                <b>{qty}</b>
+                <button disabled={qty >= MAX_QTY} onClick={() => setQty((n) => Math.min(MAX_QTY, n + 1))} aria-label={tx("More")}>+</button>
+              </span>
+            </section>
+          )}
         </div>
+        {kiosk ? (
+          <div className="opt-foot kq">
+            <button className="opt-cancel" onClick={onClose}>{tx("Cancel")}</button>
+            <button className="opt-cta" disabled={!r.ok} title={missing ? tx("Choose {x}", { x: missing }) : ""} onClick={() => r.ok && onAdd(sel, note, qty)}>
+              {missing ? tx("Choose {x}", { x: missing }) : `${tx(cta)} · ${formatMoney(total * qty)}`}
+            </button>
+          </div>
+        ) : (
         <div className="opt-foot">
           <div>
             <small className="muted">{tx("Total")}</small>
             <div className="opt-total">{formatMoney(total)}</div>
           </div>
-          <button className="opt-cta" disabled={!r.ok} title={missing ? tx("Choose {x}", { x: missing }) : ""} onClick={() => r.ok && onAdd(sel, note)}>
+          <button className="opt-cta" disabled={!r.ok} title={missing ? tx("Choose {x}", { x: missing }) : ""} onClick={() => r.ok && onAdd(sel, note, 1)}>
             {missing ? tx("Choose {x}", { x: missing }) : tx(cta)}
           </button>
         </div>
+        )}
       </div>
     </div>
   );
