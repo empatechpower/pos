@@ -259,7 +259,17 @@ function KioskSession({ info, catalog, config }: { info: Info; catalog: Catalog;
       });
       const j = (await res.json().catch(() => ({}))) as { orderId?: string; error?: string; totalCents?: number };
       if (!res.ok || !j.orderId) {
-        setProblem(j.error === "sign_in_to_order" || j.error === "pay_with_credit" ? tx("This shop takes orders from members only. Please order at the counter.") : res.status === 409 ? tx("Prices changed while you were ordering. The new total is {amt}. Tap Pay again to confirm.", { amt: formatMoney(j.totalCents ?? 0) }) : tx("We couldn't place your order. Please try again, or order at the counter."));
+        const e = String(j.error ?? "");
+        const bad = (j as { productId?: string }).productId;
+        setProblem(
+          e === "sign_in_to_order" || e === "pay_with_credit" ? tx("This shop takes orders from members only. Please order at the counter.")
+          : /table/i.test(e) ? tx("This shop only takes table orders, so the kiosk can't place this order yet. Please order at the counter.")
+          : /dine-in only/i.test(e) ? tx("This shop takes dine-in orders only. Switch to Dine in, or order at the counter.")
+          : res.status === 409 ? tx("Prices changed while you were ordering. The new total is {amt}. Tap Pay again to confirm.", { amt: formatMoney(j.totalCents ?? 0) })
+          : res.status === 429 ? tx("Too many orders from this device. Please wait a few minutes or order at the counter.")
+          : bad ? tx("{x} is no longer available. Please remove it and try again.", { x: byId.get(bad)?.name ?? tx("An item") })
+          : tx("We couldn't place your order. Please try again, or order at the counter.") + (e ? ` (${e})` : ""),
+        );
         return;
       }
       // PayNow: the shop's payment page, shown as a QR the customer scans with their own phone. Otherwise they pay at the counter.
