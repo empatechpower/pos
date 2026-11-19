@@ -86,7 +86,9 @@ export async function syncNow(): Promise<void> {
     const body = (await res.json()) as { events: Array<{ serverSeq: number; event: never }>; latestSeq: number };
     if (body.events.length) await ingestRemote(body.events.map((s) => s.event));
     await setMeta("lastServerSeq", body.latestSeq);
-    set({ reachable: true, lastSyncAt: Date.now(), error: null });
+    // A sync that worked is the proof that we are online, whatever the browser's own flag (navigator.onLine) says: on some computers
+    // and networks that flag stays false while everything works.
+    set({ online: true, reachable: true, lastSyncAt: Date.now(), error: null });
   } catch (err) {
     set({ reachable: false, error: err instanceof Error ? err.message : String(err) });
   } finally {
