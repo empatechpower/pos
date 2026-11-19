@@ -130,8 +130,9 @@ export function startSync(): () => void {
       es = new EventSource(ticket === "open" ? "/api/stream" : `/api/stream?ticket=${encodeURIComponent(ticket)}`);
       es.addEventListener("events", () => void syncNow());
       es.addEventListener("hello", () => void syncNow());
+      // The live stream only nudges the app to sync sooner. When it drops it is simply reopened: whether the server is reachable is
+      // decided by the sync itself (every few seconds), so a flaky stream no longer marks a working connection as Offline.
       es.onerror = () => {
-        set({ reachable: false });
         es?.close();
         again(3000);
       };
