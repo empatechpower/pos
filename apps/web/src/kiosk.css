@@ -36,7 +36,7 @@
 .k-bt { color: #21252a; }
 .k-bt b { display: block; font-size: var(--brand-b); font-weight: 800; line-height: 1.05; letter-spacing: -.02em; }
 .k-bt span { font-size: var(--brand-s); font-weight: 600; color: var(--muted); }
-.k-start-body { padding: var(--pad); max-width: 840px; width: 100%; margin: 0 auto; flex: 1 1 auto; display: flex; flex-direction: column; justify-content: space-evenly; gap: var(--gap); min-height: 0; overflow: hidden; }
+.k-start-body { padding: var(--pad); max-width: 840px; width: 100%; margin: 0 auto; flex: 1 1 auto; display: flex; flex-direction: column; justify-content: space-evenly; gap: var(--gap); min-height: 0; overflow-y: auto; overscroll-behavior: contain; -webkit-overflow-scrolling: touch; }
 .k-start-body > * { flex-shrink: 0; }
 .k-start-body h1 { font-size: var(--h1); line-height: 1.12; margin: 0; font-weight: 800; text-align: center; }
 .k-sub { margin: 0; text-align: center; color: var(--muted); font-size: var(--sub); line-height: 1.4; }
@@ -349,3 +349,14 @@
 @keyframes k-seg-glow { 0%,100% { box-shadow: 0 0 0 0 rgba(234,112,22,0); } 50% { box-shadow: 0 0 0 6px rgba(234,112,22,.22), 0 4px 18px rgba(234,112,22,.35); } }
 .k-seg button:active { transform: scale(.96); }
 @media (prefers-reduced-motion: reduce) { .k-seg.pulse { animation: none; } }
+
+/* Very short screens (a phone held upright with the browser bars showing, or a small window): the start screen shrinks further, as the
+   prototype's last tier does, and whatever still does not fit scrolls inside its own area. */
+@media (max-width: 480px) and (max-height: 760px) {
+  .k-start { --hero-h: 13dvh; --hero-min: 98px; --logo: 40px; --brand-b: 19px; --brand-s: 10.5px; --gap: 5px; --pad: 6px 14px 8px; --h1: 20px; --sub: 12.5px;
+    --g-min: 58px; --g-fs: 19px; --g-small: 12px; --or-fs: 13px; --pk-pad: 8px 10px; --pk-lead: 13px; --pk-fs: 12px; --pk-ic: 14px;
+    --qr-min: 0px; --qr-pad: 8px 12px; --qr-img: 52px; --qr-b: 15px; --qr-s: 11.5px; --ph-min: 44px; --ph-fs: 15px; --so-min: 44px; --so-fs: 14px; --so-g: 20px; }
+  .k-brand img { border-width: 2px; border-radius: 12px; }
+  .k-chips { gap: 5px; } .k-chips span { padding: 5px 9px; }
+}
+@media (max-height: 560px) { .k-start { --hero-h: 11dvh; --hero-min: 76px; --logo: 32px; --brand-b: 16px; --brand-s: 0px; --h1: 17px; --g-min: 48px; --g-fs: 17px; --qr-img: 44px; } .k-bt span { display: none; } .k-start .k-sub { display: none; } }
