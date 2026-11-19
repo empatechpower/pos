@@ -143,7 +143,6 @@
 .k-step { display: inline-flex; align-items: center; gap: 4px; background: #f1e9db; border-radius: 999px; padding: 5px; }
 .k-step button { width: 44px; height: 44px; border-radius: 50%; border: 0; background: #fff; font-size: 24px; font-weight: 700; line-height: 1; box-shadow: 0 2px 6px rgba(120,80,20,.15); }
 .k-step span { min-width: 36px; text-align: center; font-size: 21px; font-weight: 700; }
-}
 
 /* review & pay, payment, confirmation */
 .k-review { height: 100dvh; display: flex; flex-direction: column; }
@@ -256,7 +255,6 @@
 /* the kiosk has no swipe tab (the prototype shows none): the line still slides to remove */
 .kiosk .swipe-hint { display: none; }
 
-}
 
 /* "Still there?" and "Start over?" dialogs, as in the prototype */
 .k-scrim.idle, .k-scrim.reset { background: rgba(24,18,10,.5); display: flex; align-items: center; justify-content: center; padding: 30px; }
