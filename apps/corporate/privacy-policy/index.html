@@ -1,106 +1,334 @@
-<!DOCTYPE html>
+<!doctype html>
 <html lang="en">
 <head>
-<meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Privacy Policy – Rezein</title>
-<meta name="description" content="Rezein Pte Ltd — one connected platform for customer-facing businesses. Point of sale, online ordering, self-service kiosks, procurement, workforce optimisation, analytics and integrations.">
-<link rel="icon" href="/assets/images/rezein-logo.jpg">
-<link rel="stylesheet" href="/assets/css/main.css">
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+<meta name="color-scheme" content="light dark" />
+<meta name="description" content="Rezein is a Singapore connected commerce and operations platform — online ordering, kiosk, point of sale, procurement, workforce optimisation, analytics and in-store infrastructure services." />
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect x='3' y='13' width='16' height='16' fill='%230A214E'/%3E%3Crect x='17' y='3' width='12' height='12' fill='%230E8F8F'/%3E%3C/svg%3E" />
+<title>Privacy Policy | REZEIN PTE. LTD.</title>
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link href="https://fonts.googleapis.com/css2?family=Manrope:wght@400;500;600;700;800&family=Newsreader:opsz,wght@6..72,500;6..72,600&display=swap" rel="stylesheet" />
+<style>
+  :root{
+    /* Brand palette sampled from the Rezein logo: deep navy wordmark, teal pixel accents */
+    --bg:#ffffff; --bg-soft:#f2f5fa; --bg-navy:#0a214e; --bg-navy-2:#102c59;
+    --ink:#0e1e40; --ink-2:#3e4e6e; --ink-3:#6b7a99;
+    --line:#d9e1ee; --card:#ffffff;
+    --teal:#0e8f8f; --teal-dark:#0a7585; --teal-soft:#e2f2f2;
+    --amber:#b97f1e;
+    --nav-bg:rgba(255,255,255,.96);
+    --shadow:0 10px 30px rgba(10,33,78,.10);
+    --radius:14px;
+  }
+  @media (prefers-color-scheme: dark){
+    :root{
+      --bg:#050f26; --bg-soft:#081733; --bg-navy:#040b1f; --bg-navy-2:#0a214e;
+      --ink:#edf2fa; --ink-2:#b4c2d9; --ink-3:#8494b3;
+      --line:#1d2f52; --card:#0a1b3d;
+      --teal:#2fb3b3; --teal-dark:#2fb3b3; --teal-soft:#0c3038;
+      --nav-bg:rgba(5,15,38,.96);
+      --shadow:0 10px 30px rgba(0,0,0,.35);
+    }
+  }
+  *{box-sizing:border-box}
+  html{scroll-behavior:smooth}
+  @media (prefers-reduced-motion: reduce){ html{scroll-behavior:auto} *{animation:none!important;transition:none!important} }
+  body{margin:0;font-family:"Manrope",system-ui,-apple-system,"Segoe UI",sans-serif;color:var(--ink);background:var(--bg);line-height:1.6;font-size:16.5px;-webkit-font-smoothing:antialiased}
+  img{max-width:100%;display:block}
+  a{color:var(--teal-dark)}
+  .wrap{max-width:1180px;margin:0 auto;padding:0 22px}
+  button,[role="button"],a.btn,a.navcta{min-height:44px}
+  :focus-visible{outline:3px solid var(--teal);outline-offset:2px;border-radius:4px}
+
+  /* Utility bar */
+  .util{background:var(--bg-navy);color:#c7d5ec;font-size:13px}
+  .util .wrap{display:flex;justify-content:space-between;gap:14px;padding-top:7px;padding-bottom:7px;flex-wrap:wrap}
+  .util a{color:#fff;text-decoration:none;font-weight:700}
+  .util .u-right{display:flex;gap:18px;flex-wrap:wrap}
+
+  /* Header */
+  header.site{position:sticky;top:0;z-index:50;background:var(--nav-bg);backdrop-filter:blur(8px);border-bottom:1px solid var(--line)}
+  .nav{display:flex;align-items:center;justify-content:space-between;gap:16px;padding-top:12px;padding-bottom:12px}
+  .brand{display:flex;align-items:center;text-decoration:none;color:var(--ink)}
+  .brand-logo{height:40px;width:auto;display:block}
+  .foot-logo{height:34px;width:auto;display:block}
+  nav.main{display:flex;gap:4px;align-items:center}
+  nav.main a{color:var(--ink);text-decoration:none;font-weight:600;font-size:14.5px;padding:10px 11px;border-radius:8px}
+  nav.main a:hover{background:var(--bg-soft)}
+  .navcta{background:var(--teal);color:#fff!important;border-radius:9px;padding:11px 18px!important;margin-left:8px}
+  .navcta:hover{background:var(--teal-dark)!important}
+  .burger{display:none;background:none;border:1px solid var(--line);border-radius:9px;width:44px;height:44px;cursor:pointer;color:var(--ink);font-size:19px;line-height:1}
+
+  /* Hero */
+  .hero{background:var(--bg-soft);border-bottom:1px solid var(--line)}
+  .hero-grid{display:grid;grid-template-columns:1.02fr .98fr;gap:44px;padding:56px 0 60px;align-items:center}
+  .hero-eyebrow{display:inline-flex;align-items:center;gap:8px;background:var(--card);border:1px solid var(--line);border-radius:999px;padding:6px 13px;font-size:13px;font-weight:700;color:var(--ink-2)}
+  .hero-eyebrow i{width:8px;height:8px;border-radius:50%;background:var(--teal);display:inline-block}
+  h1{font-size:clamp(32px,4.4vw,50px);line-height:1.12;letter-spacing:-.025em;margin:18px 0 16px;font-weight:800}
+  h1 em{font-family:"Newsreader",Georgia,serif;font-style:italic;font-weight:600;letter-spacing:-.01em}
+  .hero p.lede{font-size:18.5px;color:var(--ink-2);margin:0 0 22px;max-width:34em}
+  .hero-ctas{display:flex;gap:12px;flex-wrap:wrap;margin-bottom:24px}
+  .btn{display:inline-flex;align-items:center;justify-content:center;gap:8px;text-decoration:none;font-weight:800;font-size:15.5px;border-radius:10px;padding:13px 22px;border:1px solid transparent}
+  .btn-primary{background:var(--teal);color:#fff}
+  .btn-primary:hover{background:var(--teal-dark)}
+  .btn-ghost{background:var(--card);color:var(--ink);border-color:var(--line)}
+  .hero-checks{list-style:none;margin:0;padding:0;display:grid;gap:9px;font-size:15px;font-weight:600}
+  .hero-checks li{display:flex;gap:10px;align-items:flex-start}
+  .tick{color:var(--teal);font-weight:800;flex:none}
+  .hero-media{position:relative}
+  .hero-media img{border-radius:18px;aspect-ratio:4/3.1;object-fit:cover;box-shadow:var(--shadow);width:100%}
+  .hero-card{position:absolute;left:16px;right:16px;bottom:16px;background:var(--card);border:1px solid var(--line);border-radius:12px;padding:14px 16px;box-shadow:var(--shadow)}
+  .hero-card b{font-size:13px;letter-spacing:.07em;text-transform:uppercase;color:var(--ink-3);display:block;margin-bottom:8px}
+  .chips{display:flex;flex-wrap:wrap;gap:6px}
+  .chips span{font-size:12.5px;font-weight:700;background:var(--teal-soft);color:var(--ink);border-radius:999px;padding:5px 10px}
+
+  /* Fact strip */
+  .facts{border-bottom:1px solid var(--line)}
+  .facts .wrap{display:grid;grid-template-columns:repeat(4,1fr);gap:0}
+  .fact{padding:20px 18px;border-left:1px solid var(--line)}
+  .fact:first-child{border-left:none;padding-left:0}
+  .fact b{display:block;font-size:19px;letter-spacing:-.01em}
+  .fact span{font-size:13.5px;color:var(--ink-2)}
+
+  section{padding:64px 0}
+  .sec-head{max-width:46em;margin-bottom:34px}
+  .sec-head.center{margin-left:auto;margin-right:auto;text-align:center}
+  .kicker{font-size:12.5px;font-weight:800;letter-spacing:.14em;text-transform:uppercase;color:var(--teal);margin:0 0 10px}
+  h2{font-size:clamp(26px,3.2vw,36px);line-height:1.18;letter-spacing:-.02em;margin:0 0 12px;font-weight:800}
+  .sec-head p{color:var(--ink-2);font-size:17px;margin:0}
+  h3{font-size:18px;margin:0 0 7px;letter-spacing:-.01em}
+  .card p,.mini p{color:var(--ink-2);font-size:15px;margin:0}
+
+  .grid-3{display:grid;grid-template-columns:repeat(3,1fr);gap:18px}
+  .grid-2{display:grid;grid-template-columns:repeat(2,1fr);gap:18px}
+  .grid-4{display:grid;grid-template-columns:repeat(4,1fr);gap:18px}
+  .card{background:var(--card);border:1px solid var(--line);border-radius:var(--radius);padding:24px}
+  .card .ic{width:44px;height:44px;border-radius:10px;background:var(--teal-soft);display:grid;place-items:center;margin-bottom:14px;color:var(--teal-dark)}
+  .card .ic svg{width:23px;height:23px}
+  .num{font-family:"Newsreader",Georgia,serif;font-size:30px;color:var(--teal);line-height:1;display:block;margin-bottom:10px}
+
+  /* Platform band */
+  .band{background:var(--bg-navy);color:#e8eefb}
+  .band .kicker{color:#4fc9c9}
+  .band .sec-head p{color:#b9c8e2}
+  .band h2{color:#fff}
+  .platform{display:grid;grid-template-columns:repeat(4,1fr);gap:14px}
+  .plat{background:var(--bg-navy-2);border:1px solid #24406e;border-radius:12px;padding:20px}
+  .plat b{display:block;font-size:16px;margin-bottom:6px;color:#fff}
+  .plat p{margin:0;font-size:14px;color:#b9c8e2}
+  .band-note{margin-top:22px;border:1px solid #24406e;border-radius:12px;padding:18px 20px;background:rgba(255,255,255,.03);font-size:15.5px;color:#d9e4f5}
+  .band-note b{color:#fff}
+
+  /* Why / pillars */
+  .pillar{display:flex;flex-direction:column;gap:0}
+  .pillar .tag{align-self:flex-start;font-size:12px;font-weight:800;letter-spacing:.08em;text-transform:uppercase;background:var(--teal-soft);border-radius:999px;padding:5px 11px;margin-bottom:14px;color:var(--ink)}
+  .fineprint{font-size:13.5px;color:var(--ink-3);margin-top:12px!important}
+
+  /* Infrastructure */
+  .infra-layout{display:grid;grid-template-columns:.92fr 1.08fr;gap:36px;align-items:start}
+  .infra-layout img{border-radius:16px;aspect-ratio:16/10.5;object-fit:cover;width:100%;box-shadow:var(--shadow)}
+  .infra-list{display:grid;grid-template-columns:1fr 1fr;gap:14px}
+  .mini{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:18px}
+  .mini h3{font-size:16px}
+  .spec{display:inline-block;margin-top:9px;font-size:12.5px;font-weight:800;color:var(--teal-dark);background:var(--teal-soft);padding:4px 9px;border-radius:6px}
+
+  /* Industries */
+  .ind-grid{display:grid;grid-template-columns:repeat(4,1fr);gap:14px}
+  .ind{border:1px solid var(--line);border-radius:12px;padding:20px;background:var(--card)}
+  .ind b{font-size:16.5px;display:block;margin-bottom:5px}
+  .ind p{margin:0;font-size:14px;color:var(--ink-2)}
+  .ind.wide{grid-column:span 2;display:grid;grid-template-columns:1fr 1fr;gap:18px;align-items:center;padding:0;overflow:hidden}
+  .ind.wide img{height:100%;min-height:190px;object-fit:cover}
+  .ind.wide .pad{padding:20px 20px 20px 0}
+
+  /* Hardware */
+  .hw-group{margin-bottom:26px}
+  .hw-group h3{font-size:15px;letter-spacing:.06em;text-transform:uppercase;color:var(--ink-2);margin-bottom:12px}
+  .hw-list{display:flex;flex-wrap:wrap;gap:10px}
+  .hw{display:flex;align-items:center;gap:10px;background:var(--card);border:1px solid var(--line);border-radius:999px;padding:10px 17px 10px 12px;font-weight:700;font-size:15px}
+  .hw i{width:30px;height:30px;border-radius:50%;background:var(--teal-soft);display:grid;place-items:center;font-style:normal;color:var(--teal-dark);flex:none}
+  .hw i svg{width:16px;height:16px}
+
+  /* Integrations */
+  .integ{display:flex;flex-wrap:wrap;gap:12px}
+  .integ div{border:1.5px solid var(--line);border-radius:12px;padding:16px 20px;font-weight:800;font-size:16.5px;background:var(--card)}
+  .integ div span{display:block;font-weight:600;font-size:13px;color:var(--ink-2);margin-top:2px}
+
+  /* Steps */
+  .steps{display:grid;grid-template-columns:repeat(3,1fr);gap:18px;counter-reset:step}
+  .step{border-top:3px solid var(--teal);padding-top:16px}
+  .step b{font-size:17px;display:block;margin-bottom:6px}
+  .step p{margin:0;color:var(--ink-2);font-size:15px}
+
+  /* FAQ */
+  .faq{max-width:820px}
+  details{border:1px solid var(--line);border-radius:12px;background:var(--card);margin-bottom:10px}
+  summary{cursor:pointer;font-weight:800;padding:16px 20px;list-style:none;display:flex;justify-content:space-between;gap:12px;align-items:center;min-height:52px}
+  summary::-webkit-details-marker{display:none}
+  summary::after{content:"+";font-size:22px;color:var(--teal);font-weight:700;flex:none}
+  details[open ] summary::after{content:"–"}
+  details .a{padding:0 20px 18px;color:var(--ink-2);font-size:15.5px}
+
+  /* Company / contact */
+  .company{display:grid;grid-template-columns:1.1fr .9fr;gap:36px;align-items:start}
+  .legal{border:1px solid var(--line);border-radius:14px;overflow:hidden;background:var(--card)}
+  .legal table{width:100%;border-collapse:collapse;font-size:15px}
+  .legal th,.legal td{text-align:left;padding:13px 18px;border-bottom:1px solid var(--line);vertical-align:top}
+  .legal tr:last-child th,.legal tr:last-child td{border-bottom:none}
+  .legal th{width:38%;color:var(--ink-2);font-weight:700;background:var(--bg-soft)}
+  .contact-actions{display:flex;gap:12px;flex-wrap:wrap;margin-top:18px}
+
+  footer{background:var(--bg-navy);color:#b9c8e2;padding:46px 0 30px;font-size:14.5px}
+  footer .cols{display:grid;grid-template-columns:1.4fr 1fr 1fr;gap:30px;margin-bottom:30px}
+  footer b{color:#fff}
+  footer a{color:#d9e4f5;text-decoration:none}
+  footer ul{list-style:none;margin:8px 0 0;padding:0;display:grid;gap:7px}
+  .foot-legal{border-top:1px solid #24406e;padding-top:18px;display:flex;justify-content:space-between;gap:14px;flex-wrap:wrap;font-size:13px;color:#8498bc}
+  .staging-note{background:#fff7e8;border:1px solid #ecd9ac;color:#5c4712;font-size:14px}
+  @media (prefers-color-scheme: dark){ .staging-note{background:#2c2410;border-color:#5c4a1e;color:#ecd9ac} }
+  .staging-note .wrap{padding-top:11px;padding-bottom:11px}
+
+  @media (max-width: 960px){
+    .hero-grid{grid-template-columns:1fr;padding:40px 0 44px}
+    .facts .wrap{grid-template-columns:1fr 1fr}
+    .fact{border-left:none;padding-left:0}
+    .grid-3,.grid-4,.platform,.steps{grid-template-columns:1fr 1fr}
+    .ind-grid{grid-template-columns:1fr 1fr}
+    .infra-layout,.company{grid-template-columns:1fr}
+    footer .cols{grid-template-columns:1fr 1fr}
+  }
+  @media (max-width: 680px){
+    nav.main{display:none;position:absolute;top:100%;left:0;right:0;background:var(--nav-bg);border-bottom:1px solid var(--line);flex-direction:column;align-items:stretch;padding:10px 16px 16px;gap:2px}
+    nav.main.open{display:flex}
+    nav.main a{padding:12px}
+    .navcta{margin:8px 0 0;text-align:center}
+    .burger{display:grid;place-items:center}
+    header.site .wrap{position:relative}
+    .grid-3,.grid-2,.grid-4,.platform,.steps,.ind-grid,.infra-list{grid-template-columns:1fr}
+    .ind.wide{grid-column:span 1;grid-template-columns:1fr}
+    .ind.wide .pad{padding:0 20px 20px}
+    .facts .wrap{grid-template-columns:1fr}
+    section{padding:46px 0}
+    footer .cols{grid-template-columns:1fr}
+    .util .u-right{display:none}
+  }
+</style>
 </head>
 <body>
-<a class="screen-reader-text" href="#main-content">Skip to content</a>
 
-<header class="site-header">
-	<div class="container header-inner">
-		<div class="site-branding">
-			<a class="site-logo" href="/" rel="home"><img class="site-logo-img" src="/assets/images/rezein-logo.jpg" alt="Rezein"></a>
-		</div>
-		<button class="nav-toggle" type="button" aria-expanded="false" aria-controls="primary-navigation">
-			<span class="nav-toggle-bar"></span>
-			<span class="nav-toggle-bar"></span>
-			<span class="nav-toggle-bar"></span>
-			<span class="screen-reader-text">Menu</span>
-		</button>
-		<nav id="primary-navigation" class="site-nav" aria-label="Primary">
-			<ul class="nav-list"><li><a href="/">Home</a></li><li><a href="/about-us/">About Us</a></li><li><a href="/solutions/">Solutions</a></li><li><a href="/industries/">Industries</a></li><li><a href="/contact/">Contact</a></li></ul>
-			<a class="btn btn-nav" href="/contact/">Talk to Us</a>
-		</nav>
-	</div>
+<div class="util">
+  <div class="wrap">
+    <div>Singapore &nbsp;·&nbsp; Connected commerce &amp; operations platform</div>
+    <div class="u-right">
+      <span>REZEIN PTE. LTD. · UEN 202652620G</span>
+      <a href="tel:+6597628423">+65 9762 8423</a>
+    </div>
+  </div>
+</div>
+
+<header class="site">
+  <div class="wrap">
+    <div class="nav">
+      <a class="brand" href="/" aria-label="Rezein home">
+        <picture>
+          <source media="(prefers-color-scheme: dark)" srcset="/assets/images/logo-dark.png" />
+          <img class="brand-logo" src="/assets/images/logo.png" alt="Rezein" width="800" height="226" />
+        </picture>
+      </a>
+      <button class="burger" id="burger" aria-label="Open menu" aria-expanded="false">☰</button>
+      <nav class="main" id="mainnav" aria-label="Main navigation">
+        <a href="/#platform">Platform</a>
+        <a href="/#solutions">Solutions</a>
+        <a href="/#infrastructure">Infrastructure</a>
+        <a href="/#industries">Industries</a>
+        <a href="/#hardware">Hardware</a>
+        <a href="/#company">Company</a>
+        <a class="navcta" href="/#contact">Talk to us</a>
+      </nav>
+    </div>
+  </div>
 </header>
 
-<main id="main-content" class="site-main">
-	<section class="page-hero">
-		<div class="container">
-			<h1>Privacy Policy</h1>
-		</div>
-	</section>
-
-	<section class="section">
-		<div class="container content-narrow entry-content">
+<main id="top">
+<section><div class="wrap"><div class="sec-head"><p class="kicker">Legal</p><h2>Privacy Policy</h2></div><div style="max-width:46em;color:var(--ink-2)">
 			<p><em>Last updated: 19 November 2026</em></p>
 			<p>Rezein Pte Ltd (&ldquo;Rezein&rdquo;, &ldquo;we&rdquo;, &ldquo;us&rdquo;) respects your privacy. This policy explains how we handle personal data collected through this website, in line with the Singapore Personal Data Protection Act (PDPA).</p>
 
-			<h2>What We Collect</h2>
+			<h2 style="font-size:22px;margin:30px 0 8px">What We Collect</h2>
 			<p>When you contact us through this website or by phone, we may collect your name, company name, contact number, email address (if you provide one) and the contents of your enquiry. This website does not operate user accounts and does not process payments.</p>
 
-			<h2>How We Use It</h2>
+			<h2 style="font-size:22px;margin:30px 0 8px">How We Use It</h2>
 			<p>We use the information you provide only to respond to your enquiry, provide information about our solutions and services, and manage our business relationship with you. We do not sell personal data to third parties.</p>
 
-			<h2>Disclosure</h2>
+			<h2 style="font-size:22px;margin:30px 0 8px">Disclosure</h2>
 			<p>We may share personal data with service providers who support our operations, only as needed for them to perform their services, or where required by law or a competent authority.</p>
 
-			<h2>Retention and Security</h2>
+			<h2 style="font-size:22px;margin:30px 0 8px">Retention and Security</h2>
 			<p>We retain enquiry records for as long as reasonably necessary for the purposes above and take reasonable steps to protect personal data against unauthorised access, collection, use or disclosure.</p>
 
-			<h2>Your Choices</h2>
+			<h2 style="font-size:22px;margin:30px 0 8px">Your Choices</h2>
 			<p>You may request access to, or correction of, your personal data held by us, or withdraw consent for its use, by contacting us using the details below. We will respond within a reasonable time.</p>
 
-			<h2>Rezein Hub app and ordering service</h2>
+			<h2 style="font-size:22px;margin:30px 0 8px">Rezein Hub app and ordering service</h2>
 			<p>The Rezein Hub Android app and the Rezein ordering and point-of-sale service have their own privacy policy: <a href="https://demo.rezein.com/about/privacy.html">Rezein Hub and ordering service privacy policy</a>.</p>
 
-			<h2>Contact</h2>
+			<h2 style="font-size:22px;margin:30px 0 8px">Rezein Hub app and ordering service</h2>
+			<p>The Rezein Hub Android app and the Rezein ordering and point-of-sale service have their own privacy policy: <a href="https://demo.rezein.com/about/privacy.html">Rezein Hub and ordering service privacy policy</a>.</p>
+
+			<h2 style="font-size:22px;margin:30px 0 8px">Contact</h2>
 			<p>Rezein Pte Ltd, Blk 20 Eunos Crescent #09-2959, Singapore 400020 &middot; Tel: <a href="tel:+6597628423">+65 9762 8423</a></p>
 
-		</div>
-	</section>
-
+		</div></div></section>
 </main>
 
-<footer class="site-footer">
-	<div class="container footer-grid">
-		<div class="footer-col footer-about">
-			<img class="footer-logo-img" src="/assets/images/rezein-logo.jpg" alt="Rezein">
-			<p>One connected platform for customer-facing businesses — point of sale, online ordering, self-service kiosks, procurement, workforce optimisation, analytics and integrations.</p>
-		</div>
-		<div class="footer-col">
-			<h3 class="footer-heading">Explore</h3>
-			<ul class="footer-list"><li><a href="/">Home</a></li><li><a href="/about-us/">About Us</a></li><li><a href="/solutions/">Solutions</a></li><li><a href="/industries/">Industries</a></li><li><a href="/contact/">Contact</a></li></ul>
-		</div>
-		<div class="footer-col">
-			<h3 class="footer-heading">Company</h3>
-			<ul class="footer-list">
-				<li>Rezein Pte Ltd</li>
-				<li>UEN: 202652620G</li>
-				<li><a href="/privacy-policy/">Privacy Policy</a></li>
-			</ul>
-		</div>
-		<div class="footer-col">
-			<h3 class="footer-heading">Contact</h3>
-			<ul class="footer-list">
-				<li>Blk 20 Eunos Crescent #09-2959, Singapore 400020</li>
-				<li><a href="tel:+6597628423">+65 9762 8423</a></li>
-			</ul>
-		</div>
-	</div>
-	<div class="footer-bottom">
-		<div class="container">
-			<p>&copy; <span id="yr">2026</span> Rezein Pte Ltd (UEN: 202652620G). All rights reserved.</p>
-			<p class="footer-address">Registered address: Blk 20 Eunos Crescent #09-2959, Singapore 400020 &middot; Tel: +65 9762 8423</p>
-		</div>
-	</div>
+<footer>
+  <div class="wrap">
+    <div class="cols">
+      <div>
+        <img class="foot-logo" src="/assets/images/logo-dark.png" alt="Rezein" width="800" height="226" />
+        <p style="margin:10px 0 0;max-width:32em">Connected commerce and operations platform for F&amp;B, retail and service businesses — plus the in-store infrastructure it runs on.</p>
+      </div>
+      <div><b>Platform</b><ul>
+        <li><a href="/#solutions">Online Ordering</a></li>
+        <li><a href="/#solutions">Kiosk &amp; Point of Sale</a></li>
+        <li><a href="/#solutions">Procurement</a></li>
+        <li><a href="/#infrastructure">Infrastructure Services</a></li>
+        <li><a href="/#hardware">Supported Hardware</a></li>
+      </ul></div>
+      <div><b>Company</b><ul>
+        <li><a href="/#about">About Rezein</a></li>
+        <li><a href="/#industries">Industries</a></li>
+        <li><a href="/#company">Company Information</a></li>
+        <li><a href="tel:+6597628423">+65 9762 8423</a></li>
+        <li><a href="/privacy-policy/">Privacy Policy</a></li>
+      </ul></div>
+    </div>
+    <div class="foot-legal">
+      <span>© 2026 REZEIN PTE. LTD. · UEN 202652620G · Blk 20 Eunos Crescent #09-2959, Singapore 400020</span>
+      <span>rezein.com</span>
+    </div>
+  </div>
 </footer>
 
-<script src="/assets/js/main.js"></script>
+<script>
+  (function(){
+    var burger = document.getElementById('burger');
+    var nav = document.getElementById('mainnav');
+    burger.addEventListener('click', function(){
+      var open = nav.classList.toggle('open');
+      burger.setAttribute('aria-expanded', open ? 'true' : 'false');
+      burger.textContent = open ? '✕' : '☰';
+    });
+    nav.addEventListener('click', function(e){
+      if (e.target.tagName === 'A' && nav.classList.contains('open')) {
+        nav.classList.remove('open');
+        burger.setAttribute('aria-expanded','false');
+        burger.textContent = '☰';
+      }
+    });
+  })();
+</script>
 </body>
 </html>

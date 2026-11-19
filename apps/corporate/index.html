@@ -1,161 +1,572 @@
-<!DOCTYPE html>
+<!doctype html>
 <html lang="en">
 <head>
-<meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Rezein — One Connected Platform for Customer-Facing Businesses</title>
-<meta name="description" content="Rezein Pte Ltd — one connected platform for customer-facing businesses. Point of sale, online ordering, self-service kiosks, procurement, workforce optimisation, analytics and integrations.">
-<link rel="icon" href="/assets/images/rezein-logo.jpg">
-<link rel="stylesheet" href="/assets/css/main.css">
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+<meta name="color-scheme" content="light dark" />
+<meta name="description" content="Rezein is a Singapore connected commerce and operations platform — online ordering, kiosk, point of sale, procurement, workforce optimisation, analytics and in-store infrastructure services." />
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect x='3' y='13' width='16' height='16' fill='%230A214E'/%3E%3Crect x='17' y='3' width='12' height='12' fill='%230E8F8F'/%3E%3C/svg%3E" />
+<title>Rezein — Connected Commerce &amp; Operations Platform | REZEIN PTE. LTD.</title>
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link href="https://fonts.googleapis.com/css2?family=Manrope:wght@400;500;600;700;800&family=Newsreader:opsz,wght@6..72,500;6..72,600&display=swap" rel="stylesheet" />
+<style>
+  :root{
+    /* Brand palette sampled from the Rezein logo: deep navy wordmark, teal pixel accents */
+    --bg:#ffffff; --bg-soft:#f2f5fa; --bg-navy:#0a214e; --bg-navy-2:#102c59;
+    --ink:#0e1e40; --ink-2:#3e4e6e; --ink-3:#6b7a99;
+    --line:#d9e1ee; --card:#ffffff;
+    --teal:#0e8f8f; --teal-dark:#0a7585; --teal-soft:#e2f2f2;
+    --amber:#b97f1e;
+    --nav-bg:rgba(255,255,255,.96);
+    --shadow:0 10px 30px rgba(10,33,78,.10);
+    --radius:14px;
+  }
+  @media (prefers-color-scheme: dark){
+    :root{
+      --bg:#050f26; --bg-soft:#081733; --bg-navy:#040b1f; --bg-navy-2:#0a214e;
+      --ink:#edf2fa; --ink-2:#b4c2d9; --ink-3:#8494b3;
+      --line:#1d2f52; --card:#0a1b3d;
+      --teal:#2fb3b3; --teal-dark:#2fb3b3; --teal-soft:#0c3038;
+      --nav-bg:rgba(5,15,38,.96);
+      --shadow:0 10px 30px rgba(0,0,0,.35);
+    }
+  }
+  *{box-sizing:border-box}
+  html{scroll-behavior:smooth}
+  @media (prefers-reduced-motion: reduce){ html{scroll-behavior:auto} *{animation:none!important;transition:none!important} }
+  body{margin:0;font-family:"Manrope",system-ui,-apple-system,"Segoe UI",sans-serif;color:var(--ink);background:var(--bg);line-height:1.6;font-size:16.5px;-webkit-font-smoothing:antialiased}
+  img{max-width:100%;display:block}
+  a{color:var(--teal-dark)}
+  .wrap{max-width:1180px;margin:0 auto;padding:0 22px}
+  button,[role="button"],a.btn,a.navcta{min-height:44px}
+  :focus-visible{outline:3px solid var(--teal);outline-offset:2px;border-radius:4px}
+
+  /* Utility bar */
+  .util{background:var(--bg-navy);color:#c7d5ec;font-size:13px}
+  .util .wrap{display:flex;justify-content:space-between;gap:14px;padding-top:7px;padding-bottom:7px;flex-wrap:wrap}
+  .util a{color:#fff;text-decoration:none;font-weight:700}
+  .util .u-right{display:flex;gap:18px;flex-wrap:wrap}
+
+  /* Header */
+  header.site{position:sticky;top:0;z-index:50;background:var(--nav-bg);backdrop-filter:blur(8px);border-bottom:1px solid var(--line)}
+  .nav{display:flex;align-items:center;justify-content:space-between;gap:16px;padding-top:12px;padding-bottom:12px}
+  .brand{display:flex;align-items:center;text-decoration:none;color:var(--ink)}
+  .brand-logo{height:40px;width:auto;display:block}
+  .foot-logo{height:34px;width:auto;display:block}
+  nav.main{display:flex;gap:4px;align-items:center}
+  nav.main a{color:var(--ink);text-decoration:none;font-weight:600;font-size:14.5px;padding:10px 11px;border-radius:8px}
+  nav.main a:hover{background:var(--bg-soft)}
+  .navcta{background:var(--teal);color:#fff!important;border-radius:9px;padding:11px 18px!important;margin-left:8px}
+  .navcta:hover{background:var(--teal-dark)!important}
+  .burger{display:none;background:none;border:1px solid var(--line);border-radius:9px;width:44px;height:44px;cursor:pointer;color:var(--ink);font-size:19px;line-height:1}
+
+  /* Hero */
+  .hero{background:var(--bg-soft);border-bottom:1px solid var(--line)}
+  .hero-grid{display:grid;grid-template-columns:1.02fr .98fr;gap:44px;padding:56px 0 60px;align-items:center}
+  .hero-eyebrow{display:inline-flex;align-items:center;gap:8px;background:var(--card);border:1px solid var(--line);border-radius:999px;padding:6px 13px;font-size:13px;font-weight:700;color:var(--ink-2)}
+  .hero-eyebrow i{width:8px;height:8px;border-radius:50%;background:var(--teal);display:inline-block}
+  h1{font-size:clamp(32px,4.4vw,50px);line-height:1.12;letter-spacing:-.025em;margin:18px 0 16px;font-weight:800}
+  h1 em{font-family:"Newsreader",Georgia,serif;font-style:italic;font-weight:600;letter-spacing:-.01em}
+  .hero p.lede{font-size:18.5px;color:var(--ink-2);margin:0 0 22px;max-width:34em}
+  .hero-ctas{display:flex;gap:12px;flex-wrap:wrap;margin-bottom:24px}
+  .btn{display:inline-flex;align-items:center;justify-content:center;gap:8px;text-decoration:none;font-weight:800;font-size:15.5px;border-radius:10px;padding:13px 22px;border:1px solid transparent}
+  .btn-primary{background:var(--teal);color:#fff}
+  .btn-primary:hover{background:var(--teal-dark)}
+  .btn-ghost{background:var(--card);color:var(--ink);border-color:var(--line)}
+  .hero-checks{list-style:none;margin:0;padding:0;display:grid;gap:9px;font-size:15px;font-weight:600}
+  .hero-checks li{display:flex;gap:10px;align-items:flex-start}
+  .tick{color:var(--teal);font-weight:800;flex:none}
+  .hero-media{position:relative}
+  .hero-media img{border-radius:18px;aspect-ratio:4/3.1;object-fit:cover;box-shadow:var(--shadow);width:100%}
+  .hero-card{position:absolute;left:16px;right:16px;bottom:16px;background:var(--card);border:1px solid var(--line);border-radius:12px;padding:14px 16px;box-shadow:var(--shadow)}
+  .hero-card b{font-size:13px;letter-spacing:.07em;text-transform:uppercase;color:var(--ink-3);display:block;margin-bottom:8px}
+  .chips{display:flex;flex-wrap:wrap;gap:6px}
+  .chips span{font-size:12.5px;font-weight:700;background:var(--teal-soft);color:var(--ink);border-radius:999px;padding:5px 10px}
+
+  /* Fact strip */
+  .facts{border-bottom:1px solid var(--line)}
+  .facts .wrap{display:grid;grid-template-columns:repeat(4,1fr);gap:0}
+  .fact{padding:20px 18px;border-left:1px solid var(--line)}
+  .fact:first-child{border-left:none;padding-left:0}
+  .fact b{display:block;font-size:19px;letter-spacing:-.01em}
+  .fact span{font-size:13.5px;color:var(--ink-2)}
+
+  section{padding:64px 0}
+  .sec-head{max-width:46em;margin-bottom:34px}
+  .sec-head.center{margin-left:auto;margin-right:auto;text-align:center}
+  .kicker{font-size:12.5px;font-weight:800;letter-spacing:.14em;text-transform:uppercase;color:var(--teal);margin:0 0 10px}
+  h2{font-size:clamp(26px,3.2vw,36px);line-height:1.18;letter-spacing:-.02em;margin:0 0 12px;font-weight:800}
+  .sec-head p{color:var(--ink-2);font-size:17px;margin:0}
+  h3{font-size:18px;margin:0 0 7px;letter-spacing:-.01em}
+  .card p,.mini p{color:var(--ink-2);font-size:15px;margin:0}
+
+  .grid-3{display:grid;grid-template-columns:repeat(3,1fr);gap:18px}
+  .grid-2{display:grid;grid-template-columns:repeat(2,1fr);gap:18px}
+  .grid-4{display:grid;grid-template-columns:repeat(4,1fr);gap:18px}
+  .card{background:var(--card);border:1px solid var(--line);border-radius:var(--radius);padding:24px}
+  .card .ic{width:44px;height:44px;border-radius:10px;background:var(--teal-soft);display:grid;place-items:center;margin-bottom:14px;color:var(--teal-dark)}
+  .card .ic svg{width:23px;height:23px}
+  .num{font-family:"Newsreader",Georgia,serif;font-size:30px;color:var(--teal);line-height:1;display:block;margin-bottom:10px}
+
+  /* Platform band */
+  .band{background:var(--bg-navy);color:#e8eefb}
+  .band .kicker{color:#4fc9c9}
+  .band .sec-head p{color:#b9c8e2}
+  .band h2{color:#fff}
+  .platform{display:grid;grid-template-columns:repeat(4,1fr);gap:14px}
+  .plat{background:var(--bg-navy-2);border:1px solid #24406e;border-radius:12px;padding:20px}
+  .plat b{display:block;font-size:16px;margin-bottom:6px;color:#fff}
+  .plat p{margin:0;font-size:14px;color:#b9c8e2}
+  .band-note{margin-top:22px;border:1px solid #24406e;border-radius:12px;padding:18px 20px;background:rgba(255,255,255,.03);font-size:15.5px;color:#d9e4f5}
+  .band-note b{color:#fff}
+
+  /* Why / pillars */
+  .pillar{display:flex;flex-direction:column;gap:0}
+  .pillar .tag{align-self:flex-start;font-size:12px;font-weight:800;letter-spacing:.08em;text-transform:uppercase;background:var(--teal-soft);border-radius:999px;padding:5px 11px;margin-bottom:14px;color:var(--ink)}
+  .fineprint{font-size:13.5px;color:var(--ink-3);margin-top:12px!important}
+
+  /* Infrastructure */
+  .infra-layout{display:grid;grid-template-columns:.92fr 1.08fr;gap:36px;align-items:start}
+  .infra-layout img{border-radius:16px;aspect-ratio:16/10.5;object-fit:cover;width:100%;box-shadow:var(--shadow)}
+  .infra-list{display:grid;grid-template-columns:1fr 1fr;gap:14px}
+  .mini{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:18px}
+  .mini h3{font-size:16px}
+  .spec{display:inline-block;margin-top:9px;font-size:12.5px;font-weight:800;color:var(--teal-dark);background:var(--teal-soft);padding:4px 9px;border-radius:6px}
+
+  /* Industries */
+  .ind-grid{display:grid;grid-template-columns:repeat(4,1fr);gap:14px}
+  .ind{border:1px solid var(--line);border-radius:12px;padding:20px;background:var(--card)}
+  .ind b{font-size:16.5px;display:block;margin-bottom:5px}
+  .ind p{margin:0;font-size:14px;color:var(--ink-2)}
+  .ind.wide{grid-column:span 2;display:grid;grid-template-columns:1fr 1fr;gap:18px;align-items:center;padding:0;overflow:hidden}
+  .ind.wide img{height:100%;min-height:190px;object-fit:cover}
+  .ind.wide .pad{padding:20px 20px 20px 0}
+
+  /* Hardware */
+  .hw-group{margin-bottom:26px}
+  .hw-group h3{font-size:15px;letter-spacing:.06em;text-transform:uppercase;color:var(--ink-2);margin-bottom:12px}
+  .hw-list{display:flex;flex-wrap:wrap;gap:10px}
+  .hw{display:flex;align-items:center;gap:10px;background:var(--card);border:1px solid var(--line);border-radius:999px;padding:10px 17px 10px 12px;font-weight:700;font-size:15px}
+  .hw i{width:30px;height:30px;border-radius:50%;background:var(--teal-soft);display:grid;place-items:center;font-style:normal;color:var(--teal-dark);flex:none}
+  .hw i svg{width:16px;height:16px}
+
+  /* Integrations */
+  .integ{display:flex;flex-wrap:wrap;gap:12px}
+  .integ div{border:1.5px solid var(--line);border-radius:12px;padding:16px 20px;font-weight:800;font-size:16.5px;background:var(--card)}
+  .integ div span{display:block;font-weight:600;font-size:13px;color:var(--ink-2);margin-top:2px}
+
+  /* Steps */
+  .steps{display:grid;grid-template-columns:repeat(3,1fr);gap:18px;counter-reset:step}
+  .step{border-top:3px solid var(--teal);padding-top:16px}
+  .step b{font-size:17px;display:block;margin-bottom:6px}
+  .step p{margin:0;color:var(--ink-2);font-size:15px}
+
+  /* FAQ */
+  .faq{max-width:820px}
+  details{border:1px solid var(--line);border-radius:12px;background:var(--card);margin-bottom:10px}
+  summary{cursor:pointer;font-weight:800;padding:16px 20px;list-style:none;display:flex;justify-content:space-between;gap:12px;align-items:center;min-height:52px}
+  summary::-webkit-details-marker{display:none}
+  summary::after{content:"+";font-size:22px;color:var(--teal);font-weight:700;flex:none}
+  details[open ] summary::after{content:"–"}
+  details .a{padding:0 20px 18px;color:var(--ink-2);font-size:15.5px}
+
+  /* Company / contact */
+  .company{display:grid;grid-template-columns:1.1fr .9fr;gap:36px;align-items:start}
+  .legal{border:1px solid var(--line);border-radius:14px;overflow:hidden;background:var(--card)}
+  .legal table{width:100%;border-collapse:collapse;font-size:15px}
+  .legal th,.legal td{text-align:left;padding:13px 18px;border-bottom:1px solid var(--line);vertical-align:top}
+  .legal tr:last-child th,.legal tr:last-child td{border-bottom:none}
+  .legal th{width:38%;color:var(--ink-2);font-weight:700;background:var(--bg-soft)}
+  .contact-actions{display:flex;gap:12px;flex-wrap:wrap;margin-top:18px}
+
+  footer{background:var(--bg-navy);color:#b9c8e2;padding:46px 0 30px;font-size:14.5px}
+  footer .cols{display:grid;grid-template-columns:1.4fr 1fr 1fr;gap:30px;margin-bottom:30px}
+  footer b{color:#fff}
+  footer a{color:#d9e4f5;text-decoration:none}
+  footer ul{list-style:none;margin:8px 0 0;padding:0;display:grid;gap:7px}
+  .foot-legal{border-top:1px solid #24406e;padding-top:18px;display:flex;justify-content:space-between;gap:14px;flex-wrap:wrap;font-size:13px;color:#8498bc}
+  .staging-note{background:#fff7e8;border:1px solid #ecd9ac;color:#5c4712;font-size:14px}
+  @media (prefers-color-scheme: dark){ .staging-note{background:#2c2410;border-color:#5c4a1e;color:#ecd9ac} }
+  .staging-note .wrap{padding-top:11px;padding-bottom:11px}
+
+  @media (max-width: 960px){
+    .hero-grid{grid-template-columns:1fr;padding:40px 0 44px}
+    .facts .wrap{grid-template-columns:1fr 1fr}
+    .fact{border-left:none;padding-left:0}
+    .grid-3,.grid-4,.platform,.steps{grid-template-columns:1fr 1fr}
+    .ind-grid{grid-template-columns:1fr 1fr}
+    .infra-layout,.company{grid-template-columns:1fr}
+    footer .cols{grid-template-columns:1fr 1fr}
+  }
+  @media (max-width: 680px){
+    nav.main{display:none;position:absolute;top:100%;left:0;right:0;background:var(--nav-bg);border-bottom:1px solid var(--line);flex-direction:column;align-items:stretch;padding:10px 16px 16px;gap:2px}
+    nav.main.open{display:flex}
+    nav.main a{padding:12px}
+    .navcta{margin:8px 0 0;text-align:center}
+    .burger{display:grid;place-items:center}
+    header.site .wrap{position:relative}
+    .grid-3,.grid-2,.grid-4,.platform,.steps,.ind-grid,.infra-list{grid-template-columns:1fr}
+    .ind.wide{grid-column:span 1;grid-template-columns:1fr}
+    .ind.wide .pad{padding:0 20px 20px}
+    .facts .wrap{grid-template-columns:1fr}
+    section{padding:46px 0}
+    footer .cols{grid-template-columns:1fr}
+    .util .u-right{display:none}
+  }
+</style>
 </head>
 <body>
-<a class="screen-reader-text" href="#main-content">Skip to content</a>
 
-<header class="site-header">
-	<div class="container header-inner">
-		<div class="site-branding">
-			<a class="site-logo" href="/" rel="home"><img class="site-logo-img" src="/assets/images/rezein-logo.jpg" alt="Rezein"></a>
-		</div>
-		<button class="nav-toggle" type="button" aria-expanded="false" aria-controls="primary-navigation">
-			<span class="nav-toggle-bar"></span>
-			<span class="nav-toggle-bar"></span>
-			<span class="nav-toggle-bar"></span>
-			<span class="screen-reader-text">Menu</span>
-		</button>
-		<nav id="primary-navigation" class="site-nav" aria-label="Primary">
-			<ul class="nav-list"><li class="current-menu-item"><a href="/">Home</a></li><li><a href="/about-us/">About Us</a></li><li><a href="/solutions/">Solutions</a></li><li><a href="/industries/">Industries</a></li><li><a href="/contact/">Contact</a></li></ul>
-			<a class="btn btn-nav" href="/contact/">Talk to Us</a>
-		</nav>
-	</div>
+<div class="util">
+  <div class="wrap">
+    <div>Singapore &nbsp;·&nbsp; Connected commerce &amp; operations platform</div>
+    <div class="u-right">
+      <span>REZEIN PTE. LTD. · UEN 202652620G</span>
+      <a href="tel:+6597628423">+65 9762 8423</a>
+    </div>
+  </div>
+</div>
+
+<header class="site">
+  <div class="wrap">
+    <div class="nav">
+      <a class="brand" href="#top" aria-label="Rezein home">
+        <picture>
+          <source media="(prefers-color-scheme: dark)" srcset="/assets/images/logo-dark.png" />
+          <img class="brand-logo" src="/assets/images/logo.png" alt="Rezein" width="800" height="226" />
+        </picture>
+      </a>
+      <button class="burger" id="burger" aria-label="Open menu" aria-expanded="false">☰</button>
+      <nav class="main" id="mainnav" aria-label="Main navigation">
+        <a href="#platform">Platform</a>
+        <a href="#solutions">Solutions</a>
+        <a href="#infrastructure">Infrastructure</a>
+        <a href="#industries">Industries</a>
+        <a href="#hardware">Hardware</a>
+        <a href="#company">Company</a>
+        <a class="navcta" href="#contact">Talk to us</a>
+      </nav>
+    </div>
+  </div>
 </header>
 
-<main id="main-content" class="site-main">
-<section class="hero">
-	<div class="container">
-		<p class="eyebrow">Rezein Pte Ltd &middot; Singapore</p>
-		<h1>One Connected Platform for Every Customer-Facing Business</h1>
-		<p class="hero-lead">Rezein brings point of sale, online ordering, self-service kiosks, procurement, workforce optimisation, analytics and integrations together in a single platform — supported by the infrastructure services behind the counter, so the full in-store technology stack is covered.</p>
-		<p class="hero-lead">A platform, not an ERP. Rezein connects with the accounting and third-party software your business already uses.</p>
-		<div class="hero-actions">
-			<a class="btn btn-primary" href="/solutions/">Explore Solutions</a>
-			<a class="btn btn-outline" href="/contact/">Talk to Us</a>
-		</div>
-	</div>
-</section>
+<main id="top">
 
-<section class="section">
-	<div class="container">
-		<h2 class="section-title">Why Businesses Choose Rezein</h2>
-		<div class="grid grid-3">
-			<article class="card">
-				<h3>AI-Powered Support &amp; Change Requests</h3>
-				<p>Rezein uses AI agents extensively to handle routine support and change requests. That keeps response times fast and operations lean — without the need for a large support team — while human specialists step in whenever a request needs escalation.</p>
-			</article>
-			<article class="card">
-				<h3>Hardware-Agnostic</h3>
-				<p>There is no forced hardware purchase. Rezein runs on the hardware your business already owns, so existing terminals, tablets and printers can be recycled and kept in service instead of being replaced.</p>
-			</article>
-			<article class="card">
-				<h3>PayNow Direct, at the Lowest Cost</h3>
-				<p>PayNow payments go direct to the merchant&rsquo;s own bank account, at the lowest cost in the market. Card payments are accepted via partner gateways, so merchants keep a choice of providers.</p>
-			</article>
-		</div>
-	</div>
-</section>
+  <!-- HERO -->
+  <div class="hero">
+    <div class="wrap hero-grid">
+      <div>
+        <span class="hero-eyebrow"><i></i> Singapore · For F&amp;B, retail &amp; service businesses</span>
+        <h1>One platform to run the business — <em>online, in-store, and behind the counter.</em></h1>
+        <p class="lede">Rezein connects ordering, point of sale, procurement, people and data in a single platform — and looks after the in-store technology underneath it, from CCTV and Wi-Fi to servers.</p>
+        <div class="hero-ctas">
+          <a class="btn btn-primary" href="#solutions">Explore the platform</a>
+          <a class="btn btn-ghost" href="#company">Company information</a>
+        </div>
+        <ul class="hero-checks">
+          <li><span class="tick">✓</span> Runs on the hardware you already own — no forced hardware purchase</li>
+          <li><span class="tick">✓</span> PayNow paid direct to your own bank account, at the lowest cost in the market</li>
+          <li><span class="tick">✓</span> AI-assisted support and change requests, handled without a large support queue</li>
+        </ul>
+      </div>
+      <div class="hero-media">
+        <img src="/assets/images/hero-kiosk.jpg" alt="Self-service ordering kiosks on the counter of a bright, modern quick-service restaurant in Singapore" />
+        <div class="hero-card">
+          <b>The Rezein platform</b>
+          <div class="chips">
+            <span>Online Ordering</span><span>Kiosk</span><span>Point of Sale</span><span>Procurement</span><span>Workforce</span><span>Analytics</span><span>Integrations</span>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
 
-<section class="section section-alt">
-	<div class="container">
-		<h2 class="section-title">Our Solutions</h2>
-		<p class="section-intro">Software solutions that work together on one platform — for a single outlet or across multiple locations.</p>
-		<div class="grid grid-3">
-			<article class="card"><h3>Online Ordering System</h3><p>Branded online ordering that connects directly to your operations — no separate system to reconcile.</p></article>
-			<article class="card"><h3>Self-Service Kiosk</h3><p>Self-service ordering kiosks that reduce queues and free staff for service.</p></article>
-			<article class="card"><h3>Point of Sale System</h3><p>A fast, reliable point of sale for quick service, table service and retail counters.</p></article>
-			<article class="card"><h3>Procurement System</h3><p>Ordering, goods receiving and supplier management connected to your stock and sales.</p></article>
-			<article class="card"><h3>Workforce Optimisation System</h3><p>Rostering and workforce tools that help managers deploy the right team at the right time.</p></article>
-			<article class="card"><h3>Analytics &amp; Data Mining</h3><p>Sales, product and customer analytics that turn daily trading data into decisions.</p></article>
-			<article class="card"><h3>Integrations</h3><p>Integration with accounting software and third-party software, including delivery platforms such as GrabFood and Foodpanda.</p></article>
-		</div>
-		<p class="section-more"><a class="btn btn-primary" href="/solutions/">View All Solutions</a></p>
-	</div>
-</section>
+  <!-- FACTS -->
+  <div class="facts" aria-label="Company facts">
+    <div class="wrap">
+      <div class="fact"><b>REZEIN PTE. LTD.</b><span>Registered in Singapore · UEN 202652620G</span></div>
+      <div class="fact"><b>7 solutions, 1 platform</b><span>Ordering to analytics, connected — not separate systems</span></div>
+      <div class="fact"><b>7 industries served</b><span>F&amp;B, retail &amp; grocery, beauty, spa, entertainment, logistics</span></div>
+      <div class="fact"><b>Platform, not an ERP</b><span>We connect to your accounting and third-party software</span></div>
+    </div>
+  </div>
 
-<section class="section">
-	<div class="container">
-		<h2 class="section-title">Infrastructure Services</h2>
-		<p class="section-intro">Rezein covers the full in-store technology stack, not just software. Alongside our platform, we provide the infrastructure that keeps an outlet connected, secure and running:</p>
-		<ul class="tick-list tick-list-2col">
-			<li>CCTV surveillance systems</li>
-			<li>Wi-Fi networks</li>
-			<li>Broadband connectivity</li>
-			<li>Firewall &amp; network security</li>
-			<li>VPN</li>
-			<li>Server setup &amp; support</li>
-		</ul>
-		<p class="section-more"><a href="/solutions/">More about Infrastructure Services &rarr;</a></p>
-	</div>
-</section>
+  <!-- ABOUT -->
+  <section id="about">
+    <div class="wrap">
+      <div class="sec-head">
+        <p class="kicker">About Rezein</p>
+        <h2>A connected platform for businesses that serve customers every day</h2>
+        <p>Rezein Pte. Ltd. is a Singapore technology company. We provide a single operating platform for restaurants, retailers and service businesses — covering how customers order and pay, how stock is bought and received, how teams are scheduled, and how owners see performance. Alongside the software, we supply and support the in-store infrastructure it runs on, so one partner is accountable for the whole setup.</p>
+      </div>
+      <div class="grid-3">
+        <div class="card"><span class="num">01</span><h3>Built for the counter, not the boardroom</h3><p>Every module is designed around daily operations — taking orders, receiving goods, rostering staff — so frontline teams can use it with minimal training.</p></div>
+        <div class="card"><span class="num">02</span><h3>Lean by design, with AI assistance</h3><p>We use AI agents extensively to automate support handling and routine change requests. That keeps our team lean and response times short, without a large traditional support organisation.</p></div>
+        <div class="card"><span class="num">03</span><h3>Open and platform-agnostic</h3><p>Rezein runs on a wide range of existing hardware and connects to accounting and third-party software. Businesses keep the tools and equipment that already work for them.</p></div>
+      </div>
+    </div>
+  </section>
 
-<section class="section section-alt">
-	<div class="container">
-		<h2 class="section-title">Industries We Serve</h2>
-		<div class="grid grid-3">
-			<article class="card"><h3>QSR</h3><p>Quick service restaurants that need speed at the counter, kiosk and online.</p></article>
-			<article class="card"><h3>Table Service Restaurants</h3><p>Full-service dining, from table ordering to billing.</p></article>
-			<article class="card"><h3>Retail &amp; Grocery</h3><p>Shops, mini-marts and grocery stores managing stock and suppliers daily.</p></article>
-			<article class="card"><h3>Beauty Salons</h3><p>Salons managing appointments, services and repeat customers.</p></article>
-			<article class="card"><h3>Spa &amp; Services</h3><p>Spa and service businesses that run on bookings and packages.</p></article>
-			<article class="card"><h3>Entertainment</h3><p>Entertainment venues with high-volume, time-sensitive sales.</p></article>
-			<article class="card"><h3>Logistics</h3><p>Logistics operations that need connected, trackable workflows.</p></article>
-		</div>
-		<p class="section-more"><a class="btn btn-primary" href="/industries/">View Industries</a></p>
-	</div>
-</section>
+  <!-- PLATFORM BAND -->
+  <section class="band" id="platform" style="padding-top:64px;padding-bottom:64px">
+    <div class="wrap">
+      <div class="sec-head">
+        <p class="kicker">The platform</p>
+        <h2>One headquarters platform. Every outlet connected.</h2>
+        <p>Menus, prices, products, promotions and reports are managed centrally and pushed to every channel and outlet — so a change is made once, and takes effect everywhere.</p>
+      </div>
+      <div class="platform">
+        <div class="plat"><b>Central control</b><p>One place to manage menus, price books, products, members and promotions across outlets and channels.</p></div>
+        <div class="plat"><b>Every sales channel</b><p>Counter POS, self-service kiosk, online ordering and delivery platforms feed into the same orders and reports.</p></div>
+        <div class="plat"><b>Operations underneath</b><p>Procurement, goods receiving, workforce scheduling and stock sit on the same data as sales — no re-keying.</p></div>
+        <div class="plat"><b>Data that answers back</b><p>Analytics and data mining across sales, stock and labour, so owners can see what is working, outlet by outlet.</p></div>
+      </div>
+      <div class="band-note"><b>A platform, not an ERP.</b> Rezein focuses on commerce and store operations, and integrates with your accounting software and other third-party systems — rather than asking you to replace them.</div>
+    </div>
+  </section>
 
-<section class="cta-band">
-	<div class="container">
-		<h2>Talk to Rezein About Your Business</h2>
-		<p>Call us on <a href="tel:+6597628423">+65 9762 8423</a> or send an enquiry through our contact page.</p>
-		<a class="btn btn-light" href="/contact/">Contact Us</a>
-	</div>
-</section>
+  <!-- SOLUTIONS -->
+  <section id="solutions">
+    <div class="wrap">
+      <div class="sec-head">
+        <p class="kicker">Solutions</p>
+        <h2>Everything a store needs to sell, serve and restock</h2>
+        <p>Start with the modules you need today. Each one works on its own and works better together, on shared products, prices and customer data.</p>
+      </div>
+      <div class="grid-4">
+        <div class="card"><div class="ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><circle cx="9" cy="20" r="1.6"/><circle cx="17" cy="20" r="1.6"/><path d="M3 4h2l2.4 11h10.4l2.2-8H7"/></svg></div><h3>Online Ordering</h3><p>Your own branded ordering channel for pickup and delivery — orders flow straight into the same queue as walk-in sales.</p></div>
+        <div class="card"><div class="ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><rect x="6" y="3" width="12" height="18" rx="2"/><path d="M10 7h4M10 17h.01"/></svg></div><h3>Self-Service Kiosk</h3><p>Customers browse, customise and pay at the kiosk, shortening queues and freeing staff for preparation and service.</p></div>
+        <div class="card"><div class="ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><rect x="3" y="4" width="18" height="12" rx="2"/><path d="M8 20h8M9 9h6M9 12.5h4"/></svg></div><h3>Point of Sale</h3><p>A fast, reliable POS for counter, table service and retail — with member pricing, promotions and multiple price books per channel.</p></div>
+        <div class="card"><div class="ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M4 7h13l3 5h-13zM4 7v10h3M17 7v10h-3"/><circle cx="8.5" cy="17.5" r="1.6"/><circle cx="15.5" cy="17.5" r="1.6"/></svg></div><h3>Procurement</h3><p>Ordering, delivery and goods receiving in one flow — delivered quantities matched to invoices before stock is updated.</p></div>
+        <div class="card"><div class="ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><circle cx="9" cy="8" r="3.2"/><path d="M3.5 20c.6-3.2 2.8-5 5.5-5s4.9 1.8 5.5 5M16 5.5a3.2 3.2 0 0 1 0 5.8M17.5 15.3c1.7.7 2.7 2.2 3 4.7"/></svg></div><h3>Workforce Optimisation</h3><p>Scheduling, attendance and labour cost visibility, matched against sales patterns so outlets are staffed for demand — not guesswork.</p></div>
+        <div class="card"><div class="ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M4 20V10M10 20V4M16 20v-8M21 20H3"/></svg></div><h3>Analytics &amp; Data Mining</h3><p>Sales, product, member and operations reporting across outlets — including customer lifecycle and repeat-visit insight.</p></div>
+        <div class="card"><div class="ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M9 7H6a3 3 0 0 0 0 6h3M15 7h3a3 3 0 0 1 0 6h-3M8 10h8"/></svg></div><h3>Integrations</h3><p>Connections to accounting software and third-party systems, plus delivery platforms — so data moves automatically between the tools you use.</p></div>
+        <div class="card"><div class="ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><rect x="4" y="4" width="16" height="16" rx="3"/><path d="M12 8v8M8 12h8"/></svg></div><h3>Payments — PayNow direct</h3><p>Accept PayNow direct to your own bank account, at the lowest cost in the market. Card payments are supported through gateway partners.</p></div>
+      </div>
+    </div>
+  </section>
+
+  <!-- WHY REZEIN -->
+  <section style="background:var(--bg-soft);border-top:1px solid var(--line);border-bottom:1px solid var(--line)">
+    <div class="wrap">
+      <div class="sec-head">
+        <p class="kicker">Why Rezein</p>
+        <h2>Three advantages that lower the cost of running the business</h2>
+      </div>
+      <div class="grid-3">
+        <div class="card pillar"><span class="tag">AI-assisted operations</span><h3>Support without the big support team</h3><p>AI agents handle a large share of support enquiries and routine change requests for us — triaging, resolving common issues and preparing changes for review. Customers get faster responses, and we operate with a lean team whose cost is not passed on in heavy support fees.</p></div>
+        <div class="card pillar"><span class="tag">Hardware-agnostic</span><h3>Keep the hardware you already have</h3><p>Rezein is platform-agnostic. Our software runs on a wide range of existing POS terminals, tablets, kiosks and printers, so most businesses can reuse their current equipment instead of buying a new hardware bundle to switch platforms.</p><p class="fineprint">See <a href="#hardware">Supported Hardware</a> for examples of equipment Rezein runs on.</p></div>
+        <div class="card pillar"><span class="tag">PayNow advantage</span><h3>PayNow at the lowest cost in the market</h3><p>With PayNow, payment goes direct to the merchant's own bank account — no intermediary holding your funds. We offer PayNow acceptance at the lowest cost a merchant can find in the market.</p><p class="fineprint">This lowest-cost commitment applies to PayNow. Card transaction rates are set by the payment gateway and are not guaranteed by Rezein.</p></div>
+      </div>
+    </div>
+  </section>
+
+  <!-- INFRASTRUCTURE -->
+  <section id="infrastructure">
+    <div class="wrap">
+      <div class="sec-head">
+        <p class="kicker">Infrastructure services</p>
+        <h2>The full in-store technology stack, under one roof</h2>
+        <p>Software is only half of a working store. Rezein also designs, installs and supports the physical infrastructure in-store — so CCTV, connectivity, network security and servers are set up to work with the platform from day one.</p>
+      </div>
+      <div class="infra-layout">
+        <div>
+          <img src="/assets/images/infrastructure.jpg" alt="Technician connecting network cables in a server rack" />
+          <div class="card" style="margin-top:16px"><h3>One accountable partner</h3><p>When the network, cameras and POS are supplied by different vendors, problems fall between them. With Rezein covering both the platform and the infrastructure, there is one point of accountability for the whole in-store setup.</p></div>
+        </div>
+        <div class="infra-list">
+          <div class="mini"><h3>CCTV surveillance</h3><p>Store surveillance designed for retail and F&amp;B environments, with clear coverage of counters, entrances and stock areas.</p><span class="spec">5MP cameras · Full-colour night vision</span><p style="margin-top:9px">Multi-channel network video recorders (NVR) supporting multiple hard drives, for longer retention and reliable playback.</p></div>
+          <div class="mini"><h3>Wi-Fi networks</h3><p>Business-grade wireless for POS, kiosks, staff devices and guest access — planned for coverage across the whole premises, without dead zones at the counter.</p></div>
+          <div class="mini"><h3>Broadband connectivity</h3><p>Business broadband setup and coordination, sized for ordering, payments and cloud reporting — with failover options for outlets that cannot afford downtime.</p></div>
+          <div class="mini"><h3>Firewall &amp; network security</h3><p>Firewalls and segmented networks that separate payment and POS traffic from guest Wi-Fi, with managed rules and updates.</p></div>
+          <div class="mini"><h3>VPN</h3><p>Secure remote access and site-to-site VPN connections, so headquarters and support can reach outlet systems safely without exposing them to the open internet.</p></div>
+          <div class="mini"><h3>Servers</h3><p>On-premise and hosted servers for outlets and headquarters that need local resilience or centralised systems.</p><span class="spec">Virtualisation · Disaster recovery · High availability</span></div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- INDUSTRIES -->
+  <section id="industries" style="background:var(--bg-soft);border-top:1px solid var(--line);border-bottom:1px solid var(--line)">
+    <div class="wrap">
+      <div class="sec-head">
+        <p class="kicker">Industries</p>
+        <h2>Built for businesses that serve, sell and move goods daily</h2>
+        <p>The same platform core, configured for how each industry actually operates — service mode, price books and workflows are set per outlet.</p>
+      </div>
+      <div class="ind-grid">
+        <div class="ind wide"><img src="/assets/images/hero-kiosk.jpg" alt="Quick-service restaurant with self-service ordering kiosks" /><div class="pad"><b>Quick Service Restaurants (QSR)</b><p>Counter POS, kiosks and online ordering with queue numbers and fast throughput at peak hours.</p></div></div>
+        <div class="ind"><b>Table Service Restaurants</b><p>Table ordering, shared tabs and bill management for full-service dining.</p></div>
+        <div class="ind"><b>Entertainment</b><p>Ticketing-adjacent F&amp;B and retail operations for venues and attractions.</p></div>
+        <div class="ind wide"><img src="/assets/images/retail.jpg" alt="Customers shopping in a modern grocery store with fresh produce aisles" /><div class="pad"><b>Retail &amp; Grocery</b><p>Barcode-based POS, label printing, procurement and goods receiving for stores that restock daily.</p></div></div>
+        <div class="ind"><b>Beauty Salons</b><p>Appointments-adjacent sales, packages, member credit and repeat-visit tracking.</p></div>
+        <div class="ind"><b>Spa &amp; Services</b><p>Service businesses that combine bookings, packages and retail product sales.</p></div>
+        <div class="ind"><b>Logistics</b><p>Operations, workforce and data tools for businesses moving and handling goods.</p></div>
+        <div class="ind"><b>Multi-outlet groups</b><p>Central menus, pricing and reporting across brands and locations, from one headquarters view.</p></div>
+      </div>
+    </div>
+  </section>
+
+  <!-- HARDWARE -->
+  <section id="hardware">
+    <div class="wrap">
+      <div class="sec-head">
+        <p class="kicker">Supported hardware</p>
+        <h2>Rezein runs on the hardware businesses already own</h2>
+        <p>There is no forced hardware bundle. The devices below are examples of the wide range of equipment Rezein runs on today — if your store already uses equipment like this, in most cases it can be reused when you move to Rezein.</p>
+      </div>
+      <div class="hw-group">
+        <h3>POS &amp; ordering terminals</h3>
+        <div class="hw-list">
+          <span class="hw"><i><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="5" width="12" height="10" rx="1.5"/><rect x="16" y="7" width="5" height="8" rx="1.5"/></svg></i>Dual-screen Android POS terminals</span>
+          <span class="hw"><i><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="5" y="3" width="14" height="18" rx="2"/></svg></i>iPad</span>
+          <span class="hw"><i><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="4" y="5" width="16" height="14" rx="2"/></svg></i>Android tablets</span>
+        </div>
+      </div>
+      <div class="hw-group">
+        <h3>Kiosks &amp; handhelds</h3>
+        <div class="hw-list">
+          <span class="hw"><i><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="7" y="3" width="10" height="18" rx="1.5"/></svg></i>Castor kiosk</span>
+          <span class="hw"><i><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="7" y="3" width="10" height="18" rx="1.5"/></svg></i>Sunmi kiosk terminals</span>
+          <span class="hw"><i><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="8" y="2.5" width="8" height="19" rx="2"/></svg></i>Sunmi handheld terminals</span>
+        </div>
+      </div>
+      <div class="hw-group">
+        <h3>Printers</h3>
+        <div class="hw-list">
+          <span class="hw"><i><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M6 9V4h12v5M6 18H4V9h16v9h-2M6 14h12v7H6z"/></svg></i>Zebra label printers</span>
+          <span class="hw"><i><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M6 9V4h12v5M6 18H4V9h16v9h-2M6 14h12v7H6z"/></svg></i>Epson receipt printers</span>
+          <span class="hw"><i><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M6 9V4h12v5M6 18H4V9h16v9h-2M6 14h12v7H6z"/></svg></i>Rongta receipt printers</span>
+        </div>
+      </div>
+      <div class="card" style="background:var(--teal-soft);border-color:transparent"><h3>Not sure about your current equipment?</h3><p style="color:var(--ink-2)">Talk to us with your current terminal, tablet and printer models — we will confirm what can be reused before you commit to anything new.</p></div>
+    </div>
+  </section>
+
+  <!-- INTEGRATIONS -->
+  <section style="padding-top:0">
+    <div class="wrap">
+      <div class="sec-head">
+        <p class="kicker">Integrations</p>
+        <h2>Connected to the platforms your customers and accounts team already use</h2>
+      </div>
+      <div class="integ">
+        <div>GrabFood<span>Delivery platform integration</span></div>
+        <div>Foodpanda<span>Delivery platform integration</span></div>
+        <div>Accounting software<span>Sales and payment data to your accounts</span></div>
+        <div>Third-party software<span>Open integration to other business systems</span></div>
+        <div>PayNow<span>Direct to the merchant's bank account</span></div>
+      </div>
+    </div>
+  </section>
+
+  <!-- HOW IT WORKS -->
+  <section style="background:var(--bg-soft);border-top:1px solid var(--line);border-bottom:1px solid var(--line)">
+    <div class="wrap">
+      <div class="sec-head"><p class="kicker">Getting started</p><h2>From existing setup to running on Rezein, in three steps</h2></div>
+      <div class="steps">
+        <div class="step"><b>1 — Assess what you already have</b><p>We review your current hardware, network and software. Equipment that can be reused, is reused — including terminals, tablets and printers.</p></div>
+        <div class="step"><b>2 — Connect the platform &amp; infrastructure</b><p>We configure the modules you need, set up pricing and products, and install or verify CCTV, Wi-Fi, network security and servers where required.</p></div>
+        <div class="step"><b>3 — Operate, measure, optimise</b><p>Trade on one connected system, with analytics across outlets and AI-assisted support for day-to-day questions and change requests.</p></div>
+      </div>
+    </div>
+  </section>
+
+  <!-- FAQ -->
+  <section>
+    <div class="wrap">
+      <div class="sec-head"><p class="kicker">Common questions</p><h2>Answers, before you ask</h2></div>
+      <div class="faq">
+        <details><summary>Is Rezein an ERP system?</summary><div class="a">No. Rezein is a commerce and operations platform covering ordering, POS, procurement, workforce and analytics. It integrates with accounting software and other third-party systems rather than replacing them as an ERP would.</div></details>
+        <details><summary>Do we need to buy new hardware to use Rezein?</summary><div class="a">In most cases, no. Rezein is hardware-agnostic and runs on a wide range of existing equipment — including dual-screen Android POS terminals, iPad and Android tablets, Castor and Sunmi kiosks, Sunmi handhelds, and Zebra, Epson and Rongta printers. We confirm reuse for your exact models during the initial assessment.</div></details>
+        <details><summary>What does the PayNow lowest-cost commitment cover?</summary><div class="a">It covers PayNow acceptance, where payment is made direct to the merchant's own bank account. We offer PayNow at the lowest cost a merchant can find in the market. Card payments are processed through payment gateways; their rates are set by the gateway, so Rezein does not guarantee card rates.</div></details>
+        <details><summary>Can Rezein look after our store's CCTV and network as well?</summary><div class="a">Yes. Our infrastructure services cover CCTV surveillance (5-megapixel cameras with full-colour night vision and multi-channel NVRs supporting multiple hard drives), Wi-Fi, broadband, firewall and network security, VPN, and servers — including virtualisation, disaster recovery and high-availability setups.</div></details>
+        <details><summary>Which delivery platforms does Rezein integrate with?</summary><div class="a">Rezein integrates with GrabFood and Foodpanda, alongside accounting software and other third-party systems, so delivery orders and financial data flow into the same platform as in-store sales.</div></details>
+      </div>
+    </div>
+  </section>
+
+  <!-- COMPANY / CONTACT -->
+  <section id="company" style="background:var(--bg-soft);border-top:1px solid var(--line)">
+    <div class="wrap">
+      <div class="sec-head">
+        <p class="kicker">Company &amp; contact</p>
+        <h2>REZEIN PTE. LTD. — Singapore</h2>
+        <p>Company information as registered, for customers, partners and financial institutions.</p>
+      </div>
+      <div class="company" id="contact">
+        <div class="legal">
+          <table>
+            <tr><th>Company name</th><td><strong>REZEIN PTE. LTD.</strong></td></tr>
+            <tr><th>UEN</th><td>202652620G</td></tr>
+            <tr><th>Registered address</th><td>Blk 20 Eunos Crescent #09-2959,<br />Singapore 400020</td></tr>
+            <tr><th>Contact number</th><td><a href="tel:+6597628423">+65 9762 8423</a></td></tr>
+            <tr><th>Website</th><td>rezein.com</td></tr>
+            <tr><th>Business</th><td>Connected commerce &amp; operations platform; in-store technology infrastructure services</td></tr>
+          </table>
+        </div>
+        <div>
+          <h3 style="font-size:20px">Talk to us</h3>
+          <p style="color:var(--ink-2);margin-top:0">For platform enquiries, infrastructure services, or partnership discussions, call us and we will arrange a walkthrough based on your current setup — including what hardware you can keep.</p>
+          <div class="contact-actions">
+            <a class="btn btn-primary" href="tel:+6597628423">Call +65 9762 8423</a>
+            <a class="btn btn-ghost" href="#solutions">View solutions</a>
+          </div>
+          <p style="color:var(--ink-3);font-size:14px;margin-top:16px">Registered address: Blk 20 Eunos Crescent #09-2959, Singapore 400020.</p>
+        </div>
+      </div>
+    </div>
+  </section>
 
 </main>
 
-<footer class="site-footer">
-	<div class="container footer-grid">
-		<div class="footer-col footer-about">
-			<img class="footer-logo-img" src="/assets/images/rezein-logo.jpg" alt="Rezein">
-			<p>One connected platform for customer-facing businesses — point of sale, online ordering, self-service kiosks, procurement, workforce optimisation, analytics and integrations.</p>
-		</div>
-		<div class="footer-col">
-			<h3 class="footer-heading">Explore</h3>
-			<ul class="footer-list"><li><a href="/">Home</a></li><li><a href="/about-us/">About Us</a></li><li><a href="/solutions/">Solutions</a></li><li><a href="/industries/">Industries</a></li><li><a href="/contact/">Contact</a></li></ul>
-		</div>
-		<div class="footer-col">
-			<h3 class="footer-heading">Company</h3>
-			<ul class="footer-list">
-				<li>Rezein Pte Ltd</li>
-				<li>UEN: 202652620G</li>
-				<li><a href="/privacy-policy/">Privacy Policy</a></li>
-			</ul>
-		</div>
-		<div class="footer-col">
-			<h3 class="footer-heading">Contact</h3>
-			<ul class="footer-list">
-				<li>Blk 20 Eunos Crescent #09-2959, Singapore 400020</li>
-				<li><a href="tel:+6597628423">+65 9762 8423</a></li>
-			</ul>
-		</div>
-	</div>
-	<div class="footer-bottom">
-		<div class="container">
-			<p>&copy; <span id="yr">2026</span> Rezein Pte Ltd (UEN: 202652620G). All rights reserved.</p>
-			<p class="footer-address">Registered address: Blk 20 Eunos Crescent #09-2959, Singapore 400020 &middot; Tel: +65 9762 8423</p>
-		</div>
-	</div>
+<footer>
+  <div class="wrap">
+    <div class="cols">
+      <div>
+        <img class="foot-logo" src="/assets/images/logo-dark.png" alt="Rezein" width="800" height="226" />
+        <p style="margin:10px 0 0;max-width:32em">Connected commerce and operations platform for F&amp;B, retail and service businesses — plus the in-store infrastructure it runs on.</p>
+      </div>
+      <div><b>Platform</b><ul>
+        <li><a href="#solutions">Online Ordering</a></li>
+        <li><a href="#solutions">Kiosk &amp; Point of Sale</a></li>
+        <li><a href="#solutions">Procurement</a></li>
+        <li><a href="#infrastructure">Infrastructure Services</a></li>
+        <li><a href="#hardware">Supported Hardware</a></li>
+      </ul></div>
+      <div><b>Company</b><ul>
+        <li><a href="#about">About Rezein</a></li>
+        <li><a href="#industries">Industries</a></li>
+        <li><a href="#company">Company Information</a></li>
+        <li><a href="tel:+6597628423">+65 9762 8423</a></li>
+        <li><a href="/privacy-policy/">Privacy Policy</a></li>
+      </ul></div>
+    </div>
+    <div class="foot-legal">
+      <span>© 2026 REZEIN PTE. LTD. · UEN 202652620G · Blk 20 Eunos Crescent #09-2959, Singapore 400020</span>
+      <span>rezein.com</span>
+    </div>
+  </div>
 </footer>
 
-<script src="/assets/js/main.js"></script>
+<script>
+  (function(){
+    var burger = document.getElementById('burger');
+    var nav = document.getElementById('mainnav');
+    burger.addEventListener('click', function(){
+      var open = nav.classList.toggle('open');
+      burger.setAttribute('aria-expanded', open ? 'true' : 'false');
+      burger.textContent = open ? '✕' : '☰';
+    });
+    nav.addEventListener('click', function(e){
+      if (e.target.tagName === 'A' && nav.classList.contains('open')) {
+        nav.classList.remove('open');
+        burger.setAttribute('aria-expanded','false');
+        burger.textContent = '☰';
+      }
+    });
+  })();
+</script>
 </body>
 </html>
