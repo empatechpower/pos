@@ -70,3 +70,18 @@ describe("a typical time set by the merchant", () => {
     expect(queueView([...hist, mine], mine, config, NOW, 30)!.etaMinutes).toBe(4);
   });
 });
+
+import { newlyReady, spokenNumber } from "../src/index.js";
+
+describe("queue board announcements", () => {
+  const ready = [{ orderId: "a", queueNumber: "34567A" }, { orderId: "b", queueNumber: "W001" }, { orderId: "c" }];
+  it("announces only the orders that were not on the Ready list before", () => {
+    expect(newlyReady(new Set(["a"]), ready)).toEqual(["W001"]);
+    expect(newlyReady(new Set(), ready)).toEqual(["34567A", "W001"]); // (an order with no number cannot be announced)
+    expect(newlyReady(new Set(["a", "b", "c"]), ready)).toEqual([]);
+  });
+  it("says a collection number one character at a time", () => {
+    expect(spokenNumber("34567A")).toBe("3 4 5 6 7 A");
+    expect(spokenNumber("W001")).toBe("W 0 0 1");
+  });
+});

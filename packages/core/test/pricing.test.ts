@@ -80,10 +80,11 @@ describe("coupons", () => {
 
 describe("points (100 points = S$1)", () => {
   it("redeem-all uses the whole deductible base, never below zero", () => {
+    // The deposit is refundable cash, never payable in points (handover 12.2): the S$7.34 bag has 7.24 of items + service, and the 10c deposit stays to pay.
     const r = priceOrder({ lines: bag, fulfilment: "dine_in", points: { balance: 6800, requested: null } });
-    expect(r.pointsUsed).toBe(734);
-    expect(r.pointsDiscount).toBe(734);
-    expect(r.total).toBe(0);
+    expect(r.pointsUsed).toBe(724);
+    expect(r.pointsDiscount).toBe(724);
+    expect(r.total).toBe(10);
   });
 
   it("a S$39.30 deductible base means max 3,930 points, not the 6,800 balance", () => {
@@ -101,7 +102,7 @@ describe("points (100 points = S$1)", () => {
     const low = priceOrder({ lines: bag, fulfilment: "dine_in", points: { balance: 6800, requested: 300 } });
     expect(low.pointsUsed).toBe(300);
     const high = priceOrder({ lines: bag, fulfilment: "dine_in", points: { balance: 6800, requested: 99999 } });
-    expect(high.pointsUsed).toBe(734);
+    expect(high.pointsUsed).toBe(724); // items + service; the deposit is not payable in points
   });
 
   it("deposit toggle off leaves the deposit payable", () => {
@@ -109,6 +110,13 @@ describe("points (100 points = S$1)", () => {
     const r = priceOrder({ lines: bag, fulfilment: "dine_in", points: { balance: 6800, requested: null }, config: cfg });
     expect(r.pointsUsed).toBe(724);
     expect(r.total).toBe(10);
+  });
+
+  it("deposit toggle ON (an owner option) lets points pay the deposit too", () => {
+    const cfg = { ...DEFAULT_PRICING, pointsDeduct: { ...DEFAULT_PRICING.pointsDeduct, deposit: true } };
+    const r = priceOrder({ lines: bag, fulfilment: "dine_in", points: { balance: 6800, requested: null }, config: cfg });
+    expect(r.pointsUsed).toBe(734);
+    expect(r.total).toBe(0);
   });
 
   it("items marked exempt (e.g. beer) are excluded when the 'eligible' base is chosen", () => {

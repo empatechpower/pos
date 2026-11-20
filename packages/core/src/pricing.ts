@@ -33,7 +33,8 @@ export const DEFAULT_PRICING: PricingConfig = {
   gstRate: 0.09,
   gstOn: false,
   bcrsDepositCents: 10,
-  pointsDeduct: { items: "all", service: true, tax: true, deposit: true },
+  // Usable points are capped at the items + service charge (handover 12.2): the container deposit is refundable cash, never payable in points.
+  pointsDeduct: { items: "all", service: true, tax: true, deposit: false },
   stackable: true,
   minPointsRedeem: 100,
 };

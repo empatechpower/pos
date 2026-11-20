@@ -34,3 +34,14 @@ export function collectionNumber(phone: string | undefined, taken: ReadonlySet<s
   }
   return undefined;
 }
+
+/**
+ * Which orders just became ready, for the queue board to chime and announce (handover 7.3). `previous` is the set of order ids that were
+ * already on the Ready list the last time the board looked; an order that was there before is never announced again.
+ */
+export function newlyReady(previous: ReadonlySet<string>, ready: ReadonlyArray<{ orderId: string; queueNumber?: string }>): string[] {
+  return ready.filter((o) => !previous.has(o.orderId) && o.queueNumber).map((o) => o.queueNumber!);
+}
+
+/** A collection number as it is said aloud, one character at a time: "34567A" is "3 4 5 6 7 A", "W001" is "W 0 0 1". */
+export const spokenNumber = (queueNumber: string): string => Array.from(queueNumber).join(" ");
