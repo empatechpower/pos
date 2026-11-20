@@ -326,7 +326,10 @@ export class PgCatalogStore implements CatalogStore {
       // Names in other languages: sent = the whole list is replaced (a blank one is dropped); not sent = left as it is.
       const namesGiven = p.names !== undefined;
       const cleanNames = Object.fromEntries(Object.entries(p.names ?? {}).map(([k, v]) => [k, String(v ?? "").trim()]).filter(([k, v]) => /^[a-z]{2,3}$/.test(k as string) && v));
-      const bcrsGiven = p.bcrs !== undefined; // not sent = left as it is, so a rename or a sold-out toggle never switches the deposit off
+      // A NEW item whose name says BCRS gets the container deposit switched on (handover 8); for an existing item, not sent = left as it is,
+      // so a rename or a sold-out toggle never switches the deposit off. (An explicit true/false always wins.)
+      const autoBcrs = !existing.rowCount && p.bcrs === undefined && /bcrs/i.test(p.name);
+      const bcrsGiven = p.bcrs !== undefined || autoBcrs;
       await c.query(
         `INSERT INTO products (merchant_id,id,name,category,sold_out,points_exempt,description,alt_name,options,bcrs,names) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$13,$15::jsonb)
          ON CONFLICT (merchant_id,id) DO UPDATE SET name=EXCLUDED.name, category=EXCLUDED.category, sold_out=EXCLUDED.sold_out, points_exempt=EXCLUDED.points_exempt,
@@ -335,7 +338,7 @@ export class PgCatalogStore implements CatalogStore {
            options     = CASE WHEN $12 THEN EXCLUDED.options     ELSE products.options     END,
            bcrs        = CASE WHEN $14 THEN EXCLUDED.bcrs        ELSE products.bcrs        END,
            names       = CASE WHEN $16 THEN EXCLUDED.names       ELSE products.names       END`,
-        [m, id, p.name, p.category, !!p.soldOut, !!p.pointsExempt, desc, alt, optsGiven && p.options!.length ? JSON.stringify(p.options) : null, descGiven, altGiven, optsGiven, !!p.bcrs, bcrsGiven, Object.keys(cleanNames).length ? JSON.stringify(cleanNames) : null, namesGiven],
+        [m, id, p.name, p.category, !!p.soldOut, !!p.pointsExempt, desc, alt, optsGiven && p.options!.length ? JSON.stringify(p.options) : null, descGiven, altGiven, optsGiven, !!(p.bcrs ?? autoBcrs), bcrsGiven, Object.keys(cleanNames).length ? JSON.stringify(cleanNames) : null, namesGiven],
       );
       if (p.priceCents !== undefined) {
         const def = (await c.query("SELECT default_pricebook_id FROM catalog_meta WHERE merchant_id=$1", [m])).rows[0].default_pricebook_id as string;

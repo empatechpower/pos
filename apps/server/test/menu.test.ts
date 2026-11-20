@@ -278,3 +278,24 @@ describe("item names in other languages (the merchant's own words)", () => {
     expect((await call("/api/catalog/products", { body: body({ names: { zh: "x" } }), staff: cashier })).status).toBe(403);
   });
 });
+
+describe("container deposit (BCRS) on a new item", () => {
+  const make = (name: string, extra: object = {}) => staffPost("/api/catalog/products", { name, category: "Beverages", priceCents: 250, ...extra });
+  const find = async (name: string) => (await catalog()).products.find((p) => p.name === name);
+
+  it("a new item whose name says BCRS gets the deposit switched on", async () => {
+    expect((await make("Test Cola 320ml BCRS")).status).toBe(200);
+    expect((await find("Test Cola 320ml BCRS"))?.bcrs).toBe(true);
+  });
+  it("a new item without BCRS in the name does not", async () => {
+    expect((await make("Test Plain Water")).status).toBe(200);
+    expect((await find("Test Plain Water"))?.bcrs).toBeFalsy();
+  });
+  it("an explicit choice wins over the name, and a rename never switches an existing item's deposit", async () => {
+    expect((await make("Test Zero BCRS", { bcrs: false })).status).toBe(200);
+    expect((await find("Test Zero BCRS"))?.bcrs).toBeFalsy();
+    const id = (await find("Test Plain Water"))!.id;
+    expect((await staffPost("/api/catalog/products", { id, name: "Test Plain Water BCRS", category: "Beverages" })).status).toBe(200);
+    expect((await find("Test Plain Water BCRS"))?.bcrs).toBeFalsy(); // the manager's rename dialog asks and sends it; the server alone never guesses
+  });
+});
