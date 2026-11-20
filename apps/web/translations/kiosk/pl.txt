@@ -113,3 +113,4 @@
 134|100 punktów = rabat S$1
 135|Zbieraj pieczątki i nagrody
 136|Dodaj do zamówienia
+137|Wylogowano — zamawiasz teraz jako gość

@@ -196,22 +196,25 @@ export function useDialog(open: boolean, onClose: () => void) {
 }
 
 export function SwipeRow({ children, onRemove, label }: { children: ReactNode; onRemove: () => void; label: string }) {
-  const OPEN = 84;
-  const [open, setOpen] = useState(false);
-  const [x, setX] = useState<number | null>(null); // live offset while a finger or mouse is dragging
-  const g = useRef<{ id: number; x0: number; y0: number; wasOpen: boolean; mode: "?" | "h" | "v" } | null>(null);
+  // Slide either way to reveal a red "Remove". Let go past about 30% of the row's width, or with a quick flick, and the row is removed;
+  // let go earlier and it snaps back. (Handover section 9.6.) A visually hidden button keeps it usable from a keyboard or screen reader.
+  const shell = useRef<HTMLDivElement>(null);
+  const [x, setX] = useState(0);
+  const [phase, setPhase] = useState<"rest" | "drag" | "leave">("rest");
+  const g = useRef<{ id: number; x0: number; y0: number; t0: number; mode: "?" | "h" | "v" } | null>(null);
   const moved = useRef(false);
-  // The bin acts on the release of a press that began on it, rather than waiting for the browser's click. Some touch set-ups
-  // (e.g. a tablet in desktop mode) do not deliver that click on the first touch, which made the bin need two presses.
-  const binDown = useRef(false);
-  const binDone = useRef(false);
-  const removeOnce = () => { if (binDone.current) return; binDone.current = true; window.setTimeout(() => { binDone.current = false; }, 500); onRemove(); };
+  const done = useRef(false);
+  const removeOnce = () => {
+    if (done.current) return;
+    done.current = true;
+    onRemove();
+    // If the row is still here (the owner kept it), bring it back.
+    window.setTimeout(() => { done.current = false; setPhase("rest"); setX(0); }, 600);
+  };
   const down = (e: React.PointerEvent) => {
-    // Every new touch starts clean. (A finger-drag fires no click afterwards, so a leftover "moved" flag used to swallow the next tap,
-    // which was the first press on the bin: it needed two or three presses before the item was gone.)
     moved.current = false;
     if ((e.target as HTMLElement).closest(".swipe-bin")) return;
-    g.current = { id: e.pointerId, x0: e.clientX, y0: e.clientY, wasOpen: open, mode: "?" };
+    g.current = { id: e.pointerId, x0: e.clientX, y0: e.clientY, t0: performance.now(), mode: "?" };
   };
   const move = (e: React.PointerEvent) => {
     const s = g.current;
@@ -225,35 +228,43 @@ export function SwipeRow({ children, onRemove, label }: { children: ReactNode; o
     }
     if (s.mode !== "h") return;
     moved.current = true;
-    setX(Math.max(-OPEN, Math.min(0, (s.wasOpen ? -OPEN : 0) + dx)));
+    const w = shell.current?.offsetWidth ?? 320;
+    setPhase("drag");
+    setX(Math.max(-w, Math.min(w, dx)));
   };
   const up = (e: React.PointerEvent) => {
     const s = g.current;
     if (!s || s.id !== e.pointerId) return;
     g.current = null;
-    if (s.mode === "h") {
-      const dx = e.clientX - s.x0;
-      setOpen(s.wasOpen ? !(dx > 6) : dx < -6); // almost no distance needed: a slight slide is the intent
-      setX(null);
-      // The click that may follow a mouse drag is swallowed once; if none follows (touch), forget the drag so the next tap is a real tap.
-      window.setTimeout(() => { moved.current = false; }, 80);
+    if (s.mode !== "h") return;
+    const w = shell.current?.offsetWidth ?? 320;
+    const dx = e.clientX - s.x0;
+    const speed = Math.abs(dx) / Math.max(1, performance.now() - s.t0); // px per ms
+    if (Math.abs(dx) > w * 0.3 || (speed > 0.6 && Math.abs(dx) > 30)) {
+      setPhase("leave");
+      setX(Math.sign(dx) * w);
+      window.setTimeout(removeOnce, 180);
+    } else {
+      setPhase("rest");
+      setX(0);
     }
+    // The click that may follow a mouse drag is swallowed once; if none follows (touch), forget the drag so the next tap is a real tap.
+    window.setTimeout(() => { moved.current = false; }, 80);
   };
   return (
     <div
-      className={`swipe-shell ${open ? "is-swiped" : ""} ${x !== null ? "is-dragging has-x" : ""}`}
-      style={x !== null ? ({ "--sx": `${x}px` } as React.CSSProperties) : undefined}
+      ref={shell}
+      className={`swipe-shell is-${phase} ${x > 0 ? "to-right" : x < 0 ? "to-left" : ""}`}
+      style={{ "--sx": `${x}px` } as React.CSSProperties}
       onPointerDown={down}
       onPointerMove={move}
       onPointerUp={up}
-      onPointerCancel={() => { g.current = null; setX(null); }}
+      onPointerCancel={() => { g.current = null; setPhase("rest"); setX(0); }}
       onClickCapture={(e) => { if (moved.current && !(e.target as HTMLElement).closest(".swipe-bin")) { e.stopPropagation(); e.preventDefault(); moved.current = false; } }}
     >
-      <button className="swipe-bin" tabIndex={open ? 0 : -1} aria-label={`${t("removeW", "Remove")} ${label}`}
-        onPointerDown={(e) => { e.stopPropagation(); moved.current = false; binDown.current = true; }}
-        onPointerUp={(e) => { e.stopPropagation(); if (binDown.current) { binDown.current = false; window.setTimeout(removeOnce, 120); } /* the normal click, when it comes, removes sooner */ }}
-        onPointerCancel={() => { binDown.current = false; }}
-        onClick={removeOnce}><Icon name="trash" size={22} /><span>{t("bin", "Bin")}</span></button>
+      <span className="swipe-lbl l" aria-hidden="true"><Icon name="trash" size={22} />{t("removeW", "Remove")}</span>
+      <span className="swipe-lbl r" aria-hidden="true">{t("removeW", "Remove")}<Icon name="trash" size={22} /></span>
+      <button className="swipe-bin" aria-label={`${t("removeW", "Remove")} ${label}`} onClick={removeOnce}>{t("bin", "Bin")}</button>
       {children}
       <span className="swipe-hint" aria-hidden="true"><Icon name="chevL" size={12} /></span>
     </div>
@@ -1721,8 +1732,8 @@ function WelcomeLine({ points, voucherCents }: { points: number; voucherCents: n
   );
 }
 
-/** Also used by the kiosk's pairing page on the customer's phone (noGuest: there is no guest option when signing in to a kiosk). */
-export function Login({ info, welcome, loginError, onGuest, onDone, noGuest }: { info: Info; welcome: number; loginError: string | null; onGuest: () => void; onDone: (token: string) => void; noGuest?: boolean }) {
+/** Also used by the kiosk's pairing page on the customer's phone (noGuest: no guest option when signing in to a kiosk; noEmail: email sign-in does not exist for the kiosk, handover 4.3). */
+export function Login({ info, welcome, loginError, onGuest, onDone, noGuest, noEmail }: { info: Info; welcome: number; loginError: string | null; onGuest: () => void; onDone: (token: string) => void; noGuest?: boolean; noEmail?: boolean }) {
   const [view, setView] = useState<"home" | "email" | "otp" | "phone" | "sms">("home");
   const [mode, setMode] = useState<"login" | "signup">("login");
   const [email, setEmail] = useState("");
@@ -1844,7 +1855,7 @@ export function Login({ info, welcome, loginError, onGuest, onDone, noGuest }: {
               <div className="login-icons" role="group" aria-label={tx("Sign-in options")}>
                 <button className="login-icon-btn" onClick={() => provider("google", google, "Google")} aria-label={tx("Continue with Google")}><span className="g-mark">G</span><span className="li-cap">Google</span></button>
                 <button className="login-icon-btn" onClick={() => provider("microsoft", microsoft, "Microsoft")} aria-label={tx("Continue with Microsoft")}><span className="ms-grid"><i style={{ background: "#f25022" }} /><i style={{ background: "#7fba00" }} /><i style={{ background: "#00a4ef" }} /><i style={{ background: "#ffb900" }} /></span><span className="li-cap">Microsoft</span></button>
-                <button className="login-icon-btn" onClick={() => { setErr(null); setView("email"); }} aria-label={tx("Continue with email")}><span className="li-mail"><Icon name="mail" size={26} /></span><span className="li-cap">{t("emailW", "Email")}</span></button>
+                {!noEmail && <button className="login-icon-btn" onClick={() => { setErr(null); setView("email"); }} aria-label={tx("Continue with email")}><span className="li-mail"><Icon name="mail" size={26} /></span><span className="li-cap">{t("emailW", "Email")}</span></button>}
               </div>
               )}
               <button className="login-btn" style={{ marginTop: 12 }} onClick={() => (phoneOn ? (setErr(null), setView("phone")) : setErr(tx("Phone sign-in isn't set up for this shop yet. Please use Email, or continue as guest.")))}><span className="lb-ic" style={{ color: "var(--orange-dark)" }}><Icon name="phone" size={24} /></span><span>{t("phoneNumT", "Phone number")}<span className="lb-sub">{info.auth.phone?.open ? tx("Enter your mobile number") : t("phoneSub", "Verify by sending an SMS from your phone")}</span></span></button>

@@ -113,3 +113,4 @@
 134|100 punti = S$1 di sconto
 135|Raccogli timbri e premi
 136|Aggiungi all’ordine
+137|Disconnesso — ora stai ordinando come ospite

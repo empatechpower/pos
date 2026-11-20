@@ -113,3 +113,4 @@
 134|100 punten = S$1 korting
 135|Spaar stempels & beloningen
 136|Toevoegen aan bestelling
+137|Uitgelogd — u bestelt nu als gast

@@ -113,3 +113,4 @@
 134|100 poäng = S$1 rabatt
 135|Samla stämplar & belöningar
 136|Lägg till i beställningen
+137|Utloggad — du beställer nu som gäst

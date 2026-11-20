@@ -113,3 +113,4 @@
 134|100 poin = diskon S$1
 135|Kumpulkan stempel & hadiah
 136|Tambahkan ke pesanan
+137|Anda telah keluar — kini Anda memesan sebagai tamu

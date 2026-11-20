@@ -240,7 +240,12 @@ export function Prices({ catalog, outletId }: { catalog: Catalog; outletId: stri
         const save = () => {
           if (!name) return;
           setRenaming(null);
-          if (name !== p.name || namesChanged) void send("POST", "products", { id: p.id, name, category: p.category, pointsExempt: p.pointsExempt, soldOut: p.soldOut, ...(namesChanged ? { names: namesNow } : {}) }, name !== p.name ? `Renamed to ${name}.` : "Names saved.");
+          // Container deposit (BCRS): a name that says BCRS switches the deposit ON; a rename that drops "BCRS" while it is ON asks first
+          // (the rename always saves; the deposit goes OFF only if confirmed, and a manual OFF is never switched back on by a rename).
+          let bcrsPatch: { bcrs?: boolean } = {};
+          if (!/bcrs/i.test(p.name) && /bcrs/i.test(name) && !p.bcrs) bcrsPatch = { bcrs: true };
+          if (/bcrs/i.test(p.name) && !/bcrs/i.test(name) && p.bcrs && window.confirm("The name no longer says BCRS. Turn the container deposit OFF for this item?")) bcrsPatch = { bcrs: false };
+          if (name !== p.name || namesChanged) void send("POST", "products", { id: p.id, name, category: p.category, pointsExempt: p.pointsExempt, soldOut: p.soldOut, ...bcrsPatch, ...(namesChanged ? { names: namesNow } : {}) }, name !== p.name ? `Renamed to ${name}.` : "Names saved.");
         };
         return (
           <div className="rn-back" onClick={() => setRenaming(null)}>

@@ -113,3 +113,4 @@
 134|100 points = S$1 diskwento
 135|Mangolekta ng stamps at rewards
 136|Idagdag sa order
+137|Naka-sign out na — nag-o-order ka na ngayon bilang bisita

@@ -113,3 +113,4 @@
 134|100 điểm = giảm S$1
 135|Sưu tầm tem & ưu đãi
 136|Thêm vào đơn hàng
+137|Đã đăng xuất — bạn đang đặt món với tư cách khách

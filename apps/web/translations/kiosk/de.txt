@@ -113,3 +113,4 @@
 134|100 Punkte = S$ 1 Rabatt
 135|Stempel & Prämien sammeln
 136|Zur Bestellung hinzufügen
+137|Abgemeldet — Sie bestellen jetzt als Gast

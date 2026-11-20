@@ -113,3 +113,4 @@
 134|100 puntos = S$1 de descuento
 135|Acumule sellos y recompensas
 136|Añadir al pedido
+137|Sesión cerrada — ahora está pidiendo como invitado

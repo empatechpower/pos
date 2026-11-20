@@ -113,3 +113,4 @@
 134|100 points = 1 S$ de réduction
 135|Collectez des tampons et des récompenses
 136|Ajouter à la commande
+137|Vous êtes déconnecté — vous commandez maintenant en tant qu’invité

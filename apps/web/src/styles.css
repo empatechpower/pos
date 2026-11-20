@@ -603,3 +603,18 @@ body:has(.shop) { background: #f0eadd; }
 /* Language dialog: a centered card with the floating close button, like the Change table dialog; the list scrolls inside it */
 .tbl-dlg .lang-list { max-height: calc(86dvh - 150px); overflow-y: auto; overscroll-behavior: contain; padding-bottom: 4px; }
 .shop .tbl-dlg .lang-opt { border-radius: 14px; }
+
+/* Slide-to-remove (handover 9.6): the row follows the finger either way over a red "Remove"; past ~30% or a flick removes it, otherwise it snaps back. */
+.shop .swipe-shell > :not(.swipe-bin):not(.swipe-hint):not(.swipe-lbl) { transform: translateX(var(--sx, 0px)); transition: transform .18s ease; position: relative; z-index: 1; will-change: transform; }
+.shop .swipe-shell.is-drag > :not(.swipe-bin):not(.swipe-hint):not(.swipe-lbl) { transition: none; }
+.shop .swipe-shell.is-leave > :not(.swipe-bin):not(.swipe-hint):not(.swipe-lbl) { transition: transform .18s ease-in; }
+.shop .swipe-shell.is-drag, .shop .swipe-shell.is-leave { z-index: 3; }
+.shop .swipe-lbl { position: absolute; top: 0; bottom: 0; display: flex; align-items: center; gap: 8px; padding: 0 24px; color: #fff; font-weight: 800; font-size: 17px; opacity: 0; transition: opacity .1s; pointer-events: none; }
+.shop .swipe-lbl.l { left: 0; }
+.shop .swipe-lbl.r { right: 0; }
+.shop .swipe-shell.to-right .swipe-lbl.l, .shop .swipe-shell.to-left .swipe-lbl.r { opacity: 1; }
+/* The button is only for keyboards and screen readers: invisible until it has focus. */
+.shop .swipe-bin { opacity: 0; pointer-events: none; width: auto; padding: 0 22px; z-index: 4; }
+.shop .swipe-bin:focus-visible { opacity: 1; pointer-events: auto; }
+.shop .swipe-shell.is-drag .swipe-hint, .shop .swipe-shell.is-leave .swipe-hint { opacity: 0; animation: none; }
+.shop .swipe-shell.is-drag, .shop .swipe-shell.is-leave { user-select: none; -webkit-user-select: none; }

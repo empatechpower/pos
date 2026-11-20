@@ -85,7 +85,7 @@ export function Pair() {
   return (
     <div className="shop" style={theme}>
       {step === "signin" ? (
-        <Login info={info} welcome={0} loginError={null} noGuest onGuest={() => undefined} onDone={(t) => { localStorage.setItem(LS_MEMBER, t); void whoAmI(); }} />
+        <Login info={info} welcome={0} loginError={null} noGuest noEmail onGuest={() => undefined} onDone={(t) => { localStorage.setItem(LS_MEMBER, t); void whoAmI(); }} />
       ) : (
         <div className="e2e-scroll login-page">
           {step === "loading" && <p className="e2e-sub">{tx("Loading…")}</p>}

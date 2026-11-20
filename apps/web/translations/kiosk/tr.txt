@@ -113,3 +113,4 @@
 134|100 puan = S$1 indirim
 135|Pul ve ödül biriktirin
 136|Siparişe ekle
+137|Çıkış yapıldı — artık misafir olarak sipariş veriyorsunuz

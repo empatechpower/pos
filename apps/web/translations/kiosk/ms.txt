@@ -113,3 +113,4 @@
 134|100 mata = S$1 diskaun
 135|Kumpul setem & ganjaran
 136|Tambah ke pesanan
+137|Anda telah log keluar — anda kini memesan sebagai tetamu

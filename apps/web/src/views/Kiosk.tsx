@@ -519,7 +519,7 @@ function KioskSession({ info, catalog, config }: { info: Info; catalog: Catalog;
       })()}
       {soon && <div className="k-toast" role="status">{soon}</div>}
       {upgrading && <div className="k-upgrade" role="alert"><i className="k-spin" /><h2>{tx("Upgrading in progress")}</h2><p>{tx("Please wait a moment…")}</p></div>}
-      <MemberDialog open={memberAsk} name={member?.name || member?.phone || tx("Member")} points={config.rewards.pointsEnabled ? member?.pointsBalance ?? null : null} onClose={() => setMemberAsk(false)} onSignOut={detach} />
+      <MemberDialog open={memberAsk} name={member?.name || member?.phone || tx("Member")} points={config.rewards.pointsEnabled ? member?.pointsBalance ?? null : null} onClose={() => setMemberAsk(false)} onSignOut={() => { detach(); setSoon(tx("Signed out — you're ordering as a guest now")); }} />
       <ResetDialog open={resetAsk || devDialog === "reset"} onNo={() => setResetAsk(false)} onYes={wipe} />
       <StillThere open={warning || devDialog === "idle"} left={devDialog === "idle" ? 6 : warnLeft} />
       <LanguageDialog open={langOpen} onClose={() => setLangOpen(false)} />

@@ -113,3 +113,4 @@
 134|100 pontos = S$1 de desconto
 135|Junte carimbos e recompensas
 136|Adicionar ao pedido
+137|Sessão terminada — agora está a pedir como convidado
