@@ -434,3 +434,40 @@
   [dir="rtl"] .k-bar { padding-right: 14px; padding-left: 175px; }
   [dir="rtl"] .k-badge { left: auto; right: 5px; }
 }
+
+/* rewards on the checkout screen: member chip, wallet row, "Use your points", discount lines */
+.k-bar.has-chip { padding-inline-end: 200px; }
+.k-bar.has-chip .k-session { margin-inline-start: auto; max-width: 260px; }
+.k-walletrow { display: flex; align-items: center; gap: 16px; width: 100%; margin: 14px 0 0; padding: 16px 20px; border: 2px solid var(--line); border-radius: 22px; background: #fff; text-align: start; }
+.k-walletrow .k-wic { font-size: 30px; line-height: 1; }
+.k-walletrow .k-wtx { flex: 1; display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.k-walletrow .k-wtx b { font-size: 21px; }
+.k-walletrow .k-wtx small { font-size: 16px; color: var(--muted); }
+.k-walletrow i { font-style: normal; font-size: 30px; color: var(--orange-dark); }
+.k-points { margin: 14px 0 0; padding: 18px 22px; border: 2.5px solid var(--orange); border-radius: 24px; background: var(--selected, #fdeee0); }
+.k-points h3 { margin: 0 0 4px; font-size: 24px; font-weight: 800; }
+.k-points p { margin: 0 0 12px; color: var(--muted); font-size: 17px; }
+.k-points-row { display: flex; align-items: center; gap: 16px; flex-wrap: wrap; }
+.k-points-off { flex: 1 1 200px; display: flex; flex-direction: column; min-width: 0; }
+.k-points-off b { font-size: 26px; font-weight: 800; }
+.k-points-off small { font-size: 15px; color: var(--muted); }
+.k-use-all { flex: none !important; min-height: 60px !important; padding: 0 26px !important; border-radius: 999px !important; background: var(--orange) !important; color: #fff !important; font-size: 19px !important; }
+.k-use-all:disabled { opacity: .45; }
+.k-step button:disabled { opacity: .4; }
+.k-totals > .neg > span:last-child { color: var(--orange-dark); }
+.k-earned { margin: 0; font-size: 21px; font-weight: 700; color: var(--orange-dark); }
+.k-wallet { max-width: 640px; width: 100%; max-height: 86dvh; display: flex; flex-direction: column; gap: 14px; }
+.k-wallet-list { overflow-y: auto; display: flex; flex-direction: column; gap: 10px; text-align: start; }
+.k-coupon { display: flex; flex-direction: column; gap: 4px; padding: 16px 20px; border-radius: 18px; border: 2.5px solid var(--line); background: #fff; text-align: start; }
+.k-coupon b { font-size: 21px; }
+.k-coupon small { font-size: 15px; color: var(--muted); line-height: 1.4; }
+.k-coupon.on { border-color: var(--orange); background: var(--selected, #fdeee0); }
+.k-coupon:disabled { opacity: .5; }
+
+/* payment screen: the method tile (PayNow today; a card reader would sit beside it) */
+.k-methods { display: flex; gap: 14px; justify-content: center; width: min(100%, 560px); margin: 8px 0 14px; }
+.k-method { flex: 1; display: flex; flex-direction: column; gap: 4px; padding: 16px 18px; border: 2.5px solid var(--line); border-radius: 22px; background: #fff; text-align: center; }
+.k-method b { font-size: 24px; }
+.k-method small { font-size: 16px; color: var(--muted); line-height: 1.35; }
+.k-method.on { border-color: var(--orange); background: var(--selected, #fdeee0); }
+.k-pay .k-ghost { flex: none; min-height: 72px; padding: 0 44px; margin-top: 6px; }

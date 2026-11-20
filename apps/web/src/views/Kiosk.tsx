@@ -18,7 +18,8 @@ import "../kiosk.css";
  */
 
 type Screen = "start" | "menu" | "review" | "pay" | "done" | "signin";
-interface KioskMember { name: string | null; phone: string | null; pointsBalance: number }
+interface KCoupon { id: string; title: string; amountCents: number; minSpendCents: number }
+interface KioskMember { name: string | null; phone: string | null; pointsBalance: number; coupons: KCoupon[] }
 
 const NUDGE_AFTER_S = 20; // the Reset button starts pulsing
 const WARN_FOR_S = 10; // "Still there?" shows for the last ten seconds before the wipe
@@ -126,6 +127,11 @@ function KioskSession({ info, catalog, config }: { info: Info; catalog: Catalog;
   const [member, setMember] = useState<KioskMember | null>(null);
   const memberToken = useRef<string | null>(null);
   const [memberAsk, setMemberAsk] = useState(false);
+  // Rewards on the checkout screen: points to spend (a number, or "max") and one coupon from the member's wallet.
+  const [pts, setPts] = useState<number | "max">(0);
+  const [couponId, setCouponId] = useState<string | null>(null);
+  const [walletOpen, setWalletOpen] = useState(false);
+  const placed = useRef<{ bag: BagLine[]; pts: number | "max"; couponId: string | null } | null>(null);
   const signinFrom = useRef<Screen>("start");
   const openSignin = (from: Screen) => { signinFrom.current = from; go("signin"); };
   const [startQr, setStartQr] = useState<string | null>(null);
@@ -135,7 +141,7 @@ function KioskSession({ info, catalog, config }: { info: Info; catalog: Catalog;
     const id = window.setTimeout(() => setSoon(null), 3500);
     return () => window.clearTimeout(id);
   }, [soon]);
-  const [order, setOrder] = useState<{ id: string; qr: string | null; view: OrderView | null } | null>(null);
+  const [order, setOrder] = useState<{ id: string; qr: string | null; view: OrderView | null; earn: number } | null>(null);
   const [busy, setBusy] = useState(false);
   const [problem, setProblem] = useState<string | null>(null);
   const [idle, setIdle] = useState(0);
@@ -149,7 +155,25 @@ function KioskSession({ info, catalog, config }: { info: Info; catalog: Catalog;
   const menu = useMemo(() => menuFor(catalog, ctx), [catalog, info.outletId, info.outletName, channelId]);
   const byId = useMemo(() => new Map(menu.map((m) => [m.id, m])), [menu]);
   const items = bag.map((l) => ({ productId: l.productId, qty: l.qty, options: l.selection, ...(l.note ? { note: l.note } : {}) }));
-  const quote = items.length ? quoteOrder(catalog, config, ctx, items, null, null) : null;
+  // Points and a coupon, for a signed-in member (handover 4.2). The core applies them in the shop's order: the coupon off the items first,
+  // points paid at the end, and usable points capped at items + service charge (never the deposit).
+  const chosenCoupon = member?.coupons.find((c) => c.id === couponId) ?? null;
+  const couponAsk = chosenCoupon ? { amountCents: chosenCoupon.amountCents, minSpendCents: chosenCoupon.minSpendCents } : null;
+  const canUsePts = !!member && config.rewards.pointsEnabled && member.pointsBalance > 0;
+  const maxQuote = items.length && canUsePts ? quoteOrder(catalog, config, ctx, items, { balance: member!.pointsBalance, requested: null }, couponAsk) : null;
+  const maxPts = maxQuote?.ok ? maxQuote.priced.pointsUsed : 0;
+  const pointsAsk = canUsePts && pts !== 0 && maxPts > 0 ? { balance: member!.pointsBalance, requested: pts === "max" ? null : Math.min(pts, maxPts) } : null;
+  const quote = items.length ? quoteOrder(catalog, config, ctx, items, pointsAsk, couponAsk) : null;
+  const pointsNow = quote?.ok ? quote.priced.pointsUsed : 0;
+  const rewardsOn = config.rewards.pointsEnabled || config.rewards.welcomeVoucherCents > 0 || config.rewards.stampCard.enabled;
+  const minRedeem = config.pricing.minPointsRedeem;
+  const stepPts = (dir: 1 | -1) => {
+    const next = pointsNow + dir * minRedeem;
+    setPts(next < minRedeem ? 0 : next >= maxPts ? "max" : next);
+  };
+  // A coupon the bag no longer qualifies for is dropped (its card stays in the wallet, greyed, with what is missing).
+  useEffect(() => { if (chosenCoupon && quote?.ok && quote.priced.couponIneligible) setCouponId(null); }, [chosenCoupon, quote]);
+  useEffect(() => { if (pts !== 0 && maxPts === 0) setPts(0); }, [pts, maxPts]);
   const total = quote?.ok ? quote.priced.total : 0;
   const count = bag.reduce((n, l) => n + l.qty, 0);
   // What a guest would earn if they signed up, on the amount they would pay (the prototype shows 522 for a S$5.22 order). The shop's own earning rule when points are on; while the sign-in block is shown as a
@@ -199,6 +223,10 @@ function KioskSession({ info, catalog, config }: { info: Info; catalog: Catalog;
     const q = new URLSearchParams(location.search);
     const n = Number(q.get("bag") ?? (q.get("screen") === "review" ? 3 : 0));
     if (q.has("item") && menu[Number(q.get("item"))]) setPicking(menu[Number(q.get("item"))]!); // (development only: ?item=0 opens that product, for screenshots)
+    if (q.get("screen") === "pay") { // (development only: ?screen=pay shows the payment screen with a sample QR)
+      void QRCode.toDataURL(`${location.origin}/shop`, { margin: 1, width: 560 }).then((qr) => { setOrder({ id: "dev", qr, view: { orderId: "dev", queueNumber: "W001", status: "received", items: [], totalCents: 740, paidCents: 0 } as OrderView, earn: 0 }); setScreen("pay"); });
+      return;
+    }
     if (!n && q.get("screen") !== "review") return;
     seeded.current = true;
     menu.slice(0, n).forEach((m) => addLine(m, m.options?.length ? defaultSelection(m.options) : [], 1));
@@ -212,6 +240,9 @@ function KioskSession({ info, catalog, config }: { info: Info; catalog: Catalog;
     memberToken.current = null;
     setMember(null);
     setMemberAsk(false);
+    setPts(0); // signing out (or a wipe) removes the points and the coupon from this order, never the bag
+    setCouponId(null);
+    setWalletOpen(false);
     if (t) void fetch("/api/shop/auth/logout", { method: "POST", headers: { authorization: `Bearer ${t}` } }).catch(() => undefined);
   }, []);
   const wipe = useCallback(() => {
@@ -293,14 +324,15 @@ function KioskSession({ info, catalog, config }: { info: Info; catalog: Catalog;
       const res = await fetch("/api/shop/orders", {
         method: "POST",
         headers: { "content-type": "application/json", ...(memberToken.current ? { authorization: `Bearer ${memberToken.current}` } : {}) },
-        body: JSON.stringify({ channelId, outletId: info.outletId, items, customerName: member?.name || "Kiosk", customerPhone: "", spot: "", expectedTotalCents: total }),
+        body: JSON.stringify({ channelId, outletId: info.outletId, items, customerName: member?.name || "Kiosk", customerPhone: "", spot: "", expectedTotalCents: total, ...(pointsAsk && pointsNow > 0 ? { usePoints: pts === "max" || pointsNow < minRedeem || pointsAsk.requested === null ? "max" : pointsAsk.requested } : {}), ...(chosenCoupon ? { couponId: chosenCoupon.id } : {}) }),
       });
       const j = (await res.json().catch(() => ({}))) as { orderId?: string; error?: string; totalCents?: number };
       if (!res.ok || !j.orderId) {
         const e = String(j.error ?? "");
         const bad = (j as { productId?: string }).productId;
         setProblem(
-          res.status === 401 && memberToken.current ? tx("Your sign-in ran out. Tap the member button to sign in again, or place the order as a guest.")
+          /coupon_/.test(e) ? tx("That coupon can't be used on this order. Remove it and try again.")
+          : res.status === 401 && memberToken.current ? tx("Your sign-in ran out. Tap the member button to sign in again, or place the order as a guest.")
           : e === "sign_in_to_order" || e === "pay_with_credit" ? tx("This shop takes orders from members only. Please order at the counter.")
           : /table/i.test(e) ? tx("This shop only takes table orders, so the kiosk can't place this order yet. Please order at the counter.")
           : /dine-in only/i.test(e) ? tx("This shop takes dine-in orders only. Switch to Dine in, or order at the counter.")
@@ -319,7 +351,8 @@ function KioskSession({ info, catalog, config }: { info: Info; catalog: Catalog;
           .catch(() => ({}) as { url?: string });
         if (pr.url) qr = await QRCode.toDataURL(pr.url, { margin: 1, width: 560 }).catch(() => null);
       }
-      setOrder({ id: j.orderId, qr, view: null });
+      placed.current = { bag, pts, couponId };
+      setOrder({ id: j.orderId, qr, view: null, earn: earnPts });
       setBag([]);
       go(qr ? "pay" : "done");
     } catch {
@@ -327,6 +360,23 @@ function KioskSession({ info, catalog, config }: { info: Info; catalog: Catalog;
     } finally {
       setBusy(false);
     }
+  };
+
+  // Back from Payment: until it is paid the customer can still change the order (handover 3.1). The unpaid order is cancelled (a member's
+  // points and coupon go back to them), and the bag, points and coupon return to Review & pay exactly as they were.
+  const backFromPay = async () => {
+    if (!order || busy) return;
+    setBusy(true);
+    const r = await fetch(`/api/shop/orders/${order.id}/cancel`, { method: "POST" }).catch(() => null);
+    setBusy(false);
+    if (!r || !r.ok) return setSoon(tx("Something went wrong. Please try again.")); // (paid in the meantime? the watcher below moves on by itself)
+    const back = placed.current;
+    if (back) { setBag(back.bag); setPts(back.pts); setCouponId(back.couponId); }
+    setOrder(null);
+    if (memberToken.current) {
+      await fetch("/api/shop/me", { headers: { authorization: `Bearer ${memberToken.current}` } }).then((x) => (x.ok ? x.json() : null)).then((j: { member: { pointsBalance: number }; coupons?: KCoupon[] } | null) => j && setMember((cur) => (cur ? { ...cur, pointsBalance: j.member.pointsBalance, coupons: j.coupons ?? cur.coupons } : cur))).catch(() => undefined);
+    }
+    go("review");
   };
 
   // While the QR is on screen, watch for the payment to land.
@@ -344,6 +394,15 @@ function KioskSession({ info, catalog, config }: { info: Info; catalog: Catalog;
     void tick();
     return () => { stop = true; window.clearInterval(id); };
   }, [screen, order?.id]);
+  // Once the order is paid the member's balance moves (points spent and earned); read it again, twice, as the server settles it.
+  const paidNow = !!order?.view && order.view.paidCents >= order.view.totalCents && order.view.totalCents > 0;
+  useEffect(() => {
+    if (screen !== "done" || !paidNow || !memberToken.current) return;
+    const load = () => void fetch("/api/shop/me", { headers: { authorization: `Bearer ${memberToken.current ?? ""}` } }).then((r) => (r.ok ? r.json() : null)).then((j: { member: { pointsBalance: number } } | null) => j && setMember((cur) => (cur ? { ...cur, pointsBalance: j.member.pointsBalance } : cur))).catch(() => undefined);
+    load();
+    const id = window.setTimeout(load, 2500);
+    return () => window.clearTimeout(id);
+  }, [screen, paidNow]);
   // The confirmation needs the order's collection number.
   useEffect(() => {
     if (screen !== "done" || !order || order.view) return;
@@ -366,6 +425,7 @@ function KioskSession({ info, catalog, config }: { info: Info; catalog: Catalog;
   const logoTap = () => { const n = Date.now(); if (n - lastTap.current < 450) setSettingsOpen(true); lastTap.current = n; };
   const logo = b.logoUrl ? <img className="k-logo" src={b.logoUrl} alt={info.name} onClick={logoTap} /> : <b className="k-logo-text" onClick={logoTap}>{info.name}</b>;
 
+  const memberLabel = member ? `${member.name || member.phone || tx("Member")}${config.rewards.pointsEnabled ? ` · ${member.pointsBalance.toLocaleString()} ${tx("points")}` : ""}` : null;
   let body: React.ReactNode;
   if (screen === "start") {
     const anyChip = CHIPS.some((c) => chips[c.id]);
@@ -408,12 +468,12 @@ function KioskSession({ info, catalog, config }: { info: Info; catalog: Catalog;
       </div>
     );
   } else if (screen === "menu") {
-    body = <KioskMenu info={info} menu={menu} options={options} channelId={channelId} setChannelId={setChannelId} notify={setSoon} count={count} total={total} qtyOf={qtyOf} addQuick={addQuick} lessOf={lessOf} open={(m) => setPicking(m)} onCheckout={() => go("review")} floating={floating} logo={logo} showSignin={signinBlock || !!member} onSignin={() => (member ? setMemberAsk(true) : openSignin("menu"))} memberLabel={member ? `${member.name || member.phone || tx("Member")}${config.rewards.pointsEnabled ? ` · ${member.pointsBalance.toLocaleString()} ${tx("points")}` : ""}` : null} scrolling={scrolling} />;
+    body = <KioskMenu info={info} menu={menu} options={options} channelId={channelId} setChannelId={setChannelId} notify={setSoon} count={count} total={total} qtyOf={qtyOf} addQuick={addQuick} lessOf={lessOf} open={(m) => setPicking(m)} onCheckout={() => go("review")} floating={floating} logo={logo} showSignin={signinBlock || !!member} onSignin={() => (member ? setMemberAsk(true) : openSignin("menu"))} memberLabel={memberLabel} scrolling={scrolling} />;
   } else if (screen === "review") {
     const q = quote?.ok ? quote : null;
     body = (
       <div className="k-review">
-        <header className="k-bar"><button className="k-back" onClick={() => go("menu")}>‹ {tx("Back to menu")}</button><h2>{tx("Order summary")}</h2></header>
+        <header className={`k-bar ${member ? "has-chip" : ""}`}><button className="k-back" onClick={() => go("menu")}>‹ {tx("Back to menu")}</button><h2>{tx("Order summary")}</h2>{memberLabel && <button className="k-session member" onClick={() => setMemberAsk(true)}>{memberLabel}</button>}</header>
         <div className="k-lines">
           {bag.length === 0 && <p className="k-empty">{tx("Your order is empty.")}</p>}
           {bag.map((l, at) => {
@@ -436,14 +496,34 @@ function KioskSession({ info, catalog, config }: { info: Info; catalog: Catalog;
               </SwipeRow>
             );
           })}
+          {member && rewardsOn && bag.length > 0 && (
+            <button className="k-walletrow" onClick={() => setWalletOpen(true)}>
+              <span className="k-wic" aria-hidden>🎟</span>
+              <span className="k-wtx"><b>{tx("Coupon(s) / voucher(s)")}</b><small>{chosenCoupon && q && !q.priced.couponIneligible ? `${tx("{title} applied", { title: chosenCoupon.title })} · ${tx("{amt} off", { amt: formatMoney(q.priced.couponDiscount) })}` : member.coupons.length ? tx("{n} available", { n: member.coupons.length }) : tx("You have no coupons right now.")}</small></span>
+              <i aria-hidden>›</i>
+            </button>
+          )}
+          {canUsePts && bag.length > 0 && (
+            <div className="k-points">
+              <h3>{tx("Use your points")}</h3>
+              <p>{member!.name || tx("Member")} · {member!.pointsBalance.toLocaleString()} {tx("points available")} · {tx("100 points = S$1 off")}</p>
+              <div className="k-points-row">
+                <div className="k-step"><button aria-label="−" disabled={pointsNow === 0} onClick={() => stepPts(-1)}>−</button><span>{pointsNow.toLocaleString()}</span><button aria-label="+" disabled={maxPts === 0 || pointsNow >= maxPts} onClick={() => stepPts(1)}>+</button></div>
+                <div className="k-points-off"><b><RollMoney cents={q?.priced.pointsDiscount ?? 0} /> {tx("off")}</b><small>{tx("{n} points · up to {max} usable on this order", { n: pointsNow.toLocaleString(), max: maxPts.toLocaleString() })}</small></div>
+                <button className="k-ghost k-use-all" disabled={maxPts === 0 || pts === "max"} onClick={() => setPts("max")}>{tx("Use all usable")}</button>
+              </div>
+            </div>
+          )}
           {earnPts > 0 && (member
             ? <div className="k-guestnote">{tx("You'll earn")} <b>{earnPts.toLocaleString()}</b> {tx("points on this order.")}</div>
             : <div className="k-guestnote">{tx("Ordering as a guest — sign up as a member to earn")} <b>{earnPts.toLocaleString()}</b> {tx("points on this order.")}</div>)}
           <div className="k-totals">
             <div><span>{tx("Items")}</span><span><RollMoney cents={q?.priced.subtotal ?? 0} /></span></div>
+            {q && q.priced.couponDiscount > 0 && <div className="neg"><span>{tx("Coupon")}{chosenCoupon ? ` · ${chosenCoupon.title}` : ""}</span><span>−<RollMoney cents={q.priced.couponDiscount} /></span></div>}
             {q && q.priced.service > 0 && <div><span>{t("pmService", "Service charge")} ({Math.round(config.pricing.serviceRate * 1000) / 10}%)</span><span><RollMoney cents={q.priced.service} /></span></div>}
             {q && q.priced.gst > 0 && <div><span>{tx("GST")}</span><span><RollMoney cents={q.priced.gst} /></span></div>}
             {q && q.priced.bcrs > 0 && <div><span>{t("bcrsDeposit", "BCRS Deposit")} (+{config.pricing.bcrsDepositCents}c × {q.lines.reduce((n, l) => n + (l.bcrs ? l.qty : 0), 0)})</span><span><RollMoney cents={q.priced.bcrs} /></span></div>}
+            {q && q.priced.pointsDiscount > 0 && <div className="neg"><span>{tx("Points")} · {q.priced.pointsUsed.toLocaleString()} pts</span><span>−<RollMoney cents={q.priced.pointsDiscount} /></span></div>}
             <div className="k-total"><span>{t("total", "Total")}</span><span><RollMoney cents={total} /></span></div>
           </div>
         </div>
@@ -463,7 +543,8 @@ function KioskSession({ info, catalog, config }: { info: Info; catalog: Catalog;
         onBack={() => go(signinFrom.current)}
         onAttached={(token, m) => {
           memberToken.current = token;
-          setMember({ name: m.name, phone: m.phone, pointsBalance: m.pointsBalance });
+          setMember({ name: m.name, phone: m.phone, pointsBalance: m.pointsBalance, coupons: [] });
+          void fetch("/api/shop/me", { headers: { authorization: `Bearer ${token}` } }).then((r) => (r.ok ? r.json() : null)).then((j: { member: { pointsBalance: number }; coupons?: KCoupon[] } | null) => j && setMember((cur) => (cur ? { ...cur, pointsBalance: j.member.pointsBalance, coupons: j.coupons ?? [] } : cur))).catch(() => undefined);
           setSoon(config.rewards.pointsEnabled ? tx("Welcome back, {x} — {n} points", { x: m.name || tx("member"), n: m.pointsBalance.toLocaleString() }) : tx("Welcome back, {x}", { x: m.name || tx("member") }));
           go(signinFrom.current === "start" ? "menu" : signinFrom.current);
         }}
@@ -473,16 +554,18 @@ function KioskSession({ info, catalog, config }: { info: Info; catalog: Catalog;
   } else if (screen === "pay") {
     body = (
       <div className="k-review">
-        <header className="k-bar"><h2>{tx("Payment")}</h2></header>
+        <header className={`k-bar ${member ? "has-chip" : ""}`}><button className="k-back" disabled={busy} onClick={() => void backFromPay()}>‹ {tx("Back")}</button><h2>{tx("Payment")}</h2>{memberLabel && <button className="k-session member" onClick={() => setMemberAsk(true)}>{memberLabel}</button>}</header>
         <div className="k-pay">
           <p className="k-sub">{tx("Total to pay")}</p>
           <div className="k-big"><RollMoney cents={order?.view?.totalCents ?? 0} /></div>
+          <div className="k-methods"><div className="k-method on"><b>PayNow</b><small>{tx("Scan the QR with your banking app")}</small></div></div>
           {order?.qr && <img className="k-qr" src={order.qr} alt="PayNow" />}
-          <h3>{tx("Scan to pay")}</h3>
+          <h3>{tx("Scan to pay")} {formatMoney(order?.view?.totalCents ?? 0)}</h3>
           <p className="k-sub">{tx("Open your banking app, scan this PayNow QR, and confirm the amount. This screen updates on its own once your payment lands.")}</p>
           <p className="k-wait"><i className="k-spin" /> {tx("Waiting for your payment…")}</p>
           <button className="k-ghost" onClick={() => go("done")}>{tx("Pay at the counter instead")}</button>
         </div>
+        <div className={`k-corner ${scrolling ? "fade" : ""}`}>{langOnly}</div>
       </div>
     );
   } else {
@@ -491,7 +574,7 @@ function KioskSession({ info, catalog, config }: { info: Info; catalog: Catalog;
     body = (
       <div className="k-done">
         <div className="k-tick">✓</div>
-        <h2>{tx("Thank you!")}</h2>
+        <h2>{member ? tx("Thank you, {x}!", { x: member.name || tx("member") }) : tx("Thank you!")}</h2>
         <p className="k-sub">{paid ? tx("Your order is being prepared. Listen out for your number at the counter.") : tx("Your order is in. Please pay at the counter and listen for your number.")}</p>
         {v && <div className="k-number"><small>{tx("Collection number")}</small><b>{v.queueNumber}</b></div>}
         {v && (
@@ -499,6 +582,9 @@ function KioskSession({ info, catalog, config }: { info: Info; catalog: Catalog;
             {v.items.map((i, n) => <li key={n}><span>{i.name} × {i.qty}</span><span>{formatMoney(i.unitCents * i.qty)}</span></li>)}
             <li className="k-receipt-total"><span>{paid ? tx("Total paid") : tx("Total to pay")}</span><span>{formatMoney(v.totalCents)}</span></li>
           </ul>
+        )}
+        {member && config.rewards.pointsEnabled && order && order.earn > 0 && (
+          <p className="k-earned">{paid ? tx("You earned {n} points on this order · Balance: {m} points", { n: order.earn.toLocaleString(), m: member.pointsBalance.toLocaleString() }) : tx("You'll earn {n} points once your payment is received.", { n: order.earn.toLocaleString() })}</p>
         )}
         <p className="k-sub">{tx("This screen clears in {n}s", { n: Math.max(0, doneLeft) })}</p>
         <button className="k-cta-sm" onClick={wipe}>{t("done", "Done")}</button>
@@ -519,6 +605,7 @@ function KioskSession({ info, catalog, config }: { info: Info; catalog: Catalog;
       })()}
       {soon && <div className="k-toast" role="status">{soon}</div>}
       {upgrading && <div className="k-upgrade" role="alert"><i className="k-spin" /><h2>{tx("Upgrading in progress")}</h2><p>{tx("Please wait a moment…")}</p></div>}
+      <WalletSheet open={walletOpen} coupons={member?.coupons ?? []} itemsCents={quote?.ok ? quote.priced.subtotal : 0} selected={couponId} onPick={setCouponId} onClose={() => setWalletOpen(false)} />
       <MemberDialog open={memberAsk} name={member?.name || member?.phone || tx("Member")} points={config.rewards.pointsEnabled ? member?.pointsBalance ?? null : null} onClose={() => setMemberAsk(false)} onSignOut={() => { detach(); setSoon(tx("Signed out — you're ordering as a guest now")); }} />
       <ResetDialog open={resetAsk || devDialog === "reset"} onNo={() => setResetAsk(false)} onYes={wipe} />
       <StillThere open={warning || devDialog === "idle"} left={devDialog === "idle" ? 6 : warnLeft} />
@@ -855,6 +942,36 @@ function KioskSignin({ logoUrl, name, onBack, onAttached, corner }: { logoUrl: s
         )}
       </div>
       {corner}
+    </div>
+  );
+}
+
+/** The member's coupons and vouchers. A coupon's minimum spend is judged on the items before service charge, tax and deposits, and the card says so. */
+function WalletSheet({ open, coupons, itemsCents, selected, onPick, onClose }: { open: boolean; coupons: KCoupon[]; itemsCents: number; selected: string | null; onPick: (id: string | null) => void; onClose: () => void }) {
+  const box = useDialog(open, onClose);
+  if (!open) return null;
+  return (
+    <div className="k-scrim reset" role="presentation">
+      <div className="k-idle k-wallet" ref={box} role="dialog" aria-modal="true" aria-labelledby="k-wallet-h">
+        <h2 id="k-wallet-h">{tx("Coupons & vouchers")}</h2>
+        {coupons.length === 0 && <p>{tx("You have no coupons right now.")}</p>}
+        <div className="k-wallet-list">
+          {coupons.map((c) => {
+            const ok = itemsCents >= c.minSpendCents;
+            const on = selected === c.id;
+            return (
+              <button key={c.id} className={`k-coupon ${on ? "on" : ""}`} disabled={!ok} aria-pressed={on} onClick={() => { onPick(on ? null : c.id); onClose(); }}>
+                <b>{c.title}</b>
+                <small>
+                  {c.minSpendCents > 0 ? tx("Min. spend {amt} on items only (before service charge, tax and deposits)", { amt: formatMoney(c.minSpendCents) }) : tx("No minimum spend")}
+                  {!ok && ` · ${tx("Add {amt} more in items", { amt: formatMoney(c.minSpendCents - itemsCents) })}`}
+                </small>
+              </button>
+            );
+          })}
+        </div>
+        <button className="k-cta-sm" style={{ flex: "none" }} onClick={onClose}>{t("done", "Done")}</button>
+      </div>
     </div>
   );
 }

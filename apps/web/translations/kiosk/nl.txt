@@ -114,3 +114,24 @@
 135|Spaar stempels & beloningen
 136|Toevoegen aan bestelling
 137|Uitgelogd — u bestelt nu als gast
+138|Bedankt, {x}!
+139|Gebruik uw punten
+140|punten beschikbaar
+141|{amt} korting
+142|korting
+143|{n} punten · tot {max} bruikbaar bij deze bestelling
+144|Alles bruikbare gebruiken
+145|Coupon(s) / voucher(s)
+146|Coupons & vouchers
+147|{title} toegepast
+148|U heeft op dit moment geen coupons.
+149|Min. besteding {amt} alleen op artikelen (vóór servicekosten, belasting en statiegeld)
+150|Geen minimumbesteding
+151|Voeg nog {amt} aan artikelen toe
+152|Coupon
+153|Punten
+154|U heeft {n} punten verdiend met deze bestelling · Saldo: {m} punten
+155|U verdient {n} punten zodra uw betaling binnen is.
+156|Die coupon kan niet bij deze bestelling worden gebruikt. Verwijder hem en probeer het opnieuw.
+157|{n} beschikbaar
+158|Scan de QR met uw bankapp

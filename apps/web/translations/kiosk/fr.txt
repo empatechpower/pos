@@ -114,3 +114,24 @@
 135|Collectez des tampons et des récompenses
 136|Ajouter à la commande
 137|Vous êtes déconnecté — vous commandez maintenant en tant qu’invité
+138|Merci, {x} !
+139|Utiliser vos points
+140|points disponibles
+141|{amt} de réduction
+142|de réduction
+143|{n} points · jusqu’à {max} utilisables sur cette commande
+144|Utiliser tout le possible
+145|Coupon(s) / bon(s)
+146|Coupons et bons
+147|{title} appliqué
+148|Vous n’avez aucun coupon pour le moment.
+149|Dépense minimale {amt} sur les articles uniquement (avant frais de service, taxes et consignes)
+150|Pas de dépense minimale
+151|Ajoutez encore {amt} d’articles
+152|Coupon
+153|Points
+154|Vous avez gagné {n} points sur cette commande · Solde : {m} points
+155|Vous gagnerez {n} points dès réception de votre paiement.
+156|Ce coupon ne peut pas être utilisé pour cette commande. Retirez-le et réessayez.
+157|{n} disponible(s)
+158|Scannez le QR avec votre application bancaire

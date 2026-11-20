@@ -114,3 +114,24 @@
 135|Samla stämplar & belöningar
 136|Lägg till i beställningen
 137|Utloggad — du beställer nu som gäst
+138|Tack, {x}!
+139|Använd dina poäng
+140|poäng tillgängliga
+141|{amt} rabatt
+142|rabatt
+143|{n} poäng · upp till {max} kan användas på den här beställningen
+144|Använd allt som går
+145|Kupong(er) / presentkort
+146|Kuponger & presentkort
+147|{title} tillämpad
+148|Du har inga kuponger just nu.
+149|Minsta köp {amt} endast på artiklar (före serviceavgift, skatt och pant)
+150|Inget minsta köp
+151|Lägg till artiklar för {amt} till
+152|Kupong
+153|Poäng
+154|Du fick {n} poäng på den här beställningen · Saldo: {m} poäng
+155|Du får {n} poäng när din betalning kommit in.
+156|Den kupongen kan inte användas på den här beställningen. Ta bort den och försök igen.
+157|{n} tillgängliga
+158|Skanna QR-koden med din bankapp

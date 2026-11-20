@@ -114,3 +114,24 @@
 135|Pul ve ödül biriktirin
 136|Siparişe ekle
 137|Çıkış yapıldı — artık misafir olarak sipariş veriyorsunuz
+138|Teşekkürler, {x}!
+139|Puanlarınızı kullanın
+140|puan kullanılabilir
+141|{amt} indirim
+142|indirim
+143|{n} puan · bu siparişte {max} puana kadar kullanılabilir
+144|Kullanılabilir tümünü kullan
+145|Kupon / çek
+146|Kuponlar ve çekler
+147|{title} uygulandı
+148|Şu anda kuponunuz yok.
+149|Asgari harcama {amt}, yalnızca ürünler için (servis ücreti, vergi ve depozito öncesi)
+150|Asgari harcama yok
+151|Ürünlere {amt} daha ekleyin
+152|Kupon
+153|Puan
+154|Bu siparişte {n} puan kazandınız · Bakiye: {m} puan
+155|Ödemeniz alındığında {n} puan kazanacaksınız.
+156|Bu kupon bu siparişte kullanılamaz. Kaldırıp tekrar deneyin.
+157|{n} kullanılabilir
+158|QR kodunu bankacılık uygulamanızla tarayın

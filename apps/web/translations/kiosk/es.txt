@@ -114,3 +114,24 @@
 135|Acumule sellos y recompensas
 136|Añadir al pedido
 137|Sesión cerrada — ahora está pidiendo como invitado
+138|Gracias, {x}
+139|Use sus puntos
+140|puntos disponibles
+141|{amt} de descuento
+142|de descuento
+143|{n} puntos · hasta {max} utilizables en este pedido
+144|Usar todo lo posible
+145|Cupón(es) / vale(s)
+146|Cupones y vales
+147|{title} aplicado
+148|Ahora mismo no tiene cupones.
+149|Gasto mínimo de {amt} solo en artículos (antes del cargo por servicio, impuestos y depósito)
+150|Sin gasto mínimo
+151|Añada {amt} más en artículos
+152|Cupón
+153|Puntos
+154|Ha ganado {n} puntos con este pedido · Saldo: {m} puntos
+155|Ganará {n} puntos en cuanto se reciba su pago.
+156|Ese cupón no se puede usar en este pedido. Quítelo e inténtelo de nuevo.
+157|{n} disponibles
+158|Escanee el QR con su app del banco

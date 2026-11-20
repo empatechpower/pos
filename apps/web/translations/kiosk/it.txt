@@ -114,3 +114,24 @@
 135|Raccogli timbri e premi
 136|Aggiungi all’ordine
 137|Disconnesso — ora stai ordinando come ospite
+138|Grazie, {x}!
+139|Usa i tuoi punti
+140|punti disponibili
+141|{amt} di sconto
+142|di sconto
+143|{n} punti · fino a {max} utilizzabili per questo ordine
+144|Usa tutto il possibile
+145|Coupon / buoni
+146|Coupon e buoni
+147|{title} applicato
+148|Al momento non hai coupon.
+149|Spesa minima {amt} solo sugli articoli (prima di costo del servizio, tasse e cauzione)
+150|Nessuna spesa minima
+151|Aggiungi altri {amt} di articoli
+152|Coupon
+153|Punti
+154|Hai guadagnato {n} punti con questo ordine · Saldo: {m} punti
+155|Guadagnerai {n} punti quando il pagamento sarà ricevuto.
+156|Questo coupon non può essere usato per questo ordine. Rimuovilo e riprova.
+157|{n} disponibili
+158|Inquadra il QR con la tua app bancaria

@@ -114,3 +114,24 @@
 135|Junte carimbos e recompensas
 136|Adicionar ao pedido
 137|Sessão terminada — agora está a pedir como convidado
+138|Obrigado, {x}!
+139|Use os seus pontos
+140|pontos disponíveis
+141|{amt} de desconto
+142|de desconto
+143|{n} pontos · até {max} utilizáveis neste pedido
+144|Usar tudo o que for possível
+145|Cupão(ões) / vale(s)
+146|Cupões e vales
+147|{title} aplicado
+148|Neste momento não tem cupões.
+149|Gasto mínimo de {amt} apenas em artigos (antes da taxa de serviço, impostos e caução)
+150|Sem gasto mínimo
+151|Adicione mais {amt} em artigos
+152|Cupão
+153|Pontos
+154|Ganhou {n} pontos com este pedido · Saldo: {m} pontos
+155|Vai ganhar {n} pontos assim que o seu pagamento for recebido.
+156|Esse cupão não pode ser usado neste pedido. Remova-o e tente novamente.
+157|{n} disponíveis
+158|Leia o QR com a app do seu banco

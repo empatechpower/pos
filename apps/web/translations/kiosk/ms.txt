@@ -114,3 +114,24 @@
 135|Kumpul setem & ganjaran
 136|Tambah ke pesanan
 137|Anda telah log keluar — anda kini memesan sebagai tetamu
+138|Terima kasih, {x}!
+139|Guna mata anda
+140|mata tersedia
+141|diskaun {amt}
+142|diskaun
+143|{n} mata · sehingga {max} boleh digunakan untuk pesanan ini
+144|Guna semua yang boleh
+145|Kupon / baucar
+146|Kupon & baucar
+147|{title} digunakan
+148|Anda tiada kupon buat masa ini.
+149|Perbelanjaan minimum {amt} untuk item sahaja (sebelum caj perkhidmatan, cukai dan deposit)
+150|Tiada perbelanjaan minimum
+151|Tambah {amt} lagi dalam item
+152|Kupon
+153|Mata
+154|Anda memperoleh {n} mata untuk pesanan ini · Baki: {m} mata
+155|Anda akan memperoleh {n} mata sebaik sahaja pembayaran anda diterima.
+156|Kupon itu tidak boleh digunakan untuk pesanan ini. Buangnya dan cuba lagi.
+157|{n} tersedia
+158|Imbas kod QR dengan aplikasi perbankan anda

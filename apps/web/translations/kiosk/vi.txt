@@ -114,3 +114,24 @@
 135|Sưu tầm tem & ưu đãi
 136|Thêm vào đơn hàng
 137|Đã đăng xuất — bạn đang đặt món với tư cách khách
+138|Cảm ơn bạn, {x}!
+139|Dùng điểm của bạn
+140|điểm khả dụng
+141|giảm {amt}
+142|giảm
+143|{n} điểm · tối đa {max} dùng được cho đơn này
+144|Dùng tất cả điểm khả dụng
+145|Phiếu giảm giá / voucher
+146|Phiếu giảm giá & voucher
+147|Đã áp dụng {title}
+148|Hiện bạn chưa có phiếu giảm giá nào.
+149|Chi tiêu tối thiểu {amt} chỉ tính trên món (trước phí dịch vụ, thuế và tiền ký quỹ)
+150|Không yêu cầu chi tiêu tối thiểu
+151|Thêm {amt} món nữa
+152|Phiếu giảm giá
+153|Điểm
+154|Bạn nhận được {n} điểm từ đơn này · Số dư: {m} điểm
+155|Bạn sẽ nhận {n} điểm khi thanh toán của bạn được ghi nhận.
+156|Không thể dùng phiếu này cho đơn hàng này. Hãy bỏ phiếu và thử lại.
+157|{n} khả dụng
+158|Quét mã QR bằng ứng dụng ngân hàng

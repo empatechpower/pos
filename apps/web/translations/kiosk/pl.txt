@@ -114,3 +114,24 @@
 135|Zbieraj pieczątki i nagrody
 136|Dodaj do zamówienia
 137|Wylogowano — zamawiasz teraz jako gość
+138|Dziękujemy, {x}!
+139|Wykorzystaj punkty
+140|punktów dostępnych
+141|rabat {amt}
+142|rabatu
+143|{n} pkt · do {max} do wykorzystania w tym zamówieniu
+144|Wykorzystaj wszystkie możliwe
+145|Kupon(y) / bon(y)
+146|Kupony i bony
+147|Zastosowano: {title}
+148|Obecnie nie masz kuponów.
+149|Minimalne wydatki {amt} tylko na pozycje (przed opłatą serwisową, podatkami i kaucją)
+150|Bez minimalnych wydatków
+151|Dodaj jeszcze pozycje za {amt}
+152|Kupon
+153|Punkty
+154|Zdobyto {n} pkt za to zamówienie · Saldo: {m} pkt
+155|Otrzymasz {n} pkt, gdy wpłynie płatność.
+156|Tego kuponu nie można użyć w tym zamówieniu. Usuń go i spróbuj ponownie.
+157|Dostępne: {n}
+158|Zeskanuj kod QR aplikacją bankową

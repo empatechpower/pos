@@ -114,3 +114,24 @@
 135|Stempel & Prämien sammeln
 136|Zur Bestellung hinzufügen
 137|Abgemeldet — Sie bestellen jetzt als Gast
+138|Danke, {x}!
+139|Ihre Punkte einlösen
+140|Punkte verfügbar
+141|{amt} Rabatt
+142|Rabatt
+143|{n} Punkte · bis zu {max} bei dieser Bestellung nutzbar
+144|Alles Nutzbare einlösen
+145|Gutschein(e) / Coupon(s)
+146|Coupons & Gutscheine
+147|{title} angewendet
+148|Sie haben derzeit keine Coupons.
+149|Mindestumsatz {amt} nur auf Artikel (vor Servicegebühr, Steuern und Pfand)
+150|Kein Mindestumsatz
+151|Noch {amt} an Artikeln hinzufügen
+152|Coupon
+153|Punkte
+154|Sie haben {n} Punkte mit dieser Bestellung gesammelt · Guthaben: {m} Punkte
+155|Sie erhalten {n} Punkte, sobald Ihre Zahlung eingegangen ist.
+156|Dieser Coupon kann für diese Bestellung nicht verwendet werden. Entfernen Sie ihn und versuchen Sie es erneut.
+157|{n} verfügbar
+158|QR-Code mit Ihrer Banking-App scannen

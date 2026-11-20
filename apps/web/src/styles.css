@@ -618,3 +618,8 @@ body:has(.shop) { background: #f0eadd; }
 .shop .swipe-bin:focus-visible { opacity: 1; pointer-events: auto; }
 .shop .swipe-shell.is-drag .swipe-hint, .shop .swipe-shell.is-leave .swipe-hint { opacity: 0; animation: none; }
 .shop .swipe-shell.is-drag, .shop .swipe-shell.is-leave { user-select: none; -webkit-user-select: none; }
+
+/* the queue board's sound switch (bottom corner, quiet) */
+.queue { position: relative; }
+.queue-sound { position: fixed; right: 14px; bottom: 14px; z-index: 5; border: 1px solid rgba(0,0,0,.18); background: rgba(255,255,255,.85); color: #21252a; border-radius: 999px; padding: 8px 16px; font-size: 14px; font-weight: 700; cursor: pointer; opacity: .75; }
+.queue-sound:hover { opacity: 1; }

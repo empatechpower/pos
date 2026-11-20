@@ -114,3 +114,24 @@
 135|Kumpulkan stempel & hadiah
 136|Tambahkan ke pesanan
 137|Anda telah keluar — kini Anda memesan sebagai tamu
+138|Terima kasih, {x}!
+139|Gunakan poin Anda
+140|poin tersedia
+141|diskon {amt}
+142|diskon
+143|{n} poin · hingga {max} bisa dipakai untuk pesanan ini
+144|Pakai semua yang bisa
+145|Kupon / voucher
+146|Kupon & voucher
+147|{title} diterapkan
+148|Anda belum memiliki kupon saat ini.
+149|Min. belanja {amt} untuk item saja (sebelum biaya layanan, pajak, dan deposit)
+150|Tanpa minimum belanja
+151|Tambah {amt} lagi pada item
+152|Kupon
+153|Poin
+154|Anda mendapat {n} poin dari pesanan ini · Saldo: {m} poin
+155|Anda akan mendapat {n} poin setelah pembayaran Anda diterima.
+156|Kupon itu tidak bisa dipakai untuk pesanan ini. Hapus lalu coba lagi.
+157|{n} tersedia
+158|Pindai kode QR dengan aplikasi perbankan Anda

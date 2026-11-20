@@ -114,3 +114,24 @@
 135|Mangolekta ng stamps at rewards
 136|Idagdag sa order
 137|Naka-sign out na — nag-o-order ka na ngayon bilang bisita
+138|Salamat, {x}!
+139|Gamitin ang iyong points
+140|points na magagamit
+141|{amt} diskwento
+142|diskwento
+143|{n} points · hanggang {max} ang magagamit sa order na ito
+144|Gamitin lahat ng magagamit
+145|Coupon / voucher
+146|Mga coupon at voucher
+147|Naka-apply ang {title}
+148|Wala kang coupon sa ngayon.
+149|Minimum na gastos na {amt} sa mga item lang (bago ang service charge, buwis at deposit)
+150|Walang minimum na gastos
+151|Magdagdag pa ng {amt} sa mga item
+152|Coupon
+153|Points
+154|Nakakuha ka ng {n} points sa order na ito · Balanse: {m} points
+155|Makakakuha ka ng {n} points kapag natanggap na ang bayad mo.
+156|Hindi magagamit ang coupon na iyon sa order na ito. Alisin ito at subukan ulit.
+157|{n} ang magagamit
+158|I-scan ang QR gamit ang iyong banking app
