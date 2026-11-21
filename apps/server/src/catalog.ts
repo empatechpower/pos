@@ -1,5 +1,5 @@
 import { randomBytes } from "node:crypto";
-import { validateCatalog, withComboAvailability, type BuilderSpec, type Catalog, type Channel, type ChannelKind, type OptionGroup, type PricebookAssignment, type Product } from "@pos/core";
+import { validateCatalog, withComboAvailability, type BuilderSpec, type Catalog, type Channel, type ChannelKind, type OptionGroup, type PricebookAssignment, type Product, type ProductStock } from "@pos/core";
 import { MAX_IMAGE_BYTES, sniffImage } from "./brand.js";
 import type pg from "pg";
 import type { Db } from "./db/pool.js";
@@ -86,7 +86,7 @@ export class PgCatalogStore implements CatalogStore {
     const m = this.merchantId;
     const [meta, products, books, prices, channels, assigns, offs, catNames] = await Promise.all([
       q.query("SELECT version, default_pricebook_id FROM catalog_meta WHERE merchant_id=$1", [m]),
-      q.query("SELECT id,name,category,sold_out,points_exempt,description,alt_name,options,image_version,bcrs,names,builder,tax_inclusive,tax_group FROM products WHERE merchant_id=$1 ORDER BY sort", [m]),
+      q.query("SELECT id,name,category,sold_out,points_exempt,description,alt_name,options,image_version,bcrs,names,builder,tax_inclusive,tax_group,stock FROM products WHERE merchant_id=$1 ORDER BY sort", [m]),
       q.query("SELECT id,name,missing FROM pricebooks WHERE merchant_id=$1 ORDER BY name", [m]),
       q.query("SELECT pricebook_id, product_id, price_cents FROM pricebook_prices WHERE merchant_id=$1", [m]),
       q.query("SELECT id,name,kind,service_charge,active FROM channels WHERE merchant_id=$1 ORDER BY sort", [m]),
@@ -124,6 +124,7 @@ export class PgCatalogStore implements CatalogStore {
           ...(p.builder ? { builder: p.builder as BuilderSpec } : {}),
           ...(p.tax_inclusive !== null && p.tax_inclusive !== undefined ? { taxInclusive: p.tax_inclusive as boolean } : {}),
           ...(p.tax_group ? { taxGroup: p.tax_group as string } : {}),
+          ...(p.stock ? { stock: p.stock as ProductStock } : {}),
         }),
       ),
       pricebooks: books.rows.map((b) => ({ id: b.id, name: b.name, missing: b.missing, prices: pb.get(b.id)!, ...(offBy.get(b.id)?.length ? { off: offBy.get(b.id)! } : {}) })),
@@ -321,7 +322,7 @@ export class PgCatalogStore implements CatalogStore {
    * sent are left as they are, so a quick "mark sold out" can never wipe a description or its options.
    * To clear one, send an empty string (text) or an empty list (options).
    */
-  upsertProduct(p: { id?: string; name: string; category: string; soldOut?: boolean; pointsExempt?: boolean; bcrs?: boolean; priceCents?: number; description?: string; altName?: string; names?: Record<string, string>; builder?: BuilderSpec | null; taxInclusive?: boolean | null; taxGroup?: string | null; options?: OptionGroup[] }) {
+  upsertProduct(p: { id?: string; name: string; category: string; soldOut?: boolean; pointsExempt?: boolean; bcrs?: boolean; priceCents?: number; description?: string; altName?: string; names?: Record<string, string>; builder?: BuilderSpec | null; taxInclusive?: boolean | null; taxGroup?: string | null; stock?: ProductStock | null; options?: OptionGroup[] }) {
     return this.change(async (c) => {
       const m = this.merchantId;
       const id = p.id ?? shortId("item");
@@ -343,8 +344,10 @@ export class PgCatalogStore implements CatalogStore {
       // Tax: sent = set (null clears back to the merchant default), not sent = left as it is.
       const taxGiven = p.taxInclusive !== undefined;
       const groupGiven = p.taxGroup !== undefined;
+      // Stock basis: sent = set (null stops tracking), not sent = left as it is.
+      const stockGiven = p.stock !== undefined;
       await c.query(
-        `INSERT INTO products (merchant_id,id,name,category,sold_out,points_exempt,description,alt_name,options,bcrs,names,builder,tax_inclusive,tax_group) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$13,$15::jsonb,$17::jsonb,$19,$21)
+        `INSERT INTO products (merchant_id,id,name,category,sold_out,points_exempt,description,alt_name,options,bcrs,names,builder,tax_inclusive,tax_group,stock) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$13,$15::jsonb,$17::jsonb,$19,$21,$23::jsonb)
          ON CONFLICT (merchant_id,id) DO UPDATE SET name=EXCLUDED.name, category=EXCLUDED.category, sold_out=EXCLUDED.sold_out, points_exempt=EXCLUDED.points_exempt,
            description = CASE WHEN $10 THEN EXCLUDED.description ELSE products.description END,
            alt_name    = CASE WHEN $11 THEN EXCLUDED.alt_name    ELSE products.alt_name    END,
@@ -353,8 +356,9 @@ export class PgCatalogStore implements CatalogStore {
            names       = CASE WHEN $16 THEN EXCLUDED.names       ELSE products.names       END,
            builder     = CASE WHEN $18 THEN EXCLUDED.builder     ELSE products.builder     END,
            tax_inclusive = CASE WHEN $20 THEN EXCLUDED.tax_inclusive ELSE products.tax_inclusive END,
-           tax_group   = CASE WHEN $22 THEN EXCLUDED.tax_group   ELSE products.tax_group   END`,
-        [m, id, p.name, p.category, !!p.soldOut, !!p.pointsExempt, desc, alt, optsGiven && p.options!.length ? JSON.stringify(p.options) : null, descGiven, altGiven, optsGiven, !!(p.bcrs ?? autoBcrs), bcrsGiven, Object.keys(cleanNames).length ? JSON.stringify(cleanNames) : null, namesGiven, p.builder ? JSON.stringify(p.builder) : null, builderGiven, p.taxInclusive ?? null, taxGiven, (p.taxGroup ?? "").trim() || null, groupGiven],
+           tax_group   = CASE WHEN $22 THEN EXCLUDED.tax_group   ELSE products.tax_group   END,
+           stock       = CASE WHEN $24 THEN EXCLUDED.stock       ELSE products.stock       END`,
+        [m, id, p.name, p.category, !!p.soldOut, !!p.pointsExempt, desc, alt, optsGiven && p.options!.length ? JSON.stringify(p.options) : null, descGiven, altGiven, optsGiven, !!(p.bcrs ?? autoBcrs), bcrsGiven, Object.keys(cleanNames).length ? JSON.stringify(cleanNames) : null, namesGiven, p.builder ? JSON.stringify(p.builder) : null, builderGiven, p.taxInclusive ?? null, taxGiven, (p.taxGroup ?? "").trim() || null, groupGiven, p.stock ? JSON.stringify(p.stock) : null, stockGiven],
       );
       if (p.priceCents !== undefined) {
         const def = (await c.query("SELECT default_pricebook_id FROM catalog_meta WHERE merchant_id=$1", [m])).rows[0].default_pricebook_id as string;

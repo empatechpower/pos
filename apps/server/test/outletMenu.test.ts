@@ -85,6 +85,18 @@ describe("per-outlet menus on the server", () => {
     expect((await call("/api/outlets/CBD", { method: "PUT", body: { name: "CBD shop", prepMinutes: 1.5 }, staff: owner })).status).toBe(400);
   });
 
+  it("outlet coordinates: both or neither, kept when another field is saved, and offered on the store list", async () => {
+    expect((await call("/api/outlets/CBD", { method: "PUT", body: { name: "CBD shop", latitude: 1.2838, longitude: 103.8514 }, staff: owner })).status).toBe(200);
+    expect((await call("/api/outlets/CBD", { method: "PUT", body: { name: "CBD shop", latitude: 1.28 }, staff: owner })).status).toBe(400); // half a pair
+    expect((await call("/api/outlets/CBD", { method: "PUT", body: { name: "CBD shop", latitude: 95, longitude: 0 }, staff: owner })).status).toBe(400);
+    expect((await call("/api/outlets/CBD", { method: "PUT", body: { name: "CBD shop", address: "1 Raffles Place" }, staff: owner })).status).toBe(200);
+    const stores = (await call("/api/shop/stores")).json.stores as any[];
+    expect(stores.find((x) => x.id === "CBD")).toMatchObject({ latitude: 1.2838, longitude: 103.8514 });
+    expect(stores.find((x) => x.id === "EV")).toMatchObject({ latitude: null, longitude: null });
+    expect((await call("/api/outlets/CBD", { method: "PUT", body: { name: "CBD shop", latitude: null, longitude: null }, staff: owner })).status).toBe(200);
+    expect(((await call("/api/shop/stores")).json.stores as any[]).find((x) => x.id === "CBD").latitude).toBeNull();
+  });
+
   it("an item switched off at one outlet is gone from its menu and cannot be ordered there, while the other outlet still sells it", async () => {
     const v0 = (await menuOf("CBD")).menuVersion;
     expect((await call(`/api/outlets/CBD/menu/${teaId}`, { method: "PUT", body: { off: true }, staff: owner })).status).toBe(200);

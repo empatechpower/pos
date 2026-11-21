@@ -2,7 +2,7 @@ import cors from "@fastify/cors";
 import Fastify, { type FastifyReply, type FastifyRequest } from "fastify";
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
-import { type BuilderSpec, isTimeZone, validateOutletOverride, validateWindows, type MenuWindows, confirmedPaid, hourly, isFullyPaid, productMix, summarize, menuFor, newId, orderTotals, reduceAll, reduceOrder, shopStatus, type BusinessConfig, type ChannelKind, type OptionGroup, type OrderEvent } from "@pos/core";
+import { type BuilderSpec, type ProductStock, validateProductStock, isTimeZone, validCoordinates, validateOutletOverride, validateWindows, type MenuWindows, confirmedPaid, hourly, isFullyPaid, productMix, summarize, menuFor, newId, orderTotals, reduceAll, reduceOrder, shopStatus, type BusinessConfig, type ChannelKind, type OptionGroup, type OrderEvent } from "@pos/core";
 import { CASHIER_TOPUP_LIMIT_CENTS, audit, authenticate, authenticateAgent, can, createAgent, createConnectCode, redeemConnectCode, createStaff, listAgents, login, logout, recentAudit, revokeAgent, type Permission, type Role, type Staff } from "./auth.js";
 import type { CatalogStore, ChangeResult, PgCatalogStore } from "./catalog.js";
 import type { Db } from "./db/pool.js";
@@ -13,6 +13,7 @@ import { PrintStore, validatePrinter, type Printer } from "./print.js";
 import { registerShop } from "./shop.js";
 import { registerDisplay } from "./display.js";
 import { registerPromoAdmin, releasePromo } from "./promo.js";
+import { reconcileOrderStock, registerStock } from "./stock.js";
 import { loadKiosk, optionsOf, saveKiosk, saveSetting } from "./settings.js";
 import { sendMail, type Integrations } from "./integrations.js";
 import { registerTelegram } from "./telegram.js";
@@ -156,6 +157,20 @@ export async function buildApp({ config, store, db, catalog, catalogAdmin, print
     }
   }
 
+  /** Stock follows the orders: after any change to an order, its stock movements are made to match its lines (once each; a cancel puts it back). */
+  async function reconcileStock(orderIds: string[]) {
+    try {
+      const cat = await catalog.load();
+      for (const id of orderIds) {
+        const order = reduceOrder(id, await store.eventsForOrder(id));
+        const outletId = (await store.outletOfOrder?.(id)) ?? config.outletName;
+        if (order && db) await reconcileOrderStock(db, merchantId, outletId, order, cat);
+      }
+    } catch (err) {
+      app.log.error({ err }, "could not update stock");
+    }
+  }
+
   /** Store events, tell live screens, queue whatever now needs printing. Used for tills and for customers' orders alike. */
   async function ingest(events: OrderEvent[], outletId?: string): Promise<StoredEvent[]> {
     const added = await store.append(events, outletId);
@@ -164,6 +179,7 @@ export async function buildApp({ config, store, db, catalog, catalogAdmin, print
     // A cancelled order gives its promo code use back.
     for (const a of added) if (db && a.event.type === "StageSet" && a.event.stage === "cancelled") await releasePromo(db, merchantId, a.event.orderId).catch(() => undefined);
     if (added.length && print) await queuePrints(touched);
+    if (added.length && db) await reconcileStock(touched);
     if (added.length && members) await settleMemberOrders(touched);
     return added;
   }
@@ -449,7 +465,7 @@ export async function buildApp({ config, store, db, catalog, catalogAdmin, print
    * Create or change an outlet. Adding an outlet, moving it between franchises and switching it off are for the brand owner;
    * a manager of an outlet (or of its franchise) can update its name, address, phone and opening hours.
    */
-  app.put<{ Params: { id: string }; Body: { name?: string; franchiseId?: string | null; address?: string | null; phone?: string | null; hours?: string | null; active?: boolean; serviceMode?: string | null; prepMinutes?: number | null } }>("/api/outlets/:id", { preHandler: needs("device.manage") }, async (req, reply) => {
+  app.put<{ Params: { id: string }; Body: { name?: string; franchiseId?: string | null; address?: string | null; phone?: string | null; hours?: string | null; active?: boolean; serviceMode?: string | null; prepMinutes?: number | null; latitude?: number | null; longitude?: number | null } }>("/api/outlets/:id", { preHandler: needs("device.manage") }, async (req, reply) => {
     const visible = await visibleOutletIds(db, merchantId, req.staff!);
     const id = req.params.id;
     const b = req.body ?? {};
@@ -470,7 +486,12 @@ export async function buildApp({ config, store, db, catalog, catalogAdmin, print
     const serviceMode = b.serviceMode === "qsr" || b.serviceMode === "tsr" ? b.serviceMode : null;
     if (b.prepMinutes != null && (!Number.isInteger(b.prepMinutes) || b.prepMinutes < 0 || b.prepMinutes > 600)) return reply.code(400).send({ error: "prepMinutes is a whole number of minutes, 0 to 600" });
     const prepMinutes = b.prepMinutes === undefined ? existing?.prepMinutes ?? null : b.prepMinutes;
-    await upsertOutlet(db, merchantId, { id, name, franchiseId, address: text(b.address, 200), phone: text(b.phone, 40), hours: text(b.hours, 120), active, serviceMode, prepMinutes });
+    // Coordinates come as a pair (or both cleared with null); left out, the saved ones stay.
+    const sentCoords = b.latitude !== undefined || b.longitude !== undefined;
+    if (sentCoords && !((b.latitude === null && b.longitude === null) || validCoordinates(b.latitude, b.longitude))) return reply.code(400).send({ error: "latitude is -90 to 90 and longitude -180 to 180; send both, or both null to clear" });
+    const latitude = sentCoords ? b.latitude ?? null : existing?.latitude ?? null;
+    const longitude = sentCoords ? b.longitude ?? null : existing?.longitude ?? null;
+    await upsertOutlet(db, merchantId, { id, name, franchiseId, address: text(b.address, 200), phone: text(b.phone, 40), hours: text(b.hours, 120), active, serviceMode, prepMinutes, latitude, longitude });
     await audit(db, merchantId, req.staff!.id, "outlet.save", { id, name, franchiseId, serviceMode, prepMinutes, created: !existing });
     return { ok: true };
   });
@@ -589,6 +610,7 @@ export async function buildApp({ config, store, db, catalog, catalogAdmin, print
 
   registerDisplay(app, { db, merchantId, needsDevice });
   registerPromoAdmin(app, { db, merchantId, needs });
+  registerStock(app, { db, merchantId, needs, outletIds: async () => (await listOutlets(db, merchantId)).map((o) => o.id), defaultOutlet: config.outletName });
   registerShop(app, { db, config, store, catalog, catalogAdmin, brand: new BrandStore(db, merchantId), ingest, members, needs, integrations, now });
 
   // ---- the Telegram bot for managing prices ---------------------------------------------------
@@ -739,7 +761,7 @@ export async function buildApp({ config, store, db, catalog, catalogAdmin, print
       return changed(req, reply, "category", () => cat.renameCategory(from, to, names));
     });
 
-    app.post<{ Body: { id?: string; name?: string; category?: string; soldOut?: boolean; pointsExempt?: boolean; bcrs?: boolean; priceCents?: number; description?: string; altName?: string; names?: Record<string, string>; builder?: BuilderSpec | null; taxInclusive?: boolean | null; taxGroup?: string | null; options?: OptionGroup[] } }>(
+    app.post<{ Body: { id?: string; name?: string; category?: string; soldOut?: boolean; pointsExempt?: boolean; bcrs?: boolean; priceCents?: number; description?: string; altName?: string; names?: Record<string, string>; builder?: BuilderSpec | null; taxInclusive?: boolean | null; taxGroup?: string | null; stock?: ProductStock | null; options?: OptionGroup[] } }>(
       "/api/catalog/products",
       manage,
       async (req, reply) => {
@@ -748,10 +770,15 @@ export async function buildApp({ config, store, db, catalog, catalogAdmin, print
         if (b.priceCents !== undefined && !isCents(b.priceCents)) return bad(reply, "priceCents must be a whole number of cents, 0 or more");
         if (b.names !== undefined && (!b.names || typeof b.names !== "object" || Array.isArray(b.names))) return bad(reply, "names must be an object of language code to name");
         if (b.taxInclusive !== undefined && b.taxInclusive !== null && typeof b.taxInclusive !== "boolean") return bad(reply, "taxInclusive must be true, false or null");
+        if (b.stock) {
+          const known = new Set((await db.query("SELECT id FROM inventory_items WHERE merchant_id=$1", [merchantId])).rows.map((x) => x.id as string));
+          const problems = validateProductStock(b.stock, b.name ?? "this product", (id) => known.has(id));
+          if (problems.length) return reply.code(400).send({ error: "invalid_stock", problems });
+        }
         if (b.taxGroup !== undefined && b.taxGroup !== null && (typeof b.taxGroup !== "string" || b.taxGroup.length > 40)) return bad(reply, "taxGroup must be a short name or null");
         if (b.builder !== undefined && b.builder !== null && (typeof b.builder !== "object" || Array.isArray(b.builder))) return bad(reply, "builder must be an object with groups or variants, or null to remove it");
         return changed(req, reply, "product", () =>
-          cat.upsertProduct({ id: b.id, name: b.name!.trim(), category: b.category!.trim(), soldOut: b.soldOut, pointsExempt: b.pointsExempt, bcrs: b.bcrs, priceCents: b.priceCents, description: b.description, altName: b.altName, names: b.names, builder: b.builder, taxInclusive: b.taxInclusive, taxGroup: b.taxGroup, options: b.options }),
+          cat.upsertProduct({ id: b.id, name: b.name!.trim(), category: b.category!.trim(), soldOut: b.soldOut, pointsExempt: b.pointsExempt, bcrs: b.bcrs, priceCents: b.priceCents, description: b.description, altName: b.altName, names: b.names, builder: b.builder, taxInclusive: b.taxInclusive, taxGroup: b.taxGroup, stock: b.stock, options: b.options }),
         );
       },
     );

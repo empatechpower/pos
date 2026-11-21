@@ -1,3 +1,4 @@
+import { validateProductStock, type ProductStock } from "./stock.js";
 import type { Cents } from "./money.js";
 import { hasBuilder, validateBuilderSpec, type BuilderSpec } from "./builder.js";
 import type { OptionGroup } from "./options.js";
@@ -38,6 +39,8 @@ export interface Product {
   names?: Record<string, string>;
   /** A build-your-own product: groups with rules and allowances (see builder.ts). A product has options OR a builder, not both. */
   builder?: BuilderSpec;
+  /** What one unit of this product uses up: its own stock item (finished stock) or a recipe's ingredients. Absent = not tracked. */
+  stock?: ProductStock;
   /** Computed for an outlet when its menu is read (never stored): orderable, available later (with the next opening), sold out. */
   availability?: Availability;
   /** 0 or absent = no photo. Changes whenever the photo does, so devices refetch it. */
@@ -207,6 +210,7 @@ export function validateCatalog(c: Catalog): string[] {
       return { exists: !!l, hasOptions: !!l && (!!l.options?.length || hasBuilder(l.builder)) };
     }));
   }
+  for (const p of c.products) problems.push(...validateProductStock(p.stock, p.id));
   for (const [cat, names] of Object.entries(c.categoryNames ?? {})) {
     for (const [code, n] of Object.entries(names)) {
       if (!/^[a-z]{2,3}$/.test(code)) problems.push(`category ${cat}: "${code}" is not a language code`);

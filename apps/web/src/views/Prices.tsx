@@ -1,7 +1,8 @@
 import { LANGS } from "../shopI18n";
 import { useEffect, useState } from "react";
-import { formatMoney, isCombo, type Catalog, type ChannelKind, type OptionGroup } from "@pos/core";
+import { brandColoursFromPixels, formatMoney, isCombo, type Catalog, type ChannelKind, type OptionGroup } from "@pos/core";
 import { OptionsEditor } from "./OptionsEditor";
+import { StockPanel } from "./StockPanel";
 import { authHeader, staffFetch, useStaff } from "../auth";
 import { markDeviceRejected } from "../device";
 
@@ -337,6 +338,22 @@ export function Prices({ catalog, outletId }: { catalog: Catalog; outletId: stri
           <div className="row brand">
             <label className="inline">Button colour <input type="color" value={brand.primary} onChange={(e) => setBrand({ ...brand, primary: e.target.value })} aria-label="Button colour" /></label>
             <label className="inline">Highlight colour <input type="color" value={brand.accent} onChange={(e) => setBrand({ ...brand, accent: e.target.value })} aria-label="Highlight colour" /></label>
+            {brand.logoUrl && <button className="secondary sm" onClick={() => void (async () => {
+              // The logo comes first and is never recoloured: its own colours become the shop's. The manager checks them, then saves.
+              const img = new Image();
+              img.crossOrigin = "anonymous";
+              const loaded = await new Promise<boolean>((ok) => { img.onload = () => ok(true); img.onerror = () => ok(false); img.src = brand.logoUrl!; });
+              if (!loaded) { setMsg("Could not read the logo."); return; }
+              const c = document.createElement("canvas");
+              c.width = 96; c.height = 96;
+              const g = c.getContext("2d", { willReadFrequently: true });
+              if (!g) { setMsg("Could not read the logo."); return; }
+              g.drawImage(img, 0, 0, 96, 96);
+              const found = brandColoursFromPixels(g.getImageData(0, 0, 96, 96).data);
+              if (!found) { setMsg("The logo has no colour to take (it is black and white). Choose the colours yourself."); return; }
+              setBrand({ ...brand, primary: found.primary, accent: found.accent });
+              setMsg("Colours taken from the logo. Check them, then press Save colours.");
+            })()}>Use the logo's colours</button>}
             <button className="primary sm" onClick={async () => {
               const r = await staffFetch("/api/brand", { method: "PUT", body: { primary: brand.primary, accent: brand.accent } });
               setMsg("problem" in r ? r.problem : r.res.ok ? "Shop colours saved." : "Colours were not saved.");
@@ -359,6 +376,7 @@ export function Prices({ catalog, outletId }: { catalog: Catalog; outletId: stri
         <input placeholder="e.g. LIDO, Weekend, Grab" value={newBook} onChange={(e) => setNewBook(e.target.value)} />
         <button className="primary sm" disabled={!newBook.trim()} onClick={() => { void send("POST", "pricebooks", { name: newBook }, `${newBook} created. Pick it above and set its prices.`); setNewBook(""); }}>Create</button>
       </div>
+      <StockPanel catalog={catalog} outletId={outletId} />
       <p className="muted">Outlet: {outletId}. To price one outlet differently, create a pricebook and assign it to that outlet through the API for now.</p>
     </div>
   );

@@ -5,6 +5,7 @@ import { BuilderSheet } from "./BuilderSheet";
 import { RollMoney } from "./RollMoney";
 import { PickupPicker } from "./PickupPicker";
 import { PromoBox, type AppliedPromo } from "./PromoBox";
+import { StoresSheet, useStores } from "./StoresSheet";
 import "../shopProto.css";
 import { go, onRouteChange, queryParams } from "../nav";
 import { LANGS, detectedLang, greeting, lang, langMode, setLangMode, shortLabel, t, tx, useLang } from "../shopI18n";
@@ -327,9 +328,11 @@ const clearPurchaseKey = () => {
 };
 
 /** The bag is kept per table link (…?table=12), so several tabs in one browser, each opened from a different table, never share a bag. */
+/** A bag also belongs to its outlet, so going to another outlet and back never loses what was picked at the first. */
 const bagKeyFor = (table: string) => {
   const n = table.replace(/\D/g, "");
-  return n ? `pos.shopBag:t${n}` : "pos.shopBag";
+  const o = linkOutlet();
+  return `${n ? `pos.shopBag:t${n}` : "pos.shopBag"}${o ? `@${o}` : ""}`;
 };
 /** The unsent bag and table survive a reload or an interrupted visit for a few hours, then are forgotten. */
 function loadBag(key: string): { bag: BagLine[]; spot: string } | null {
@@ -470,6 +473,8 @@ function Menu({ info, catalog, config, loginError, recheck }: { info: Info; cata
   const [bag, setBag] = useState<BagLine[]>(saved?.bag ?? []);
   const [picking, setPicking] = useState<MenuEntry | null>(null);
   const [promo, setPromo] = useState<AppliedPromo | null>(null);
+  const stores = useStores();
+  const [storesOpen, setStoresOpen] = useState(false);
   const [editing, setEditing] = useState<BagLine | null>(null);
   const [name, setName] = useState("");
   const [phone, setPhone] = useState("");
@@ -929,7 +934,11 @@ function Menu({ info, catalog, config, loginError, recheck }: { info: Info; cata
         ) : (
           <button className="shop-pts link" onClick={() => setScreen("login")}>{t("signInW", "Sign in")}<br />{tx("to pay with credit")}</button>
         )}
-        <span className="shop-outlet"><Icon name="pin" size={13} />{info.outletName}</span>
+        {stores && stores.length > 1 ? (
+          <button className="shop-outlet" onClick={() => setStoresOpen(true)} aria-label={tx("Choose an outlet")}><Icon name="pin" size={13} />{info.outletName} ▾</button>
+        ) : (
+          <span className="shop-outlet"><Icon name="pin" size={13} />{info.outletName}</span>
+        )}
       </div>
     </header>
   );
@@ -1722,6 +1731,7 @@ function Menu({ info, catalog, config, loginError, recheck }: { info: Info; cata
         <div className="shop-msg"><p>{t("bagEmptyShort", "Your bag is empty.")}</p><button className="shop-primary" onClick={() => setScreen("order")}>{t("backToOrder", "Back to Order")}</button></div>
       )}
       {walletSheet}
+      {storesOpen && stores && <StoresSheet stores={stores} currentId={info.outletId} onClose={() => setStoresOpen(false)} onPick={(id) => { try { sessionStorage.setItem("pos.outlet", id); } catch { /* ignore */ } window.location.href = `/shop?outlet=${encodeURIComponent(id)}`; }} />}
       {langSheet}
       {tableDialog}
       {picking && hasBuilder(picking.builder) && (

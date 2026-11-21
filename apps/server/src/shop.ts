@@ -1,5 +1,5 @@
 import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
-import { applyOutletMenu, availabilityOf, menuFor, priceBuild, hasBuilder, type BuildInput, type StoredBuild, isValidSlot, pickupSlots, localParts, lastBoundaryAt, menuState, cleanNote, collectionNumber, confirmedPaid, newId, optionLines, orderTotals, totalsLines, queueView, quoteOrder, reduceAll, reduceOrder, shopStatus, type BusinessConfig, type OrderEvent, type OrderState } from "@pos/core";
+import { applyOutletMenu, applyStockToMenu, orderConsumption, shortfalls, availabilityOf, menuFor, priceBuild, hasBuilder, type BuildInput, type StoredBuild, isValidSlot, pickupSlots, localParts, lastBoundaryAt, menuState, cleanNote, collectionNumber, confirmedPaid, newId, optionLines, orderTotals, totalsLines, queueView, quoteOrder, reduceAll, reduceOrder, shopStatus, type BusinessConfig, type OrderEvent, type OrderState } from "@pos/core";
 import { audit, type Permission } from "./auth.js";
 import type { BrandStore } from "./brand.js";
 import type { CatalogStore, PgCatalogStore } from "./catalog.js";
@@ -7,6 +7,7 @@ import { liveSmsNumber } from "./devices.js";
 import type { Db } from "./db/pool.js";
 import { balanceOf, creditBlockedFor, creditFrozen, refund as refundCredit, spend as spendCredit } from "./ledger.js";
 import { FailureLimiter } from "./rateLimit.js";
+import { itemNames, onHandAt, stockVersion } from "./stock.js";
 import { PROMO_BASIS, claimPromo, judgePromo, promoStacksWithCoupons, releasePromo, type PromoVerdict } from "./promo.js";
 import { normaliseEmail, type MemberStore } from "./members.js";
 import { authorizeUrl, createStripeCheckout, createStripeRefund, fetchProfile, sendMail, newState, newVerifier, sameSecret, verifyStripeSignature, type Integrations, type OAuthProvider } from "./integrations.js";
@@ -176,6 +177,8 @@ export function registerShop(app: FastifyInstance, d: ShopDeps) {
         phone: o.phone ?? undefined,
         hours: o.hours ?? undefined,
         prepMinutes: o.prepMinutes,
+        latitude: o.latitude,
+        longitude: o.longitude,
         directionsUrl: o.address ? `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(o.address)}` : undefined,
       })),
     };
@@ -187,11 +190,11 @@ export function registerShop(app: FastifyInstance, d: ShopDeps) {
     const id = outlet?.id ?? d.config.outletName;
     const now = (d.now ?? Date.now)();
     const [c, o, w] = await Promise.all([d.catalog.load(), loadOutletMenu(d.db, merchantId, id), loadOutletWindows(d.db, merchantId, id)]);
-    const applied = applyOutletMenu(c, o.menu);
+    const applied = applyStockToMenu(applyOutletMenu(c, o.menu), await onHandAt(d.db, merchantId, id));
     // Every item carries its one state (orderable, available later with the next opening, sold out). The version also moves at each window boundary,
     // so a phone that keeps asking "has the menu changed?" sees an item flip with nothing to reload by hand.
     const catalog = { ...applied, products: applied.products.map((p) => ({ ...p, availability: availabilityOf(p, w.windows, now, w.timeZone) })) };
-    const menuVersion = c.version + o.version + Math.floor(lastBoundaryAt(w.windows, now, w.timeZone) / 60_000);
+    const menuVersion = c.version + o.version + (await stockVersion(d.db, merchantId, id)) + Math.floor(lastBoundaryAt(w.windows, now, w.timeZone) / 60_000);
     return { outletId: id, prepMinutes: outlet?.prepMinutes ?? null, menuVersion, menuState: menuState(w.windows, now, w.timeZone), timeZone: w.timeZone, serverTime: now, catalog };
   };
   app.get<{ Querystring: { outlet?: string } }>("/api/shop/menu", async (req, reply) => {
@@ -583,7 +586,8 @@ export function registerShop(app: FastifyInstance, d: ShopDeps) {
     if (phone && !/^[+\d][\d\s-]{5,19}$/.test(phone)) return reply.code(400).send({ error: "phone number looks wrong" });
 
     // The menu as THIS outlet sells it: items it has switched off are gone, sold-out items and options follow the outlet.
-    const cat = applyOutletMenu(await d.catalog.load(), (await loadOutletMenu(d.db, merchantId, outlet.id)).menu);
+    const stockNow = await onHandAt(d.db, merchantId, outlet.id);
+    const cat = applyStockToMenu(applyOutletMenu(await d.catalog.load(), (await loadOutletMenu(d.db, merchantId, outlet.id)).menu), stockNow);
     // An item outside its menu window can be looked at and built, but not ordered: refused here, whatever the app showed, with when it opens next.
     const wins = await loadOutletWindows(d.db, merchantId, outlet.id);
     const nowMs = (d.now ?? Date.now)();
@@ -635,6 +639,12 @@ export function registerShop(app: FastifyInstance, d: ShopDeps) {
     const discountIn = coupon || promo ? { amountCents: (coupon?.amountCents ?? 0) + (promo?.discountCents ?? 0), minSpendCents: coupon?.minSpendCents ?? 0 } : null;
     const quote = quoteOrder(cat, d.config, { outletId: outlet.id, channelId: b.channelId }, items, pointsAsk, discountIn);
     if (!quote.ok) return reply.code(400).send({ error: quote.error, productId: quote.productId, ...(quote.validation ? { validation: quote.validation } : {}) });
+    // Stock: the whole order is covered or none of it is taken (never a partial deduction). The stock of each ingredient and linked part is counted once.
+    const short = shortfalls(orderConsumption(cat, quote.lines), stockNow);
+    if (short.length) {
+      const names = await itemNames(d.db, merchantId);
+      return reply.code(409).send({ error: "out_of_stock", items: short.map((x) => ({ itemId: x.itemId, name: names.get(x.itemId) ?? x.itemId, needed: x.needed, onHand: Math.max(0, x.onHand) })) });
+    }
     if (b.expectedTotalCents !== undefined && b.expectedTotalCents !== quote.priced.total) {
       return reply.code(409).send({ error: "price_changed", totalCents: quote.priced.total });
     }
@@ -817,7 +827,8 @@ export function registerShop(app: FastifyInstance, d: ShopDeps) {
   const outletView = async (asked: unknown) => {
     const outlet = await outletFor(asked);
     const [base, om, wins] = await Promise.all([d.catalog.load(), loadOutletMenu(d.db, merchantId, outlet.id), loadOutletWindows(d.db, merchantId, outlet.id)]);
-    return { outlet, cat: applyOutletMenu(base, om.menu), wins, nowMs: (d.now ?? Date.now)() };
+    // Stock-tracked items that cannot make one more are sold out here (86), and so is anything that links to them.
+    return { outlet, cat: applyStockToMenu(applyOutletMenu(base, om.menu), await onHandAt(d.db, merchantId, outlet.id)), wins, nowMs: (d.now ?? Date.now)() };
   };
   type OutletView = Awaited<ReturnType<typeof outletView>>;
 

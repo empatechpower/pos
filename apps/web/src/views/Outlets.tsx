@@ -3,7 +3,7 @@ import { formatMoney } from "@pos/core";
 import { staffFetch } from "../auth";
 
 interface Franchise { id: string; name: string; active: boolean }
-interface Outlet { id: string; name: string; franchiseId: string | null; address: string | null; phone: string | null; hours: string | null; active: boolean; serviceMode: "qsr" | "tsr" | null; prepMinutes?: number | null }
+interface Outlet { id: string; name: string; franchiseId: string | null; address: string | null; phone: string | null; hours: string | null; active: boolean; serviceMode: "qsr" | "tsr" | null; prepMinutes?: number | null; latitude?: number | null; longitude?: number | null }
 interface Summary { orders: number; netCents: number; netToAccountForCents: number; discountsCents: number; voided: { orders: number } }
 interface Row { outletId: string; name: string; franchiseId: string | null; summary: Summary }
 interface Info { brand: { id: string; name: string }; scope: { franchiseId: string | null; outletId: string | null; brandWide: boolean }; franchises: Franchise[]; outlets: Outlet[] }
@@ -134,13 +134,18 @@ export function Outlets() {
               </select>
             </label>
           )}
+          <div className="row">
+            <label className="cust"><span>Latitude</span><input value={editing.latitude ?? ""} inputMode="decimal" placeholder="e.g. 1.2965" onChange={(e) => setEditing({ ...editing, latitude: e.target.value === "" ? null : Number(e.target.value) })} /></label>
+            <label className="cust"><span>Longitude</span><input value={editing.longitude ?? ""} inputMode="decimal" placeholder="e.g. 103.8764" onChange={(e) => setEditing({ ...editing, longitude: e.target.value === "" ? null : Number(e.target.value) })} /></label>
+          </div>
+          <p className="muted" style={{ fontSize: 12 }}>Both, or neither. With them, customers can sort outlets by distance. In Google Maps, right-click the shop and tap the numbers to copy them.</p>
           <label className="cust"><span>Minutes to prepare an order</span><input value={editing.prepMinutes ?? ""} onChange={(e) => setEditing({ ...editing, prepMinutes: e.target.value === "" ? null : Math.max(0, Math.min(600, Math.round(Number(e.target.value) || 0))) })} inputMode="numeric" placeholder="e.g. 15" /></label>
           {!isNew && <SchedulingBox outletId={editing.id} />}
           {brandWide && !isNew && <label className="inline"><input type="checkbox" checked={editing.active} onChange={(e) => setEditing({ ...editing, active: e.target.checked })} /> Outlet is open for business</label>}
           <p className="muted">Customers see the address, phone and hours under Help &amp; support.</p>
           <div style={{ display: "flex", gap: 8 }}>
             <button className="primary" disabled={!editing.name.trim() || (isNew && !editing.id)} onClick={async () => {
-              const body = brandWide ? { name: editing.name, address: editing.address, phone: editing.phone, hours: editing.hours, franchiseId: editing.franchiseId, active: editing.active, serviceMode: editing.serviceMode, prepMinutes: editing.prepMinutes ?? null } : { name: editing.name, address: editing.address, phone: editing.phone, hours: editing.hours, serviceMode: editing.serviceMode, prepMinutes: editing.prepMinutes ?? null };
+              const body = brandWide ? { name: editing.name, address: editing.address, phone: editing.phone, hours: editing.hours, franchiseId: editing.franchiseId, active: editing.active, serviceMode: editing.serviceMode, prepMinutes: editing.prepMinutes ?? null, latitude: editing.latitude ?? null, longitude: editing.longitude ?? null } : { name: editing.name, address: editing.address, phone: editing.phone, hours: editing.hours, serviceMode: editing.serviceMode, prepMinutes: editing.prepMinutes ?? null, latitude: editing.latitude ?? null, longitude: editing.longitude ?? null };
               if (await save(`/api/outlets/${encodeURIComponent(editing.id)}`, body, "Saved.")) setEditing(null);
             }}>Save</button>
             <button className="secondary" onClick={() => setEditing(null)}>Cancel</button>
