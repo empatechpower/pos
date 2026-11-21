@@ -1652,8 +1652,9 @@ function Menu({ info, catalog, config, loginError, recheck }: { info: Info; cata
                 {(v.opts || !v.note) && <p className="bag-desc">{v.opts || v.m.description || v.m.category}</p>}
                 {v.note && <p className="bag-desc bag-note">{v.note}</p>}
                 <div className="bag-pricerow">{coveredLines.has(l.key) ? <><RollMoney cents={0} /> <span className="orig-pill" aria-label={`${tx("Original price")} ${formatMoney(v.lineCents)}`}>{formatMoney(v.lineCents)}</span></> : <RollMoney cents={v.lineCents} />}</div>
+                <button className="shop-link bag-remove" aria-label={`${tx("Remove")} ${v.m.name}`} onClick={() => removeLine(l)}>{tx("Remove")}</button>
               </div>
-              <div className="sc-act sc-act-col"><button className="sc-edit" aria-label={`${tx("Remove")} ${v.m.name}`} onClick={() => removeLine(l)}>{tx("Remove")}</button><button className="sc-edit" aria-label={`Edit ${v.m.name}`} onClick={() => setEditing(l)}>{t("edit", "Edit")}</button><span className="sc-step"><button className="minus" aria-label={`Fewer ${v.m.name}`} onClick={() => bump(l, -1)}>−</button><b>{l.qty}</b><button className="plus" aria-label={`More ${v.m.name}`} onClick={() => bump(l, 1)}>+</button></span></div>
+              <div className="sc-act sc-act-col"><button className="sc-edit" aria-label={`Edit ${v.m.name}`} onClick={() => setEditing(l)}>{t("edit", "Edit")}</button><span className="sc-step"><button className="minus" aria-label={`Fewer ${v.m.name}`} onClick={() => bump(l, -1)}>−</button><b>{l.qty}</b><button className="plus" aria-label={`More ${v.m.name}`} onClick={() => bump(l, 1)}>+</button></span></div>
             </div>
             </SwipeRow>
           );
