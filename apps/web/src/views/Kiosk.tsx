@@ -3,7 +3,7 @@ import QRCode from "qrcode";
 import { cleanNote, defaultSelection, formatMoney, menuFor, priceRange, quoteOrder, readableOn, resolveOptions, type BusinessConfig, type Catalog, type ChosenOptionInput, type MenuEntry } from "@pos/core";
 import { OptionSheet } from "./OptionSheet";
 import { RollMoney } from "./RollMoney";
-import { Icon, SwipeRow, itemMatches, itemName, linkOutlet, photo, tint, useDialog, type BagLine, type Info, type OrderView } from "./Shop";
+import { Icon, SwipeRow, categoryLabel, itemMatches, itemName, linkOutlet, photo, tint, useDialog, type BagLine, type Info, type OrderView } from "./Shop";
 import { applyUpdate, useUpdatePending } from "../pwaUpdate";
 import { LANGS, lang, setLangMode, t, tx, useLang } from "../shopI18n";
 import "../kiosk.css";
@@ -68,7 +68,7 @@ export function Kiosk() {
 
   useEffect(() => {
     const o = linkOutlet();
-    Promise.all([fetch(`/api/shop/info${o ? `?outlet=${encodeURIComponent(o)}` : ""}`), fetch("/api/catalog"), fetch("/api/config")])
+    Promise.all([fetch(`/api/shop/info${o ? `?outlet=${encodeURIComponent(o)}` : ""}`), fetch(`/api/shop/menu${o ? `?outlet=${encodeURIComponent(o)}` : ""}`), fetch("/api/config")])
       .then(async ([i, c, k]) => {
         if (!i.ok || !c.ok || !k.ok) throw new Error("bad response");
         setInfo((await i.json()) as Info);
@@ -80,15 +80,16 @@ export function Kiosk() {
 
   // Keep the menu current: ask for its version now and then, download only when it changed.
   const have = useRef(0);
-  have.current = catalog?.version ?? 0;
+  have.current = (catalog as { menuVersion?: number } | null)?.menuVersion ?? catalog?.version ?? 0; // the outlet's menu version (brand menu + this outlet's changes)
   useEffect(() => {
     const run = async () => {
       if (!have.current) return;
       try {
-        const v = await fetch("/api/catalog/version", { cache: "no-store" });
+        const o = linkOutlet();
+        const v = await fetch(`/api/shop/menu/version${o ? `?outlet=${encodeURIComponent(o)}` : ""}`, { cache: "no-store" });
         if (!v.ok) return;
         if (((await v.json()) as { version: number }).version === have.current) return;
-        const c = await fetch("/api/catalog", { cache: "no-cache" });
+        const c = await fetch(`/api/shop/menu${o ? `?outlet=${encodeURIComponent(o)}` : ""}`, { cache: "no-cache" });
         if (c.ok) setCatalog((await c.json()) as Catalog);
       } catch {
         /* offline: keep what we have */
@@ -468,7 +469,7 @@ function KioskSession({ info, catalog, config }: { info: Info; catalog: Catalog;
       </div>
     );
   } else if (screen === "menu") {
-    body = <KioskMenu info={info} menu={menu} options={options} channelId={channelId} setChannelId={setChannelId} notify={setSoon} count={count} total={total} qtyOf={qtyOf} addQuick={addQuick} lessOf={lessOf} open={(m) => setPicking(m)} onCheckout={() => go("review")} floating={floating} logo={logo} showSignin={signinBlock || !!member} onSignin={() => (member ? setMemberAsk(true) : openSignin("menu"))} memberLabel={memberLabel} scrolling={scrolling} />;
+    body = <KioskMenu info={info} menu={menu} categoryNames={catalog.categoryNames} options={options} channelId={channelId} setChannelId={setChannelId} notify={setSoon} count={count} total={total} qtyOf={qtyOf} addQuick={addQuick} lessOf={lessOf} open={(m) => setPicking(m)} onCheckout={() => go("review")} floating={floating} logo={logo} showSignin={signinBlock || !!member} onSignin={() => (member ? setMemberAsk(true) : openSignin("menu"))} memberLabel={memberLabel} scrolling={scrolling} />;
   } else if (screen === "review") {
     const q = quote?.ok ? quote : null;
     body = (
@@ -615,8 +616,8 @@ function KioskSession({ info, catalog, config }: { info: Info; catalog: Catalog;
   );
 }
 
-function KioskMenu({ info, menu, options, channelId, setChannelId, notify, count, total, qtyOf, addQuick, lessOf, open, onCheckout, floating, logo, showSignin, onSignin, memberLabel, scrolling }: {
-  info: Info; menu: MenuEntry[]; options: Array<{ kind: "dine_in" | "takeaway"; ch?: Info["channels"][number] }>; channelId: string; setChannelId: (id: string) => void; notify: (m: string) => void; count: number; total: number;
+function KioskMenu({ info, menu, categoryNames, options, channelId, setChannelId, notify, count, total, qtyOf, addQuick, lessOf, open, onCheckout, floating, logo, showSignin, onSignin, memberLabel, scrolling }: {
+  info: Info; menu: MenuEntry[]; categoryNames?: Record<string, Record<string, string>>; options: Array<{ kind: "dine_in" | "takeaway"; ch?: Info["channels"][number] }>; channelId: string; setChannelId: (id: string) => void; notify: (m: string) => void; count: number; total: number;
   qtyOf: (m: MenuEntry) => number; addQuick: (m: MenuEntry, d: number) => void; lessOf: (m: MenuEntry) => void; open: (m: MenuEntry) => void; onCheckout: () => void; floating: React.ReactNode; logo: React.ReactNode; showSignin: boolean; onSignin: () => void; memberLabel: string | null; scrolling: boolean;
 }) {
   const [search, setSearch] = useState<string | null>(() => (import.meta.env.DEV && new URLSearchParams(location.search).has("search") ? "" : null)); // (development only: ?search opens the search bar)
@@ -732,7 +733,7 @@ function KioskMenu({ info, menu, options, channelId, setChannelId, notify, count
         <div className="k-chiprow">
           <div className="k-chipbar">
             <button className={`k-chip ${cat === "All" && !q ? "on" : ""}`} onClick={() => { setSearch(null); jump("All"); }}>{t("all", "All")} <i>{menu.length}</i></button>
-            {cats.map((c) => <button key={c} className={`k-chip ${cat === c && !q ? "on" : ""}`} onClick={() => { if (q) setSearch(null); window.setTimeout(() => jump(c), q ? 60 : 0); }}>{c} <i>{counts.get(c)}</i></button>)}
+            {cats.map((c) => <button key={c} className={`k-chip ${cat === c && !q ? "on" : ""}`} onClick={() => { if (q) setSearch(null); window.setTimeout(() => jump(c), q ? 60 : 0); }}>{categoryLabel(categoryNames, c, (x) => x)} <i>{counts.get(c)}</i></button>)}
           </div>
           <button className={`k-search ${search !== null ? "on" : ""}`} aria-label={tx("Search the menu")} onClick={() => setSearch((x) => (x === null ? "" : null))}><Icon name="search" size={24} /></button>
         </div>
@@ -749,7 +750,7 @@ function KioskMenu({ info, menu, options, channelId, setChannelId, notify, count
         {groups.length === 0 && <p className="k-empty">{tx("Nothing matches that search.")}</p>}
         {groups.map((g) => (
           <section key={g.c} className="k-sec" data-cat={q ? undefined : g.c}>
-            <h3>{g.c} <small>{g.items.length} {g.items.length === 1 ? tx("item") : tx("items")}</small></h3>
+            <h3>{q ? g.c : categoryLabel(categoryNames, g.c, (x) => x)} <small>{g.items.length} {g.items.length === 1 ? tx("item") : tx("items")}</small></h3>
             <div className="k-grid">
               {g.items.map((m) => {
                 const n = qtyOf(m);

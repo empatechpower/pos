@@ -135,3 +135,60 @@
 156|Không thể dùng phiếu này cho đơn hàng này. Hãy bỏ phiếu và thử lại.
 157|{n} khả dụng
 158|Quét mã QR bằng ứng dụng ngân hàng
+159|Bàn
+160|Xác minh bằng cách gửi SMS từ điện thoại của bạn
+161|Quay lại Đặt món
+162|Đăng ký ngay
+163|Ưu đãi dành cho thành viên
+164|Đăng ký
+165|Đăng ký / Đăng nhập
+166|Đã đăng nhập với tên
+167|Ưu đãi đặc biệt
+168|Tiến hành thanh toán
+169|Giỏ của bạn đang trống.
+170|Voucher
+171|Phương thức thanh toán
+172|Chọn sau
+173|Thanh toán với tư cách khách
+174|Tiếp tục với tư cách khách — đơn này sẽ không tích điểm.
+175|Chi tiết
+176|Cửa hàng
+177|Hình thức
+178|Vui lòng đợi — đừng đóng màn hình này.
+179|Trạng thái đơn hàng
+180|Hủy đơn hàng
+181|Tạm tính các món
+182|Tên
+183|Điện thoại
+184|Email
+185|Tên hiển thị
+186|Điểm hoạt động như thế nào?
+187|Trước khi đặt món
+188|Số điện thoại (bắt buộc)
+189|Chào mừng
+190|Nhập mã OTP của bạn
+191|Mã dùng một lần
+192|Số điện thoại
+193|Số di động
+194|Tạo mã mới
+195|Tài khoản
+196|Giỏ của bạn
+197|Tài khoản của tôi
+198|Thông tin hồ sơ
+199|Lịch sử đơn hàng
+200|Xóa tất cả
+201|Xóa giỏ?
+202|Xóa
+203|Giữ lại
+204|Tạm tính
+205|Áp dụng ưu đãi
+206|Thêm món từ tab Đặt món.
+207|1 tem sau khi thanh toán được xác nhận
+208|Dùng điểm
+209|Tự chọn theo cài đặt điện thoại của bạn. Chọn ngôn ngữ để đổi ngay — sẽ có thêm ngôn ngữ sau nếu cần.
+210|Tự động — theo cài đặt điện thoại
+211|Tự động
+212|Hiện tại
+213|Đặt món
+214|Ưu đãi
+215|Xem giỏ

@@ -135,3 +135,60 @@
 156|Tego kuponu nie można użyć w tym zamówieniu. Usuń go i spróbuj ponownie.
 157|Dostępne: {n}
 158|Zeskanuj kod QR aplikacją bankową
+159|Stolik
+160|Zweryfikuj, wysyłając SMS z telefonu
+161|Wróć do zamówienia
+162|Zarejestruj się teraz
+163|Nagrody są dla członków
+164|Zarejestruj się
+165|Rejestracja / Logowanie
+166|Zalogowano jako
+167|Oferta specjalna
+168|Przejdź do płatności
+169|Twoja torba jest pusta.
+170|Bon
+171|Metoda płatności
+172|Wybierz później
+173|Zapłać jako gość
+174|Kontynuujesz jako gość — za to zamówienie nie otrzymasz punktów.
+175|Szczegóły
+176|Lokal
+177|Tryb
+178|Proszę czekać — nie zamykaj tego ekranu.
+179|Status zamówienia
+180|Anuluj zamówienie
+181|Suma częściowa pozycji
+182|Imię
+183|Telefon
+184|E-mail
+185|Nazwa wyświetlana
+186|Jak działają punkty?
+187|Przed zamówieniem
+188|Numer telefonu (wymagany)
+189|Witamy
+190|Wpisz kod OTP
+191|Kod jednorazowy
+192|Numer telefonu
+193|Numer komórkowy
+194|Wygeneruj nowy kod
+195|Konto
+196|Twoja torba
+197|Moje konto
+198|Dane profilu
+199|Historia zamówień
+200|Wyczyść wszystko
+201|Opróżnić torbę?
+202|Opróżnij
+203|Zostaw
+204|Suma częściowa
+205|Zastosuj nagrodę
+206|Dodaj pozycje na karcie Zamówienie.
+207|1 pieczątka po potwierdzeniu płatności
+208|Użyj punktów
+209|Wybierane automatycznie na podstawie ustawień telefonu. Wybierz język, aby zmienić aplikację teraz — w razie potrzeby dodamy kolejne języki.
+210|Auto — ustawienia telefonu
+211|Auto
+212|Bieżący
+213|Zamówienie
+214|Nagrody
+215|Zobacz torbę

@@ -279,6 +279,8 @@ const channelIcon = (kind: string): keyof typeof ICONS => (kind === "dine_in" ? 
 export const itemName = (p: { name: string; names?: Record<string, string> }) => p.names?.[lang()]?.trim() || p.name;
 /** Whether a search matches an item in any of its names. */
 export const itemMatches = (p: { name: string; altName?: string; names?: Record<string, string> }, needle: string) => [p.name, p.altName ?? "", ...Object.values(p.names ?? {})].some((n) => n.toLowerCase().includes(needle));
+/** A category's name in the language on screen: the merchant's own wording when they wrote one, otherwise the category as entered (the shop's own translation of the common ones, if it has one). */
+export const categoryLabel = (names: Record<string, Record<string, string>> | undefined, c: string, fallback: (c: string) => string = tx) => names?.[c]?.[lang()]?.trim() || fallback(c);
 export const photo = (p: { id: string; imageVersion?: number }) => (p.imageVersion ? `/api/products/${p.id}/image?v=${p.imageVersion}` : null);
 // The card shows the plain lower price; Variants are chosen on the sheet (no ranges on cards).
 const cardPrice = (m: MenuEntry, saving = 0) => {
@@ -375,7 +377,7 @@ export function Shop() {
   }, []);
 
   useEffect(() => {
-    Promise.all([fetch(`/api/shop/info${linkOutlet() ? `?outlet=${encodeURIComponent(linkOutlet())}` : ""}`), fetch("/api/catalog"), fetch("/api/config")])
+    Promise.all([fetch(`/api/shop/info${linkOutlet() ? `?outlet=${encodeURIComponent(linkOutlet())}` : ""}`), fetch(`/api/shop/menu${linkOutlet() ? `?outlet=${encodeURIComponent(linkOutlet())}` : ""}`), fetch("/api/config")])
       .then(async ([i, c, k]) => {
         if (!i.ok || !c.ok || !k.ok) throw new Error("bad response");
         setInfo((await i.json()) as Info);
@@ -388,18 +390,18 @@ export function Shop() {
   // Keep the menu current without a reload: ask the server for its menu version (a few bytes) every 30 s, when the
   // customer comes back to the tab, and before they pay. Only when it differs is the whole menu downloaded, once.
   const haveVersion = useRef(0);
-  haveVersion.current = catalog?.version ?? 0;
+  haveVersion.current = (catalog as { menuVersion?: number } | null)?.menuVersion ?? catalog?.version ?? 0; // the outlet's menu version
   const checking = useRef(false);
   const recheckMenu = useRef(async () => {});
   recheckMenu.current = async () => {
     if (!haveVersion.current || checking.current) return;
     checking.current = true;
     try {
-      const v = await fetch("/api/catalog/version", { cache: "no-store" });
+      const v = await fetch(`/api/shop/menu/version${linkOutlet() ? `?outlet=${encodeURIComponent(linkOutlet())}` : ""}`, { cache: "no-store" });
       if (!v.ok) return;
       const { version } = (await v.json()) as { version: number };
       if (version === haveVersion.current) return;
-      const c = await fetch("/api/catalog", { cache: "no-cache" });
+      const c = await fetch(`/api/shop/menu${linkOutlet() ? `?outlet=${encodeURIComponent(linkOutlet())}` : ""}`, { cache: "no-cache" });
       if (c.ok) setCatalog((await c.json()) as Catalog);
     } catch {
       // offline: keep the menu we have
@@ -1060,7 +1062,7 @@ function Menu({ info, catalog, config, loginError, recheck }: { info: Info; cata
         <div className="shop-chips">
           <div className="cats-row">
           <div className="cats">
-            {categories.map((c) => <button key={c} aria-pressed={c === category} onClick={() => jumpTo(c)}>{c === "All" ? t("all", "All") : tx(c)}<span className="cat-count">{c === "All" ? menu.length : catCounts.get(c)}</span></button>)}
+            {categories.map((c) => <button key={c} aria-pressed={c === category} onClick={() => jumpTo(c)}>{c === "All" ? t("all", "All") : categoryLabel(catalog.categoryNames, c)}<span className="cat-count">{c === "All" ? menu.length : catCounts.get(c)}</span></button>)}
           </div>
           <button className={`search ${search !== null ? "on" : ""}`} aria-label={tx("Search the menu")} aria-expanded={search !== null} onClick={() => { setSearchCleared(false); setSearch((x) => (x === null ? "" : null)); }}><Icon name="search" size={18} /></button>
           </div>
@@ -1077,7 +1079,7 @@ function Menu({ info, catalog, config, loginError, recheck }: { info: Info; cata
           {shown.length === 0 && <p className="shop-msg">{tx("No items match your search.")}</p>}
           {sections.map((g) => (
             <div key={g.c ?? "results"} className="cat-section" data-cat={g.c ?? undefined}>
-              {g.c && <div className="cat-section-head"><h3>{tx(g.c)}</h3><span className="cat-section-count">{g.items.length}</span></div>}
+              {g.c && <div className="cat-section-head"><h3>{categoryLabel(catalog.categoryNames, g.c)}</h3><span className="cat-section-count">{g.items.length}</span></div>}
           {g.items.map((m) => {
             const n = inBag(m.id);
             const img = photo(m);

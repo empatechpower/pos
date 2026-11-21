@@ -135,3 +135,60 @@
 156|Den kupongen kan inte användas på den här beställningen. Ta bort den och försök igen.
 157|{n} tillgängliga
 158|Skanna QR-koden med din bankapp
+159|Bord
+160|Verifiera genom att skicka ett sms från din telefon
+161|Tillbaka till beställning
+162|Bli medlem nu
+163|Belöningar är för medlemmar
+164|Bli medlem
+165|Bli medlem / Logga in
+166|Inloggad som
+167|Specialerbjudande
+168|Gå vidare till betalning
+169|Din påse är tom.
+170|Presentkort
+171|Betalsätt
+172|Välj senare
+173|Betala som gäst
+174|Fortsätter som gäst — inga poäng tjänas på den här beställningen.
+175|Detaljer
+176|Butik
+177|Läge
+178|Vänta — stäng inte den här skärmen.
+179|Orderstatus
+180|Avbryt beställning
+181|Delsumma artiklar
+182|Namn
+183|Telefon
+184|E-post
+185|Visningsnamn
+186|Hur fungerar poäng?
+187|Innan du beställer
+188|Telefonnummer (krävs)
+189|Välkommen
+190|Ange din OTP
+191|Engångskod
+192|Telefonnummer
+193|Mobilnummer
+194|Skapa en ny kod
+195|Konto
+196|Din påse
+197|Mitt konto
+198|Profiluppgifter
+199|Orderhistorik
+200|Rensa allt
+201|Töm påsen?
+202|Töm
+203|Behåll
+204|Delsumma
+205|Använd en belöning
+206|Lägg till artiklar från fliken Beställ.
+207|1 stämpel efter bekräftad betalning
+208|Använd poäng
+209|Väljs automatiskt utifrån telefonens inställningar. Välj ett språk för att byta appen nu — fler språk läggs till vid behov.
+210|Auto — telefonens inställningar
+211|Auto
+212|Nuvarande
+213|Beställ
+214|Belöningar
+215|Visa påsen

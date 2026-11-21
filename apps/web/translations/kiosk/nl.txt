@@ -135,3 +135,60 @@
 156|Die coupon kan niet bij deze bestelling worden gebruikt. Verwijder hem en probeer het opnieuw.
 157|{n} beschikbaar
 158|Scan de QR met uw bankapp
+159|Tafel
+160|Verifieer door een sms vanaf uw telefoon te sturen
+161|Terug naar bestellen
+162|Nu aanmelden
+163|Beloningen zijn voor leden
+164|Aanmelden
+165|Aanmelden / Inloggen
+166|Ingelogd als
+167|Speciale aanbieding
+168|Verder naar betalen
+169|Uw tas is leeg.
+170|Voucher
+171|Betaalmethode
+172|Later kiezen
+173|Afrekenen als gast
+174|Doorgaan als gast — voor deze bestelling worden geen punten verdiend.
+175|Details
+176|Vestiging
+177|Modus
+178|Even wachten — sluit dit scherm niet.
+179|Bestelstatus
+180|Bestelling annuleren
+181|Subtotaal artikelen
+182|Naam
+183|Telefoon
+184|E-mail
+185|Weergavenaam
+186|Hoe werken punten?
+187|Voordat u bestelt
+188|Telefoonnummer (verplicht)
+189|Welkom
+190|Voer uw OTP in
+191|Eenmalige code
+192|Telefoonnummer
+193|Mobiel nummer
+194|Nieuwe code maken
+195|Account
+196|Uw tas
+197|Mijn account
+198|Profielgegevens
+199|Bestelgeschiedenis
+200|Alles wissen
+201|Tas leegmaken?
+202|Leegmaken
+203|Bewaren
+204|Subtotaal
+205|Beloning toepassen
+206|Voeg artikelen toe via het tabblad Bestellen.
+207|1 stempel na bevestigde betaling
+208|Punten gebruiken
+209|Wordt automatisch gekozen op basis van uw telefooninstellingen. Kies een taal om de app nu te wisselen — indien nodig komen er later meer talen bij.
+210|Automatisch — telefooninstellingen
+211|Automatisch
+212|Huidig
+213|Bestellen
+214|Beloningen
+215|Tas bekijken

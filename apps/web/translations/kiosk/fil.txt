@@ -135,3 +135,60 @@
 156|Hindi magagamit ang coupon na iyon sa order na ito. Alisin ito at subukan ulit.
 157|{n} ang magagamit
 158|I-scan ang QR gamit ang iyong banking app
+159|Mesa
+160|I-verify sa pamamagitan ng pagpapadala ng SMS mula sa iyong telepono
+161|Bumalik sa Order
+162|Mag-sign up ngayon
+163|Ang mga reward ay para sa mga miyembro
+164|Mag-sign up
+165|Mag-sign up / Mag-sign in
+166|Naka-sign in bilang
+167|Espesyal na Alok
+168|Magpatuloy sa pagbabayad
+169|Walang laman ang iyong bag.
+170|Voucher
+171|Paraan ng pagbabayad
+172|Piliin mamaya
+173|Mag-checkout bilang bisita
+174|Nagpapatuloy bilang bisita — walang makukuhang points sa order na ito.
+175|Mga detalye
+176|Outlet
+177|Mode
+178|Sandali lang — huwag isara ang screen na ito.
+179|Katayuan ng order
+180|Kanselahin ang order
+181|Subtotal ng mga item
+182|Pangalan
+183|Telepono
+184|Email
+185|Display name
+186|Paano gumagana ang points?
+187|Bago ka mag-order
+188|Numero ng telepono (kinakailangan)
+189|Welcome
+190|Ilagay ang iyong OTP
+191|One-time code
+192|Numero ng telepono
+193|Numero ng mobile
+194|Gumawa ng bagong code
+195|Account
+196|Ang iyong bag
+197|Aking account
+198|Mga detalye ng profile
+199|Kasaysayan ng order
+200|Burahin lahat
+201|Alisin ang laman ng bag?
+202|Burahin
+203|Panatilihin
+204|Subtotal
+205|Mag-apply ng reward
+206|Magdagdag ng mga item mula sa tab na Order.
+207|1 stamp pagkatapos makumpirma ang bayad
+208|Gamitin ang points
+209|Awtomatikong pinipili mula sa mga setting ng telepono mo. Pumili ng wika para lumipat ngayon — madaragdagan pa ang mga wika kung kailangan.
+210|Auto — mga setting ng telepono
+211|Auto
+212|Kasalukuyan
+213|Order
+214|Mga Reward
+215|Tingnan ang bag

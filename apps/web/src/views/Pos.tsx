@@ -102,7 +102,7 @@ export function Pos({ config, catalog, online, customerId, setCustomerId }: PosP
   const shown = menu.filter((m) => category === "All" || m.category === category);
 
   const priced = priceOrder({
-    lines: bag.map((b) => ({ name: b.item.name, unitCents: b.unitCents, qty: b.qty, pointsExempt: b.item.pointsExempt, bcrs: !!b.item.bcrs })),
+    lines: bag.map((b) => ({ name: b.item.name, unitCents: b.unitCents, qty: b.qty, pointsExempt: b.item.pointsExempt, bcrs: !!b.item.bcrs, taxInclusive: b.item.taxInclusive, taxGroup: b.item.taxGroup })),
     fulfilment,
     serviceCharge: channel.serviceCharge,
     config: config.pricing,
@@ -151,6 +151,8 @@ export function Pos({ config, catalog, online, customerId, setCustomerId }: PosP
         qty: l.qty,
         pointsExempt: l.item.pointsExempt,
         bcrs: !!l.item.bcrs,
+        ...(l.item.taxInclusive !== undefined ? { taxInclusive: l.item.taxInclusive } : {}),
+        ...(l.item.taxGroup ? { taxGroup: l.item.taxGroup } : {}),
         options: l.options.length ? l.options : undefined,
       });
     }

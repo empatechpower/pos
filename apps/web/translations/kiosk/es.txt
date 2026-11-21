@@ -135,3 +135,60 @@
 156|Ese cupón no se puede usar en este pedido. Quítelo e inténtelo de nuevo.
 157|{n} disponibles
 158|Escanee el QR con su app del banco
+159|Mesa
+160|Verifique enviando un SMS desde su teléfono
+161|Volver al pedido
+162|Regístrese ahora
+163|Las recompensas son para socios
+164|Registrarse
+165|Registrarse / Iniciar sesión
+166|Sesión iniciada como
+167|Oferta especial
+168|Continuar al pago
+169|Su bolsa está vacía.
+170|Vale
+171|Método de pago
+172|Elegir más tarde
+173|Pagar como invitado
+174|Continúa como invitado — este pedido no sumará puntos.
+175|Detalles
+176|Local
+177|Modo
+178|Espere — no cierre esta pantalla.
+179|Estado del pedido
+180|Cancelar pedido
+181|Subtotal de artículos
+182|Nombre
+183|Teléfono
+184|Correo electrónico
+185|Nombre para mostrar
+186|¿Cómo funcionan los puntos?
+187|Antes de pedir
+188|Número de teléfono (obligatorio)
+189|Le damos la bienvenida
+190|Introduzca su código OTP
+191|Código de un solo uso
+192|Número de teléfono
+193|Número de móvil
+194|Generar un código nuevo
+195|Cuenta
+196|Su bolsa
+197|Mi cuenta
+198|Datos del perfil
+199|Historial de pedidos
+200|Borrar todo
+201|¿Vaciar la bolsa?
+202|Vaciar
+203|Mantener
+204|Subtotal
+205|Aplicar una recompensa
+206|Añada artículos desde la pestaña Pedir.
+207|1 sello tras confirmarse el pago
+208|Usar puntos
+209|Se elige automáticamente según los ajustes de su teléfono. Elija un idioma para cambiar la app ahora; si hace falta, se añadirán más idiomas.
+210|Automático — ajustes del teléfono
+211|Automático
+212|Actual
+213|Pedir
+214|Recompensas
+215|Ver bolsa

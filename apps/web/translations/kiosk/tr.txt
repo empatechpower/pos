@@ -135,3 +135,60 @@
 156|Bu kupon bu siparişte kullanılamaz. Kaldırıp tekrar deneyin.
 157|{n} kullanılabilir
 158|QR kodunu bankacılık uygulamanızla tarayın
+159|Masa
+160|Telefonunuzdan SMS göndererek doğrulayın
+161|Siparişe dön
+162|Hemen üye ol
+163|Ödüller üyelere özeldir
+164|Üye ol
+165|Üye ol / Giriş yap
+166|Şu hesapla giriş yapıldı:
+167|Özel Teklif
+168|Ödemeye geç
+169|Çantanız boş.
+170|Çek
+171|Ödeme yöntemi
+172|Sonra seç
+173|Misafir olarak öde
+174|Misafir olarak devam ediliyor — bu siparişten puan kazanılmaz.
+175|Ayrıntılar
+176|Şube
+177|Mod
+178|Lütfen bekleyin — bu ekranı kapatmayın.
+179|Sipariş durumu
+180|Siparişi iptal et
+181|Ürün ara toplamı
+182|Ad
+183|Telefon
+184|E-posta
+185|Görünen ad
+186|Puanlar nasıl çalışır?
+187|Sipariş vermeden önce
+188|Telefon numarası (zorunlu)
+189|Hoş geldiniz
+190|OTP kodunuzu girin
+191|Tek kullanımlık kod
+192|Telefon numarası
+193|Cep telefonu numarası
+194|Yeni kod oluştur
+195|Hesap
+196|Çantanız
+197|Hesabım
+198|Profil bilgileri
+199|Sipariş geçmişi
+200|Tümünü temizle
+201|Çanta boşaltılsın mı?
+202|Temizle
+203|Koru
+204|Ara toplam
+205|Ödül uygula
+206|Sipariş sekmesinden ürün ekleyin.
+207|Ödeme onaylandıktan sonra 1 damga
+208|Puan kullan
+209|Telefon ayarlarınızdan otomatik seçilir. Uygulamayı şimdi değiştirmek için bir dil seçin — gerekirse daha fazla dil eklenecek.
+210|Otomatik — telefon ayarları
+211|Otomatik
+212|Geçerli
+213|Sipariş
+214|Ödüller
+215|Çantayı gör

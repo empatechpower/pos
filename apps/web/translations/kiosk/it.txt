@@ -135,3 +135,60 @@
 156|Questo coupon non può essere usato per questo ordine. Rimuovilo e riprova.
 157|{n} disponibili
 158|Inquadra il QR con la tua app bancaria
+159|Tavolo
+160|Verifica inviando un SMS dal tuo telefono
+161|Torna all’ordine
+162|Iscriviti ora
+163|I premi sono riservati ai soci
+164|Iscriviti
+165|Iscriviti / Accedi
+166|Accesso eseguito come
+167|Offerta speciale
+168|Procedi al pagamento
+169|La tua borsa è vuota.
+170|Buono
+171|Metodo di pagamento
+172|Scegli più tardi
+173|Paga come ospite
+174|Prosegui come ospite — questo ordine non farà guadagnare punti.
+175|Dettagli
+176|Punto vendita
+177|Modalità
+178|Attendi — non chiudere questa schermata.
+179|Stato dell’ordine
+180|Annulla ordine
+181|Subtotale articoli
+182|Nome
+183|Telefono
+184|Email
+185|Nome visualizzato
+186|Come funzionano i punti?
+187|Prima di ordinare
+188|Numero di telefono (obbligatorio)
+189|Benvenuto
+190|Inserisci il tuo OTP
+191|Codice monouso
+192|Numero di telefono
+193|Numero di cellulare
+194|Genera un nuovo codice
+195|Account
+196|La tua borsa
+197|Il mio account
+198|Dati del profilo
+199|Cronologia ordini
+200|Cancella tutto
+201|Svuotare la borsa?
+202|Svuota
+203|Mantieni
+204|Subtotale
+205|Applica un premio
+206|Aggiungi articoli dalla scheda Ordina.
+207|1 timbro dopo la conferma del pagamento
+208|Usa i punti
+209|Scelta automatica dalle impostazioni del telefono. Scegli una lingua per cambiare subito l’app — in futuro potranno essere aggiunte altre lingue.
+210|Auto — impostazioni del telefono
+211|Auto
+212|Attuale
+213|Ordina
+214|Premi
+215|Vedi borsa

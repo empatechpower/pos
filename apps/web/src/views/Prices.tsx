@@ -34,7 +34,7 @@ export function Prices({ catalog, outletId }: { catalog: Catalog; outletId: stri
   const [bookId, setBookId] = useState(catalog.defaultPricebookId);
   const [msg, setMsg] = useState<string | null>(null);
   const [draft, setDraft] = useState<Record<string, string>>({});
-  const [renamingCat, setRenamingCat] = useState<{ from: string; to: string } | null>(null);
+  const [renamingCat, setRenamingCat] = useState<{ from: string; to: string; names: Record<string, string> } | null>(null);
   const [newItem, setNewItem] = useState({ name: "", category: "", price: "" });
   const [newBook, setNewBook] = useState("");
   const [newKind, setNewKind] = useState<ChannelKind>("delivery");
@@ -145,7 +145,7 @@ export function Prices({ catalog, outletId }: { catalog: Catalog; outletId: stri
         {[...new Set(catalog.products.map((p) => p.category))].map((c) => (
           <div className="catrow" key={c}>
             <span>{c} <i className="muted">· {catalog.products.filter((p) => p.category === c).length}</i></span>
-            <button className="pencil" aria-label={`Rename category ${c}`} title="Rename category" onClick={() => setRenamingCat({ from: c, to: c })}>
+            <button className="pencil" aria-label={`Rename category ${c}`} title="Rename category" onClick={() => setRenamingCat({ from: c, to: c, names: { ...(catalog.categoryNames?.[c] ?? {}) } })}>
               <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M12 20h9" /><path d="M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4Z" /></svg>
             </button>
           </div>
@@ -204,11 +204,14 @@ export function Prices({ catalog, outletId }: { catalog: Catalog; outletId: stri
 
       {renamingCat && (() => {
         const to = renamingCat.to.trim();
+        const cleanC = (m: Record<string, string>) => Object.fromEntries(Object.entries(m).map(([k, v]) => [k, v.trim()]).filter(([, v]) => v));
+        const catNow = cleanC(renamingCat.names);
+        const catChanged = JSON.stringify(Object.entries(catNow).sort()) !== JSON.stringify(Object.entries(cleanC(catalog.categoryNames?.[renamingCat.from] ?? {})).sort());
         const save = () => {
           if (!to) return;
           const from = renamingCat.from;
           setRenamingCat(null);
-          if (to !== from) void send("POST", "categories/rename", { from, to }, `${from} is now ${to}.`);
+          if (to !== from || catChanged) void send("POST", "categories/rename", { from, to, ...(catChanged ? { names: catNow } : {}) }, to !== from ? `${from} is now ${to}.` : "Names saved.");
         };
         return (
           <div className="rn-back" onClick={() => setRenamingCat(null)}>
@@ -216,9 +219,19 @@ export function Prices({ catalog, outletId }: { catalog: Catalog; outletId: stri
               <h3>Rename category</h3>
               <p className="muted">Every item in “{renamingCat.from}” moves to the new name. Printers set to this category keep printing it. Using an existing name merges the two.</p>
               <input autoFocus value={renamingCat.to} maxLength={80} aria-label="New category name" onChange={(e) => setRenamingCat({ ...renamingCat, to: e.target.value })} onKeyDown={(e) => { if (e.key === "Enter") save(); if (e.key === "Escape") setRenamingCat(null); }} />
+              <details style={{ marginTop: 10 }} open={Object.keys(catNow).length > 0}>
+                <summary>Name in other languages <span className="muted">(optional)</span></summary>
+                <p className="muted" style={{ margin: "6px 0" }}>Shown to customers who pick that language. Leave one blank to show the name above. Nothing is translated automatically.</p>
+                {LANGS.filter((l) => l.code !== "en").map((l) => (
+                  <label key={l.code} style={{ display: "flex", alignItems: "center", gap: 8, margin: "4px 0" }}>
+                    <span style={{ width: 120, flex: "none" }}>{l.native}</span>
+                    <input style={{ flex: 1 }} value={renamingCat.names[l.code] ?? ""} maxLength={80} aria-label={`Category name in ${l.en}`} onChange={(e) => setRenamingCat({ ...renamingCat, names: { ...renamingCat.names, [l.code]: e.target.value } })} />
+                  </label>
+                ))}
+              </details>
               <div className="rn-actions">
                 <button className="secondary" onClick={() => setRenamingCat(null)}>Cancel</button>
-                <button className="primary" disabled={!to || to === renamingCat.from} onClick={save}>Save</button>
+                <button className="primary" disabled={!to || (to === renamingCat.from && !catChanged)} onClick={save}>Save</button>
               </div>
             </div>
           </div>

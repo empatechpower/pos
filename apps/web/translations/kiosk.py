@@ -54,11 +54,12 @@ def build():
         problems += check(code, m)
         out.append(" " + json.dumps(code) + ": {" + ",".join(f"{i}:{json.dumps(t, ensure_ascii=False)}" for i, t in sorted(m.items())) + "},")
     out.append("};")
+    if problems:
+        # A translation that loses a placeholder ({n}, {amt}...) would show the customer a broken sentence: nothing is written.
+        print("NOT BUILT. Fix these first (language, phrase number, what is wrong):", problems)
+        sys.exit(1)
     open(OUT, "w", encoding="utf-8").write("\n".join(out) + "\n")
     print("built", OUT)
-    if problems:
-        print("PROBLEMS:", problems)
-        sys.exit(1)
 
 
 def review_import(path):
