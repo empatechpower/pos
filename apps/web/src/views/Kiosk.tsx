@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import QRCode from "qrcode";
-import { cleanNote, defaultSelection, formatMoney, menuFor, priceRange, quoteOrder, readableOn, resolveOptions, type BusinessConfig, type Catalog, type ChosenOptionInput, type MenuEntry } from "@pos/core";
+import { cleanNote, defaultSelection, formatMoney, hasBuilder, menuFor, priceRange, quoteOrder, readableOn, resolveOptions, type BusinessConfig, type Catalog, type ChosenOptionInput, type MenuEntry } from "@pos/core";
 import { OptionSheet } from "./OptionSheet";
 import { RollMoney } from "./RollMoney";
 import { Icon, SwipeRow, categoryLabel, itemMatches, itemName, linkOutlet, photo, tint, useDialog, type BagLine, type Info, type OrderView } from "./Shop";
@@ -153,7 +153,8 @@ function KioskSession({ info, catalog, config }: { info: Info; catalog: Catalog;
 
   // ---- menu data
   const ctx = { outletId: info.outletId ?? info.outletName, channelId };
-  const menu = useMemo(() => menuFor(catalog, ctx), [catalog, info.outletId, info.outletName, channelId]);
+  // Build-your-own items need the builder screen, which the kiosk does not have yet: they are left off its menu rather than offered and refused at payment.
+  const menu = useMemo(() => menuFor(catalog, ctx).filter((m) => !hasBuilder(m.builder)), [catalog, info.outletId, info.outletName, channelId]);
   const byId = useMemo(() => new Map(menu.map((m) => [m.id, m])), [menu]);
   const items = bag.map((l) => ({ productId: l.productId, qty: l.qty, options: l.selection, ...(l.note ? { note: l.note } : {}) }));
   // Points and a coupon, for a signed-in member (handover 4.2). The core applies them in the shop's order: the coupon off the items first,

@@ -295,6 +295,9 @@ main { flex: 1; padding: 14px 16px; }
 .opt-pills button.on { border-color: var(--o-acc); background: var(--o-soft); font-weight: 700; }
 .opt-pills button:disabled { opacity: .45; }
 .opt-row { display: flex; justify-content: space-between; align-items: center; padding: 10px 0; border-bottom: 1px solid var(--line); }
+.opt-tog { width: 38px; height: 38px; border-radius: 50%; border: 1.5px solid var(--line); background: #fff; font-size: 20px; font-weight: 700; color: var(--o-acc); cursor: pointer; }
+.opt-tog.on { background: var(--o-acc); border-color: var(--o-acc); color: #fff; }
+.opt-tog:disabled { opacity: .4; cursor: default; }
 .opt-step { display: inline-flex; align-items: center; gap: 14px; border: 1.5px solid var(--line); border-radius: 999px; padding: 4px 8px; }
 .opt-step button { width: 34px; height: 34px; border-radius: 50%; border: 0; background: transparent; font-size: 20px; }
 .opt-step button:not(:disabled) { color: var(--o-acc); }

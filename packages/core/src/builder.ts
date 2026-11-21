@@ -175,20 +175,17 @@ export type PricedBuild =
   | { ok: false; validation: BuildValidation };
 
 /**
- * Price a build. The base price already includes each group's allowance, so the customer pays base + only what exceeds the allowance.
- * Allowance is used up in SELECTION ORDER (the order of `picks`), one unit at a time: an earlier selection uses it first, a later one pays only
- * the part that is left over. Doubling an option uses the allowance per unit.
+ * Where each pick's price goes, in selection order: allowance is used up by earlier picks first, per unit. Picks that do not belong to the rule
+ * set are skipped, so a screen can show the split while a build is still being filled in. {@link priceBuild} uses this after validating.
  */
-export function priceBuild(spec: BuilderSpec, input: BuildInput, baseCents: Cents, opts: { unavailable?: ReadonlySet<string>; ruleVersion?: number } = {}): PricedBuild {
-  const validation = validateBuild(spec, input, opts.unavailable);
-  if (!validation.ok) return { ok: false, validation };
-  const rs = ruleSetFor(spec, input.variantId) as Extract<ReturnType<typeof ruleSetFor>, { ok: true }>;
+export function allocateSelections(groups: readonly BuilderGroup[], picks: BuildInput["picks"]): SelectionPrice[] {
   const left = new Map<string, number>(); // allowance remaining per group (cents, or free selections for "count")
-  for (const g of rs.groups) left.set(g.id, g.allowance && g.allowance.mode !== "none" ? Math.max(0, g.allowance.value) : 0);
+  for (const g of groups) left.set(g.id, g.allowance && g.allowance.mode !== "none" ? Math.max(0, g.allowance.value) : 0);
   const selections: SelectionPrice[] = [];
-  for (const p of input.picks) {
-    const g = rs.groups.find((x) => x.id === p.groupId)!;
-    const o = g.options.find((x) => x.id === p.optionId)!;
+  for (const p of picks) {
+    const g = groups.find((x) => x.id === p.groupId);
+    const o = g?.options.find((x) => x.id === p.optionId);
+    if (!g || !o) continue;
     const qty = unitsOf(p.qty);
     let covered = 0;
     for (let u = 0; u < qty; u++) {
@@ -206,6 +203,19 @@ export function priceBuild(spec: BuilderSpec, input: BuildInput, baseCents: Cent
     const full = o.priceCents * qty;
     selections.push({ groupId: g.id, groupName: g.name, optionId: o.id, name: o.name, qty, unitFullCents: o.priceCents, fullCents: full, coveredCents: covered, chargedCents: full - covered, ...(o.productId ? { productId: o.productId } : {}) });
   }
+  return selections;
+}
+
+/**
+ * Price a build. The base price already includes each group's allowance, so the customer pays base + only what exceeds the allowance.
+ * Allowance is used up in SELECTION ORDER (the order of `picks`), one unit at a time: an earlier selection uses it first, a later one pays only
+ * the part that is left over. Doubling an option uses the allowance per unit.
+ */
+export function priceBuild(spec: BuilderSpec, input: BuildInput, baseCents: Cents, opts: { unavailable?: ReadonlySet<string>; ruleVersion?: number } = {}): PricedBuild {
+  const validation = validateBuild(spec, input, opts.unavailable);
+  if (!validation.ok) return { ok: false, validation };
+  const rs = ruleSetFor(spec, input.variantId) as Extract<ReturnType<typeof ruleSetFor>, { ok: true }>;
+  const selections = allocateSelections(rs.groups, input.picks);
   const charged = selections.reduce((n, s) => n + s.chargedCents, 0);
   return {
     ok: true,

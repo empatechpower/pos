@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
-import { cleanNote, comboSaving, defaultSelection, formatMoney, isCombo, menuFor, optionLines, priceRange, quoteOrder, readableOn, resolveOptions, type BusinessConfig, type Catalog, type ChosenOptionInput, type MenuEntry, type ShopStatus } from "@pos/core";
+import { buildTicketLines, cleanNote, comboSaving, defaultSelection, formatMoney, hasBuilder, isCombo, menuFor, optionLines, priceBuild, priceRange, quoteOrder, readableOn, resolveOptions, type BuildInput, type BusinessConfig, type Catalog, type ChosenOptionInput, type MenuEntry, type ShopStatus } from "@pos/core";
 import { OptionSheet } from "./OptionSheet";
+import { BuilderSheet } from "./BuilderSheet";
 import { RollMoney } from "./RollMoney";
 import { PickupPicker } from "./PickupPicker";
 import "../shopProto.css";
@@ -64,6 +65,8 @@ export interface BagLine {
   selection: ChosenOptionInput[];
   /** The customer's free-text request for the kitchen. */
   note?: string;
+  /** Build-your-own: what the customer picked (ids only; the server prices it). */
+  build?: BuildInput;
 }
 
 const LS_LAST = "shop.lastOrder";
@@ -672,6 +675,7 @@ function Menu({ info, catalog, config, loginError, recheck }: { info: Info; cata
     setBag((cur) => {
       const ok = (l: BagLine) => {
         const m = byId.get(l.productId);
+        if (m && l.build) return !m.soldOut && hasBuilder(m.builder) && priceBuild(m.builder, l.build, m.priceCents).ok;
         return !!m && !m.soldOut && resolveOptions(m.options, l.selection).ok;
       };
       const kept = cur.filter(ok);
@@ -685,7 +689,7 @@ function Menu({ info, catalog, config, loginError, recheck }: { info: Info; cata
 
   useEffect(() => { if (screen === "payment" && member && (member.creditCents ?? 0) >= shownTotal && payMethod === "counter") setPayMethod("credit"); }, [screen]); // eslint-disable-line react-hooks/exhaustive-deps
   useEffect(() => { if (!usePoints) { setPointsPts(null); setPEdit(false); setPEditAmt(false); } }, [usePoints]);
-  const items = bag.map((l) => ({ productId: l.productId, qty: l.qty, options: l.selection, ...(l.note ? { note: l.note } : {}) }));
+  const items = bag.map((l) => ({ productId: l.productId, qty: l.qty, options: l.selection, ...(l.build ? { build: l.build } : {}), ...(l.note ? { note: l.note } : {}) }));
   const count = bag.reduce((n, l) => n + l.qty, 0);
   // Rewards (points, coupons, stamps) can be switched off for a shop. Then none of their screens or wording shows.
   const rewardsOn = config.rewards.pointsEnabled || config.rewards.welcomeVoucherCents > 0 || config.rewards.stampCard.enabled;
@@ -727,6 +731,34 @@ function Menu({ info, catalog, config, loginError, recheck }: { info: Info; cata
     });
     setAgreed(null);
   };
+  /** Add a build-your-own item. The same product with the same picks and note is one line; a different build is its own line. */
+  const buildKey = (m: MenuEntry, build: BuildInput, note: string) => `${m.id}#b:${JSON.stringify(build)}${note ? `#${note}` : ""}`;
+  const addBuild = (m: MenuEntry, build: BuildInput, d = 1, rawNote = "") => {
+    if (!hasBuilder(m.builder) || !priceBuild(m.builder, build, m.priceCents).ok) return;
+    const note = cleanNote(rawNote);
+    const key = buildKey(m, build, note);
+    setBag((cur) => {
+      const have = cur.find((l) => l.key === key);
+      const qty = (have?.qty ?? 0) + d;
+      if (qty <= 0) return cur.filter((l) => l.key !== key);
+      const next = Math.min(20, qty);
+      return have ? cur.map((l) => (l.key === key ? { ...l, qty: next } : l)) : [...cur, { key, productId: m.id, qty: next, selection: [], build, ...(note ? { note } : {}) }];
+    });
+    setAgreed(null);
+  };
+  /** Change a built line in place (same line, new build, new price); it joins another line if it now matches one. */
+  const editBuild = (old: BagLine, m: MenuEntry, build: BuildInput, rawNote: string) => {
+    if (!hasBuilder(m.builder) || !priceBuild(m.builder, build, m.priceCents).ok) return;
+    const note = cleanNote(rawNote);
+    const key = buildKey(m, build, note);
+    setBag((cur) => {
+      const rest = cur.filter((x) => x.key !== old.key);
+      const same = rest.find((x) => x.key === key);
+      if (same) return rest.map((x) => (x.key === key ? { ...x, qty: Math.min(20, x.qty + old.qty) } : x));
+      return cur.map((x) => (x.key === old.key ? { key, productId: m.id, qty: old.qty, selection: [], build, ...(note ? { note } : {}) } : x));
+    });
+    setAgreed(null);
+  };
   // Change a line's choices or note in place: it keeps its quantity, and joins another line if it now matches one.
   const editLine = (old: BagLine, m: MenuEntry, selection: ChosenOptionInput[], rawNote: string) => {
     const r = resolveOptions(m.options, selection);
@@ -743,7 +775,7 @@ function Menu({ info, catalog, config, loginError, recheck }: { info: Info; cata
   };
   const bump = (l: BagLine, d: number) => {
     const m = byId.get(l.productId);
-    if (m) addLine(m, l.selection, d, l.note);
+    if (m) (l.build ? addBuild(m, l.build, d, l.note) : addLine(m, l.selection, d, l.note));
     // After a + / − (or removing a line) in the Bag, push the page down so the Total stays visible above the bottom nav.
     window.setTimeout(() => document.getElementById("bag-total")?.scrollIntoView({ behavior: "smooth", block: "nearest" }), 80);
   };
@@ -922,6 +954,11 @@ function Menu({ info, catalog, config, loginError, recheck }: { info: Info; cata
   );
   const lineView = (l: BagLine) => {
     const m = byId.get(l.productId);
+    if (m && l.build && hasBuilder(m.builder)) {
+      const pb = priceBuild(m.builder, l.build, m.priceCents);
+      if (!pb.ok) return null;
+      return { m, r: null, lineCents: pb.unitCents * l.qty, opts: buildTicketLines(pb, true, formatMoney).map((x) => (x.endsWith(":") ? x : x.trim())).join(" · ").replace(/: · /g, ": "), note: l.note ? `${tx("Special request")}: ${l.note}` : "" };
+    }
     const r = m ? resolveOptions(m.options, l.selection) : null;
     if (!m || !r?.ok) return null;
     return { m, r, lineCents: (m.priceCents + r.extraCents) * l.qty, opts: optionLines(r.options).join(" · "), note: l.note ? `${tx("Special request")}: ${l.note}` : "" };
@@ -1092,7 +1129,7 @@ function Menu({ info, catalog, config, loginError, recheck }: { info: Info; cata
           {g.items.map((m) => {
             const n = inBag(m.id);
             const img = photo(m);
-            const hasOpts = !!m.options?.length || bag.some((l) => l.productId === m.id && !!l.note);
+            const hasOpts = !!m.options?.length || hasBuilder(m.builder) || bag.some((l) => l.productId === m.id && !!l.note);
             const card = (
               <div key={m.id} className={`sc ${n ? "in" : ""} ${m.soldOut ? "out" : ""}`}>
                 <div className="sc-photo" onClick={() => { if (!m.soldOut) setPicking(m); }}>
@@ -1679,7 +1716,18 @@ function Menu({ info, catalog, config, loginError, recheck }: { info: Info; cata
       {walletSheet}
       {langSheet}
       {tableDialog}
-      {picking && (
+      {picking && hasBuilder(picking.builder) && (
+        <BuilderSheet
+          name={itemName(picking)}
+          description={picking.description}
+          photoUrl={photo(picking)}
+          baseCents={picking.priceCents}
+          spec={picking.builder}
+          onClose={() => setPicking(null)}
+          onAdd={(build, note) => { addBuild(picking, build, 1, note); setPicking(null); }}
+        />
+      )}
+      {picking && !hasBuilder(picking.builder) && (
         <OptionSheet
           notes
           name={itemName(picking)}
@@ -1693,6 +1741,22 @@ function Menu({ info, catalog, config, loginError, recheck }: { info: Info; cata
       )}
       {editing && byId.get(editing.productId) && (() => {
         const em = byId.get(editing.productId)!;
+        if (editing.build && hasBuilder(em.builder)) {
+          return (
+            <BuilderSheet
+              cta={tx("Save changes")}
+              name={itemName(em)}
+              description={em.description}
+              photoUrl={photo(em)}
+              baseCents={em.priceCents}
+              spec={em.builder}
+              initial={editing.build}
+              initialNote={editing.note ?? ""}
+              onClose={() => setEditing(null)}
+              onAdd={(build, note) => { editBuild(editing, em, build, note); setEditing(null); }}
+            />
+          );
+        }
         return (
           <OptionSheet
             notes
