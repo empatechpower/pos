@@ -51,7 +51,8 @@ export function shareProRata(amount: Cents, weights: Readonly<Record<string, num
   for (const id of ids) out[id] = Math.round((amount * weights[id]!) / sum);
   const diff = amount - ids.reduce((n, id) => n + out[id]!, 0);
   if (diff !== 0) {
-    const largest = ids.reduce((a, b) => (weights[b]! > weights[a]! ? b : a));
+    // Ties go to the smallest key, so everyone who works the same shares out gets the same answer and the pieces still add up.
+    const largest = ids.reduce((a, b) => (weights[b]! > weights[a]! || (weights[b]! === weights[a]! && b < a) ? b : a));
     out[largest] = out[largest]! + diff;
   }
   return out;

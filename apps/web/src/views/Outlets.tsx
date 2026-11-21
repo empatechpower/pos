@@ -141,6 +141,7 @@ export function Outlets() {
           <p className="muted" style={{ fontSize: 12 }}>Both, or neither. With them, customers can sort outlets by distance. In Google Maps, right-click the shop and tap the numbers to copy them.</p>
           <label className="cust"><span>Minutes to prepare an order</span><input value={editing.prepMinutes ?? ""} onChange={(e) => setEditing({ ...editing, prepMinutes: e.target.value === "" ? null : Math.max(0, Math.min(600, Math.round(Number(e.target.value) || 0))) })} inputMode="numeric" placeholder="e.g. 15" /></label>
           {!isNew && <SchedulingBox outletId={editing.id} />}
+          {!isNew && editing.serviceMode === "tsr" && <TabSettingsBox outletId={editing.id} />}
           {brandWide && !isNew && <label className="inline"><input type="checkbox" checked={editing.active} onChange={(e) => setEditing({ ...editing, active: e.target.checked })} /> Outlet is open for business</label>}
           <p className="muted">Customers see the address, phone and hours under Help &amp; support.</p>
           <div style={{ display: "flex", gap: 8 }}>
@@ -225,6 +226,37 @@ function SchedulingBox({ outletId }: { outletId: string }) {
           <label className="cust"><span>Days ahead a customer can book</span><input value={v.daysAhead} inputMode="numeric" onChange={(e) => setV({ ...v, daysAhead: Number(e.target.value) || 0 })} onBlur={() => void change({ daysAhead: Math.max(0, Math.min(30, v.daysAhead)) })} /></label>
           <p className="muted">Pickup times follow the menu's ordering hours and the minutes to prepare above. An order waits and goes to the kitchen that many minutes before its time.</p>
         </>
+      )}
+      {saved && <p className="muted">{saved}</p>}
+    </div>
+  );
+}
+
+/** Table service with a shared tab: a table's orders join one bill, paid after the waiter releases payment. Off until switched on here. */
+function TabSettingsBox({ outletId }: { outletId: string }) {
+  const [v, setV] = useState<{ tabService: boolean; allocation: "oldest_first" | "reduce_only" } | null>(null);
+  const [saved, setSaved] = useState("");
+  useEffect(() => {
+    void (async () => {
+      const r = await staffFetch(`/api/outlets/${encodeURIComponent(outletId)}/tab-settings`);
+      if ("res" in r && r.res.ok) setV((await r.res.json()) as NonNullable<typeof v>);
+    })();
+  }, [outletId]);
+  async function change(body: object) {
+    const r = await staffFetch(`/api/outlets/${encodeURIComponent(outletId)}/tab-settings`, { method: "PUT", body });
+    if ("res" in r && r.res.ok) { setV((await r.res.json()) as NonNullable<typeof v>); setSaved("Saved."); } else setSaved("Could not save.");
+  }
+  if (!v) return null;
+  return (
+    <div style={{ marginTop: 8 }}>
+      <label className="inline"><input type="checkbox" checked={v.tabService} onChange={(e) => void change({ tabService: e.target.checked })} /> Table service uses a shared tab (customers pay after the waiter releases payment)</label>
+      {v.tabService && (
+        <label className="cust"><span>A custom amount paid on a tab</span>
+          <select value={v.allocation} onChange={(e) => void change({ allocation: e.target.value })}>
+            <option value="oldest_first">Marks items paid, oldest round first</option>
+            <option value="reduce_only">Only reduces what remains</option>
+          </select>
+        </label>
       )}
       {saved && <p className="muted">{saved}</p>}
     </div>

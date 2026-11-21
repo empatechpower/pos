@@ -30,6 +30,8 @@ export type OrderEventBody =
       customerPhone?: string;
       /** The signed-in member who placed it (set by the server only, never by a client). */
       memberId?: string;
+      /** A round on a table's Tab (table service): it is sent to the kitchen without payment; the Tab is paid down later. */
+      onTab?: boolean;
       /** A scheduled pickup: when the customer collects (epoch ms), and when the kitchen starts (that time less the outlet's prep time). Missing = ASAP. */
       scheduledFor?: number;
       fireAt?: number;
@@ -81,6 +83,8 @@ export interface OrderState {
   pointsRedeemed?: number;
   /** When staff accepted an online order. Always unset for POS orders, which need no acceptance. */
   acceptedAt?: number;
+  /** A round on a Tab: not paid at ordering, never held back for payment, and its receipt is the Tab's. */
+  onTab?: boolean;
   /** Scheduled pickup: when it is collected, when the kitchen should start, and when it was actually released to the kitchen. */
   scheduledFor?: number;
   fireAt?: number;
@@ -121,7 +125,7 @@ export function reduceOrder(orderId: string, events: readonly OrderEvent[]): Ord
   for (const e of mine) {
     if (e.type === "OrderOpened") {
       if (state) continue; // first open wins
-      state = { orderId, fulfilment: e.fulfilment, channelId: e.channelId, channelName: e.channelName, serviceCharge: e.serviceCharge, source: e.source ?? "pos", customerName: e.customerName, customerPhone: e.customerPhone, memberId: e.memberId, scheduledFor: e.scheduledFor, fireAt: e.fireAt, spot: e.spot, queueNumber: e.queueNumber, openedAt: e.ts, lines: [], payments: [], stage: "open" };
+      state = { orderId, fulfilment: e.fulfilment, channelId: e.channelId, channelName: e.channelName, serviceCharge: e.serviceCharge, source: e.source ?? "pos", customerName: e.customerName, customerPhone: e.customerPhone, memberId: e.memberId, scheduledFor: e.scheduledFor, fireAt: e.fireAt, ...(e.onTab ? { onTab: true } : {}), spot: e.spot, queueNumber: e.queueNumber, openedAt: e.ts, lines: [], payments: [], stage: "open" };
       continue;
     }
     if (!state) continue; // events that arrived before the open are applied once it exists on the next replay
@@ -203,6 +207,6 @@ export function visibleToKitchen(state: OrderState, config: BusinessConfig): boo
   if (state.fireAt !== undefined && state.firedAt === undefined) return false;
   // A customer's own order is held until staff accept it, so a stranger cannot send tickets to the kitchen.
   if (state.source === "online" && !state.acceptedAt) return false;
-  if (config.paymentTiming === "prepay") return isFullyPaid(state, config);
+  if (config.paymentTiming === "prepay" && !state.onTab) return isFullyPaid(state, config);
   return true;
 }

@@ -188,7 +188,8 @@ export class PrintStore {
       // One order at a time, so two events for it arriving together cannot print its lines twice.
       await client.query("SELECT pg_advisory_xact_lock(hashtext($1))", [`print/${this.merchantId}/${order.orderId}`]);
 
-      if (isFullyPaid(order, ctx.config)) {
+      // A round on a Tab has no receipt of its own: the Tab's payments carry it.
+      if (!order.onTab && isFullyPaid(order, ctx.config)) {
         const cash = order.payments.some((x) => x.confirmed && x.method === "cash");
         for (const p of printers.filter((x) => x.roles.includes("receipt"))) {
           const doc = receipt(order, ctx.config, ctx.print, { showQueue: p.showQueue });

@@ -14,6 +14,8 @@ import { registerShop } from "./shop.js";
 import { registerDisplay } from "./display.js";
 import { registerPromoAdmin, releasePromo } from "./promo.js";
 import { reconcileOrderStock, registerStock } from "./stock.js";
+import { TabService } from "./tabs.js";
+import { registerTabRoutes } from "./tabRoutes.js";
 import { loadKiosk, optionsOf, saveKiosk, saveSetting } from "./settings.js";
 import { sendMail, type Integrations } from "./integrations.js";
 import { registerTelegram } from "./telegram.js";
@@ -610,8 +612,10 @@ export async function buildApp({ config, store, db, catalog, catalogAdmin, print
 
   registerDisplay(app, { db, merchantId, needsDevice });
   registerPromoAdmin(app, { db, merchantId, needs });
+  const tabs = new TabService({ db, merchantId, config, eventsForOrder: (id) => store.eventsForOrder(id), members, ingest, now });
+  registerTabRoutes(app, { db, merchantId, tabs, members, needs, outletIds: async () => (await listOutlets(db, merchantId)).map((o) => o.id) });
   registerStock(app, { db, merchantId, needs, outletIds: async () => (await listOutlets(db, merchantId)).map((o) => o.id), defaultOutlet: config.outletName });
-  registerShop(app, { db, config, store, catalog, catalogAdmin, brand: new BrandStore(db, merchantId), ingest, members, needs, integrations, now });
+  registerShop(app, { db, config, store, catalog, catalogAdmin, brand: new BrandStore(db, merchantId), ingest, members, needs, integrations, now, tabs });
 
   // ---- the Telegram bot for managing prices ---------------------------------------------------
 

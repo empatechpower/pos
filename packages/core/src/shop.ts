@@ -113,7 +113,7 @@ export function shopStatus(order: OrderState, config: BusinessConfig): ShopStatu
   if (order.stage === "cancelled") return "cancelled";
   if (order.stage === "completed") return "completed";
   if (order.source === "online" && !order.acceptedAt) return "received";
-  if (config.paymentTiming === "prepay" && !isFullyPaid(order, config)) return "awaiting_payment";
+  if (config.paymentTiming === "prepay" && !order.onTab && !isFullyPaid(order, config)) return "awaiting_payment";
   if (order.fireAt !== undefined && order.firedAt === undefined) return "scheduled";
   if (order.stage === "ready") return "ready";
   if (order.stage === "preparing") return "preparing";

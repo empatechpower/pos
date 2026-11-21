@@ -38,7 +38,7 @@ export function StoresSheet({ stores, currentId, onPick, onClose }: { stores: St
 
   return (
     <div className="tbl-back" role="dialog" aria-label={tx("Our outlets")} onClick={onClose}>
-      <div className="tbl-sheet" onClick={(e) => e.stopPropagation()} style={{ maxHeight: "85dvh", overflow: "auto" }}>
+      <div className="tbl-dlg" onClick={(e) => e.stopPropagation()} style={{ maxHeight: "85dvh", overflow: "auto" }}>
         <h3>{tx("Our outlets")}</h3>
         {anyCoords && !here && <button className="secondary sm" onClick={locate}>{tx("Show the nearest first")}</button>}
         {note && <p className="muted" role="status">{note}</p>}

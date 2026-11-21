@@ -8,6 +8,7 @@ import type { Db } from "./db/pool.js";
 import { balanceOf, creditBlockedFor, creditFrozen, refund as refundCredit, spend as spendCredit } from "./ledger.js";
 import { FailureLimiter } from "./rateLimit.js";
 import { itemNames, onHandAt, stockVersion } from "./stock.js";
+import { TabError, type TabService } from "./tabs.js";
 import { PROMO_BASIS, claimPromo, judgePromo, promoStacksWithCoupons, releasePromo, type PromoVerdict } from "./promo.js";
 import { normaliseEmail, type MemberStore } from "./members.js";
 import { authorizeUrl, createStripeCheckout, createStripeRefund, fetchProfile, sendMail, newState, newVerifier, sameSecret, verifyStripeSignature, type Integrations, type OAuthProvider } from "./integrations.js";
@@ -37,6 +38,8 @@ interface ShopDeps {
   integrations?: Integrations;
   /** The clock (epoch ms); tests set it. */
   now?: () => number;
+  /** Tabs for table service: a round is an order that joins a table's shared tab. */
+  tabs?: TabService;
 }
 
 /** Only ids and counts are read from a client's build; names, prices and rules come from the menu. */
@@ -552,6 +555,8 @@ export function registerShop(app: FastifyInstance, d: ShopDeps) {
     pickupAt?: number;
     /** A typed promo code. Judged on the items subtotal, before service charge, tax and deposits. */
     promoCode?: string;
+    /** Table service: the order is a round on this tab (the credential from joining it). */
+    tab?: { participantId?: string; token?: string };
   }
 
   /** A customer places an order. Held for staff to accept; nothing reaches the kitchen yet. */
@@ -572,7 +577,27 @@ export function registerShop(app: FastifyInstance, d: ShopDeps) {
     // Quick service takes no table. Table service takes dine-in only, at one of the shop's own tables (any table name when it has no list).
     const outlet = await outletFor((b as { outletId?: unknown }).outletId);
     let table: string | undefined;
-    if (outlet.mode === "tsr") {
+    // Table service with a shared tab: a dine-in order is a ROUND on the table's tab (no payment now, no collection number). Takeaway there is pay-now as usual.
+    const chKind = (await d.catalog.load()).channels.find((c) => c.id === b.channelId)?.kind;
+    const tabCfg = d.tabs ? await d.tabs.outletSettings(outlet.id) : null;
+    const tabRound = !!tabCfg?.tabService && chKind === "dine_in";
+    const takeawayAtTsr = !!tabCfg?.tabService && chKind !== "dine_in";
+    let tabCtx: { tabId: string; participantId: string } | null = null;
+    if (tabRound) {
+      try {
+        const who = await d.tabs!.authenticate(b.tab?.participantId, b.tab?.token);
+        const t = await d.tabs!.tabOpen(who.tabId);
+        if (!t.open) return reply.code(409).send({ error: "tab_closed" });
+        if (t.outletId !== outlet.id) return reply.code(400).send({ error: "this_tab_is_at_another_outlet" });
+        tabCtx = { tabId: who.tabId, participantId: who.person.id };
+        table = t.spot ?? undefined;
+      } catch (e) {
+        if (e instanceof TabError) return reply.code(e.status).send(e.body);
+        throw e;
+      }
+      if (b.payWithCredit || b.usePoints || b.couponId || b.promoCode) return reply.code(400).send({ error: "pay_on_the_tab", message: "A table's orders are paid on the tab, not when ordering." });
+    }
+    if (outlet.mode === "tsr" && !tabRound && !takeawayAtTsr) {
       if (tables.length) {
         const wanted = String(b.spot ?? "").trim().replace(/^table\s*/i, "");
         table = tables.find((x) => x === `Table ${Number(wanted)}`);
@@ -608,7 +633,7 @@ export function registerShop(app: FastifyInstance, d: ShopDeps) {
       if (!ok) return reply.code(400).send({ error: "slot_not_available" });
     }
     const member = gate.member;
-    if (membersOnly) {
+    if (membersOnly && !tabRound) {
       if (!member) return reply.code(401).send({ error: "sign_in_to_order" });
       if (!b.payWithCredit) return reply.code(400).send({ error: "pay_with_credit" });
     }
@@ -624,7 +649,7 @@ export function registerShop(app: FastifyInstance, d: ShopDeps) {
       coupon = await members!.coupon(member.id, String(b.couponId));
       if (!coupon) return reply.code(400).send({ error: "coupon_not_available" });
     }
-    if (outlet.mode === "tsr" && cat.channels.find((c) => c.id === b.channelId)?.kind !== "dine_in") return reply.code(400).send({ error: "this shop takes dine-in orders only" });
+    if (outlet.mode === "tsr" && !takeawayAtTsr && cat.channels.find((c) => c.id === b.channelId)?.kind !== "dine_in") return reply.code(400).send({ error: "this shop takes dine-in orders only" });
     // A typed promo code is judged here, again, whatever the app showed: on the items subtotal, before service charge, tax and deposits.
     let promo: Extract<PromoVerdict, { ok: true }> | null = null;
     if (typeof b.promoCode === "string" && b.promoCode.trim()) {
@@ -688,7 +713,8 @@ export function registerShop(app: FastifyInstance, d: ShopDeps) {
     try {
     out = await serially(async () => {
     const taken = await activeQueueNumbers(d.db, merchantId);
-    const queueNumber = collectionNumber(phone ?? member?.phone ?? undefined, taken) ?? (await nextOnlineNumber(d.db, merchantId));
+    // A round on a tab carries no collection number (Spec 11.2); everything else gets one.
+    const queueNumber = tabCtx ? undefined : (collectionNumber(phone ?? member?.phone ?? undefined, taken) ?? (await nextOnlineNumber(d.db, merchantId)));
     const ts = Date.now();
     // Credit first: if it is short, nothing else has been touched. Taken in one step that cannot go below zero.
     const creditCents = b.payWithCredit && member ? quote.priced.total : 0;
@@ -730,6 +756,7 @@ export function registerShop(app: FastifyInstance, d: ShopDeps) {
         customerName: clean(b.customerName, 40) ?? member?.name ?? undefined,
         customerPhone: phone ?? member?.phone ?? undefined,
         memberId: member?.id,
+        ...(tabCtx ? { onTab: true } : {}),
         ...(pickupAt !== undefined ? { scheduledFor: pickupAt, fireAt: pickupAt - (outlet.prepMinutes ?? 0) * 60_000 } : {}),
         spot: quote.channel.kind === "dine_in" && (outlet.mode === "tsr" || !outlet.chosen) ? table ?? clean(b.spot, 30)?.replace(/[^\w #-]/g, "") : undefined,
         queueNumber,
@@ -748,8 +775,10 @@ export function registerShop(app: FastifyInstance, d: ShopDeps) {
       await releasePromo(d.db, merchantId, orderId);
       throw err;
     }
+    let roundNo: number | undefined;
+    if (tabCtx) roundNo = await d.tabs!.addRound(tabCtx.tabId, orderId, tabCtx.participantId);
     if (pickupAt !== undefined) await d.db.query("INSERT INTO scheduled_orders (merchant_id, order_id, outlet_id, fire_at) VALUES ($1,$2,$3,$4) ON CONFLICT DO NOTHING", [merchantId, orderId, outlet.id, pickupAt - (outlet.prepMinutes ?? 0) * 60_000]);
-    return { orderId, queueNumber, totalCents: quote.priced.total, pointsUsed, couponDiscountCents: quote.priced.couponDiscount, ...(promoUsed ? { promoCode: promo!.promo.code } : {}), paidWithCreditCents: creditCents, creditBalanceCents: member ? await balanceOf(d.db, merchantId, member.id) : undefined, status: creditCents > 0 ? "queued" : "received" };
+    return { orderId, queueNumber, totalCents: quote.priced.total, pointsUsed, couponDiscountCents: quote.priced.couponDiscount, ...(promoUsed ? { promoCode: promo!.promo.code } : {}), ...(tabCtx ? { tabId: tabCtx.tabId, round: roundNo } : {}), paidWithCreditCents: creditCents, creditBalanceCents: member ? await balanceOf(d.db, merchantId, member.id) : undefined, status: creditCents > 0 ? "queued" : "received" };
     });
     } catch (e) {
       await dropAttempt();

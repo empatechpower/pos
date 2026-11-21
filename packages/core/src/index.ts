@@ -22,5 +22,6 @@ export * from "./stock.js";
 export * from "./logoColours.js";
 export * from "./customerDisplay.js";
 export * from "./tab.js";
+export * from "./tabEngine.js";
 export * from "./print/raster.js";
 export * from "./reports.js";

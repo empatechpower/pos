@@ -6,6 +6,7 @@ import { RollMoney } from "./RollMoney";
 import { PickupPicker } from "./PickupPicker";
 import { PromoBox, type AppliedPromo } from "./PromoBox";
 import { StoresSheet, useStores } from "./StoresSheet";
+import { JoinTabSheet, PageBell, TabScreen, leaveOtherTabs, otherTabSessions, useTab } from "./TabView";
 import "../shopProto.css";
 import { go, onRouteChange, queryParams } from "../nav";
 import { LANGS, detectedLang, greeting, lang, langMode, setLangMode, shortLabel, t, tx, useLang } from "../shopI18n";
@@ -452,7 +453,7 @@ export function Shop() {
   );
 }
 
-type Screen = "login" | "order" | "rewards" | "account" | "bag" | "summary" | "checkout" | "payment";
+type Screen = "login" | "order" | "rewards" | "account" | "bag" | "summary" | "checkout" | "payment" | "tab";
 
 function Menu({ info, catalog, config, loginError, recheck }: { info: Info; catalog: Catalog; config: BusinessConfig; loginError: string | null; recheck: () => void }) {
   const q = params();
@@ -903,6 +904,36 @@ function Menu({ info, catalog, config, loginError, recheck }: { info: Info; cata
   const dine = channel?.kind === "dine_in";
   // Quick service has no table at all; table service needs one.
   const tableMode = dine && info.serviceMode !== "qsr";
+  // Table service with a shared tab (Spec 12, 13): a dine-in order is a round on the table's tab; payment happens on the tab.
+  const [tabCfg, setTabCfg] = useState<{ tabService: boolean } | null>(null);
+  useEffect(() => { void fetch(`/api/shop/tab/settings${info.outletId ? `?outlet=${encodeURIComponent(info.outletId)}` : ""}`).then((r) => (r.ok ? r.json() : null)).then(setTabCfg).catch(() => undefined); }, [info.outletId]);
+  const tabMode = !!tabCfg?.tabService && dine && !!spot;
+  const memberToken = member ? localStorage.getItem(LS_MEMBER) : null;
+  const tab = useTab(info.outletId, spot, tabMode, memberToken);
+  const [joining, setJoining] = useState(false);
+  const [joinFailed, setJoinFailed] = useState(false);
+  const placeRound = async () => {
+    if (!tab.session || !quote?.ok || busy) return;
+    setBusy(true);
+    setNote(null);
+    try {
+      const res = await fetch("/api/shop/orders", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ channelId, outletId: info.outletId, items, customerName: tab.view?.me?.name ?? "", customerPhone: "", spot, expectedTotalCents: agreed ?? total, tab: { participantId: tab.session.participantId, token: tab.session.token } }) });
+      const j = (await res.json().catch(() => ({}))) as { orderId?: string; error?: string; totalCents?: number };
+      if (res.ok && j.orderId) {
+        saveBag(bagKey, [], spot);
+        setBag([]);
+        await tab.refresh();
+        setScreen("tab");
+      } else if (res.status === 409 && j.error === "price_changed") {
+        setAgreed(j.totalCents ?? null);
+        setNote(`Prices changed while you were ordering. The new total is ${formatMoney(j.totalCents ?? 0)}. Tap Add to Tab again to confirm.`);
+      } else if (res.status === 401 || res.status === 409) {
+        setNote(j.error === "tab_closed" ? tx("This table's bill has been paid and closed. Scan the table's code to start a new one.") : tx("Please join the table first."));
+      } else setNote(tx("Your order could not be sent. Please try again."));
+    } finally {
+      setBusy(false);
+    }
+  };
   const spotText = dine ? spot || tx("Add table") : tx("Pickup counter");
   const loadingMember = memberPending && !member;
   const who = member ? member.name || (member.email ?? member.phone ?? "Member").split("@")[0] : loadingMember ? "\u00A0" : t("guestW", "Guest");
@@ -917,9 +948,12 @@ function Menu({ info, catalog, config, loginError, recheck }: { info: Info; cata
         <b className="shop-name">{who}</b>
         <button className="shop-chip" onClick={() => setLangOpen(true)} aria-label={`${t("language", "Language")} — ${LANGS.find((l) => l.code === lang())!.native}`}><Icon name="globe" size={15} /><span>{shortLabel()}</span></button>
       </div>
-      <div className="shop-logo">{b.logoUrl ? <img src={b.logoUrl} alt={info.name} /> : <b>{info.name}</b>}</div>
+      <div className="shop-logo">{(() => { const logo = b.logoUrl ? <img src={b.logoUrl} alt={info.name} /> : <b>{info.name}</b>; return tabMode && tab.session ? <PageBell logo={logo} view={tab.view} session={tab.session} onPaged={() => void tab.refresh()} /> : logo; })()}</div>
       <div className="shop-meta">
-        {tableMode && !noSpot && (
+        {tabMode && tab.session && tab.view && !noSpot && (
+          <button className="shop-table on" onClick={() => setScreen("tab")} aria-label={tx("Table bill")}><Icon name="ticket" size={16} />{tab.view.closed ? tx("Paid") : formatMoney(tab.view.totals.remainingCents)}</button>
+        )}
+        {tableMode && !noSpot && !(tabMode && tab.session) && (
           <button className={`shop-table ${spot ? "on" : ""}`} disabled={tableLocked} style={tableLocked ? { opacity: 1, cursor: "default" } : undefined} onClick={() => setTableEdit((v) => !v)} aria-label={tableLocked ? spot : "Change table"}>
             <Icon name="table" size={16} />{spot || tx("Add table")}
           </button>
@@ -1295,6 +1329,10 @@ function Menu({ info, catalog, config, loginError, recheck }: { info: Info; cata
     <>
       <div className="acct-fixed">{pageHead(t("account", "Account"))}<div className="acct-fixed-card">{acctMemberCard}</div></div>
       <div className="scroll-body shop-body">
+        {/* "My table bill": a stable way back to the table's bill. Dine-in, a tab with lines, something still to pay, and this phone is on it (Spec 12.8). */}
+        {tabMode && tab.session && tab.view && tab.view.rounds.length > 0 && tab.view.totals.remainingCents > 0 && !tab.view.closed && (
+          <button className="sum-link-row" onClick={() => setScreen("tab")}><span className="sl-ic"><Icon name="ticket" size={21} /></span><span className="sl-t">{tx("My table bill")}<span className="sl-d">{tab.view.spot} · {formatMoney(tab.view.totals.remainingCents)}</span></span><span className="chev"><Icon name="chevR" size={16} /></span></button>
+        )}
         {acctPanel === "profile" ? (
           <>
             <button className="e2e-back" onClick={() => setAcctPanel(null)}><Icon name="chevL" size={16} /> {tx("Back to Account")}</button>
@@ -1646,11 +1684,17 @@ function Menu({ info, catalog, config, loginError, recheck }: { info: Info; cata
             </button>
           </div>
         ) : (
+        tabMode ? (
+          <button className={`e2e-cta ${tab.session && quote?.ok ? "" : "off"}`} disabled={!tab.session || !quote?.ok || busy} onClick={() => void placeRound()}>
+            <span>{busy ? tx("Sending…") : tx(count === 1 ? "Add to Tab · {n} item" : "Add to Tab · {n} items", { n: count })}</span><span><RollMoney cents={shownTotal} /></span>
+          </button>
+        ) : (
         <button className={`e2e-cta ${canOrder && (!tableMode || !!spot) ? "" : "off"}`} disabled={!canOrder || (tableMode && !spot)} onClick={() => setScreen("checkout")}>
           <span>{tx(count === 1 ? "Order Now · {n} item" : "Order Now · {n} items", { n: count })}</span><span><RollMoney cents={shownTotal} /></span>
         </button>
+        )
         )}
-        {!canOrder && <p className="e2e-sub">{member ? "Add your phone number to place this order." : "Tap Sign up, or Check out as guest, to place this order."}</p>}
+        {!canOrder && !tabMode && <p className="e2e-sub">{member ? "Add your phone number to place this order." : "Tap Sign up, or Check out as guest, to place this order."}</p>}
       </div>
     </>
   ) : null;
@@ -1716,7 +1760,18 @@ function Menu({ info, catalog, config, loginError, recheck }: { info: Info; cata
     </>
   ) : null;
 
+  const tabScreen = tab.session && tab.view ? (
+    <>
+      {pageHead(tx("Table bill"))}
+      <div className="scroll-body shop-body">
+        <TabScreen view={tab.view} session={tab.session} bearer={memberToken} creditCents={credit} rewardsOn={rewardsOn} onBack={() => setScreen("order")} onAddMore={() => setScreen("order")} onChanged={() => void tab.refresh()} />
+      </div>
+      {nav}
+    </>
+  ) : null;
+
   const body =
+    screen === "tab" ? tabScreen :
     screen === "rewards" ? rewardsScreen :
     screen === "account" ? accountScreen :
     screen === "bag" ? bagScreen :
@@ -1730,6 +1785,13 @@ function Menu({ info, catalog, config, loginError, recheck }: { info: Info; cata
       {body ?? (
         <div className="shop-msg"><p>{t("bagEmptyShort", "Your bag is empty.")}</p><button className="shop-primary" onClick={() => setScreen("order")}>{t("backToOrder", "Back to Order")}</button></div>
       )}
+      {tabMode && !tab.session && <JoinTabSheet spot={spot} memberName={member?.name} busy={joining} failed={joinFailed} onJoin={(n) => {
+          // One active tab per phone: a second table asks whether to leave the first, or stay.
+          const others = otherTabSessions(info.outletId, spot);
+          if (others.length && !window.confirm(tx("You are already on {t}'s tab. Leave it and join {n}?", { t: others[0]!.spot, n: spot }))) return;
+          setJoining(true); setJoinFailed(false);
+          void (others.length ? leaveOtherTabs(info.outletId, spot) : Promise.resolve()).then(() => tab.join(n)).then((ok) => { setJoining(false); setJoinFailed(!ok); });
+        }} />}
       {walletSheet}
       {storesOpen && stores && <StoresSheet stores={stores} currentId={info.outletId} onClose={() => setStoresOpen(false)} onPick={(id) => { try { sessionStorage.setItem("pos.outlet", id); } catch { /* ignore */ } window.location.href = `/shop?outlet=${encodeURIComponent(id)}`; }} />}
       {langSheet}

@@ -365,6 +365,23 @@ export class MemberStore {
     return { count, rewarded };
   }
 
+  /** One stamp for something that is not a single order (a settled tab), once for this key. The card fills and rewards exactly as for an order. */
+  async stampOnce(memberId: string, key: string, card: StampCardConfig): Promise<{ count: number; rewarded: boolean } | null> {
+    if (!card.enabled || card.target < 1) return null;
+    if (!(await this.claimNotice(key, "stamp"))) return null;
+    const r = await this.db.query(
+      `INSERT INTO member_stamps (member_id, count) VALUES ($1, 1) ON CONFLICT (member_id) DO UPDATE SET count = member_stamps.count + 1 RETURNING count`, [memberId]);
+    let count = Number(r.rows[0].count);
+    let rewarded = false;
+    if (count >= card.target) {
+      await this.db.query("UPDATE member_stamps SET count = count - $2, cards_completed = cards_completed + 1 WHERE member_id=$1", [memberId, card.target]);
+      count -= card.target;
+      rewarded = true;
+      await this.grantCoupon(memberId, `stamp:${key}`, { title: card.rewardTitle, amountCents: card.rewardCents, minSpendCents: 0 });
+    }
+    return { count, rewarded };
+  }
+
   // ---- coupons ----------------------------------------------------------------------------------
 
   /** Give a coupon. The source key makes it idempotent: the same grant twice is one coupon. */

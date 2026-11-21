@@ -14,6 +14,7 @@ import { Online } from "./views/Online";
 import { ErrorBoundary } from "./views/ErrorBoundary";
 import { Shop } from "./views/Shop";
 import { Orders } from "./views/Orders";
+import { Tabs } from "./views/Tabs";
 import { Printers } from "./views/Printers";
 import { Prices } from "./views/Prices";
 import { PricebookEditor } from "./views/PricebookEditor";
@@ -26,10 +27,10 @@ import { Pos } from "./views/Pos";
 import { Queue } from "./views/Queue";
 import { CustomerDisplay } from "./views/CustomerDisplay";
 
-type Route = "display" | "pos" | "kitchen" | "queue" | "credit" | "login" | "devices" | "prices" | "printers" | "orders" | "online" | "shop" | "kiosk" | "manager" | "tg" | "pricebook" | "pair";
+type Route = "tabs" | "display" | "pos" | "kitchen" | "queue" | "credit" | "login" | "devices" | "prices" | "printers" | "orders" | "online" | "shop" | "kiosk" | "manager" | "tg" | "pricebook" | "pair";
 const routeFromHash = (): Route => {
   const h = routeParts()[0] ?? "";
-  return h === "display" || h === "kitchen" || h === "queue" || h === "credit" || h === "login" || h === "devices" || h === "prices" || h === "printers" || h === "orders" || h === "online" || h === "shop" || h === "kiosk" || h === "manager" || h === "pos" || h === "tg" || h === "pricebook" || h === "pair" ? h : "manager";
+  return h === "tabs" || h === "display" || h === "kitchen" || h === "queue" || h === "credit" || h === "login" || h === "devices" || h === "prices" || h === "printers" || h === "orders" || h === "online" || h === "shop" || h === "kiosk" || h === "manager" || h === "pos" || h === "tg" || h === "pricebook" || h === "pair" ? h : "manager";
 };
 
 export function App() {
@@ -128,6 +129,8 @@ export function App() {
           <Printers catalog={catalog} />
         ) : route === "manager" ? (
           <Manager config={config} catalog={catalog} />
+        ) : route === "tabs" ? (
+          <Tabs />
         ) : route === "orders" ? (
           <Orders config={config} />
         ) : route === "pricebook" ? (

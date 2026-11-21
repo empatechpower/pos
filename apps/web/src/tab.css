@@ -1,0 +1,55 @@
+/* Table service: the Tab screen, Split & Pay and the logo-bell. */
+.tab-screen { padding: 0 14px 120px; max-width: var(--shop-max, 520px); margin: 0 auto; }
+.tab-top { display: flex; justify-content: space-between; align-items: center; padding: 10px 0; }
+.tab-jump { border: 1.5px solid var(--orange, #ea7016); color: var(--orange-dark, #b85c0a); background: #fff; border-radius: 999px; padding: 6px 14px; font-weight: 700; }
+.tab-code { letter-spacing: .14em; font-size: 1.1em; }
+.tab-people { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; }
+.tab-chip { display: inline-block; padding: 2px 10px; border-radius: 999px; background: #f1e9db; font-size: 12px; font-weight: 600; }
+.tab-chip.me { background: var(--selected, #fdeee0); border: 1px solid var(--orange, #ea7016); }
+.tab-totals .tab-tot-row { display: flex; justify-content: space-between; align-items: baseline; font-size: 16px; padding: 3px 0; }
+.tab-totals .tab-rem { font-size: 30px; font-weight: 800; border-top: 1px solid var(--line, #ede4d6); margin-top: 6px; padding-top: 8px; }
+.tab-totals .tab-rem b { font-size: 38px; }
+.tab-break { font-size: 12px; margin-top: 4px; }
+.tab-reward { background: #fff8ec; }
+.tab-closed { background: #eaf7ee; color: #1c6b3a; text-align: center; }
+.tab-share { font-size: 12px; padding: 2px 0; }
+.tab-actions { display: flex; gap: 8px; margin-top: 14px; }
+.tab-actions > * { flex: 1 1 0; }
+.tab-lock { text-align: center; margin-top: 8px; }
+.tab-modes .pay-opt.on { border-color: var(--orange, #ea7016); background: var(--selected, #fdeee0); }
+.tab-rounds { display: flex; gap: 6px; flex-wrap: wrap; margin: 8px 0; }
+
+/* The logo that flips to a bell about every 3 seconds, transform/opacity only. */
+.pw { position: relative; display: block; width: 92px; height: 56px; background: none; border: 0; padding: 0; cursor: pointer; }
+.pw .pw-logo { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; animation: pw-logo 3s infinite; }
+.pw .pw-bell { position: absolute; inset: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 2px; opacity: 0; animation: pw-bell 3s infinite; }
+.pw .pw-badge { display: grid; place-items: center; width: 56px; height: 36px; border-radius: 999px; background: #fdeee0; color: #ea7016; transform-origin: 50% 10%; animation: pw-ring 3s infinite; }
+.pw .pw-pill { background: #fff; border: 1.5px solid #ea7016; color: #b85c0a; border-radius: 999px; padding: 0 8px; font-size: 9px; font-weight: 700; white-space: nowrap; line-height: 14px; }
+.pw.paged .pw-logo { animation: none; opacity: 0; }
+.pw.paged .pw-bell { animation: none; opacity: 1; }
+.pw.paged .pw-badge { background: #ea7016; color: #fff; animation: none; }
+@keyframes pw-logo { 0%, 62% { opacity: 1; } 68%, 96% { opacity: 0; } 100% { opacity: 1; } }
+@keyframes pw-bell { 0%, 62% { opacity: 0; } 68%, 96% { opacity: 1; } 100% { opacity: 0; } }
+@keyframes pw-ring { 0%, 66% { transform: rotate(0); } 70% { transform: rotate(14deg); } 74% { transform: rotate(-11deg); } 78% { transform: rotate(8deg); } 82% { transform: rotate(-5deg); } 86%, 100% { transform: rotate(0); } }
+@media (prefers-reduced-motion: reduce) { .pw .pw-logo, .pw .pw-bell, .pw .pw-badge { animation: none; } .pw:not(.paged) .pw-bell { opacity: 0; } }
+/* Secondary and link buttons inside the Tab screens (the shop's own look for them). */
+.tab-screen .secondary, .tbl-dlg .secondary { border: 1.5px solid var(--orange, #ea7016); color: var(--orange-dark, #b85c0a); background: #fff; border-radius: 999px; padding: 12px 16px; font-weight: 700; cursor: pointer; }
+.tab-screen .secondary:disabled, .tbl-dlg .secondary:disabled { opacity: .5; }
+.tab-screen .secondary.sm, .tbl-dlg .secondary.sm { padding: 6px 12px; font-size: 13px; }
+.tab-screen .shop-primary, .tbl-dlg .shop-primary { background: var(--orange, #ea7016); color: #fff; border: 0; border-radius: 999px; padding: 14px 18px; font-weight: 800; cursor: pointer; }
+.tab-screen .shop-primary:disabled, .tbl-dlg .shop-primary:disabled { opacity: .45; }
+.tbl-dlg .shop-link { background: none; border: 0; color: var(--orange-dark, #b85c0a); font-weight: 700; padding: 8px; cursor: pointer; }
+.tbl-dlg .pay-opt { display: flex; align-items: center; justify-content: space-between; gap: 10px; width: 100%; padding: 12px 14px; border: 1.5px solid #ede4d6; border-radius: 14px; background: #fff; text-align: left; cursor: pointer; font: inherit; }
+.tbl-dlg .pay-opt[aria-pressed="true"], .tbl-dlg .pay-opt.on { border-color: var(--orange, #ea7016); background: var(--selected, #fdeee0); }
+.tbl-dlg .pay-opt .pt { display: flex; flex-direction: column; }
+.tbl-dlg .pay-opt .pt span { font-size: 12px; color: #73777b; }
+.tbl-dlg .e2e-cta { background: var(--orange, #ea7016); color: #fff; border: 0; border-radius: 999px; padding: 14px 18px; font-weight: 800; display: flex; justify-content: center; cursor: pointer; }
+.tbl-dlg .e2e-cta:disabled { opacity: .45; }
+.tbl-dlg .e2e-card { border: 1px solid #ede4d6; border-radius: 14px; padding: 10px 12px; }
+.tbl-dlg .sum-row { display: flex; justify-content: space-between; gap: 10px; padding: 4px 0; }
+.tbl-dlg .sum-row.grand { font-weight: 800; border-top: 1px solid #ede4d6; margin-top: 4px; padding-top: 8px; font-size: 18px; }
+.tbl-dlg .sum-row.neg .v { color: #1c6b3a; }
+.tbl-dlg .e2e-input { width: 100%; box-sizing: border-box; border: 1.5px solid #e3dccf; border-radius: 12px; padding: 12px; font: inherit; }
+.tbl-dlg .inline { display: flex; gap: 8px; align-items: center; }
+.tbl-dlg .chip { padding: 8px 14px; border-radius: 999px; border: 1px solid #ede4d6; background: #fff; }
+.tbl-dlg .chip.on { background: var(--orange, #ea7016); color: #fff; border-color: var(--orange, #ea7016); }
