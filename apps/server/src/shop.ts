@@ -1,5 +1,5 @@
 import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
-import { applyOutletMenu, cleanNote, collectionNumber, confirmedPaid, newId, optionLines, orderTotals, totalsLines, queueView, quoteOrder, reduceAll, reduceOrder, shopStatus, type BusinessConfig, type OrderEvent, type OrderState } from "@pos/core";
+import { applyOutletMenu, availabilityOf, lastBoundaryAt, menuState, cleanNote, collectionNumber, confirmedPaid, newId, optionLines, orderTotals, totalsLines, queueView, quoteOrder, reduceAll, reduceOrder, shopStatus, type BusinessConfig, type OrderEvent, type OrderState } from "@pos/core";
 import { audit, type Permission } from "./auth.js";
 import type { BrandStore } from "./brand.js";
 import type { CatalogStore, PgCatalogStore } from "./catalog.js";
@@ -10,7 +10,7 @@ import { FailureLimiter } from "./rateLimit.js";
 import { normaliseEmail, type MemberStore } from "./members.js";
 import { authorizeUrl, createStripeCheckout, createStripeRefund, fetchProfile, sendMail, newState, newVerifier, sameSecret, verifyStripeSignature, type Integrations, type OAuthProvider } from "./integrations.js";
 import type { EventStore } from "./store.js";
-import { loadOutletMenu } from "./outletMenu.js";
+import { loadOutletMenu, loadOutletWindows } from "./outletMenu.js";
 import { loadKiosk } from "./settings.js";
 import { listOutlets } from "./tenant.js";
 import { createHash, randomBytes } from "node:crypto";
@@ -33,6 +33,8 @@ interface ShopDeps {
   needs: (p: Permission) => (req: FastifyRequest, reply: FastifyReply) => Promise<unknown>;
   /** Google / Microsoft / SMS / Stripe settings. Any that are missing simply switch that feature off. */
   integrations?: Integrations;
+  /** The clock (epoch ms); tests set it. */
+  now?: () => number;
 }
 
 const singaporeDay = (now = Date.now()) => new Intl.DateTimeFormat("en-CA", { timeZone: "Asia/Singapore" }).format(now);
@@ -153,8 +155,11 @@ export function registerShop(app: FastifyInstance, d: ShopDeps) {
   app.get("/api/shop/stores", async (req, reply) => {
     if (limited(readLimit, req, reply)) return;
     const all = (await listOutlets(d.db, merchantId)).filter((o) => o.active);
+    const nowMs = (d.now ?? Date.now)();
+    const wins = await Promise.all(all.map((o) => loadOutletWindows(d.db, merchantId, o.id)));
     return {
-      stores: all.map((o) => ({
+      stores: all.map((o, i) => ({
+        menu: menuState(wins[i]!.windows, nowMs, wins[i]!.timeZone),
         id: o.id,
         name: o.name,
         address: o.address ?? undefined,
@@ -170,15 +175,21 @@ export function registerShop(app: FastifyInstance, d: ShopDeps) {
   const menuOf = async (asked: unknown) => {
     const outlet = (await listOutlets(d.db, merchantId)).find((o) => o.id === (typeof asked === "string" && asked ? asked : d.config.outletName) && o.active);
     const id = outlet?.id ?? d.config.outletName;
-    const [c, o] = await Promise.all([d.catalog.load(), loadOutletMenu(d.db, merchantId, id)]);
-    return { outletId: id, prepMinutes: outlet?.prepMinutes ?? null, menuVersion: c.version + o.version, catalog: applyOutletMenu(c, o.menu) };
+    const now = (d.now ?? Date.now)();
+    const [c, o, w] = await Promise.all([d.catalog.load(), loadOutletMenu(d.db, merchantId, id), loadOutletWindows(d.db, merchantId, id)]);
+    const applied = applyOutletMenu(c, o.menu);
+    // Every item carries its one state (orderable, available later with the next opening, sold out). The version also moves at each window boundary,
+    // so a phone that keeps asking "has the menu changed?" sees an item flip with nothing to reload by hand.
+    const catalog = { ...applied, products: applied.products.map((p) => ({ ...p, availability: availabilityOf(p, w.windows, now, w.timeZone) })) };
+    const menuVersion = c.version + o.version + Math.floor(lastBoundaryAt(w.windows, now, w.timeZone) / 60_000);
+    return { outletId: id, prepMinutes: outlet?.prepMinutes ?? null, menuVersion, menuState: menuState(w.windows, now, w.timeZone), timeZone: w.timeZone, serverTime: now, catalog };
   };
   app.get<{ Querystring: { outlet?: string } }>("/api/shop/menu", async (req, reply) => {
     if (limited(readLimit, req, reply)) return;
     const m = await menuOf(req.query.outlet);
     const etag = `"m${m.outletId}-${m.menuVersion}"`;
     if (req.headers["if-none-match"] === etag) return reply.code(304).send();
-    return reply.header("etag", etag).header("cache-control", "no-cache").send({ ...m.catalog, outletId: m.outletId, prepMinutes: m.prepMinutes, menuVersion: m.menuVersion });
+    return reply.header("etag", etag).header("cache-control", "no-cache").send({ ...m.catalog, outletId: m.outletId, prepMinutes: m.prepMinutes, menuVersion: m.menuVersion, menuState: m.menuState, timeZone: m.timeZone, serverTime: m.serverTime });
   });
   /** A few bytes: has this outlet's menu changed? */
   app.get<{ Querystring: { outlet?: string } }>("/api/shop/menu/version", async (req, reply) => {
@@ -557,6 +568,15 @@ export function registerShop(app: FastifyInstance, d: ShopDeps) {
 
     // The menu as THIS outlet sells it: items it has switched off are gone, sold-out items and options follow the outlet.
     const cat = applyOutletMenu(await d.catalog.load(), (await loadOutletMenu(d.db, merchantId, outlet.id)).menu);
+    // An item outside its menu window can be looked at and built, but not ordered: refused here, whatever the app showed, with when it opens next.
+    const wins = await loadOutletWindows(d.db, merchantId, outlet.id);
+    const nowMs = (d.now ?? Date.now)();
+    for (const it of items) {
+      const p = cat.products.find((x) => x.id === it.productId);
+      if (!p) continue; // unknown or switched off here: the pricing below refuses it as unavailable
+      const a = availabilityOf(p, wins.windows, nowMs, wins.timeZone);
+      if (a.state === "AVAILABLE_LATER") return reply.code(400).send({ error: "available_later", productId: p.id, ...(a.nextOpeningAt !== undefined ? { nextOpeningAt: a.nextOpeningAt } : {}), ...(a.window ? { window: a.window } : {}) });
+    }
     const member = gate.member;
     if (membersOnly) {
       if (!member) return reply.code(401).send({ error: "sign_in_to_order" });

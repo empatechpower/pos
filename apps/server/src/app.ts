@@ -2,7 +2,7 @@ import cors from "@fastify/cors";
 import Fastify, { type FastifyReply, type FastifyRequest } from "fastify";
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
-import { type BuilderSpec, validateOutletOverride, confirmedPaid, hourly, isFullyPaid, productMix, summarize, menuFor, newId, orderTotals, reduceAll, reduceOrder, shopStatus, type BusinessConfig, type ChannelKind, type OptionGroup, type OrderEvent } from "@pos/core";
+import { type BuilderSpec, isTimeZone, validateOutletOverride, validateWindows, type MenuWindows, confirmedPaid, hourly, isFullyPaid, productMix, summarize, menuFor, newId, orderTotals, reduceAll, reduceOrder, shopStatus, type BusinessConfig, type ChannelKind, type OptionGroup, type OrderEvent } from "@pos/core";
 import { CASHIER_TOPUP_LIMIT_CENTS, audit, authenticate, authenticateAgent, can, createAgent, createConnectCode, redeemConnectCode, createStaff, listAgents, login, logout, recentAudit, revokeAgent, type Permission, type Role, type Staff } from "./auth.js";
 import type { CatalogStore, ChangeResult, PgCatalogStore } from "./catalog.js";
 import type { Db } from "./db/pool.js";
@@ -17,7 +17,7 @@ import { registerTelegram } from "./telegram.js";
 import { MemberStore } from "./members.js";
 import { FailureLimiter } from "./rateLimit.js";
 import type { EventStore, StoredEvent } from "./store.js";
-import { loadOutletMenu, saveOutletOverride } from "./outletMenu.js";
+import { loadOutletMenu, loadOutletWindows, saveOutletOverride, saveOutletWindows } from "./outletMenu.js";
 import { ensureDefaultOutlet, listFranchises, listOutlets, outletAllowed, upsertFranchise, upsertOutlet, validId, visibleOutletIds } from "./tenant.js";
 
 declare module "fastify" {
@@ -44,6 +44,8 @@ interface Deps {
   trustProxy?: boolean;
   /** Google / Microsoft / SMS / Stripe settings; see integrations.ts. Optional: each one only switches a feature on. */
   integrations?: Integrations;
+  /** The clock (epoch ms). Tests set it to prove what happens at a window's edge; production leaves it. */
+  now?: () => number;
 }
 
 const bearer = (req: FastifyRequest) => req.headers.authorization?.replace(/^Bearer\s+/i, "");
@@ -52,7 +54,7 @@ const deviceToken = (req: FastifyRequest) => {
   return Array.isArray(h) ? h[0] : h;
 };
 
-export async function buildApp({ config, store, db, catalog, catalogAdmin, print, logger = true, trustProxy = false, integrations }: Deps) {
+export async function buildApp({ config, store, db, catalog, catalogAdmin, print, logger = true, trustProxy = false, integrations, now }: Deps) {
   const app = Fastify({ logger, trustProxy });
   // Logo uploads arrive as raw image bytes.
   app.addContentTypeParser(["image/png", "image/jpeg", "image/webp"], { parseAs: "buffer", bodyLimit: 300 * 1024 + 1 }, (_req, body, done) => done(null, body));
@@ -477,6 +479,30 @@ export async function buildApp({ config, store, db, catalog, catalogAdmin, print
     return loadOutletMenu(db, merchantId, req.params.id);
   });
 
+  /** The menu's time windows at one outlet, and the clock they are read on. */
+  app.get<{ Params: { id: string } }>("/api/outlets/:id/windows", { preHandler: needs("device.manage") }, async (req, reply) => {
+    if (!outletAllowed(await visibleOutletIds(db, merchantId, req.staff!), req.params.id)) return reply.code(403).send({ error: "outside_your_scope" });
+    if (!(await listOutlets(db, merchantId)).some((o) => o.id === req.params.id)) return reply.code(404).send({ error: "outlet_not_found" });
+    return loadOutletWindows(db, merchantId, req.params.id);
+  });
+  /** Replace the windows (null removes them) and/or set the time zone. Orderable hours are independent of the outlet's opening hours. */
+  app.put<{ Params: { id: string }; Body: { windows?: MenuWindows | null; timeZone?: string } }>("/api/outlets/:id/windows", { preHandler: needs("device.manage") }, async (req, reply) => {
+    const { id } = req.params;
+    if (!outletAllowed(await visibleOutletIds(db, merchantId, req.staff!), id)) return reply.code(403).send({ error: "outside_your_scope" });
+    if (!(await listOutlets(db, merchantId)).some((o) => o.id === id)) return reply.code(404).send({ error: "outlet_not_found" });
+    const b = req.body ?? {};
+    if (typeof b !== "object" || Array.isArray(b)) return reply.code(400).send({ error: "send an object" });
+    if (b.windows !== undefined && b.windows !== null && (typeof b.windows !== "object" || Array.isArray(b.windows))) return reply.code(400).send({ error: "windows must be an object with menu, categories and/or products, or null to remove them" });
+    if (b.timeZone !== undefined && (typeof b.timeZone !== "string" || !isTimeZone(b.timeZone))) return reply.code(400).send({ error: "timeZone must be a time zone name such as Asia/Singapore" });
+    if (b.windows) {
+      const problems = validateWindows(b.windows);
+      if (problems.length) return reply.code(400).send({ error: "invalid_change", problems });
+    }
+    await saveOutletWindows(db, merchantId, id, { windows: b.windows, timeZone: b.timeZone });
+    await audit(db, merchantId, req.staff!.id, "outlet.windows", { outlet: id, windows: b.windows, timeZone: b.timeZone });
+    return loadOutletWindows(db, merchantId, id);
+  });
+
   /** Change one item at one outlet. Only what is sent changes; null removes an override; an item left with none is back to following the brand. */
   app.put<{ Params: { id: string; productId: string }; Body: { off?: boolean; soldOut?: boolean | null; builder?: BuilderSpec | null; soldOutOptions?: string[] } }>("/api/outlets/:id/menu/:productId", { preHandler: needs("device.manage") }, async (req, reply) => {
     const { id, productId } = req.params;
@@ -538,7 +564,7 @@ export async function buildApp({ config, store, db, catalog, catalogAdmin, print
 
   // ---- customer ordering and shop look ------------------------------------------------------
 
-  registerShop(app, { db, config, store, catalog, catalogAdmin, brand: new BrandStore(db, merchantId), ingest, members, needs, integrations });
+  registerShop(app, { db, config, store, catalog, catalogAdmin, brand: new BrandStore(db, merchantId), ingest, members, needs, integrations, now });
 
   // ---- the Telegram bot for managing prices ---------------------------------------------------
 
