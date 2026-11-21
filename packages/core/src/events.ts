@@ -1,4 +1,5 @@
 import type { BusinessConfig } from "./config.js";
+import type { StoredBuild } from "./builder.js";
 import type { Fulfilment } from "./catalog.js";
 import type { ChosenOption } from "./options.js";
 import { type Cents } from "./money.js";
@@ -29,13 +30,18 @@ export type OrderEventBody =
       customerPhone?: string;
       /** The signed-in member who placed it (set by the server only, never by a client). */
       memberId?: string;
+      /** A scheduled pickup: when the customer collects (epoch ms), and when the kitchen starts (that time less the outlet's prep time). Missing = ASAP. */
+      scheduledFor?: number;
+      fireAt?: number;
     }
   | { type: "OrderAccepted" }
+  /** The moment a scheduled order is released to the kitchen (the server writes it at `fireAt`). Until then it is confirmed but not fired. */
+  | { type: "OrderFired" }
   /** A coupon or voucher the member used. The discount is capped at the items subtotal; the minimum spend is on items only. */
   | { type: "CouponApplied"; title: string; amountCents: Cents; minSpendCents: Cents }
   /** Points the member spent on this order (100 points = S$1). Reduces what is owed. */
   | { type: "PointsRedeemed"; points: number }
-  | { type: "ItemAdded"; lineId: string; productId: string; name: string; /** includes the price of any options */ unitCents: Cents; qty: number; bcrs?: boolean; pointsExempt?: boolean; taxInclusive?: boolean; taxGroup?: string; options?: ChosenOption[] }
+  | { type: "ItemAdded"; lineId: string; productId: string; name: string; /** includes the price of any options */ unitCents: Cents; qty: number; bcrs?: boolean; pointsExempt?: boolean; taxInclusive?: boolean; taxGroup?: string; options?: ChosenOption[]; /** Build-your-own: the frozen structured build. */ build?: StoredBuild }
   | { type: "ItemQtySet"; lineId: string; qty: number }
   | { type: "PaymentRecorded"; paymentId: string; method: PaymentMethod; amountCents: Cents; /** false = awaiting gateway confirmation */ confirmed: boolean }
   | { type: "PaymentConfirmed"; paymentId: string }
@@ -56,6 +62,7 @@ export interface OrderLine extends PricedLine {
   lineId: string;
   productId: string;
   options?: ChosenOption[];
+  build?: StoredBuild;
 }
 
 export interface OrderState {
@@ -74,6 +81,10 @@ export interface OrderState {
   pointsRedeemed?: number;
   /** When staff accepted an online order. Always unset for POS orders, which need no acceptance. */
   acceptedAt?: number;
+  /** Scheduled pickup: when it is collected, when the kitchen should start, and when it was actually released to the kitchen. */
+  scheduledFor?: number;
+  fireAt?: number;
+  firedAt?: number;
   spot?: string;
   queueNumber?: string;
   openedAt: number;
@@ -110,14 +121,14 @@ export function reduceOrder(orderId: string, events: readonly OrderEvent[]): Ord
   for (const e of mine) {
     if (e.type === "OrderOpened") {
       if (state) continue; // first open wins
-      state = { orderId, fulfilment: e.fulfilment, channelId: e.channelId, channelName: e.channelName, serviceCharge: e.serviceCharge, source: e.source ?? "pos", customerName: e.customerName, customerPhone: e.customerPhone, memberId: e.memberId, spot: e.spot, queueNumber: e.queueNumber, openedAt: e.ts, lines: [], payments: [], stage: "open" };
+      state = { orderId, fulfilment: e.fulfilment, channelId: e.channelId, channelName: e.channelName, serviceCharge: e.serviceCharge, source: e.source ?? "pos", customerName: e.customerName, customerPhone: e.customerPhone, memberId: e.memberId, scheduledFor: e.scheduledFor, fireAt: e.fireAt, spot: e.spot, queueNumber: e.queueNumber, openedAt: e.ts, lines: [], payments: [], stage: "open" };
       continue;
     }
     if (!state) continue; // events that arrived before the open are applied once it exists on the next replay
     switch (e.type) {
       case "ItemAdded": {
         if (state.lines.some((l) => l.lineId === e.lineId)) break;
-        state.lines.push({ lineId: e.lineId, productId: e.productId, name: e.name, unitCents: e.unitCents, qty: e.qty, bcrs: e.bcrs, pointsExempt: e.pointsExempt, ...(e.taxInclusive !== undefined ? { taxInclusive: e.taxInclusive } : {}), ...(e.taxGroup ? { taxGroup: e.taxGroup } : {}), options: e.options });
+        state.lines.push({ lineId: e.lineId, productId: e.productId, name: e.name, unitCents: e.unitCents, qty: e.qty, bcrs: e.bcrs, pointsExempt: e.pointsExempt, ...(e.taxInclusive !== undefined ? { taxInclusive: e.taxInclusive } : {}), ...(e.taxGroup ? { taxGroup: e.taxGroup } : {}), ...(e.build ? { build: e.build } : {}), options: e.options });
         break;
       }
       case "ItemQtySet": {
@@ -143,6 +154,9 @@ export function reduceOrder(orderId: string, events: readonly OrderEvent[]): Ord
         break;
       case "OrderAccepted":
         state.acceptedAt ??= e.ts;
+        break;
+      case "OrderFired":
+        state.firedAt ??= e.ts;
         break;
       case "StageSet":
         state.stage = e.stage;
@@ -185,6 +199,8 @@ export function isFullyPaid(state: OrderState, config: BusinessConfig | undefine
 export function visibleToKitchen(state: OrderState, config: BusinessConfig): boolean {
   if (!config.modules.kitchen) return false;
   if (state.stage === "cancelled" || state.lines.length === 0) return false;
+  // A scheduled order is confirmed but not fired: the kitchen does not see it until the server releases it (its slot less the prep time).
+  if (state.fireAt !== undefined && state.firedAt === undefined) return false;
   // A customer's own order is held until staff accept it, so a stranger cannot send tickets to the kitchen.
   if (state.source === "online" && !state.acceptedAt) return false;
   if (config.paymentTiming === "prepay") return isFullyPaid(state, config);

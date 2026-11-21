@@ -1,5 +1,5 @@
 import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
-import { applyOutletMenu, availabilityOf, lastBoundaryAt, menuState, cleanNote, collectionNumber, confirmedPaid, newId, optionLines, orderTotals, totalsLines, queueView, quoteOrder, reduceAll, reduceOrder, shopStatus, type BusinessConfig, type OrderEvent, type OrderState } from "@pos/core";
+import { applyOutletMenu, availabilityOf, menuFor, priceBuild, hasBuilder, type BuildInput, type StoredBuild, isValidSlot, pickupSlots, localParts, lastBoundaryAt, menuState, cleanNote, collectionNumber, confirmedPaid, newId, optionLines, orderTotals, totalsLines, queueView, quoteOrder, reduceAll, reduceOrder, shopStatus, type BusinessConfig, type OrderEvent, type OrderState } from "@pos/core";
 import { audit, type Permission } from "./auth.js";
 import type { BrandStore } from "./brand.js";
 import type { CatalogStore, PgCatalogStore } from "./catalog.js";
@@ -10,7 +10,7 @@ import { FailureLimiter } from "./rateLimit.js";
 import { normaliseEmail, type MemberStore } from "./members.js";
 import { authorizeUrl, createStripeCheckout, createStripeRefund, fetchProfile, sendMail, newState, newVerifier, sameSecret, verifyStripeSignature, type Integrations, type OAuthProvider } from "./integrations.js";
 import type { EventStore } from "./store.js";
-import { loadOutletMenu, loadOutletWindows } from "./outletMenu.js";
+import { loadOutletMenu, loadOutletScheduling, loadOutletWindows } from "./outletMenu.js";
 import { loadKiosk } from "./settings.js";
 import { listOutlets } from "./tenant.js";
 import { createHash, randomBytes } from "node:crypto";
@@ -37,6 +37,15 @@ interface ShopDeps {
   now?: () => number;
 }
 
+/** Only ids and counts are read from a client's build; names, prices and rules come from the menu. */
+function cleanBuild(raw: unknown): BuildInput | undefined {
+  if (!raw || typeof raw !== "object") return undefined;
+  const r = raw as { variantId?: unknown; picks?: unknown };
+  const picks = (Array.isArray(r.picks) ? r.picks.slice(0, 60) : []).map((p: any) => ({ groupId: String(p?.groupId ?? ""), optionId: String(p?.optionId ?? ""), ...(p?.qty === undefined ? {} : { qty: Number(p.qty) }) }));
+  return { ...(typeof r.variantId === "string" && r.variantId ? { variantId: r.variantId } : {}), picks };
+}
+
+const MAX_QTY_LINE = 20;
 const singaporeDay = (now = Date.now()) => new Intl.DateTimeFormat("en-CA", { timeZone: "Asia/Singapore" }).format(now);
 
 /** W001, W002… restarting each day. Atomic, so two customers ordering together never share a number. */
@@ -142,12 +151,12 @@ export function registerShop(app: FastifyInstance, d: ShopDeps) {
    * Which outlet a customer is ordering from: the one in the link (?outlet=B1, or outletId in the order) when it is a real, open
    * outlet of this brand; otherwise the original outlet. A made-up or closed outlet quietly falls back, so a bad link still works.
    */
-  const outletFor = async (asked: unknown): Promise<{ id: string; name: string; hours?: string; phone?: string; address?: string; mode: "qsr" | "tsr"; chosen: boolean }> => {
+  const outletFor = async (asked: unknown): Promise<{ id: string; name: string; hours?: string; phone?: string; address?: string; mode: "qsr" | "tsr"; chosen: boolean; prepMinutes: number | null }> => {
     const all = await listOutlets(d.db, merchantId);
     const want = typeof asked === "string" && asked ? all.find((o) => o.id === asked && o.active) : undefined;
     const o = want ?? all.find((x) => x.id === d.config.outletName);
     // Quick service (no table) or table service (a table is required). Until an outlet is set, a table list on the server means table service.
-    return { id: o?.id ?? d.config.outletName, name: o?.name ?? d.config.outletName, hours: o?.hours?.trim() || undefined, phone: o?.phone?.trim() || undefined, address: o?.address?.trim() || undefined, mode: o?.serviceMode ?? (tables.length ? "tsr" : "qsr"), chosen: !!o?.serviceMode };
+    return { id: o?.id ?? d.config.outletName, name: o?.name ?? d.config.outletName, hours: o?.hours?.trim() || undefined, phone: o?.phone?.trim() || undefined, address: o?.address?.trim() || undefined, mode: o?.serviceMode ?? (tables.length ? "tsr" : "qsr"), chosen: !!o?.serviceMode, prepMinutes: o?.prepMinutes ?? null };
   };
   /** The outlet an existing order belongs to. */
   const outletOfOrder = async (orderId: string) => (await d.store.outletOfOrder?.(orderId)) ?? d.config.outletName;
@@ -520,7 +529,7 @@ export function registerShop(app: FastifyInstance, d: ShopDeps) {
 
   interface OrderBody {
     channelId?: string;
-    items?: Array<{ productId?: string; qty?: number; note?: string; options?: Array<{ groupId?: string; choiceId?: string; qty?: number }> }>;
+    items?: Array<{ productId?: string; qty?: number; note?: string; build?: BuildInput; options?: Array<{ groupId?: string; choiceId?: string; qty?: number }> }>;
     customerName?: string;
     customerPhone?: string;
     spot?: string;
@@ -534,6 +543,8 @@ export function registerShop(app: FastifyInstance, d: ShopDeps) {
     payWithCredit?: boolean;
     /** Made by the phone for this checkout attempt; required with credit. A retry with the same key never debits twice. */
     idempotencyKey?: string;
+    /** Pickup at a chosen time (epoch ms, one of the outlet's slots). Missing = as soon as possible. */
+    pickupAt?: number;
   }
 
   /** A customer places an order. Held for staff to accept; nothing reaches the kitchen yet. */
@@ -546,6 +557,7 @@ export function registerShop(app: FastifyInstance, d: ShopDeps) {
       productId: String(i?.productId ?? ""),
       qty: Number(i?.qty),
       note: cleanNote(i?.note),
+      build: cleanBuild(i?.build),
       // Only ids and counts are read; any name or price a client sends here is ignored.
       options: (Array.isArray(i?.options) ? i.options.slice(0, 40) : []).map((o) => ({ groupId: String(o?.groupId ?? ""), choiceId: String(o?.choiceId ?? ""), qty: o?.qty === undefined ? undefined : Number(o.qty) })),
     }));
@@ -571,11 +583,21 @@ export function registerShop(app: FastifyInstance, d: ShopDeps) {
     // An item outside its menu window can be looked at and built, but not ordered: refused here, whatever the app showed, with when it opens next.
     const wins = await loadOutletWindows(d.db, merchantId, outlet.id);
     const nowMs = (d.now ?? Date.now)();
-    for (const it of items) {
+    // (A scheduled order is judged at its pickup time instead, below.)
+    for (const it of b.pickupAt != null ? [] : items) {
       const p = cat.products.find((x) => x.id === it.productId);
       if (!p) continue; // unknown or switched off here: the pricing below refuses it as unavailable
       const a = availabilityOf(p, wins.windows, nowMs, wins.timeZone);
       if (a.state === "AVAILABLE_LATER") return reply.code(400).send({ error: "available_later", productId: p.id, ...(a.nextOpeningAt !== undefined ? { nextOpeningAt: a.nextOpeningAt } : {}), ...(a.window ? { window: a.window } : {}) });
+    }
+    // A chosen pickup time must be one of the slots the outlet offers for these items; nothing else is accepted.
+    let pickupAt: number | undefined;
+    const sched = await loadOutletScheduling(d.db, merchantId, outlet.id);
+    if (b.pickupAt !== undefined && b.pickupAt !== null) {
+      if (!sched.on) return reply.code(400).send({ error: "scheduling_off" });
+      pickupAt = Number(b.pickupAt);
+      const ok = isValidSlot(pickupAt, { now: nowMs, timeZone: wins.timeZone, windows: wins.windows, items: items.map((i) => cat.products.find((x) => x.id === i.productId)).filter((p): p is NonNullable<typeof p> => !!p), prepMinutes: outlet.prepMinutes ?? 0, intervalMinutes: sched.intervalMinutes, daysAhead: sched.daysAhead });
+      if (!ok) return reply.code(400).send({ error: "slot_not_available" });
     }
     const member = gate.member;
     if (membersOnly) {
@@ -596,7 +618,7 @@ export function registerShop(app: FastifyInstance, d: ShopDeps) {
     }
     if (outlet.mode === "tsr" && cat.channels.find((c) => c.id === b.channelId)?.kind !== "dine_in") return reply.code(400).send({ error: "this shop takes dine-in orders only" });
     const quote = quoteOrder(cat, d.config, { outletId: outlet.id, channelId: b.channelId }, items, pointsAsk, coupon ? { amountCents: coupon.amountCents, minSpendCents: coupon.minSpendCents } : null);
-    if (!quote.ok) return reply.code(400).send({ error: quote.error, productId: quote.productId });
+    if (!quote.ok) return reply.code(400).send({ error: quote.error, productId: quote.productId, ...(quote.validation ? { validation: quote.validation } : {}) });
     if (b.expectedTotalCents !== undefined && b.expectedTotalCents !== quote.priced.total) {
       return reply.code(409).send({ error: "price_changed", totalCents: quote.priced.total });
     }
@@ -675,12 +697,13 @@ export function registerShop(app: FastifyInstance, d: ShopDeps) {
         customerName: clean(b.customerName, 40) ?? member?.name ?? undefined,
         customerPhone: phone ?? member?.phone ?? undefined,
         memberId: member?.id,
+        ...(pickupAt !== undefined ? { scheduledFor: pickupAt, fireAt: pickupAt - (outlet.prepMinutes ?? 0) * 60_000 } : {}),
         spot: quote.channel.kind === "dine_in" && (outlet.mode === "tsr" || !outlet.chosen) ? table ?? clean(b.spot, 30)?.replace(/[^\w #-]/g, "") : undefined,
         queueNumber,
       }),
       ...(couponUsed ? [mk({ type: "CouponApplied", title: coupon!.title, amountCents: coupon!.amountCents, minSpendCents: coupon!.minSpendCents })] : []),
       ...(pointsUsed > 0 ? [mk({ type: "PointsRedeemed", points: pointsUsed })] : []),
-      ...quote.lines.map((l) => mk({ type: "ItemAdded", lineId: newId(), productId: l.productId, name: l.name, unitCents: l.unitCents, qty: l.qty, pointsExempt: l.pointsExempt, bcrs: l.bcrs, ...(l.taxInclusive !== undefined ? { taxInclusive: l.taxInclusive } : {}), ...(l.taxGroup ? { taxGroup: l.taxGroup } : {}), options: l.options.length ? l.options : undefined })),
+      ...quote.lines.map((l) => mk({ type: "ItemAdded", lineId: newId(), productId: l.productId, name: l.name, unitCents: l.unitCents, qty: l.qty, pointsExempt: l.pointsExempt, bcrs: l.bcrs, ...(l.taxInclusive !== undefined ? { taxInclusive: l.taxInclusive } : {}), ...(l.taxGroup ? { taxGroup: l.taxGroup } : {}), ...(l.build ? { build: l.build } : {}), options: l.options.length ? l.options : undefined })),
       // Paid with the member's credit: the order is paid and accepted at once, so it goes straight to the kitchen.
       ...(creditCents > 0 ? [mk({ type: "OrderAccepted" }), mk({ type: "PaymentRecorded", paymentId: `credit:${orderId}`, method: "credit", amountCents: creditCents, confirmed: true })] : []),
     ];
@@ -690,6 +713,7 @@ export function registerShop(app: FastifyInstance, d: ShopDeps) {
       await giveCreditBack(); // the order was not recorded, so the customer keeps their credit
       throw err;
     }
+    if (pickupAt !== undefined) await d.db.query("INSERT INTO scheduled_orders (merchant_id, order_id, outlet_id, fire_at) VALUES ($1,$2,$3,$4) ON CONFLICT DO NOTHING", [merchantId, orderId, outlet.id, pickupAt - (outlet.prepMinutes ?? 0) * 60_000]);
     return { orderId, queueNumber, totalCents: quote.priced.total, pointsUsed, couponDiscountCents: quote.priced.couponDiscount, paidWithCreditCents: creditCents, creditBalanceCents: member ? await balanceOf(d.db, merchantId, member.id) : undefined, status: creditCents > 0 ? "queued" : "received" };
     });
     } catch (e) {
@@ -741,6 +765,206 @@ export function registerShop(app: FastifyInstance, d: ShopDeps) {
     }
     return r.rowCount ?? 0;
   }
+  /** Release every scheduled order whose moment has come (its slot less the prep time) to the kitchen. Safe to run twice: the event has one fixed id. */
+  async function fireScheduledOrders(): Promise<number> {
+    const due = await d.db.query("SELECT order_id, outlet_id FROM scheduled_orders WHERE merchant_id=$1 AND NOT fired AND fire_at <= $2 ORDER BY fire_at", [merchantId, (d.now ?? Date.now)()]);
+    for (const row of due.rows) {
+      const orderId = row.order_id as string;
+      const evs = await d.store.eventsForOrder(orderId);
+      const ts = (d.now ?? Date.now)();
+      if (evs.length && !evs.some((e) => e.type === "OrderFired")) {
+        await d.ingest([{ id: `fire-${orderId}`, orderId, deviceId: SHOP_DEVICE, ts, seq: 1_000_000, type: "OrderFired" } as OrderEvent], row.outlet_id as string);
+      }
+      await d.db.query("UPDATE scheduled_orders SET fired=true WHERE merchant_id=$1 AND order_id=$2", [merchantId, orderId]);
+    }
+    return due.rowCount ?? 0;
+  }
+  (app as unknown as { fireScheduledOrders: () => Promise<number> }).fireScheduledOrders = fireScheduledOrders;
+  const scheduler = setInterval(() => void fireScheduledOrders().catch(() => undefined), 15_000);
+  scheduler.unref();
+  app.addHook("onClose", async () => clearInterval(scheduler));
+
+  // ---- build pricing and the server-side cart (backend handout sections 4, 5, 8, 9) ----------------------------------------------------------
+
+  /** The menu one outlet sells right now: its own prices, rules, sold-out options and windows. */
+  const outletView = async (asked: unknown) => {
+    const outlet = await outletFor(asked);
+    const [base, om, wins] = await Promise.all([d.catalog.load(), loadOutletMenu(d.db, merchantId, outlet.id), loadOutletWindows(d.db, merchantId, outlet.id)]);
+    return { outlet, cat: applyOutletMenu(base, om.menu), wins, nowMs: (d.now ?? Date.now)() };
+  };
+  type OutletView = Awaited<ReturnType<typeof outletView>>;
+
+  /** The customer's cart owner: their member id when signed in, else the cart key their phone made. */
+  const cartOwner = async (req: FastifyRequest): Promise<string | null> => {
+    const m = members ? await members.fromToken(bearer(req)) : null;
+    if (m) return `m:${m.id}`;
+    const key = String(req.headers["x-cart-key"] ?? "");
+    return /^[\w-]{8,64}$/.test(key) ? `a:${key}` : null;
+  };
+
+  interface CartLine { lineId: string; productId: string; qty: number; note?: string; build?: BuildInput; options?: Array<{ groupId: string; choiceId: string; qty?: number }>; /** Frozen at add or update: what the customer was shown. */ snapshot?: StoredBuild; unitCents?: number }
+
+  /** One line against the menu as it stands now: still sellable, still valid, with its price split. A problem flags the line; it is never silently dropped or changed. */
+  const judgeLine = (v: OutletView, channelId: string, l: CartLine) => {
+    const p = v.cat.products.find((x) => x.id === l.productId);
+    if (!p) return { state: "unavailable" as const };
+    const a = availabilityOf(p, v.wins.windows, v.nowMs, v.wins.timeZone);
+    if (a.state === "AVAILABLE_LATER") return { state: "available_later" as const, ...(a.nextOpeningAt !== undefined ? { nextOpeningAt: a.nextOpeningAt } : {}) };
+    const q = quoteOrder(v.cat, d.config, { outletId: v.outlet.id, channelId }, [{ productId: l.productId, qty: l.qty, note: l.note, build: l.build, options: l.options }]);
+    if (!q.ok) return { state: q.error === "build_invalid" ? ("build_invalid" as const) : ("unavailable" as const), error: q.error, ...(q.validation ? { validation: q.validation } : {}) };
+    const line = q.lines[0]!;
+    return { state: "ok" as const, unitCents: line.unitCents, lineCents: line.unitCents * line.qty, selections: line.build?.selections, options: line.options };
+  };
+
+  const defaultChannel = (cat: { channels: Array<{ id: string; active: boolean; kind: string }> }, asked?: unknown) => (typeof asked === "string" && cat.channels.some((c) => c.id === asked) ? asked : (cat.channels.find((c) => c.active && c.kind !== "dine_in") ?? cat.channels.find((c) => c.active))?.id ?? "");
+
+  const loadCart = async (owner: string, outletId: string): Promise<CartLine[]> => ((await d.db.query("SELECT lines FROM shop_carts WHERE merchant_id=$1 AND owner=$2 AND outlet_id=$3", [merchantId, owner, outletId])).rows[0]?.lines as CartLine[] | undefined) ?? [];
+  const saveCart = (owner: string, outletId: string, lines: CartLine[]) => d.db.query("INSERT INTO shop_carts (merchant_id, owner, outlet_id, lines) VALUES ($1,$2,$3,$4::jsonb) ON CONFLICT (merchant_id, owner, outlet_id) DO UPDATE SET lines=EXCLUDED.lines, updated_at=now()", [merchantId, owner, outletId, JSON.stringify(lines)]);
+
+  /** The cart as the phone shows it: each line judged against the menu now, and the totals of the lines that are fine. */
+  const cartView = async (owner: string, v: OutletView, channelId: string) => {
+    const lines = await loadCart(owner, v.outlet.id);
+    const judged = lines.map((l) => ({ lineId: l.lineId, productId: l.productId, qty: l.qty, note: l.note, build: l.build, options: l.options, storedBuild: l.snapshot, ...judgeLine(v, channelId, l) }));
+    const good = lines.filter((_, i) => judged[i]!.state === "ok");
+    const q = good.length ? quoteOrder(v.cat, d.config, { outletId: v.outlet.id, channelId }, good.map((l) => ({ productId: l.productId, qty: l.qty, note: l.note, build: l.build, options: l.options }))) : null;
+    const others = ((await d.db.query("SELECT outlet_id, lines FROM shop_carts WHERE merchant_id=$1 AND owner=$2 AND outlet_id <> $3", [merchantId, owner, v.outlet.id])).rows as Array<{ outlet_id: string; lines: CartLine[] }>).filter((r) => r.lines.length).map((r) => ({ outletId: r.outlet_id, lineCount: r.lines.length }));
+    return {
+      outletId: v.outlet.id, channelId, lines: judged,
+      flagged: judged.filter((l) => l.state !== "ok").length,
+      totals: q && q.ok ? { ...q.priced, lines: totalsLines(q.priced) } : null,
+      otherCarts: others,
+      menuVersion: v.cat.version,
+    };
+  };
+
+  /** Validate and price a build without touching any cart: per-group states and, per selection, the full price, the part the allowance covered and what is charged. */
+  app.post<{ Body: { outletId?: string; productId?: string; build?: BuildInput; qty?: number } }>("/api/shop/build/price", async (req, reply) => {
+    if (limited(readLimit, req, reply)) return;
+    const v = await outletView(req.body?.outletId);
+    const p = v.cat.products.find((x) => x.id === String(req.body?.productId ?? ""));
+    if (!p || !hasBuilder(p.builder)) return reply.code(404).send({ error: "not_a_builder_product" });
+    const channelId = defaultChannel(v.cat);
+    const entry = menuFor(v.cat, { outletId: v.outlet.id, channelId }).find((m) => m.id === p.id);
+    if (!entry) return reply.code(404).send({ error: "not_on_this_menu" });
+    const built = priceBuild(p.builder, cleanBuild(req.body?.build) ?? { picks: [] }, entry.priceCents, { ruleVersion: v.cat.version });
+    const qty = Math.max(1, Math.min(MAX_QTY_LINE, Number(req.body?.qty) || 1));
+    if (!built.ok) return { ok: false, validation: built.validation };
+    return { ok: true, unitCents: built.unitCents, lineCents: built.unitCents * qty, qty, selections: built.selections, chargedCents: built.chargedCents, variantDeltaCents: built.variantDeltaCents, baseCents: built.baseCents, validation: { ok: true } };
+  });
+
+  const cartKeyMissing = { error: "cart_key_required" };
+
+  /** The cart at one outlet, re-checked against the menu as it is now. */
+  app.get<{ Querystring: { outlet?: string; channel?: string } }>("/api/shop/cart", async (req, reply) => {
+    if (limited(readLimit, req, reply)) return;
+    const owner = await cartOwner(req);
+    if (!owner) return reply.code(400).send(cartKeyMissing);
+    const v = await outletView(req.query.outlet);
+    return cartView(owner, v, defaultChannel(v.cat, req.query.channel));
+  });
+
+  /** Every outlet the customer has a cart at, so the phone can warn before a switch and restore after. */
+  app.get("/api/shop/carts", async (req, reply) => {
+    if (limited(readLimit, req, reply)) return;
+    const owner = await cartOwner(req);
+    if (!owner) return reply.code(400).send(cartKeyMissing);
+    const rows = (await d.db.query("SELECT outlet_id, lines, updated_at FROM shop_carts WHERE merchant_id=$1 AND owner=$2 ORDER BY updated_at DESC", [merchantId, owner])).rows as Array<{ outlet_id: string; lines: CartLine[]; updated_at: Date }>;
+    return { carts: rows.filter((r) => r.lines.length).map((r) => ({ outletId: r.outlet_id, lineCount: r.lines.length, updatedAt: new Date(r.updated_at).getTime() })) };
+  });
+
+  const checkNewLine = (v: OutletView, channelId: string, l: CartLine, reply: FastifyReply) => {
+    const j = judgeLine(v, channelId, l);
+    if (j.state === "ok") return null;
+    return reply.code(400).send({ error: j.state === "build_invalid" ? "build_invalid" : j.state, ...(j as object) });
+  };
+
+  /** Add a line. The same product with the same build and note merges into one line. */
+  app.post<{ Body: { outletId?: string; channelId?: string; productId?: string; qty?: number; note?: string; build?: BuildInput; options?: CartLine["options"] } }>("/api/shop/cart/lines", async (req, reply) => {
+    if (limited(readLimit, req, reply)) return;
+    const owner = await cartOwner(req);
+    if (!owner) return reply.code(400).send(cartKeyMissing);
+    const b = req.body ?? {};
+    const v = await outletView(b.outletId);
+    const channelId = defaultChannel(v.cat, b.channelId);
+    const qty = Number(b.qty ?? 1);
+    if (!Number.isInteger(qty) || qty < 1 || qty > MAX_QTY_LINE) return reply.code(400).send({ error: "bad_quantity" });
+    const line: CartLine = { lineId: newId(), productId: String(b.productId ?? ""), qty, note: cleanNote(b.note) || undefined, build: cleanBuild(b.build), options: Array.isArray(b.options) ? b.options.slice(0, 40).map((o) => ({ groupId: String(o?.groupId ?? ""), choiceId: String(o?.choiceId ?? ""), qty: o?.qty === undefined ? undefined : Number(o.qty) })) : undefined };
+    const refused = checkNewLine(v, channelId, line, reply);
+    if (refused) return refused;
+    const lines = await loadCart(owner, v.outlet.id);
+    const sig = (l: CartLine) => JSON.stringify([l.productId, l.build, l.options, l.note]);
+    const same = lines.find((l) => sig(l) === sig(line));
+    if (same) same.qty = Math.min(MAX_QTY_LINE, same.qty + qty);
+    else lines.push(line);
+    if (lines.length > 30) return reply.code(400).send({ error: "too_many_items" });
+    await saveCart(owner, v.outlet.id, lines);
+    return cartView(owner, v, channelId);
+  });
+
+  /** Change a line in place: a new build is re-validated and re-priced and replaces the line (no duplicate); or set its quantity or note. */
+  app.put<{ Params: { lineId: string }; Body: { outletId?: string; channelId?: string; qty?: number; note?: string; build?: BuildInput } }>("/api/shop/cart/lines/:lineId", async (req, reply) => {
+    if (limited(readLimit, req, reply)) return;
+    const owner = await cartOwner(req);
+    if (!owner) return reply.code(400).send(cartKeyMissing);
+    const b = req.body ?? {};
+    const v = await outletView(b.outletId);
+    const channelId = defaultChannel(v.cat, b.channelId);
+    const lines = await loadCart(owner, v.outlet.id);
+    const i = lines.findIndex((l) => l.lineId === req.params.lineId);
+    if (i < 0) return reply.code(404).send({ error: "line_not_found" });
+    const next: CartLine = { ...lines[i]! };
+    if (b.qty !== undefined) {
+      if (!Number.isInteger(b.qty) || b.qty < 0 || b.qty > MAX_QTY_LINE) return reply.code(400).send({ error: "bad_quantity" });
+      next.qty = b.qty;
+    }
+    if (b.note !== undefined) next.note = cleanNote(b.note) || undefined;
+    if (b.build !== undefined) next.build = cleanBuild(b.build);
+    if (next.qty === 0) lines.splice(i, 1);
+    else {
+      const refused = checkNewLine(v, channelId, next, reply);
+      if (refused) return refused;
+      lines[i] = next;
+    }
+    await saveCart(owner, v.outlet.id, lines);
+    return cartView(owner, v, channelId);
+  });
+
+  app.delete<{ Params: { lineId: string }; Querystring: { outlet?: string; channel?: string } }>("/api/shop/cart/lines/:lineId", async (req, reply) => {
+    if (limited(readLimit, req, reply)) return;
+    const owner = await cartOwner(req);
+    if (!owner) return reply.code(400).send(cartKeyMissing);
+    const v = await outletView(req.query.outlet);
+    const lines = await loadCart(owner, v.outlet.id);
+    await saveCart(owner, v.outlet.id, lines.filter((l) => l.lineId !== req.params.lineId));
+    return cartView(owner, v, defaultChannel(v.cat, req.query.channel));
+  });
+
+  /** Empty one outlet's cart (after the order is placed, or when the customer asks). Other outlets' carts are untouched. */
+  app.delete<{ Querystring: { outlet?: string } }>("/api/shop/cart", async (req, reply) => {
+    if (limited(readLimit, req, reply)) return;
+    const owner = await cartOwner(req);
+    if (!owner) return reply.code(400).send(cartKeyMissing);
+    const v = await outletView(req.query.outlet);
+    await saveCart(owner, v.outlet.id, []);
+    return cartView(owner, v, defaultChannel(v.cat));
+  });
+
+  /** The pickup times an outlet offers on one day (YYYY-MM-DD on its own clock), for these items. Public. */
+  app.get<{ Querystring: { outlet?: string; date?: string; items?: string } }>("/api/shop/slots", async (req, reply) => {
+    if (limited(readLimit, req, reply)) return;
+    const outlet = await outletFor(req.query.outlet);
+    const sched = await loadOutletScheduling(d.db, merchantId, outlet.id);
+    if (!sched.on) return reply.code(400).send({ error: "scheduling_off" });
+    const wins = await loadOutletWindows(d.db, merchantId, outlet.id);
+    const nowMs = (d.now ?? Date.now)();
+    const cat = applyOutletMenu(await d.catalog.load(), (await loadOutletMenu(d.db, merchantId, outlet.id)).menu);
+    const ids = String(req.query.items ?? "").split(",").map((x) => x.trim()).filter(Boolean).slice(0, 60);
+    const items = ids.map((id) => cat.products.find((p) => p.id === id)).filter((p): p is NonNullable<typeof p> => !!p);
+    const l = localParts(nowMs, wins.timeZone);
+    const date = req.query.date && /^\d{4}-\d{2}-\d{2}$/.test(req.query.date) ? req.query.date : `${l.y}-${String(l.m).padStart(2, "0")}-${String(l.d).padStart(2, "0")}`;
+    const slots = pickupSlots(date, { now: nowMs, timeZone: wins.timeZone, windows: wins.windows, items, prepMinutes: outlet.prepMinutes ?? 0, intervalMinutes: sched.intervalMinutes, daysAhead: sched.daysAhead });
+    return { outletId: outlet.id, date, timeZone: wins.timeZone, intervalMinutes: sched.intervalMinutes, daysAhead: sched.daysAhead, prepMinutes: outlet.prepMinutes ?? 0, slots };
+  });
   void sweepOrphanDebits().catch(() => undefined);
   const sweeper = setInterval(() => void sweepOrphanDebits().catch(() => undefined), 5 * 60_000);
   sweeper.unref();
@@ -771,6 +995,9 @@ export function registerShop(app: FastifyInstance, d: ShopDeps) {
       orderId: order.orderId,
       queueNumber: order.queueNumber,
       status: shopStatus(order, d.config),
+      scheduledFor: order.scheduledFor,
+      // The menu's state at this order's outlet rides on the poll, so a screen that is already polling learns the menu moved.
+      ...(await (async () => { const m = await menuOf(await outletOfOrder(order.orderId)); return { menuVersion: m.menuVersion, menuState: m.menuState }; })()),
       channelName: order.channelName,
       spot: order.spot,
       items: order.lines.filter((l) => l.qty > 0).map((l) => ({ name: l.name, qty: l.qty, unitCents: l.unitCents, options: optionLines(l.options) })),

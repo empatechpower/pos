@@ -41,16 +41,19 @@ const minutesOf = (t: string): number => (t === "24:00" ? 1440 : Number(t.slice(
 
 interface Local { y: number; m: number; d: number; day: number; minutes: number }
 
+const formatters = new Map<string, Intl.DateTimeFormat>();
+
 /** The clock on the wall in a time zone at an instant. */
 export function localParts(ms: number, timeZone: string): Local {
-  const f = new Intl.DateTimeFormat("en-US", { timeZone, hourCycle: "h23", year: "numeric", month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit", weekday: "short" });
+  let f = formatters.get(timeZone);
+  if (!f) { f = new Intl.DateTimeFormat("en-US", { timeZone, hourCycle: "h23", year: "numeric", month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit", weekday: "short" }); formatters.set(timeZone, f); }
   const p = Object.fromEntries(f.formatToParts(ms).map((x) => [x.type, x.value]));
   const day = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"].indexOf(String(p.weekday));
   return { y: Number(p.year), m: Number(p.month), d: Number(p.day), day, minutes: Number(p.hour) * 60 + Number(p.minute) };
 }
 
 /** The instant (epoch ms) at which a time zone's wall clock reads year-month-day plus `minutes`. */
-function zonedToEpoch(y: number, m: number, d: number, minutes: number, timeZone: string): number {
+export function zonedToEpoch(y: number, m: number, d: number, minutes: number, timeZone: string): number {
   const guess = Date.UTC(y, m - 1, d, 0, minutes, 0);
   const off = (at: number) => { const l = localParts(at, timeZone); return Date.UTC(l.y, l.m - 1, l.d, 0, l.minutes) - at; };
   let t = guess - off(guess);

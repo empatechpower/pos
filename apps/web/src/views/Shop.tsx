@@ -34,6 +34,7 @@ export interface OrderView {
   orderId: string;
   queueNumber: string;
   status: ShopStatus;
+  scheduledFor?: number;
   channelName?: string;
   spot?: string;
   items: Array<{ name: string; qty: number; unitCents: number; options: string[] }>;
@@ -49,6 +50,7 @@ interface PastOrder {
   at: string;
   queueNumber: string;
   status: ShopStatus;
+  scheduledFor?: number;
   channelName?: string;
   spot?: string;
   itemCount: number;
@@ -118,6 +120,7 @@ export const tint = (hex: string, amount = 0.88) => {
 const STATUS_TEXT: Record<ShopStatus, { title: string; body: (o: OrderView) => string }> = {
   received: { get title() { return tx("Order sent"); }, body: () => tx("Waiting for the shop to accept your order. This page updates by itself.") },
   awaiting_payment: { get title() { return tx("Accepted: please pay"); }, body: (o) => tx("Pay {amt} at the counter and quote your number. We start your order once it is paid.", { amt: formatMoney(o.totalCents - o.paidCents) }) },
+  scheduled: { get title() { return tx("Booked for later"); }, body: (o) => tx("Your order is booked for {t}. We start making it shortly before.", { t: o.scheduledFor ? new Date(o.scheduledFor).toLocaleString([], { weekday: "short", hour: "numeric", minute: "2-digit" }) : "" }) },
   queued: { get title() { return tx("In the queue"); }, body: () => tx("Your order is paid and waiting to be made.") },
   preparing: { get title() { return tx("Being prepared"); }, body: () => tx("Your order is being made right now.") },
   ready: { get title() { return tx("Ready to serve!"); }, body: (o) => (o.spot ? tx("Your order is going to be served to {t}.", { t: o.spot }) : tx("Please collect your order at the counter.")) },

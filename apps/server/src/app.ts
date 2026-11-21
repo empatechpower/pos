@@ -17,7 +17,7 @@ import { registerTelegram } from "./telegram.js";
 import { MemberStore } from "./members.js";
 import { FailureLimiter } from "./rateLimit.js";
 import type { EventStore, StoredEvent } from "./store.js";
-import { loadOutletMenu, loadOutletWindows, saveOutletOverride, saveOutletWindows } from "./outletMenu.js";
+import { loadOutletMenu, loadOutletScheduling, loadOutletWindows, saveOutletOverride, saveOutletScheduling, saveOutletWindows } from "./outletMenu.js";
 import { ensureDefaultOutlet, listFranchises, listOutlets, outletAllowed, upsertFranchise, upsertOutlet, validId, visibleOutletIds } from "./tenant.js";
 
 declare module "fastify" {
@@ -501,6 +501,25 @@ export async function buildApp({ config, store, db, catalog, catalogAdmin, print
     await saveOutletWindows(db, merchantId, id, { windows: b.windows, timeZone: b.timeZone });
     await audit(db, merchantId, req.staff!.id, "outlet.windows", { outlet: id, windows: b.windows, timeZone: b.timeZone });
     return loadOutletWindows(db, merchantId, id);
+  });
+
+  /** Whether an outlet takes orders for a chosen pickup time, how far apart the times are and how many days ahead. */
+  app.get<{ Params: { id: string } }>("/api/outlets/:id/scheduling", { preHandler: needs("device.manage") }, async (req, reply) => {
+    if (!outletAllowed(await visibleOutletIds(db, merchantId, req.staff!), req.params.id)) return reply.code(403).send({ error: "outside_your_scope" });
+    if (!(await listOutlets(db, merchantId)).some((o) => o.id === req.params.id)) return reply.code(404).send({ error: "outlet_not_found" });
+    return loadOutletScheduling(db, merchantId, req.params.id);
+  });
+  app.put<{ Params: { id: string }; Body: { on?: boolean; intervalMinutes?: number; daysAhead?: number } }>("/api/outlets/:id/scheduling", { preHandler: needs("device.manage") }, async (req, reply) => {
+    const { id } = req.params;
+    if (!outletAllowed(await visibleOutletIds(db, merchantId, req.staff!), id)) return reply.code(403).send({ error: "outside_your_scope" });
+    if (!(await listOutlets(db, merchantId)).some((o) => o.id === id)) return reply.code(404).send({ error: "outlet_not_found" });
+    const b = req.body ?? {};
+    if (b.on !== undefined && typeof b.on !== "boolean") return reply.code(400).send({ error: "on is true or false" });
+    if (b.intervalMinutes !== undefined && ![5, 10, 15, 20, 30, 60].includes(b.intervalMinutes)) return reply.code(400).send({ error: "intervalMinutes is 5, 10, 15, 20, 30 or 60" });
+    if (b.daysAhead !== undefined && (!Number.isInteger(b.daysAhead) || b.daysAhead < 0 || b.daysAhead > 30)) return reply.code(400).send({ error: "daysAhead is a whole number of days, 0 to 30" });
+    await saveOutletScheduling(db, merchantId, id, b);
+    await audit(db, merchantId, req.staff!.id, "outlet.scheduling", { outlet: id, ...b });
+    return loadOutletScheduling(db, merchantId, id);
   });
 
   /** Change one item at one outlet. Only what is sent changes; null removes an override; an item left with none is back to following the brand. */

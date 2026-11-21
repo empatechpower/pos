@@ -38,3 +38,19 @@ export async function saveOutletWindows(db: Db, merchantId: string, outletId: st
   if (o.timeZone !== undefined) await db.query("UPDATE outlets SET timezone=$3 WHERE merchant_id=$1 AND id=$2", [merchantId, outletId, o.timeZone]);
   await db.query("UPDATE outlets SET menu_version = menu_version + 1 WHERE merchant_id=$1 AND id=$2", [merchantId, outletId]);
 }
+
+/** How an outlet takes scheduled pickup orders. Off until the shop turns it on. */
+export interface OutletScheduling { on: boolean; intervalMinutes: number; daysAhead: number }
+
+export async function loadOutletScheduling(db: Db | null, merchantId: string, outletId: string): Promise<OutletScheduling> {
+  const off = { on: false, intervalMinutes: 15, daysAhead: 3 };
+  if (!db) return off;
+  const row = (await db.query("SELECT scheduling_on, slot_interval_minutes, schedule_days_ahead FROM outlets WHERE merchant_id=$1 AND id=$2", [merchantId, outletId])).rows[0];
+  return row ? { on: !!row.scheduling_on, intervalMinutes: Number(row.slot_interval_minutes), daysAhead: Number(row.schedule_days_ahead) } : off;
+}
+
+export async function saveOutletScheduling(db: Db, merchantId: string, outletId: string, s: Partial<OutletScheduling>): Promise<void> {
+  if (s.on !== undefined) await db.query("UPDATE outlets SET scheduling_on=$3 WHERE merchant_id=$1 AND id=$2", [merchantId, outletId, s.on]);
+  if (s.intervalMinutes !== undefined) await db.query("UPDATE outlets SET slot_interval_minutes=$3 WHERE merchant_id=$1 AND id=$2", [merchantId, outletId, s.intervalMinutes]);
+  if (s.daysAhead !== undefined) await db.query("UPDATE outlets SET schedule_days_ahead=$3 WHERE merchant_id=$1 AND id=$2", [merchantId, outletId, s.daysAhead]);
+}

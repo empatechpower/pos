@@ -2,6 +2,7 @@ import type { BusinessConfig } from "./config.js";
 import { channelById, menuFor, fulfilmentOf, type Catalog, type Channel, type PriceContext } from "./catalog.js";
 import { isFullyPaid, visibleToKitchen, type OrderState } from "./events.js";
 import { resolveOptions, type ChosenOption, type ChosenOptionInput, type OptionError } from "./options.js";
+import { groupedBuild, hasBuilder, priceBuild, type BuildInput, type BuildValidation, type StoredBuild } from "./builder.js";
 import { priceOrder, type CouponInput, type PointsInput, type PriceResult } from "./pricing.js";
 
 /**
@@ -19,6 +20,8 @@ export interface QuoteItem {
   options?: ChosenOptionInput[];
   /** A free-text request for the kitchen ("no onions"). Costs nothing; it is printed on the ticket. */
   note?: string;
+  /** What the customer picked on a build-your-own product (ids only; names and prices come from the menu). */
+  build?: BuildInput;
 }
 
 export const MAX_NOTE = 140;
@@ -30,7 +33,7 @@ export function cleanNote(raw: unknown): string {
   return raw.replace(/[\u0000-\u001f\u007f\u2028\u2029]+/g, " ").replace(/\s+/g, " ").trim().slice(0, MAX_NOTE);
 }
 
-export type QuoteError = "unknown_channel" | "channel_off" | "empty" | "too_many_items" | "bad_quantity" | "unavailable" | OptionError;
+export type QuoteError = "unknown_channel" | "channel_off" | "empty" | "too_many_items" | "bad_quantity" | "unavailable" | "build_invalid" | OptionError;
 
 export interface QuoteLine {
   productId: string;
@@ -44,6 +47,8 @@ export interface QuoteLine {
   /** The item's deposit setting at the moment of sale, frozen on the order line. */
   bcrs: boolean;
   options: ChosenOption[];
+  /** Build-your-own: the structured build with every selection's allocation frozen (full price, covered by allowance, charged). */
+  build?: StoredBuild;
 }
 
 export type Quote =
@@ -54,7 +59,7 @@ export type Quote =
       lines: QuoteLine[];
       priced: PriceResult;
     }
-  | { ok: false; error: QuoteError; productId?: string };
+  | { ok: false; error: QuoteError; productId?: string; validation?: BuildValidation };
 
 export function quoteOrder(catalog: Catalog, config: BusinessConfig, ctx: PriceContext, items: readonly QuoteItem[], points?: PointsInput | null, coupon?: CouponInput | null): Quote {
   const channel = channelById(catalog, ctx.channelId);
@@ -70,14 +75,27 @@ export function quoteOrder(catalog: Catalog, config: BusinessConfig, ctx: PriceC
     if (!Number.isInteger(it.qty) || it.qty < 1 || it.qty > MAX_QTY) return { ok: false, error: "bad_quantity", productId: it.productId };
     const m = menu.get(it.productId);
     if (!m || m.soldOut) return { ok: false, error: "unavailable", productId: it.productId };
-    const r = resolveOptions(m.options, it.options);
-    if (!r.ok) return { ok: false, error: r.error, productId: it.productId };
+    let built: StoredBuild | undefined;
+    let r: { ok: true; options: ChosenOption[]; extraCents: number; key: string };
+    if (hasBuilder(m.builder)) {
+      // A build-your-own product is priced by its rule set and allowances; an incomplete or invalid build is refused with the per-group reasons.
+      const pb = priceBuild(m.builder, it.build ?? { picks: [] }, m.priceCents, { ruleVersion: catalog.version });
+      if (!pb.ok) return { ok: false, error: "build_invalid", productId: it.productId, validation: pb.validation };
+      built = pb;
+      const grouped = groupedBuild(pb).flatMap((g) => g.items.map((i) => ({ group: g.group, name: i.name, qty: i.qty, priceCents: i.chargedCents })));
+      const options = [...(pb.variantName ? [{ group: "Choice", name: pb.variantName, qty: 1, priceCents: pb.variantDeltaCents }] : []), ...grouped];
+      r = { ok: true, options, extraCents: pb.unitCents - m.priceCents, key: JSON.stringify(it.build ?? {}) };
+    } else {
+      const ro = resolveOptions(m.options, it.options);
+      if (!ro.ok) return { ok: false, error: ro.error, productId: it.productId };
+      r = ro as typeof r;
+    }
     const note = cleanNote(it.note);
     const key = `${it.productId}#${r.key}#${note}`;
     const have = merged.get(key);
     const qty = (have?.qty ?? 0) + it.qty;
     if (qty > MAX_QTY) return { ok: false, error: "bad_quantity", productId: it.productId };
-    merged.set(key, { productId: it.productId, name: m.name, unitCents: m.priceCents + r.extraCents, qty, pointsExempt: m.pointsExempt, bcrs: !!m.bcrs, ...(m.taxInclusive !== undefined ? { taxInclusive: m.taxInclusive } : {}), ...(m.taxGroup ? { taxGroup: m.taxGroup } : {}), options: note ? [...r.options, { group: "Special request", name: `Note: ${note}`, qty: 1, priceCents: 0 }] : r.options });
+    merged.set(key, { productId: it.productId, name: m.name, unitCents: m.priceCents + r.extraCents, qty, pointsExempt: m.pointsExempt, bcrs: !!m.bcrs, ...(m.taxInclusive !== undefined ? { taxInclusive: m.taxInclusive } : {}), ...(m.taxGroup ? { taxGroup: m.taxGroup } : {}), ...(built ? { build: built } : {}), options: note ? [...r.options, { group: "Special request", name: `Note: ${note}`, qty: 1, priceCents: 0 }] : r.options });
   }
   const lines = [...merged.values()];
   if (lines.length > MAX_LINES) return { ok: false, error: "too_many_items" };
@@ -88,7 +106,7 @@ export function quoteOrder(catalog: Catalog, config: BusinessConfig, ctx: PriceC
 
 // ---- what the customer is told ----------------------------------------------------------------
 
-export type ShopStatus = "received" | "awaiting_payment" | "queued" | "preparing" | "ready" | "completed" | "cancelled";
+export type ShopStatus = "received" | "awaiting_payment" | "scheduled" | "queued" | "preparing" | "ready" | "completed" | "cancelled";
 
 /** One plain status for a customer's order, from the order's real state. */
 export function shopStatus(order: OrderState, config: BusinessConfig): ShopStatus {
@@ -96,6 +114,7 @@ export function shopStatus(order: OrderState, config: BusinessConfig): ShopStatu
   if (order.stage === "completed") return "completed";
   if (order.source === "online" && !order.acceptedAt) return "received";
   if (config.paymentTiming === "prepay" && !isFullyPaid(order, config)) return "awaiting_payment";
+  if (order.fireAt !== undefined && order.firedAt === undefined) return "scheduled";
   if (order.stage === "ready") return "ready";
   if (order.stage === "preparing") return "preparing";
   return "queued";
