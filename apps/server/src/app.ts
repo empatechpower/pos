@@ -14,7 +14,7 @@ import { registerShop } from "./shop.js";
 import { registerDisplay } from "./display.js";
 import { registerPromoAdmin, releasePromo } from "./promo.js";
 import { reconcileOrderStock, registerStock } from "./stock.js";
-import { TabService } from "./tabs.js";
+import { TabError, TabService } from "./tabs.js";
 import { registerTabRoutes } from "./tabRoutes.js";
 import { applyOption, loadKiosk, OPTION_KEYS, optionsOf, saveKiosk, saveSetting } from "./settings.js";
 import { sendMail, type Integrations } from "./integrations.js";
@@ -63,6 +63,8 @@ export async function buildApp({ config, store, db, catalog, catalogAdmin, print
   const app = Fastify({ logger, trustProxy });
   // Logo uploads arrive as raw image bytes.
   app.addContentTypeParser(["image/png", "image/jpeg", "image/webp"], { parseAs: "buffer", bodyLimit: 300 * 1024 + 1 }, (_req, body, done) => done(null, body));
+  // The merchant's own "number is ready" sound: a short clip, same size limit as the logo.
+  app.addContentTypeParser(["audio/mpeg", "audio/wav", "audio/x-wav", "audio/ogg", "audio/mp4"], { parseAs: "buffer", bodyLimit: 300 * 1024 + 1 }, (_req, body, done) => done(null, body));
   // Android's HttpURLConnection labels every POST as a form ("application/x-www-form-urlencoded"), even with no body, which Fastify would
   // refuse (415). The print app's "done" reports are exactly that, so they never arrived and every printed ticket stayed "unconfirmed".
   // Forms are read as plain fields. Every route takes its credentials from headers, never cookies, so this opens nothing new.
@@ -663,7 +665,37 @@ export async function buildApp({ config, store, db, catalog, catalogAdmin, print
     timer.unref();
     app.addHook("onClose", async () => clearInterval(timer));
   }
-  if (catalogAdmin) registerTelegram(app, { db, merchantId, outletId: config.outletName, integ: integrations ?? { publicUrl: "" }, cat: catalogAdmin as PgCatalogStore, needs, reports: { sales: salesReport, orders: ordersReport, today: () => dayOf(Date.now()), hour: () => hourOf(Date.now()) }, tabs: { open: () => tabs.openSummary() } });
+  if (catalogAdmin) registerTelegram(app, { db, merchantId, outletId: config.outletName, integ: integrations ?? { publicUrl: "" }, cat: catalogAdmin as PgCatalogStore, needs, reports: { sales: salesReport, orders: ordersReport, today: () => dayOf(Date.now()), hour: () => hourOf(Date.now()) }, tabs: { open: () => tabs.openSummary() },
+    settings: {
+      brand: () => {
+        const o = optionsOf(config);
+        return [
+          { key: "serviceChargeOn", label: "Service charge", on: o.serviceChargeOn },
+          { key: "gstOn", label: "Tax (GST)", on: o.gstOn },
+          { key: "stackable", label: "Coupon and points together", on: o.stackable },
+          { key: "pointsItemsEligibleOnly", label: "Points pay only eligible items", on: o.pointsItemsEligibleOnly },
+          { key: "pointsDeductService", label: "Points can pay service charge", on: o.pointsDeductService },
+          { key: "pointsDeductTax", label: "Points can pay tax", on: o.pointsDeductTax },
+          { key: "pointsDeductDeposit", label: "Points can pay container deposit", on: o.pointsDeductDeposit },
+        ];
+      },
+      setBrand: async (key, on, staffId) => {
+        if (!(OPTION_KEYS as readonly string[]).includes(key) || !applyOption(config, key, on)) return false;
+        await saveSetting(db!, merchantId, key, on);
+        await audit(db, merchantId, staffId, "settings.save", { [key]: on, via: "telegram" });
+        return true;
+      },
+      outlets: async () => {
+        const out = [];
+        for (const o of await listOutlets(db, merchantId)) { const t = await tabs.outletSettings(o.id); out.push({ id: o.id, name: o.name, tableService: t.tableService, tabService: t.tabService, allocation: t.allocation }); }
+        return out;
+      },
+      setOutlet: async (id, change, staffId) => {
+        try { await tabs.saveOutletSettings(id, change); } catch (e) { return e instanceof TabError ? String(e.body.message ?? e.body.error) : "That did not save."; }
+        await audit(db, merchantId, staffId, "outlet.tab_settings", { outlet: id, ...change, via: "telegram" });
+        return null;
+      },
+    } });
 
   // ---- devices ----------------------------------------------------------------------------
 

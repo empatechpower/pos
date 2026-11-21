@@ -365,6 +365,18 @@ export function Prices({ catalog, outletId }: { catalog: Catalog; outletId: stri
             }}>Save colours</button>
           </div>
           <div className="editor">
+            <b>Queue board sound</b>
+            <p className="muted" style={{ margin: "2px 0 6px" }}>The queue board plays a chime when a number is ready, then says the number. Upload your own short clip (mp3, wav, ogg or m4a, under 300 KB) to replace the default chime.</p>
+            <label className="secondary sm filebtn">Upload sound<input type="file" accept="audio/mpeg,audio/wav,audio/ogg,audio/mp4" hidden aria-label="Upload ready sound" onChange={async (e) => {
+              const f = e.target.files?.[0]; e.target.value = "";
+              if (!f) return;
+              if (f.size > 300 * 1024) return setMsg("That clip is too big. Use one under 300 KB.");
+              const res = await fetch("/api/brand/sound", { method: "PUT", headers: { "content-type": f.type || "audio/mpeg", ...authHeader() }, body: f }).catch(() => null);
+              setMsg(res?.ok ? "Ready sound saved." : ((await res?.json().catch(() => ({}))) as { error?: string } | undefined)?.error ?? "The sound was not saved.");
+            }} /></label>{" "}
+            <button className="secondary sm" onClick={async () => { const r = await staffFetch("/api/brand/sound", { method: "DELETE" }); setMsg("problem" in r ? r.problem : "Back to the default chime."); }}>Use the default chime</button>
+          </div>
+          <div className="editor">
             <label className="field">Line under the top photo<input aria-label="Tagline" maxLength={80} value={brand.tagline ?? ""} onChange={(e) => setBrand({ ...brand, tagline: e.target.value })} /></label>
             <label className="field">Special offer title (leave empty to hide the offer)<input aria-label="Offer title" maxLength={80} value={brand.promoTitle ?? ""} onChange={(e) => setBrand({ ...brand, promoTitle: e.target.value })} /></label>
             <label className="field">Special offer text<textarea aria-label="Offer text" maxLength={400} rows={3} value={brand.promoBody ?? ""} onChange={(e) => setBrand({ ...brand, promoBody: e.target.value })} /></label>

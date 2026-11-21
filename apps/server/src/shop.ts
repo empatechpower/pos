@@ -266,6 +266,35 @@ export function registerShop(app: FastifyInstance, d: ShopDeps) {
       .send(logo.bytes);
   });
 
+  // ---- the merchant's own "ready" sound for the queue board (Q&A X-3); the default chime plays when none is set ---------------------
+  const soundType = (b: Buffer): string | null => {
+    if (b.length > 12 && b.toString("latin1", 0, 4) === "RIFF" && b.toString("latin1", 8, 12) === "WAVE") return "audio/wav";
+    if (b.length > 4 && b.toString("latin1", 0, 4) === "OggS") return "audio/ogg";
+    if (b.length > 8 && b.toString("latin1", 4, 8) === "ftyp") return "audio/mp4";
+    if (b.length > 3 && (b.toString("latin1", 0, 3) === "ID3" || (b[0] === 0xff && (b[1]! & 0xe0) === 0xe0))) return "audio/mpeg";
+    return null;
+  };
+  app.get("/api/brand/sound", async (_req, reply) => {
+    const row = d.db ? (await d.db.query("SELECT value FROM merchant_settings WHERE merchant_id=$1 AND key='readySound'", [merchantId])).rows[0] : undefined;
+    const v = row?.value as { type?: string; data?: string } | undefined;
+    if (!v?.data || !v.type) return reply.code(404).send({ error: "no_sound" });
+    return reply.header("content-type", v.type).header("x-content-type-options", "nosniff").header("content-security-policy", "default-src 'none'; sandbox").header("cache-control", "no-cache").send(Buffer.from(v.data, "base64"));
+  });
+  app.put("/api/brand/sound", { preHandler: d.needs("catalog.manage") }, async (req, reply) => {
+    if (!d.db) return reply.code(503).send({ error: "no_database" });
+    if (!Buffer.isBuffer(req.body)) return reply.code(415).send({ error: "send the clip as audio/mpeg, audio/wav, audio/ogg or audio/mp4" });
+    const type = soundType(req.body);
+    if (!type) return reply.code(400).send({ error: "that does not look like an mp3, wav, ogg or m4a clip" });
+    await d.db.query("INSERT INTO merchant_settings (merchant_id, key, value) VALUES ($1,'readySound',$2::jsonb) ON CONFLICT (merchant_id, key) DO UPDATE SET value=EXCLUDED.value, updated_at=now()", [merchantId, JSON.stringify({ type, data: req.body.toString("base64") })]);
+    await audit(d.db, merchantId, req.staff!.id, "brand.sound", { bytes: req.body.length, type });
+    return { ok: true, type };
+  });
+  app.delete("/api/brand/sound", { preHandler: d.needs("catalog.manage") }, async (req) => {
+    if (d.db) await d.db.query("DELETE FROM merchant_settings WHERE merchant_id=$1 AND key='readySound'", [merchantId]);
+    if (d.db) await audit(d.db, merchantId, req.staff!.id, "brand.sound", { removed: true });
+    return { ok: true };
+  });
+
   const manage = { preHandler: d.needs("catalog.manage") };
   app.put<{ Body: { primary?: string; accent?: string } }>("/api/brand", manage, async (req, reply) => {
     const problem = await d.brand.setColors(req.body?.primary ?? "", req.body?.accent ?? "");

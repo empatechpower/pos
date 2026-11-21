@@ -25,7 +25,7 @@ export function Outlets() {
   const [editing, setEditing] = useState<Outlet | null>(null);
   const [isNew, setIsNew] = useState(false);
   const [fr, setFr] = useState({ id: "", name: "" });
-  const [opts, setOpts] = useState<{ serviceChargeOn: boolean; gstOn: boolean; stackable: boolean; pointsItemsEligibleOnly: boolean; pointsDeductService: boolean; pointsDeductTax: boolean; serviceRate: number; gstRate: number } | null>(null);
+  const [opts, setOpts] = useState<{ serviceChargeOn: boolean; gstOn: boolean; stackable: boolean; pointsItemsEligibleOnly: boolean; pointsDeductService: boolean; pointsDeductTax: boolean; pointsDeductDeposit: boolean; serviceRate: number; gstRate: number } | null>(null);
   const [kiosk, setKiosk] = useState<{ idleMinutes: number; signinBlock: boolean; chips: { earn: boolean; rate: boolean; stamps: boolean } } | null>(null);
 
   const load = useCallback(async () => {
@@ -49,7 +49,7 @@ export function Outlets() {
     const r = await staffFetch("/api/settings/kiosk", { method: "PUT", body });
     if ("res" in r && r.res.ok) { setKiosk((await r.res.json()) as NonNullable<typeof kiosk>); say("Saved. A kiosk picks it up when its screen is next reloaded."); } else say("Could not save.");
   }
-  async function setOption(body: Partial<Record<"serviceChargeOn" | "gstOn" | "stackable" | "pointsItemsEligibleOnly" | "pointsDeductService" | "pointsDeductTax", boolean>>) {
+  async function setOption(body: Partial<Record<"serviceChargeOn" | "gstOn" | "stackable" | "pointsItemsEligibleOnly" | "pointsDeductService" | "pointsDeductTax" | "pointsDeductDeposit", boolean>>) {
     const r = await staffFetch("/api/settings", { method: "PUT", body });
     if ("res" in r && r.res.ok) { setOpts((await r.res.json()) as NonNullable<typeof opts>); say("Saved. Open screens pick it up on their next reload."); } else say("Could not save.");
   }
@@ -165,6 +165,7 @@ export function Outlets() {
           <label className="inline" style={{ marginTop: 6 }}><input type="checkbox" checked={opts.pointsItemsEligibleOnly} onChange={(e) => void setOption({ pointsItemsEligibleOnly: e.target.checked })} /> Points pay only for items that earn points</label>
           <label className="inline" style={{ marginTop: 6 }}><input type="checkbox" checked={opts.pointsDeductService} onChange={(e) => void setOption({ pointsDeductService: e.target.checked })} /> Points can pay the service charge</label>
           <label className="inline" style={{ marginTop: 6 }}><input type="checkbox" checked={opts.pointsDeductTax} onChange={(e) => void setOption({ pointsDeductTax: e.target.checked })} /> Points can pay the tax</label>
+          <label className="inline" style={{ marginTop: 6 }}><input type="checkbox" checked={opts.pointsDeductDeposit} onChange={(e) => void setOption({ pointsDeductDeposit: e.target.checked })} /> Points can pay the container deposit</label>
         </div>
       )}
 

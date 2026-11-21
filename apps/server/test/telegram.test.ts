@@ -508,4 +508,22 @@ describe("menu changes and reports by Telegram (for an AI assistant working Tele
     expect(out[0]).toMatch(/^End of day\nSales for today/);
     expect(await run()).toBe(false); // already sent for today
   });
+
+  it("/settings: the owner switches operator settings with buttons; others are refused", async () => {
+    // 1001 is a manager: not allowed. The owner's chat is linked through the admin id list.
+    expect((await say(1001, "/settings")).said[0].text).toMatch(/Only the owner/);
+    const out = await say(777, "/settings");
+    const msg = out.said[0];
+    expect(msg.text).toMatch(/^Settings/);
+    const btn = buttons(msg).find((b: any) => /Service charge/.test(b.text))!;
+    const before = btn.text.startsWith("✅");
+    const after = await press(777, btn.callback_data!);
+    const again = buttons(after[0]).find((b: any) => /Service charge/.test(b.text))!;
+    expect(again.text.startsWith("✅")).toBe(!before);
+    const stack = buttons(after[0]).find((b: any) => /Coupon and points/.test(b.text))!;
+    const flipped = buttons((await press(777, stack.callback_data!))[0]).find((b: any) => /Coupon and points/.test(b.text))!;
+    expect(flipped.text.startsWith("✅")).toBe(!stack.text.startsWith("✅"));
+    await press(777, again.callback_data!); // put service charge back
+    await press(777, flipped.callback_data!);
+  });
 });

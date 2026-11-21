@@ -14,6 +14,8 @@ export interface PricingOptions {
   pointsItemsEligibleOnly: boolean;
   pointsDeductService: boolean;
   pointsDeductTax: boolean;
+  /** Points may also pay the container deposit (off by default: the deposit is refundable cash). */
+  pointsDeductDeposit: boolean;
 }
 
 export const optionsOf = (config: BusinessConfig): PricingOptions => ({
@@ -23,6 +25,7 @@ export const optionsOf = (config: BusinessConfig): PricingOptions => ({
   pointsItemsEligibleOnly: config.pricing.pointsDeduct.items === "eligible",
   pointsDeductService: config.pricing.pointsDeduct.service,
   pointsDeductTax: config.pricing.pointsDeduct.tax,
+  pointsDeductDeposit: config.pricing.pointsDeduct.deposit,
 });
 
 /** Applies one owner setting to the live config. Returns false for a key that is not a pricing option. */
@@ -34,10 +37,11 @@ export function applyOption(config: BusinessConfig, key: string, value: boolean)
     case "pointsItemsEligibleOnly": config.pricing.pointsDeduct = { ...config.pricing.pointsDeduct, items: value ? "eligible" : "all" }; return true;
     case "pointsDeductService": config.pricing.pointsDeduct = { ...config.pricing.pointsDeduct, service: value }; return true;
     case "pointsDeductTax": config.pricing.pointsDeduct = { ...config.pricing.pointsDeduct, tax: value }; return true;
+    case "pointsDeductDeposit": config.pricing.pointsDeduct = { ...config.pricing.pointsDeduct, deposit: value }; return true;
     default: return false;
   }
 }
-export const OPTION_KEYS = ["serviceChargeOn", "gstOn", "stackable", "pointsItemsEligibleOnly", "pointsDeductService", "pointsDeductTax"] as const;
+export const OPTION_KEYS = ["serviceChargeOn", "gstOn", "stackable", "pointsItemsEligibleOnly", "pointsDeductService", "pointsDeductTax", "pointsDeductDeposit"] as const;
 
 export async function loadSettings(db: Db | null, merchantId: string, config: BusinessConfig): Promise<void> {
   const rows = db ? (await db.query("SELECT key, value FROM merchant_settings WHERE merchant_id=$1", [merchantId])).rows : [];

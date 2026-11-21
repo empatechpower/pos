@@ -203,6 +203,20 @@ describe("placing an order", () => {
     expect((await sales()).commissionCents).toBeUndefined();
   });
 
+  it("the queue board's ready sound is the merchant's own when set; managers only; real audio only", async () => {
+    expect((await call("/api/brand/sound")).status).toBe(404);
+    const wav = Buffer.concat([Buffer.from("RIFF"), Buffer.from([4, 0, 0, 0]), Buffer.from("WAVEfmt "), Buffer.alloc(20)]);
+    expect((await call("/api/brand/sound", { method: "PUT", raw: wav, type: "audio/wav" })).status).toBe(401); // no staff login
+    expect((await call("/api/brand/sound", { method: "PUT", raw: Buffer.from("not audio at all"), type: "audio/wav", device: till.token, staff: mgr })).status).toBe(400);
+    expect((await call("/api/brand/sound", { method: "PUT", raw: wav, type: "audio/wav", device: till.token, staff: mgr })).json).toEqual({ ok: true, type: "audio/wav" });
+    const got = await call("/api/brand/sound");
+    expect(got.status).toBe(200);
+    expect(got.headers.get("content-type")).toBe("audio/wav");
+    expect(got.buf.equals(wav)).toBe(true);
+    expect((await call("/api/brand/sound", { method: "DELETE", device: till.token, staff: mgr })).status).toBe(200);
+    expect((await call("/api/brand/sound")).status).toBe(404);
+  });
+
   it("tells the customer when prices changed since they looked, and places nothing", async () => {
     const before = (await db.query("SELECT count(*) FROM events WHERE type='OrderOpened'")).rows[0].count;
     const r = await order({ channelId: "take-away", items: [kaya(1)], expectedTotalCents: 150 });

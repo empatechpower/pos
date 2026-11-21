@@ -33,7 +33,17 @@ export function Queue({ config }: { config: BusinessConfig | null }) {
     return () => window.removeEventListener("pointerdown", unlock);
   }, []);
 
+  // The merchant's own sound, when they have set one (else the built-in chime). The board can name the spoken language with ?lang=.
+  const [custom, setCustom] = useState<string | null>(null);
+  useEffect(() => {
+    let url: string | null = null;
+    void fetch("/api/brand/sound", { cache: "no-cache" }).then(async (r) => { if (r.ok) { url = URL.createObjectURL(await r.blob()); setCustom(url); } }).catch(() => undefined);
+    return () => { if (url) URL.revokeObjectURL(url); };
+  }, []);
+  const speakLang = (() => { try { return new URLSearchParams(window.location.search).get("lang") || "en"; } catch { return "en"; } })();
+
   const chime = () => {
+    if (custom) { try { void new Audio(custom).play(); return; } catch { /* fall through to the default */ } }
     const ac = audio.current;
     if (!ac) return;
     [880, 1318.5].forEach((hz, i) => {
@@ -53,7 +63,7 @@ export function Queue({ config }: { config: BusinessConfig | null }) {
   const say = (number: string) => {
     try {
       const u = new SpeechSynthesisUtterance(`Number ${spokenNumber(number)}`);
-      u.lang = "en";
+      u.lang = speakLang;
       u.rate = 0.9;
       window.speechSynthesis.speak(u);
     } catch { /* no speech on this device */ }

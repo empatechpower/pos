@@ -1013,10 +1013,23 @@ function Menu({ info, catalog, config, loginError, recheck }: { info: Info; cata
       </div>
     </header>
   );
+  /** "Dine in · Table 12 · 9% service charge applies" / "Take away · Pickup counter · No service charge": mode, spot and what it means for the bill. */
+  const contextText = (): string | null => {
+    if (!channel) return null;
+    const spotPart = dine ? (spot || null) : tx("Pickup counter");
+    const svc = dine && config.pricing.serviceOn !== false
+      ? tx("{pct}% service charge applies", { pct: Math.round(config.pricing.serviceRate * 1000) / 10 })
+      : tx("No service charge");
+    return [channel.name, spotPart, svc].filter(Boolean).join(" · ");
+  };
+  const ctxLine = contextText();
   const seg = channels.length < 2 ? null : (
+    <>
     <div className="shop-seg">
       {channels.map((c) => <button key={c.id} className={c.id === channelId ? "on" : ""} onClick={() => { setChannelId(c.id); setAgreed(null); }}><Icon name={channelIcon(c.kind)} size={19} />{c.kind === "dine_in" ? t("dineIn", c.name) : c.kind === "takeaway" ? t("takeAway", c.name) : c.name}</button>)}
     </div>
+    {ctxLine && <p className="e2e-note sum-context" style={{ margin: "6px 0 0" }}>{ctxLine}</p>}
+    </>
   );
   const pageHead = (title: string, opts: { seg?: boolean } = {}) => (
     <div className="shop-headwrap">
@@ -1689,9 +1702,7 @@ function Menu({ info, catalog, config, loginError, recheck }: { info: Info; cata
           <button className="e2e-back" onClick={() => document.getElementById("sum-end")?.scrollIntoView({ behavior: "smooth", block: "center" })}>{tx("Checkout")} <Icon name="chevD" size={16} /></button>
         </div>
         {noteEl}
-        {dine && (
-          <p className="e2e-note sum-context">{[channel?.name, spot || null, quote && quote.priced.service > 0 ? tx("{pct}% service charge applies", { pct: Math.round(config.pricing.serviceRate * 1000) / 10 }) : null].filter(Boolean).join(" · ")}</p>
-        )}
+        {ctxLine && <p className="e2e-note sum-context">{ctxLine}</p>}
         <div className="bag-sheet review-bag">
           <h3 className="review-h" style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
             <span>{t("itemsCardT", "Items")}</span>

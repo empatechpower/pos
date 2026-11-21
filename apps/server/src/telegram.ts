@@ -39,6 +39,13 @@ export interface TelegramDeps {
     /** The hour (0-23) in the shop's time zone, for the end-of-day summary. */
     hour?: () => number;
   };
+  /** The owner's operator settings for /settings (Q&A E-1: payment/service options day one, as a guided operation). */
+  settings?: {
+    brand: () => Array<{ key: string; label: string; on: boolean }>;
+    setBrand: (key: string, on: boolean, staffId: string) => Promise<boolean>;
+    outlets: () => Promise<Array<{ id: string; name: string; tableService: boolean; tabService: boolean; allocation: "oldest_first" | "reduce_only" }>>;
+    setOutlet: (id: string, change: { tabService?: boolean; allocation?: string }, staffId: string) => Promise<string | null>;
+  };
   /** Open tables for /tabs. */
   tabs?: { open: () => Promise<Array<{ spot: string | null; people: number; paged: string | null; billRequested: boolean; totalCents: number; paidCents: number; remainingCents: number }>> };
 }
@@ -148,6 +155,7 @@ export async function setupTelegramWebhook(integ: Integrations, log: (m: string)
       { command: "sales", description: "Sales totals for a day or period" },
       { command: "orders", description: "Orders as a spreadsheet file" },
       { command: "tabs", description: "Open tables and what is owed" },
+      { command: "settings", description: "Service charge, tax, points, tabs" },
       { command: "help", description: "What I can do" },
     ],
   });
@@ -416,6 +424,20 @@ export function registerTelegram(app: FastifyInstance, d: TelegramDeps): void {
     return send(chatId, `✅ New picture for ${p.name}. It shows on the menu now.`);
   };
 
+  /** The operator settings as buttons: tap one to switch it. Brand-wide options first, then each outlet's table-service options. */
+  const showSettings = async (chatId: number) => {
+    if (!d.settings) return send(chatId, "Settings aren't available here.");
+    const brand = d.settings.brand();
+    const outlets = await d.settings.outlets();
+    const rows: Button[][] = brand.map((b) => [{ text: `${b.on ? "✅" : "⬜"} ${b.label}`, callback_data: `st:${b.key}:${b.on ? 0 : 1}` }]);
+    for (const o of outlets) {
+      if (!o.tableService) continue;
+      rows.push([{ text: `${o.tabService ? "✅" : "⬜"} ${o.name}: Add to Tab`, callback_data: `so:${o.id}:ts:${o.tabService ? 0 : 1}` }]);
+      rows.push([{ text: `${o.name}: custom amount ${o.allocation === "reduce_only" ? "reduces the total only" : "pays the oldest round first"} (tap to switch)`, callback_data: `so:${o.id}:al:${o.allocation === "reduce_only" ? "oldest_first" : "reduce_only"}` }]);
+    }
+    return send(chatId, "Settings. Tap one to switch it. Open screens pick a change up on their next reload.", rows);
+  };
+
   const salesMessage = async (arg: string): Promise<string> => {
     if (!d.reports) return "Reports aren't available here.";
     const range = parseRange(arg, d.reports.today());
@@ -557,6 +579,9 @@ export function registerTelegram(app: FastifyInstance, d: TelegramDeps): void {
       case "/sales":
         if (!can(who.role, "audit.read")) return send(chatId, "Only managers and owners can see sales.");
         return showSales(chatId, arg);
+      case "/settings":
+        if (!can(who.role, "staff.manage")) return send(chatId, "Only the owner can change settings.");
+        return showSettings(chatId);
       case "/tabs": {
         if (!d.tabs) return send(chatId, "Tables aren't available here.");
         const list = await d.tabs.open();
@@ -602,6 +627,18 @@ export function registerTelegram(app: FastifyInstance, d: TelegramDeps): void {
     const who = await linkedStaff(q.from.id, q.from);
     if (!who || !can(who.role, "catalog.manage")) return send(chatId, "I don't know you, or you can't change the menu.");
     const parts = q.data.split(":");
+    if (parts[0] === "st" || parts[0] === "so") {
+      if (!can(who.role, "staff.manage") || !d.settings) return send(chatId, "Only the owner can change settings.");
+      if (parts[0] === "st") {
+        if (!(await d.settings.setBrand(parts[1]!, parts[2] === "1", who.staffId))) return send(chatId, "I don't know that setting.");
+      } else {
+        const outletId = parts.slice(1, -2).join(":");
+        const change = parts[parts.length - 2] === "ts" ? { tabService: parts[parts.length - 1] === "1" } : { allocation: parts[parts.length - 1]! };
+        const problem = await d.settings.setOutlet(outletId, change, who.staffId);
+        if (problem) return send(chatId, problem);
+      }
+      return showSettings(chatId);
+    }
     const cat = await d.cat.load();
     const known = (id: string) => cat.pricebooks.some((b) => b.id === id) || id === "*";
     switch (parts[0]) {
