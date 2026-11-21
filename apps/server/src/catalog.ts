@@ -1,5 +1,5 @@
 import { randomBytes } from "node:crypto";
-import { validateCatalog, withComboAvailability, type Catalog, type Channel, type ChannelKind, type OptionGroup, type PricebookAssignment, type Product } from "@pos/core";
+import { validateCatalog, withComboAvailability, type BuilderSpec, type Catalog, type Channel, type ChannelKind, type OptionGroup, type PricebookAssignment, type Product } from "@pos/core";
 import { MAX_IMAGE_BYTES, sniffImage } from "./brand.js";
 import type pg from "pg";
 import type { Db } from "./db/pool.js";
@@ -49,8 +49,8 @@ export class PgCatalogStore implements CatalogStore {
         for (const p of seed.products) {
           const img = images?.get(p.id);
           await client.query(
-            "INSERT INTO products (merchant_id,id,name,category,sold_out,points_exempt,description,alt_name,options,image_version,bcrs,names) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12::jsonb)",
-            [m, p.id, p.name, p.category, !!p.soldOut, !!p.pointsExempt, p.description ?? null, p.altName ?? null, p.options ? JSON.stringify(p.options) : null, img ? 1 : 0, !!p.bcrs, p.names && Object.keys(p.names).length ? JSON.stringify(p.names) : null],
+            "INSERT INTO products (merchant_id,id,name,category,sold_out,points_exempt,description,alt_name,options,image_version,bcrs,names,builder,tax_inclusive,tax_group) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12::jsonb,$13::jsonb,$14,$15)",
+            [m, p.id, p.name, p.category, !!p.soldOut, !!p.pointsExempt, p.description ?? null, p.altName ?? null, p.options ? JSON.stringify(p.options) : null, img ? 1 : 0, !!p.bcrs, p.names && Object.keys(p.names).length ? JSON.stringify(p.names) : null, p.builder ? JSON.stringify(p.builder) : null, p.taxInclusive ?? null, p.taxGroup ?? null],
           );
           if (img) await client.query("INSERT INTO product_images (merchant_id,product_id,bytes,type,version) VALUES ($1,$2,$3,$4,1)", [m, p.id, img.bytes, img.type]);
         }
@@ -84,15 +84,19 @@ export class PgCatalogStore implements CatalogStore {
 
   private async read(q: Pick<pg.Pool, "query">): Promise<Catalog> {
     const m = this.merchantId;
-    const [meta, products, books, prices, channels, assigns, offs] = await Promise.all([
+    const [meta, products, books, prices, channels, assigns, offs, catNames] = await Promise.all([
       q.query("SELECT version, default_pricebook_id FROM catalog_meta WHERE merchant_id=$1", [m]),
-      q.query("SELECT id,name,category,sold_out,points_exempt,description,alt_name,options,image_version,bcrs,names FROM products WHERE merchant_id=$1 ORDER BY sort", [m]),
+      q.query("SELECT id,name,category,sold_out,points_exempt,description,alt_name,options,image_version,bcrs,names,builder,tax_inclusive,tax_group FROM products WHERE merchant_id=$1 ORDER BY sort", [m]),
       q.query("SELECT id,name,missing FROM pricebooks WHERE merchant_id=$1 ORDER BY name", [m]),
       q.query("SELECT pricebook_id, product_id, price_cents FROM pricebook_prices WHERE merchant_id=$1", [m]),
       q.query("SELECT id,name,kind,service_charge,active FROM channels WHERE merchant_id=$1 ORDER BY sort", [m]),
       q.query("SELECT pricebook_id, outlet_id, channel_id FROM pricebook_assignments WHERE merchant_id=$1", [m]),
       q.query("SELECT pricebook_id, product_id FROM pricebook_off WHERE merchant_id=$1", [m]),
+      q.query("SELECT category, names FROM category_names WHERE merchant_id=$1", [m]),
     ]);
+    const liveCategories = new Set(products.rows.map((p) => p.category as string));
+    const categoryNames: Record<string, Record<string, string>> = {};
+    for (const r of catNames.rows) if (liveCategories.has(r.category as string) && r.names && Object.keys(r.names).length) categoryNames[r.category as string] = r.names as Record<string, string>;
     const offBy = new Map<string, string[]>();
     for (const r of offs.rows) offBy.set(r.pricebook_id as string, [...(offBy.get(r.pricebook_id as string) ?? []), r.product_id as string]);
     if (!meta.rows[0]) throw new Error("catalog not initialised");
@@ -117,11 +121,15 @@ export class PgCatalogStore implements CatalogStore {
           ...(p.names && Object.keys(p.names).length ? { names: p.names as Record<string, string> } : {}),
           imageVersion: p.image_version || undefined,
           options: (p.options as OptionGroup[] | null) ?? undefined,
+          ...(p.builder ? { builder: p.builder as BuilderSpec } : {}),
+          ...(p.tax_inclusive !== null && p.tax_inclusive !== undefined ? { taxInclusive: p.tax_inclusive as boolean } : {}),
+          ...(p.tax_group ? { taxGroup: p.tax_group as string } : {}),
         }),
       ),
       pricebooks: books.rows.map((b) => ({ id: b.id, name: b.name, missing: b.missing, prices: pb.get(b.id)!, ...(offBy.get(b.id)?.length ? { off: offBy.get(b.id)! } : {}) })),
       channels: channels.rows.map((c): Channel => ({ id: c.id, name: c.name, kind: c.kind as ChannelKind, serviceCharge: c.service_charge, active: c.active })),
       assignments: assigns.rows.map((a): PricebookAssignment => ({ pricebookId: a.pricebook_id, outletId: a.outlet_id ?? undefined, channelId: a.channel_id ?? undefined })),
+      ...(Object.keys(categoryNames).length ? { categoryNames } : {}),
     };
   }
 
@@ -313,7 +321,7 @@ export class PgCatalogStore implements CatalogStore {
    * sent are left as they are, so a quick "mark sold out" can never wipe a description or its options.
    * To clear one, send an empty string (text) or an empty list (options).
    */
-  upsertProduct(p: { id?: string; name: string; category: string; soldOut?: boolean; pointsExempt?: boolean; bcrs?: boolean; priceCents?: number; description?: string; altName?: string; names?: Record<string, string>; options?: OptionGroup[] }) {
+  upsertProduct(p: { id?: string; name: string; category: string; soldOut?: boolean; pointsExempt?: boolean; bcrs?: boolean; priceCents?: number; description?: string; altName?: string; names?: Record<string, string>; builder?: BuilderSpec | null; taxInclusive?: boolean | null; taxGroup?: string | null; options?: OptionGroup[] }) {
     return this.change(async (c) => {
       const m = this.merchantId;
       const id = p.id ?? shortId("item");
@@ -330,15 +338,23 @@ export class PgCatalogStore implements CatalogStore {
       // so a rename or a sold-out toggle never switches the deposit off. (An explicit true/false always wins.)
       const autoBcrs = !existing.rowCount && p.bcrs === undefined && /bcrs/i.test(p.name);
       const bcrsGiven = p.bcrs !== undefined || autoBcrs;
+      // A builder spec sent replaces the old one (null removes it); not sent = left as it is. Its rules are checked with the whole catalogue before it is kept.
+      const builderGiven = p.builder !== undefined;
+      // Tax: sent = set (null clears back to the merchant default), not sent = left as it is.
+      const taxGiven = p.taxInclusive !== undefined;
+      const groupGiven = p.taxGroup !== undefined;
       await c.query(
-        `INSERT INTO products (merchant_id,id,name,category,sold_out,points_exempt,description,alt_name,options,bcrs,names) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$13,$15::jsonb)
+        `INSERT INTO products (merchant_id,id,name,category,sold_out,points_exempt,description,alt_name,options,bcrs,names,builder,tax_inclusive,tax_group) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$13,$15::jsonb,$17::jsonb,$19,$21)
          ON CONFLICT (merchant_id,id) DO UPDATE SET name=EXCLUDED.name, category=EXCLUDED.category, sold_out=EXCLUDED.sold_out, points_exempt=EXCLUDED.points_exempt,
            description = CASE WHEN $10 THEN EXCLUDED.description ELSE products.description END,
            alt_name    = CASE WHEN $11 THEN EXCLUDED.alt_name    ELSE products.alt_name    END,
            options     = CASE WHEN $12 THEN EXCLUDED.options     ELSE products.options     END,
            bcrs        = CASE WHEN $14 THEN EXCLUDED.bcrs        ELSE products.bcrs        END,
-           names       = CASE WHEN $16 THEN EXCLUDED.names       ELSE products.names       END`,
-        [m, id, p.name, p.category, !!p.soldOut, !!p.pointsExempt, desc, alt, optsGiven && p.options!.length ? JSON.stringify(p.options) : null, descGiven, altGiven, optsGiven, !!(p.bcrs ?? autoBcrs), bcrsGiven, Object.keys(cleanNames).length ? JSON.stringify(cleanNames) : null, namesGiven],
+           names       = CASE WHEN $16 THEN EXCLUDED.names       ELSE products.names       END,
+           builder     = CASE WHEN $18 THEN EXCLUDED.builder     ELSE products.builder     END,
+           tax_inclusive = CASE WHEN $20 THEN EXCLUDED.tax_inclusive ELSE products.tax_inclusive END,
+           tax_group   = CASE WHEN $22 THEN EXCLUDED.tax_group   ELSE products.tax_group   END`,
+        [m, id, p.name, p.category, !!p.soldOut, !!p.pointsExempt, desc, alt, optsGiven && p.options!.length ? JSON.stringify(p.options) : null, descGiven, altGiven, optsGiven, !!(p.bcrs ?? autoBcrs), bcrsGiven, Object.keys(cleanNames).length ? JSON.stringify(cleanNames) : null, namesGiven, p.builder ? JSON.stringify(p.builder) : null, builderGiven, p.taxInclusive ?? null, taxGiven, (p.taxGroup ?? "").trim() || null, groupGiven],
       );
       if (p.priceCents !== undefined) {
         const def = (await c.query("SELECT default_pricebook_id FROM catalog_meta WHERE merchant_id=$1", [m])).rows[0].default_pricebook_id as string;
@@ -353,12 +369,26 @@ export class PgCatalogStore implements CatalogStore {
   }
 
   /** Rename a category: every item in it moves, and printers that list it keep printing it. Naming an existing category merges the two. */
-  renameCategory(from: string, to: string) {
+  renameCategory(from: string, to: string, names?: Record<string, string>) {
     return this.change(async (c) => {
       const m = this.merchantId;
       const r = await c.query("UPDATE products SET category=$3 WHERE merchant_id=$1 AND category=$2", [m, from, to]);
       if (!r.rowCount) throw new ChangeError("category not found");
       await c.query("UPDATE printers SET categories = array_replace(categories, $3, $2) WHERE merchant_id=$1 AND $3 = ANY(categories)", [m, to, from]);
+      if (from !== to) {
+        // The names follow the category; merging into an existing one keeps that one's own names where both have the same language.
+        const old = (await c.query("DELETE FROM category_names WHERE merchant_id=$1 AND category=$2 RETURNING names", [m, from])).rows[0]?.names as Record<string, string> | undefined;
+        if (old) {
+          const there = (await c.query("SELECT names FROM category_names WHERE merchant_id=$1 AND category=$2", [m, to])).rows[0]?.names as Record<string, string> | undefined;
+          await c.query("INSERT INTO category_names (merchant_id, category, names) VALUES ($1,$2,$3::jsonb) ON CONFLICT (merchant_id, category) DO UPDATE SET names=EXCLUDED.names", [m, to, JSON.stringify({ ...old, ...(there ?? {}) })]);
+        }
+      }
+      // Names sent with the rename replace the whole list (a blank one is dropped); not sent = left as they are.
+      if (names !== undefined) {
+        const clean = Object.fromEntries(Object.entries(names).map(([k, v]) => [k, String(v ?? "").trim()]).filter(([k, v]) => /^[a-z]{2,3}$/.test(k as string) && v));
+        if (Object.keys(clean).length) await c.query("INSERT INTO category_names (merchant_id, category, names) VALUES ($1,$2,$3::jsonb) ON CONFLICT (merchant_id, category) DO UPDATE SET names=EXCLUDED.names", [m, to, JSON.stringify(clean)]);
+        else await c.query("DELETE FROM category_names WHERE merchant_id=$1 AND category=$2", [m, to]);
+      }
       return { from, to, items: r.rowCount };
     });
   }

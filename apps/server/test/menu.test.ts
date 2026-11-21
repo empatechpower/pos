@@ -299,3 +299,80 @@ describe("container deposit (BCRS) on a new item", () => {
     expect((await find("Test Plain Water BCRS"))?.bcrs).toBeFalsy(); // the manager's rename dialog asks and sends it; the server alone never guesses
   });
 });
+
+describe("category names in other languages (the merchant's own words)", () => {
+  const cats = async () => (await catalog()).categoryNames ?? {};
+  const rename = (from: string, to: string, names?: unknown) => staffPost("/api/catalog/categories/rename", { from, to, ...(names !== undefined ? { names } : {}) });
+
+  it("saves the names as written, drops blank ones, and they follow a rename", async () => {
+    expect((await staffPost("/api/catalog/products", { name: "Zed Item", category: "Zed Group", priceCents: 100 })).status).toBe(200);
+    expect(await cats()).not.toHaveProperty("Zed Group");
+    expect((await rename("Zed Group", "Zed Group", { zh: "吐司组", ms: " Kumpulan Zed ", id: "  " })).status).toBe(200);
+    expect((await cats())["Zed Group"]).toEqual({ zh: "吐司组", ms: "Kumpulan Zed" });
+    expect((await rename("Zed Group", "Zed Renamed")).status).toBe(200); // no names sent: they are left as they are, and move with the category
+    expect(await cats()).not.toHaveProperty("Zed Group");
+    expect((await cats())["Zed Renamed"]).toEqual({ zh: "吐司组", ms: "Kumpulan Zed" });
+  });
+
+  it("an empty list clears them; bad input is refused; only a manager can set them", async () => {
+    expect((await rename("Zed Renamed", "Zed Renamed", {})).status).toBe(200);
+    expect(await cats()).not.toHaveProperty("Zed Renamed");
+    expect((await rename("Zed Renamed", "Zed Renamed", "吐司")).status).toBe(400);
+    expect((await rename("Zed Renamed", "Zed Renamed", { zh: "x".repeat(81) })).status).toBe(400);
+    expect((await call("/api/catalog/categories/rename", { body: { from: "Zed Renamed", to: "Zed Renamed", names: { zh: "x" } }, staff: cashier })).status).toBe(403);
+    expect(await cats()).not.toHaveProperty("Zed Renamed");
+  });
+});
+
+describe("build-your-own products (rule sets stored with the product)", () => {
+  const bowl = {
+    variants: [
+      { id: "regular", name: "Regular", groups: [
+        { id: "protein", name: "Protein", minSelect: 1, maxSelect: 1, allowance: { mode: "dollar", value: 450 }, options: [{ id: "salmon", name: "Salmon", priceCents: 750 }, { id: "chicken", name: "Chicken", priceCents: 450 }] },
+        { id: "supp", name: "Supplements", minSelect: 3, maxSelect: 6, allowance: { mode: "dollar", value: 450 }, options: [{ id: "broc", name: "Broccoli", priceCents: 150, maxQty: 2 }, { id: "carr", name: "Carrots", priceCents: 150 }, { id: "brus", name: "Brussels", priceCents: 150 }] },
+      ] },
+      { id: "noprotein", name: "No Protein", groups: [{ id: "supp", name: "Supplements", minSelect: 6, maxSelect: 6, allowance: { mode: "dollar", value: 900 }, options: [{ id: "broc", name: "Broccoli", priceCents: 150, maxQty: 3 }, { id: "carr", name: "Carrots", priceCents: 150, maxQty: 3 }] }] },
+    ],
+  };
+  const find = async () => (await catalog()).products.find((p) => p.name === "Test Build Bowl");
+  const make = (extra: object = {}) => staffPost("/api/catalog/products", { name: "Test Build Bowl", category: "Bowls", priceCents: 1350, builder: bowl, ...extra });
+
+  it("stores the rule sets and returns them with the menu, untouched by other edits", async () => {
+    expect((await make()).status).toBe(200);
+    const p = (await find())!;
+    expect(p.builder).toEqual(bowl);
+    // a sold-out toggle does not send the builder, so it is left alone
+    expect((await staffPost("/api/catalog/products", { id: p.id, name: p.name, category: p.category, soldOut: true })).status).toBe(200);
+    expect((await find())!.builder).toEqual(bowl);
+    expect((await staffPost("/api/catalog/products", { id: p.id, name: p.name, category: p.category, soldOut: false })).status).toBe(200);
+  });
+
+  it("refuses a bad rule set, with what is wrong, and keeps what was there", async () => {
+    const id = (await find())!.id;
+    const bad = { groups: [{ id: "g", name: "G", minSelect: 4, maxSelect: 2, allowance: { mode: "dollar", value: -1 }, options: [{ id: "o", name: "O", priceCents: -5 }] }] };
+    const r = await staffPost("/api/catalog/products", { id, name: "Test Build Bowl", category: "Bowls", builder: bad });
+    expect(r.status).toBe(400);
+    expect(JSON.stringify(r.json)).toContain("maximum must be at least the minimum");
+    expect((await find())!.builder).toEqual(bowl);
+    expect((await staffPost("/api/catalog/products", { id, name: "Test Build Bowl", category: "Bowls", builder: "bowl" })).status).toBe(400);
+  });
+
+  it("a product has options or a builder, not both; a builder can be removed", async () => {
+    const id = (await find())!.id;
+    const both = await staffPost("/api/catalog/products", { id, name: "Test Build Bowl", category: "Bowls", options: [{ id: "o", name: "Size", kind: "single", required: true, choices: [{ id: "s", name: "S", priceCents: 0 }] }] });
+    expect(both.status).toBe(400);
+    expect(JSON.stringify(both.json)).toContain("options or a builder");
+    expect((await staffPost("/api/catalog/products", { id, name: "Test Build Bowl", category: "Bowls", builder: null })).status).toBe(200);
+    expect((await find())!.builder).toBeUndefined();
+  });
+
+  it("an option linked to a plain menu item must not have options of its own", async () => {
+    const withOptions = (await catalog()).products.find((p) => p.options?.length)!;
+    const linked = (pid: string) => ({ groups: [{ id: "g", name: "G", minSelect: 0, maxSelect: 1, options: [{ id: "o", name: "O", priceCents: 0, productId: pid }] }] });
+    const id = (await find())!.id;
+    expect((await staffPost("/api/catalog/products", { id, name: "Test Build Bowl", category: "Bowls", builder: linked(withOptions.id) })).status).toBe(400);
+    expect((await staffPost("/api/catalog/products", { id, name: "Test Build Bowl", category: "Bowls", builder: linked("no-such-item") })).status).toBe(400);
+    const plain = (await catalog()).products.find((p) => !p.options?.length && p.name !== "Test Build Bowl")!;
+    expect((await staffPost("/api/catalog/products", { id, name: "Test Build Bowl", category: "Bowls", builder: linked(plain.id) })).status).toBe(200);
+  });
+});

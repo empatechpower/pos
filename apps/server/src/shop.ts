@@ -1,5 +1,5 @@
 import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
-import { cleanNote, collectionNumber, confirmedPaid, newId, optionLines, orderTotals, queueView, quoteOrder, reduceAll, reduceOrder, shopStatus, type BusinessConfig, type OrderEvent, type OrderState } from "@pos/core";
+import { applyOutletMenu, cleanNote, collectionNumber, confirmedPaid, newId, optionLines, orderTotals, totalsLines, queueView, quoteOrder, reduceAll, reduceOrder, shopStatus, type BusinessConfig, type OrderEvent, type OrderState } from "@pos/core";
 import { audit, type Permission } from "./auth.js";
 import type { BrandStore } from "./brand.js";
 import type { CatalogStore, PgCatalogStore } from "./catalog.js";
@@ -10,6 +10,7 @@ import { FailureLimiter } from "./rateLimit.js";
 import { normaliseEmail, type MemberStore } from "./members.js";
 import { authorizeUrl, createStripeCheckout, createStripeRefund, fetchProfile, sendMail, newState, newVerifier, sameSecret, verifyStripeSignature, type Integrations, type OAuthProvider } from "./integrations.js";
 import type { EventStore } from "./store.js";
+import { loadOutletMenu } from "./outletMenu.js";
 import { loadKiosk } from "./settings.js";
 import { listOutlets } from "./tenant.js";
 import { createHash, randomBytes } from "node:crypto";
@@ -148,6 +149,44 @@ export function registerShop(app: FastifyInstance, d: ShopDeps) {
   };
   /** The outlet an existing order belongs to. */
   const outletOfOrder = async (orderId: string) => (await d.store.outletOfOrder?.(orderId)) ?? d.config.outletName;
+  /** The outlets a customer can order from, with what they need before choosing: contact, hours, how long an order takes, a directions link. Public. */
+  app.get("/api/shop/stores", async (req, reply) => {
+    if (limited(readLimit, req, reply)) return;
+    const all = (await listOutlets(d.db, merchantId)).filter((o) => o.active);
+    return {
+      stores: all.map((o) => ({
+        id: o.id,
+        name: o.name,
+        address: o.address ?? undefined,
+        phone: o.phone ?? undefined,
+        hours: o.hours ?? undefined,
+        prepMinutes: o.prepMinutes,
+        directionsUrl: o.address ? `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(o.address)}` : undefined,
+      })),
+    };
+  });
+
+  /** The menu as one outlet sells it (same shape as the brand's catalogue), with that outlet's prep time and a version that rises when anything on it changes. Public. */
+  const menuOf = async (asked: unknown) => {
+    const outlet = (await listOutlets(d.db, merchantId)).find((o) => o.id === (typeof asked === "string" && asked ? asked : d.config.outletName) && o.active);
+    const id = outlet?.id ?? d.config.outletName;
+    const [c, o] = await Promise.all([d.catalog.load(), loadOutletMenu(d.db, merchantId, id)]);
+    return { outletId: id, prepMinutes: outlet?.prepMinutes ?? null, menuVersion: c.version + o.version, catalog: applyOutletMenu(c, o.menu) };
+  };
+  app.get<{ Querystring: { outlet?: string } }>("/api/shop/menu", async (req, reply) => {
+    if (limited(readLimit, req, reply)) return;
+    const m = await menuOf(req.query.outlet);
+    const etag = `"m${m.outletId}-${m.menuVersion}"`;
+    if (req.headers["if-none-match"] === etag) return reply.code(304).send();
+    return reply.header("etag", etag).header("cache-control", "no-cache").send({ ...m.catalog, outletId: m.outletId, prepMinutes: m.prepMinutes, menuVersion: m.menuVersion });
+  });
+  /** A few bytes: has this outlet's menu changed? */
+  app.get<{ Querystring: { outlet?: string } }>("/api/shop/menu/version", async (req, reply) => {
+    if (limited(readLimit, req, reply)) return;
+    const m = await menuOf(req.query.outlet);
+    return reply.header("cache-control", "no-store").send({ version: m.menuVersion });
+  });
+
   /** Everything the ordering page needs to dress itself. Public. */
   app.get<{ Querystring: { outlet?: string } }>("/api/shop/info", async (req, reply) => {
     if (limited(readLimit, req, reply)) return;
@@ -516,7 +555,8 @@ export function registerShop(app: FastifyInstance, d: ShopDeps) {
     const phone = clean(b.customerPhone, 20);
     if (phone && !/^[+\d][\d\s-]{5,19}$/.test(phone)) return reply.code(400).send({ error: "phone number looks wrong" });
 
-    const cat = await d.catalog.load();
+    // The menu as THIS outlet sells it: items it has switched off are gone, sold-out items and options follow the outlet.
+    const cat = applyOutletMenu(await d.catalog.load(), (await loadOutletMenu(d.db, merchantId, outlet.id)).menu);
     const member = gate.member;
     if (membersOnly) {
       if (!member) return reply.code(401).send({ error: "sign_in_to_order" });
@@ -620,7 +660,7 @@ export function registerShop(app: FastifyInstance, d: ShopDeps) {
       }),
       ...(couponUsed ? [mk({ type: "CouponApplied", title: coupon!.title, amountCents: coupon!.amountCents, minSpendCents: coupon!.minSpendCents })] : []),
       ...(pointsUsed > 0 ? [mk({ type: "PointsRedeemed", points: pointsUsed })] : []),
-      ...quote.lines.map((l) => mk({ type: "ItemAdded", lineId: newId(), productId: l.productId, name: l.name, unitCents: l.unitCents, qty: l.qty, pointsExempt: l.pointsExempt, bcrs: l.bcrs, options: l.options.length ? l.options : undefined })),
+      ...quote.lines.map((l) => mk({ type: "ItemAdded", lineId: newId(), productId: l.productId, name: l.name, unitCents: l.unitCents, qty: l.qty, pointsExempt: l.pointsExempt, bcrs: l.bcrs, ...(l.taxInclusive !== undefined ? { taxInclusive: l.taxInclusive } : {}), ...(l.taxGroup ? { taxGroup: l.taxGroup } : {}), options: l.options.length ? l.options : undefined })),
       // Paid with the member's credit: the order is paid and accepted at once, so it goes straight to the kitchen.
       ...(creditCents > 0 ? [mk({ type: "OrderAccepted" }), mk({ type: "PaymentRecorded", paymentId: `credit:${orderId}`, method: "credit", amountCents: creditCents, confirmed: true })] : []),
     ];
@@ -704,7 +744,8 @@ export function registerShop(app: FastifyInstance, d: ShopDeps) {
     if (limited(readLimit, req, reply)) return;
     const order = reduceOrder(req.params.id, await d.store.eventsForOrder(req.params.id));
     if (!order || order.source !== "online") return reply.code(404).send({ error: "order_not_found" });
-    const total = orderTotals(order, d.config).total;
+    const priced = orderTotals(order, d.config);
+    const total = priced.total;
     const paid = order.payments.filter((p) => p.confirmed).reduce((n, p) => n + p.amountCents, 0);
     return {
       orderId: order.orderId,
@@ -714,6 +755,9 @@ export function registerShop(app: FastifyInstance, d: ShopDeps) {
       spot: order.spot,
       items: order.lines.filter((l) => l.qty > 0).map((l) => ({ name: l.name, qty: l.qty, unitCents: l.unitCents, options: optionLines(l.options) })),
       totalCents: total,
+      // The bill line by line, with the tax basis said plainly (tax inside the prices is shown, never added) and the deposit as its own line.
+      totals: totalsLines(priced),
+      taxIncludedCents: priced.taxIncluded,
       paidCents: paid,
       pointsRedeemed: order.pointsRedeemed ?? 0,
       canCancel: cancellable(order),

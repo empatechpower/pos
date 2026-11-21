@@ -2,7 +2,7 @@ import cors from "@fastify/cors";
 import Fastify, { type FastifyReply, type FastifyRequest } from "fastify";
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
-import { confirmedPaid, hourly, isFullyPaid, productMix, summarize, menuFor, newId, orderTotals, reduceAll, reduceOrder, shopStatus, type BusinessConfig, type ChannelKind, type OptionGroup, type OrderEvent } from "@pos/core";
+import { type BuilderSpec, validateOutletOverride, confirmedPaid, hourly, isFullyPaid, productMix, summarize, menuFor, newId, orderTotals, reduceAll, reduceOrder, shopStatus, type BusinessConfig, type ChannelKind, type OptionGroup, type OrderEvent } from "@pos/core";
 import { CASHIER_TOPUP_LIMIT_CENTS, audit, authenticate, authenticateAgent, can, createAgent, createConnectCode, redeemConnectCode, createStaff, listAgents, login, logout, recentAudit, revokeAgent, type Permission, type Role, type Staff } from "./auth.js";
 import type { CatalogStore, ChangeResult, PgCatalogStore } from "./catalog.js";
 import type { Db } from "./db/pool.js";
@@ -17,6 +17,7 @@ import { registerTelegram } from "./telegram.js";
 import { MemberStore } from "./members.js";
 import { FailureLimiter } from "./rateLimit.js";
 import type { EventStore, StoredEvent } from "./store.js";
+import { loadOutletMenu, saveOutletOverride } from "./outletMenu.js";
 import { ensureDefaultOutlet, listFranchises, listOutlets, outletAllowed, upsertFranchise, upsertOutlet, validId, visibleOutletIds } from "./tenant.js";
 
 declare module "fastify" {
@@ -442,7 +443,7 @@ export async function buildApp({ config, store, db, catalog, catalogAdmin, print
    * Create or change an outlet. Adding an outlet, moving it between franchises and switching it off are for the brand owner;
    * a manager of an outlet (or of its franchise) can update its name, address, phone and opening hours.
    */
-  app.put<{ Params: { id: string }; Body: { name?: string; franchiseId?: string | null; address?: string | null; phone?: string | null; hours?: string | null; active?: boolean; serviceMode?: string | null } }>("/api/outlets/:id", { preHandler: needs("device.manage") }, async (req, reply) => {
+  app.put<{ Params: { id: string }; Body: { name?: string; franchiseId?: string | null; address?: string | null; phone?: string | null; hours?: string | null; active?: boolean; serviceMode?: string | null; prepMinutes?: number | null } }>("/api/outlets/:id", { preHandler: needs("device.manage") }, async (req, reply) => {
     const visible = await visibleOutletIds(db, merchantId, req.staff!);
     const id = req.params.id;
     const b = req.body ?? {};
@@ -461,9 +462,43 @@ export async function buildApp({ config, store, db, catalog, catalogAdmin, print
     }
     if (b.serviceMode != null && b.serviceMode !== "qsr" && b.serviceMode !== "tsr") return reply.code(400).send({ error: "service mode is qsr (quick service, no table) or tsr (table service)" });
     const serviceMode = b.serviceMode === "qsr" || b.serviceMode === "tsr" ? b.serviceMode : null;
-    await upsertOutlet(db, merchantId, { id, name, franchiseId, address: text(b.address, 200), phone: text(b.phone, 40), hours: text(b.hours, 120), active, serviceMode });
-    await audit(db, merchantId, req.staff!.id, "outlet.save", { id, name, franchiseId, serviceMode, created: !existing });
+    if (b.prepMinutes != null && (!Number.isInteger(b.prepMinutes) || b.prepMinutes < 0 || b.prepMinutes > 600)) return reply.code(400).send({ error: "prepMinutes is a whole number of minutes, 0 to 600" });
+    const prepMinutes = b.prepMinutes === undefined ? existing?.prepMinutes ?? null : b.prepMinutes;
+    await upsertOutlet(db, merchantId, { id, name, franchiseId, address: text(b.address, 200), phone: text(b.phone, 40), hours: text(b.hours, 120), active, serviceMode, prepMinutes });
+    await audit(db, merchantId, req.staff!.id, "outlet.save", { id, name, franchiseId, serviceMode, prepMinutes, created: !existing });
     return { ok: true };
+  });
+
+  // ---- one outlet's menu: what it overrides of the brand's menu (items off or sold out, its own build rules, sold-out options) ----
+
+  app.get<{ Params: { id: string } }>("/api/outlets/:id/menu", { preHandler: needs("device.manage") }, async (req, reply) => {
+    if (!outletAllowed(await visibleOutletIds(db, merchantId, req.staff!), req.params.id)) return reply.code(403).send({ error: "outside_your_scope" });
+    if (!(await listOutlets(db, merchantId)).some((o) => o.id === req.params.id)) return reply.code(404).send({ error: "outlet_not_found" });
+    return loadOutletMenu(db, merchantId, req.params.id);
+  });
+
+  /** Change one item at one outlet. Only what is sent changes; null removes an override; an item left with none is back to following the brand. */
+  app.put<{ Params: { id: string; productId: string }; Body: { off?: boolean; soldOut?: boolean | null; builder?: BuilderSpec | null; soldOutOptions?: string[] } }>("/api/outlets/:id/menu/:productId", { preHandler: needs("device.manage") }, async (req, reply) => {
+    const { id, productId } = req.params;
+    if (!outletAllowed(await visibleOutletIds(db, merchantId, req.staff!), id)) return reply.code(403).send({ error: "outside_your_scope" });
+    if (!(await listOutlets(db, merchantId)).some((o) => o.id === id)) return reply.code(404).send({ error: "outlet_not_found" });
+    const b = req.body ?? {};
+    if (typeof b !== "object" || Array.isArray(b)) return reply.code(400).send({ error: "send an object" });
+    if (b.off !== undefined && typeof b.off !== "boolean") return reply.code(400).send({ error: "off must be true or false" });
+    if (b.soldOut !== undefined && b.soldOut !== null && typeof b.soldOut !== "boolean") return reply.code(400).send({ error: "soldOut must be true, false or null" });
+    if (b.builder !== undefined && b.builder !== null && (typeof b.builder !== "object" || Array.isArray(b.builder))) return reply.code(400).send({ error: "builder must be an object, or null to go back to the brand's rules" });
+    if (b.soldOutOptions !== undefined && (!Array.isArray(b.soldOutOptions) || b.soldOutOptions.some((x) => typeof x !== "string"))) return reply.code(400).send({ error: "soldOutOptions must be a list of option ids" });
+    const current = (await loadOutletMenu(db, merchantId, id)).menu[productId] ?? {};
+    const next = { ...current };
+    if (b.off !== undefined) { if (b.off) next.off = true; else delete next.off; }
+    if (b.soldOut !== undefined) { if (b.soldOut === null) delete next.soldOut; else next.soldOut = b.soldOut; }
+    if (b.builder !== undefined) { if (b.builder === null) delete next.builder; else next.builder = b.builder; }
+    if (b.soldOutOptions !== undefined) { if (b.soldOutOptions.length) next.soldOutOptions = [...new Set(b.soldOutOptions)]; else delete next.soldOutOptions; }
+    const problems = validateOutletOverride(await catalog.load(), productId, next);
+    if (problems.length) return reply.code(400).send({ error: "invalid_change", problems });
+    await saveOutletOverride(db, merchantId, id, productId, next);
+    await audit(db, merchantId, req.staff!.id, "outlet.menu", { outlet: id, productId, override: next });
+    return loadOutletMenu(db, merchantId, id);
   });
 
   // ---- options the owner can switch: service charge and tax ------------------------------------
@@ -645,13 +680,15 @@ export async function buildApp({ config, store, db, catalog, catalogAdmin, print
       return changed(req, reply, "default", () => cat.setDefaultPricebook(req.body!.pricebookId!));
     });
 
-    app.post<{ Body: { from?: string; to?: string } }>("/api/catalog/categories/rename", manage, async (req, reply) => {
+    app.post<{ Body: { from?: string; to?: string; names?: Record<string, string> } }>("/api/catalog/categories/rename", manage, async (req, reply) => {
       const from = req.body?.from?.trim(), to = req.body?.to?.trim();
       if (!from || !to) return bad(reply, "from and to are required");
-      return changed(req, reply, "category", () => cat.renameCategory(from, to));
+      const names = req.body?.names;
+      if (names !== undefined && (!names || typeof names !== "object" || Array.isArray(names))) return bad(reply, "names must be an object of language code to name");
+      return changed(req, reply, "category", () => cat.renameCategory(from, to, names));
     });
 
-    app.post<{ Body: { id?: string; name?: string; category?: string; soldOut?: boolean; pointsExempt?: boolean; bcrs?: boolean; priceCents?: number; description?: string; altName?: string; names?: Record<string, string>; options?: OptionGroup[] } }>(
+    app.post<{ Body: { id?: string; name?: string; category?: string; soldOut?: boolean; pointsExempt?: boolean; bcrs?: boolean; priceCents?: number; description?: string; altName?: string; names?: Record<string, string>; builder?: BuilderSpec | null; taxInclusive?: boolean | null; taxGroup?: string | null; options?: OptionGroup[] } }>(
       "/api/catalog/products",
       manage,
       async (req, reply) => {
@@ -659,8 +696,11 @@ export async function buildApp({ config, store, db, catalog, catalogAdmin, print
         if (!b.name?.trim() || !b.category?.trim()) return bad(reply, "name and category are required");
         if (b.priceCents !== undefined && !isCents(b.priceCents)) return bad(reply, "priceCents must be a whole number of cents, 0 or more");
         if (b.names !== undefined && (!b.names || typeof b.names !== "object" || Array.isArray(b.names))) return bad(reply, "names must be an object of language code to name");
+        if (b.taxInclusive !== undefined && b.taxInclusive !== null && typeof b.taxInclusive !== "boolean") return bad(reply, "taxInclusive must be true, false or null");
+        if (b.taxGroup !== undefined && b.taxGroup !== null && (typeof b.taxGroup !== "string" || b.taxGroup.length > 40)) return bad(reply, "taxGroup must be a short name or null");
+        if (b.builder !== undefined && b.builder !== null && (typeof b.builder !== "object" || Array.isArray(b.builder))) return bad(reply, "builder must be an object with groups or variants, or null to remove it");
         return changed(req, reply, "product", () =>
-          cat.upsertProduct({ id: b.id, name: b.name!.trim(), category: b.category!.trim(), soldOut: b.soldOut, pointsExempt: b.pointsExempt, bcrs: b.bcrs, priceCents: b.priceCents, description: b.description, altName: b.altName, names: b.names, options: b.options }),
+          cat.upsertProduct({ id: b.id, name: b.name!.trim(), category: b.category!.trim(), soldOut: b.soldOut, pointsExempt: b.pointsExempt, bcrs: b.bcrs, priceCents: b.priceCents, description: b.description, altName: b.altName, names: b.names, builder: b.builder, taxInclusive: b.taxInclusive, taxGroup: b.taxGroup, options: b.options }),
         );
       },
     );
