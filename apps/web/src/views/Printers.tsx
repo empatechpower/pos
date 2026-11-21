@@ -21,6 +21,7 @@ interface Printer {
   active: boolean;
   cutMode?: "grouped" | "unit" | "category";
   showQueue?: boolean;
+  backupPrinterId?: string | null;
 }
 interface Job {
   id: string;
@@ -45,7 +46,7 @@ const kindOf = (p: Printer): Kind => (p.roles.includes("label") ? "label" : p.ro
 const rolesOf = (k: Kind): Printer["roles"] => (k === "both" ? ["receipt", "kitchen"] : [k]);
 const slug = (s: string) => s.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "").slice(0, 32);
 
-const blank = (): Printer => ({ id: "", name: "", language: "escpos", roles: ["receipt"], categories: [], widthChars: 42, drawer: false, raster: false, labelWidthMm: null, labelHeightMm: null, dpi: 203, connection: { host: "", port: 9100 }, agentDeviceId: null, active: true, cutMode: "grouped", showQueue: false });
+const blank = (): Printer => ({ id: "", name: "", language: "escpos", roles: ["receipt"], categories: [], widthChars: 42, drawer: false, raster: false, labelWidthMm: null, labelHeightMm: null, dpi: 203, connection: { host: "", port: 9100 }, agentDeviceId: null, active: true, cutMode: "grouped", showQueue: false, backupPrinterId: null });
 
 const STATUS: Record<Job["status"], string> = { queued: "Waiting", leased: "Printing", done: "Printed", failed: "Failed", unconfirmed: "Unconfirmed" };
 const timeOf = (iso: string) => new Date(iso).toLocaleTimeString("en-GB", { hour: "2-digit", minute: "2-digit", timeZone: "Asia/Singapore" });
@@ -59,12 +60,15 @@ export function Printers({ catalog }: { catalog: Catalog }) {
   const [editing, setEditing] = useState<Printer | null>(null);
   const [isNew, setIsNew] = useState(false);
   const [msg, setMsg] = useState<string | null>(null);
+  const [alerts, setAlerts] = useState<Array<{ id: string; kind: string; detail: string; createdAt: string }>>([]);
   const [outlets, setOutlets] = useState<Array<{ id: string; name: string }>>([]);
 
   const load = useCallback(async () => {
     const [p, j, d] = await Promise.all([staffFetch("/api/printers"), staffFetch("/api/print/jobs"), staffFetch("/api/devices")]);
     if ("res" in p && p.res.ok) setPrinters(((await p.res.json()) as { printers: Printer[] }).printers);
     if ("res" in j && j.res.ok) setJobs(((await j.res.json()) as { jobs: Job[] }).jobs);
+    const al = await staffFetch("/api/print/alerts");
+    if ("res" in al && al.res.ok) setAlerts(((await al.res.json()) as { alerts: typeof alerts }).alerts);
     const o = await staffFetch("/api/outlets");
     if ("res" in o && o.res.ok) setOutlets(((await o.res.json()) as { outlets: Array<{ id: string; name: string }> }).outlets);
     if ("res" in d && d.res.ok) setDevices(((await d.res.json()) as { devices: DeviceRow[] }).devices.filter((x) => x.active));
@@ -133,6 +137,12 @@ export function Printers({ catalog }: { catalog: Catalog }) {
     <div className="credit prices">
       <h2>Printers</h2>
       {msg && <div className="flash">{msg}</div>}
+      {alerts.map((a) => (
+        <div key={a.id} className="flash warn" role="alert">
+          {a.detail}
+          <button className="secondary sm" style={{ marginLeft: 10 }} onClick={() => void (async () => { await staffFetch(`/api/print/alerts/${a.id}/resolve`, { method: "POST", body: {} }); void load(); })()}>Done</button>
+        </div>
+      ))}
       {hubs.length === 0 ? (
         <div className="flash warn">Rezein has not connected yet, so nothing can print. Install Rezein on the tablet (see the setup guide), then it shows here.</div>
       ) : liveHubs.length === 0 ? (
@@ -237,6 +247,16 @@ export function Printers({ catalog }: { catalog: Catalog }) {
                 <option value="category">One cut for each category</option>
               </select>
               <span className="muted" style={{ fontSize: 12 }}>The same item with different choices (Milo iced and Milo hot) is never put on one line.</span>
+            </label>
+          )}
+          {(kind === "kitchen" || kind === "both") && (
+            <label className="field">
+              Backup printer
+              <select value={editing.backupPrinterId ?? ""} onChange={(e) => set({ backupPrinterId: e.target.value || null })}>
+                <option value="">None</option>
+                {printers.filter((x) => x.id !== editing.id && x.outletId === editing.outletId && x.roles.includes("kitchen") && x.widthChars === editing.widthChars && x.raster === editing.raster).map((x) => <option key={x.id} value={x.id}>{x.name}</option>)}
+              </select>
+              <span className="muted" style={{ fontSize: 12 }}>If this printer cannot be reached after a few tries, its tickets go to the backup and staff are told. The backup needs the same paper width and print mode, and should be limited to a category nothing else uses, so it only prints what is sent to it.</span>
             </label>
           )}
           <label className="field">

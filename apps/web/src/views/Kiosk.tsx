@@ -226,7 +226,7 @@ function KioskSession({ info, catalog, config }: { info: Info; catalog: Catalog;
     const n = Number(q.get("bag") ?? (q.get("screen") === "review" ? 3 : 0));
     if (q.has("item") && menu[Number(q.get("item"))]) setPicking(menu[Number(q.get("item"))]!); // (development only: ?item=0 opens that product, for screenshots)
     if (q.get("screen") === "pay") { // (development only: ?screen=pay shows the payment screen with a sample QR)
-      void QRCode.toDataURL(`${location.origin}/shop`, { margin: 1, width: 560 }).then((qr) => { setOrder({ id: "dev", qr, view: { orderId: "dev", queueNumber: "W001", status: "received", items: [], totalCents: 740, paidCents: 0 } as OrderView, earn: 0 }); setScreen("pay"); });
+      void QRCode.toDataURL(`${location.origin}/shop`, { margin: 1, width: 560 }).then((qr) => { setOrder({ id: "dev", qr, view: { orderId: "dev", queueNumber: "101", status: "received", items: [], totalCents: 740, paidCents: 0 } as OrderView, earn: 0 }); setScreen("pay"); });
       return;
     }
     if (!n && q.get("screen") !== "review") return;

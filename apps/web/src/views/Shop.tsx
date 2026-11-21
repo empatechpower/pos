@@ -4,6 +4,7 @@ import { OptionSheet } from "./OptionSheet";
 import { BuilderSheet } from "./BuilderSheet";
 import { RollMoney } from "./RollMoney";
 import { PickupPicker } from "./PickupPicker";
+import { PromoBox, type AppliedPromo } from "./PromoBox";
 import "../shopProto.css";
 import { go, onRouteChange, queryParams } from "../nav";
 import { LANGS, detectedLang, greeting, lang, langMode, setLangMode, shortLabel, t, tx, useLang } from "../shopI18n";
@@ -29,7 +30,7 @@ export interface Info {
   /** What this shop can do beyond email sign-in and paying at the counter. */
   /** The kiosk's operator settings from Manager (the kiosk lets a tablet override them locally). */
   kiosk?: { idleMinutes: number; signinBlock: boolean; chips: { earn: boolean; rate: boolean; stamps: boolean } };
-  auth: { google: boolean; microsoft: boolean; phone: { number: string; simulated?: boolean; manual?: boolean; open?: boolean } | null };
+  auth: { /** Email sign-in is off unless the server turns it on. */ email?: boolean; google: boolean; microsoft: boolean; phone: { number: string; simulated?: boolean; manual?: boolean; open?: boolean } | null };
   payments: { online: boolean; methods: string[] };
 }
 export interface OrderView {
@@ -468,6 +469,7 @@ function Menu({ info, catalog, config, loginError, recheck }: { info: Info; cata
   const saved = useRef(loadBag(bagKey)).current;
   const [bag, setBag] = useState<BagLine[]>(saved?.bag ?? []);
   const [picking, setPicking] = useState<MenuEntry | null>(null);
+  const [promo, setPromo] = useState<AppliedPromo | null>(null);
   const [editing, setEditing] = useState<BagLine | null>(null);
   const [name, setName] = useState("");
   const [phone, setPhone] = useState("");
@@ -705,13 +707,14 @@ function Menu({ info, catalog, config, loginError, recheck }: { info: Info; cata
   // A coupon only counts once the items alone reach its minimum spend.
   const chosenOk = !!chosen && itemsSubtotal >= chosen.minSpendCents;
   // The most points this order can take, then what the customer chose (all of it unless they used Edit).
-  const couponAsk = chosen && chosenOk ? { amountCents: chosen.amountCents, minSpendCents: chosen.minSpendCents } : null;
+  // A typed promo code adds to the coupon's discount; the shop's server judges it again when the order is placed.
+  const couponAsk = (chosen && chosenOk) || promo ? { amountCents: (chosen && chosenOk ? chosen.amountCents : 0) + (promo?.discountCents ?? 0), minSpendCents: chosen && chosenOk ? chosen.minSpendCents : 0 } : null;
   const maxQuote = items.length && usePoints && canUsePoints ? quoteOrder(catalog, config, ctx, items, { balance: member!.pointsBalance, requested: null }, couponAsk) : null;
   const maxPts = maxQuote?.ok ? maxQuote.priced.pointsUsed : 0;
   const minPts = Math.min(config.pricing.minPointsRedeem, maxPts);
   const reqPts = pointsPts !== null && pointsPts < maxPts ? Math.max(minPts, pointsPts) : null;
   const pointsAsk = usePoints && canUsePoints ? { balance: member!.pointsBalance, requested: reqPts } : null;
-  const quote = items.length ? quoteOrder(catalog, config, ctx, items, pointsAsk, chosen && chosenOk ? { amountCents: chosen.amountCents, minSpendCents: chosen.minSpendCents } : null) : null;
+  const quote = items.length ? quoteOrder(catalog, config, ctx, items, pointsAsk, couponAsk) : null;
   const total = quote?.ok ? quote.priced.total : 0;
   const shownTotal = agreed ?? total;
   const inBag = (id: string) => bag.filter((l) => l.productId === id).reduce((n, l) => n + l.qty, 0);
@@ -808,7 +811,7 @@ function Menu({ info, catalog, config, loginError, recheck }: { info: Info; cata
       const res = await fetch("/api/shop/orders", {
         method: "POST",
         headers: { "content-type": "application/json", ...(member ? { authorization: `Bearer ${localStorage.getItem(LS_MEMBER) ?? ""}` } : {}) },
-        body: JSON.stringify({ channelId, outletId: info.outletId, items, customerName: name, customerPhone: phone, spot: tableMode ? spot : "", expectedTotalCents: agreed ?? total, ...(pickupAt ? { pickupAt } : {}), ...(payMethod === "credit" && member ? { payWithCredit: true, idempotencyKey: purchaseKey(JSON.stringify({ channelId, items, spot, m: member.id })) } : {}), ...(pointsAsk ? { usePoints: reqPts ?? "max" } : {}), ...(chosen && chosenOk ? { couponId: chosen.id } : {}) }),
+        body: JSON.stringify({ channelId, outletId: info.outletId, items, customerName: name, customerPhone: phone, spot: tableMode ? spot : "", expectedTotalCents: agreed ?? total, ...(pickupAt ? { pickupAt } : {}), ...(payMethod === "credit" && member ? { payWithCredit: true, idempotencyKey: purchaseKey(JSON.stringify({ channelId, items, spot, m: member.id })) } : {}), ...(pointsAsk ? { usePoints: reqPts ?? "max" } : {}), ...(chosen && chosenOk ? { couponId: chosen.id } : {}), ...(promo ? { promoCode: promo.code } : {}) }),
       });
       const j = (await res.json().catch(() => ({}))) as { orderId?: string; error?: string; totalCents?: number };
       if (res.ok && j.orderId) {
@@ -834,6 +837,10 @@ function Menu({ info, catalog, config, loginError, recheck }: { info: Info; cata
       } else if (j.error === "slot_not_available") {
         setPickupAt(null);
         setNote(tx("That pickup time is no longer available. Please choose another time."));
+      } else if (j.error === "promo_rejected" || j.error === "one_code_or_coupon") {
+        setPromo(null);
+        setAgreed(null);
+        setNote(j.error === "one_code_or_coupon" ? tx("A promo code cannot be used together with a coupon. The code was taken off; tap Pay again.") : tx("The promo code could not be used, so it was taken off. Tap Pay again to continue without it."));
       } else if (j.error === "purchase_in_progress") {
         setNote(tx("Your order is still being placed. Please wait a moment, then tap Pay again. You will not be charged twice."));
       } else if (j.error === "idempotency_key_reused") {
@@ -1668,6 +1675,7 @@ function Menu({ info, catalog, config, loginError, recheck }: { info: Info; cata
           <>
             {back("Back to order summary", "summary")}
             {noteEl}
+            <PromoBox outletId={info.outletId} channelId={channelId} items={items} token={member ? localStorage.getItem(LS_MEMBER) : null} value={promo} onChange={(p) => { setPromo(p); setAgreed(null); }} />
             <PickupPicker outletId={info.outletId} productIds={[...new Set(items.map((i) => i.productId))]} value={pickupAt} onChange={setPickupAt} />
             <div className="e2e-card"><h3>{t("totalToPay", "Total to pay")}</h3><div className="sum-row grand" style={{ border: 0, margin: 0, padding: 0 }}><span className="k">{t("total", "Total")}</span><span className="v"><RollMoney cents={shownTotal} /></span></div></div>
             {member && (() => {
@@ -1931,7 +1939,7 @@ export function Login({ info, welcome, loginError, onGuest, onDone, noGuest, noE
               <div className="login-icons" role="group" aria-label={tx("Sign-in options")}>
                 <button className="login-icon-btn" onClick={() => provider("google", google, "Google")} aria-label={tx("Continue with Google")}><span className="g-mark">G</span><span className="li-cap">Google</span></button>
                 <button className="login-icon-btn" onClick={() => provider("microsoft", microsoft, "Microsoft")} aria-label={tx("Continue with Microsoft")}><span className="ms-grid"><i style={{ background: "#f25022" }} /><i style={{ background: "#7fba00" }} /><i style={{ background: "#00a4ef" }} /><i style={{ background: "#ffb900" }} /></span><span className="li-cap">Microsoft</span></button>
-                {!noEmail && <button className="login-icon-btn" onClick={() => { setErr(null); setView("email"); }} aria-label={tx("Continue with email")}><span className="li-mail"><Icon name="mail" size={26} /></span><span className="li-cap">{t("emailW", "Email")}</span></button>}
+                {!noEmail && info.auth.email === true && <button className="login-icon-btn" onClick={() => { setErr(null); setView("email"); }} aria-label={tx("Continue with email")}><span className="li-mail"><Icon name="mail" size={26} /></span><span className="li-cap">{t("emailW", "Email")}</span></button>}
               </div>
               )}
               <button className="login-btn" style={{ marginTop: 12 }} onClick={() => (phoneOn ? (setErr(null), setView("phone")) : setErr(tx("Phone sign-in isn't set up for this shop yet. Please use Email, or continue as guest.")))}><span className="lb-ic" style={{ color: "var(--orange-dark)" }}><Icon name="phone" size={24} /></span><span>{t("phoneNumT", "Phone number")}<span className="lb-sub">{info.auth.phone?.open ? tx("Enter your mobile number") : t("phoneSub", "Verify by sending an SMS from your phone")}</span></span></button>

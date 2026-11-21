@@ -29,7 +29,48 @@ export function CustomerDisplay() {
   const [info, setInfo] = useState<Info | null>(null);
   const [qr, setQr] = useState<string | null>(null);
 
-  useEffect(() => listenDisplay(setState), []);
+  // On the till's own device (the Android second screen, a second window) the till hands the state over directly: ?local. Anywhere else this is a
+  // separate display: it pairs with a till by a short code and reads what that till publishes through the server.
+  const local = q.has("local") || q.has("demo");
+  const [pair, setPair] = useState<{ code: string } | null>(null);
+  useEffect(() => (local ? listenDisplay(setState) : undefined), [local]);
+  useEffect(() => {
+    if (local) return;
+    let live = true;
+    let since = 0;
+    const SECRET = "rezein-display-secret";
+    const start = async () => {
+      const r = await fetch("/api/display/pair", { method: "POST" }).catch(() => null);
+      if (!r?.ok) return;
+      const j = (await r.json()) as { secret: string; code: string };
+      try { localStorage.setItem(SECRET, j.secret); } catch { /* the screen still pairs; it just asks again after a reload */ }
+      since = 0;
+      if (live) setPair({ code: j.code });
+    };
+    const tick = async () => {
+      let secret = "";
+      try { secret = localStorage.getItem(SECRET) ?? ""; } catch { /* none */ }
+      if (!secret) { await start(); return; }
+      const r = await fetch(`/api/display/state${since ? `?since=${since}` : ""}`, { headers: { "x-display-secret": secret } }).catch(() => null);
+      if (!live || !r) return; // offline: keep showing the last state and try again
+      if (r.status === 404) { try { localStorage.removeItem(SECRET); } catch { /* ignore */ } await start(); return; } // the pairing expired or was removed
+      if (!r.ok) return;
+      const j = (await r.json()) as { linked: boolean; code?: string; unchanged?: boolean; updatedAt?: number; state?: DisplayState | null };
+      if (!j.linked) { since = 0; setState(IDLE_DISPLAY); setPair(j.code ? { code: j.code } : null); return; }
+      setPair(null);
+      if (j.unchanged) return;
+      since = j.updatedAt ?? 0;
+      setState(j.state ?? IDLE_DISPLAY);
+    };
+    void tick();
+    const t = window.setInterval(() => void tick(), 1000);
+    return () => { live = false; window.clearInterval(t); };
+  }, [local]);
+  useEffect(() => {
+    // Installs as its own full-screen app that opens on /display.
+    const link = document.querySelector<HTMLLinkElement>('link[rel="manifest"]');
+    if (link) link.href = "/manifest-display.webmanifest";
+  }, []);
   useEffect(() => {
     const o = q.get("outlet");
     void fetch(`/api/shop/info${o ? `?outlet=${encodeURIComponent(o)}` : ""}`).then((r) => (r.ok ? (r.json() as Promise<Info>) : null)).then(setInfo).catch(() => undefined);
@@ -47,6 +88,18 @@ export function CustomerDisplay() {
   const accent = b?.accent ?? "#EA7016";
   const theme = { "--cd-brand": brand, "--cd-brand-ink": readableOn(brand), "--cd-accent": accent, "--cd-soft": tint(accent) } as React.CSSProperties;
   const logo = b?.logoUrl ? <img className="cd-logo" src={b.logoUrl} alt={info?.name ?? ""} /> : <b className="cd-logo-text">{info?.name ?? ""}</b>;
+
+  if (pair) {
+    const c = pair.code;
+    return (
+      <div className="cd cd-idle cd-wait" style={theme}>
+        {b?.logoUrl && <img className="cd-wait-logo" src={b.logoUrl} alt={info?.name ?? ""} />}
+        <p>Waiting for a till</p>
+        <div className="cd-code" aria-label={`Pairing code ${c.split("").join(" ")}`}>{c.slice(0, 3)} {c.slice(3)}</div>
+        <small>On the till, open Devices and type this code under Customer display.</small>
+      </div>
+    );
+  }
 
   if (state.mode === "idle") {
     return (
@@ -68,15 +121,15 @@ export function CustomerDisplay() {
       </header>
       <div className="cd-body">
         <aside className="cd-side">
-          {state.mode === "pay" && qr ? (
+          {/* The item photo (when the till sends one) and the payment QR sit together, as in the shop's concept: the QR is on screen while items are rung up, not only at payment. */}
+          {state.imageUrl && <img className="cd-photo" src={state.imageUrl} alt="" />}
+          {qr && state.mode !== "thanks" ? (
             <div className="cd-qr">
               <img src={qr} alt="Payment QR" />
               <b>Scan to pay</b>
               {state.demo && <small>DEMO · NOT PAYABLE</small>}
             </div>
-          ) : state.imageUrl ? (
-            <img className="cd-photo" src={state.imageUrl} alt="" />
-          ) : b?.logoUrl ? (
+          ) : !state.imageUrl && b?.logoUrl ? (
             <div className="cd-brandcard"><img src={b.logoUrl} alt={info?.name ?? ""} />{b.tagline && <p>{b.tagline}</p>}</div>
           ) : null}
           <div className="cd-totals">

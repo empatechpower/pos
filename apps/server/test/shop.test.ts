@@ -116,7 +116,7 @@ describe("placing an order", () => {
 
   it("without a phone number it falls back to the daily W number", async () => {
     const r = await order({ channelId: "take-away", items: [kaya()] });
-    expect(r.json.queueNumber).toBe("W001");
+    expect(r.json.queueNumber).toBe("101");
   });
 
   it("is created from the server's prices, held for staff, and numbered from the phone", async () => {

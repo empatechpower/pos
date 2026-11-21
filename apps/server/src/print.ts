@@ -31,9 +31,15 @@ export interface Printer {
   cutMode: CutMode;
   /** Print the queue number on this printer's tickets and receipts. */
   showQueue: boolean;
+  /** A kitchen printer's backup: if tickets cannot be delivered here after a few quick tries, they go there. */
+  backupPrinterId: string | null;
 }
 
 export const MAX_ATTEMPTS = 5;
+/** Delivery tries before a kitchen ticket is sent to the printer's backup. The delays are 5 s then 15 s, so this is within about 30 seconds. */
+export const REROUTE_AFTER_ATTEMPTS = 3;
+/** This many reroutes from one printer in a day, and staff are asked to make the backup its permanent route. */
+export const REPEATED_REROUTES = 3;
 export const LEASE_SECONDS = 60;
 /** Wait before retrying a failed delivery: 5 s, 15 s, 45 s, 2 min. */
 export const backoffSeconds = (attempt: number) => Math.min(120, 5 * 3 ** Math.max(0, attempt - 1));
@@ -44,6 +50,7 @@ const toPrinter = (r: Record<string, any>): Printer => ({
   connection: r.connection, agentDeviceId: r.agent_device_id, active: r.active,
   cutMode: r.cut_mode === "unit" || r.cut_mode === "category" ? r.cut_mode : "grouped",
   showQueue: r.show_queue === true,
+  backupPrinterId: (r.backup_printer_id as string | null) ?? null,
 });
 
 /** Receipt and kitchen printers speak ESC/POS; label printers speak ZPL or EPL. Checked before saving. */
@@ -143,12 +150,12 @@ export class PrintStore {
 
   async savePrinter(p: Printer): Promise<void> {
     await this.db.query(
-      `INSERT INTO printers (merchant_id,id,name,outlet_id,language,roles,categories,width_chars,drawer,raster,label_width_mm,label_height_mm,dpi,connection,agent_device_id,active,cut_mode,show_queue)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18)
+      `INSERT INTO printers (merchant_id,id,name,outlet_id,language,roles,categories,width_chars,drawer,raster,label_width_mm,label_height_mm,dpi,connection,agent_device_id,active,cut_mode,show_queue,backup_printer_id)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19)
        ON CONFLICT (merchant_id,id) DO UPDATE SET name=EXCLUDED.name, outlet_id=EXCLUDED.outlet_id, language=EXCLUDED.language, roles=EXCLUDED.roles,
          categories=EXCLUDED.categories, width_chars=EXCLUDED.width_chars, drawer=EXCLUDED.drawer, raster=EXCLUDED.raster, label_width_mm=EXCLUDED.label_width_mm,
-         label_height_mm=EXCLUDED.label_height_mm, dpi=EXCLUDED.dpi, connection=EXCLUDED.connection, agent_device_id=EXCLUDED.agent_device_id, active=EXCLUDED.active, cut_mode=EXCLUDED.cut_mode, show_queue=EXCLUDED.show_queue`,
-      [this.merchantId, p.id, p.name, p.outletId, p.language, p.roles, p.categories, p.widthChars, p.drawer, !!p.raster, p.labelWidthMm, p.labelHeightMm, p.dpi, JSON.stringify(p.connection), p.agentDeviceId, p.active, p.cutMode ?? "grouped", p.showQueue === true],
+         label_height_mm=EXCLUDED.label_height_mm, dpi=EXCLUDED.dpi, connection=EXCLUDED.connection, agent_device_id=EXCLUDED.agent_device_id, active=EXCLUDED.active, cut_mode=EXCLUDED.cut_mode, show_queue=EXCLUDED.show_queue, backup_printer_id=EXCLUDED.backup_printer_id`,
+      [this.merchantId, p.id, p.name, p.outletId, p.language, p.roles, p.categories, p.widthChars, p.drawer, !!p.raster, p.labelWidthMm, p.labelHeightMm, p.dpi, JSON.stringify(p.connection), p.agentDeviceId, p.active, p.cutMode ?? "grouped", p.showQueue === true, p.backupPrinterId ?? null],
     );
   }
 
@@ -310,7 +317,7 @@ export class PrintStore {
   /** True when an order has kitchen tickets and every one of them has been delivered: none waiting, retrying, failed or unconfirmed. */
   async kitchenFullyPrinted(orderId: string): Promise<boolean> {
     const r = await this.db.query(
-      "SELECT count(*) FILTER (WHERE status='done')::int AS done, count(*) FILTER (WHERE status<>'done')::int AS open FROM print_jobs WHERE merchant_id=$1 AND order_id=$2 AND doc_type='kitchen'",
+      "SELECT count(*) FILTER (WHERE status='done')::int AS done, count(*) FILTER (WHERE status NOT IN ('done','rerouted'))::int AS open FROM print_jobs WHERE merchant_id=$1 AND order_id=$2 AND doc_type='kitchen'",
       [this.merchantId, orderId],
     );
     return r.rows[0].done > 0 && r.rows[0].open === 0;
@@ -334,10 +341,67 @@ export class PrintStore {
          status = CASE WHEN attempts >= $3 THEN 'failed' ELSE 'queued' END,
          next_attempt_at = now() + make_interval(secs => LEAST(120, 5 * power(3, GREATEST(0, attempts - 1)))),
          leased_until = NULL, last_error = $4, updated_at = now()
-       WHERE merchant_id=$1 AND id=$2 AND status='leased' RETURNING status`,
+       WHERE merchant_id=$1 AND id=$2 AND status='leased' RETURNING status, attempts`,
       [this.merchantId, jobId, MAX_ATTEMPTS, error.slice(0, 300)],
     );
-    return r.rows[0] ? (r.rows[0].status === "failed" ? "failed" : "retry") : "unknown";
+    if (!r.rows[0]) return "unknown";
+    const status = r.rows[0].status as string;
+    // Kitchen tickets must not stall: after a few quick tries they go to the printer's backup, and staff are told where they went.
+    if (status === "queued" && Number(r.rows[0].attempts) >= REROUTE_AFTER_ATTEMPTS && (await this.rerouteToBackup(jobId, error))) return "retry";
+    if (status === "failed") await this.noBackupAlert(jobId, error);
+    return status === "failed" ? "failed" : "retry";
+  }
+
+  /** Called with a text to tell staff (Telegram and so on). Set by the app; left empty in tests that do not need it. */
+  onAlert?: (text: string, alert: { kind: string; outletId: string; printerName: string; backupName?: string }) => Promise<void> | void;
+
+  private async alert(kind: "rerouted" | "no_backup" | "repeated_reroute", p: Printer, backupId: string | null, jobId: string, detail: string, backupName?: string): Promise<void> {
+    await this.db.query("INSERT INTO print_alerts (merchant_id, outlet_id, kind, printer_id, backup_id, job_id, detail) VALUES ($1,$2,$3,$4,$5,$6,$7)", [this.merchantId, p.outletId, kind, p.id, backupId, jobId, detail]);
+    try { await this.onAlert?.(detail, { kind, outletId: p.outletId, printerName: p.name, ...(backupName ? { backupName } : {}) }); } catch { /* an alert that cannot be sent is still on the Printers screen */ }
+  }
+
+  /**
+   * Send a kitchen ticket that cannot be delivered to the printer's backup (the same bytes, so the backup must match its width and mode).
+   * The original is marked rerouted, so it is never printed twice. Returns whether it was moved.
+   */
+  private async rerouteToBackup(jobId: string, error: string): Promise<boolean> {
+    const row = (await this.db.query("SELECT * FROM print_jobs WHERE merchant_id=$1 AND id=$2 AND status='queued'", [this.merchantId, jobId])).rows[0];
+    if (!row || row.doc_type !== "kitchen") return false;
+    const printers = await this.listPrinters();
+    const from = printers.find((x) => x.id === row.printer_id);
+    const to = from?.backupPrinterId ? printers.find((x) => x.id === from.backupPrinterId && x.active) : undefined;
+    if (!from || !to) return false;
+    const moved = await this.insertJob(this.db, to, "kitchen", row.order_id, `reroute:${jobId}`, row.payload as Buffer, `${row.title ?? ""}`.trim() || null);
+    if (!moved) return false;
+    await this.db.query("UPDATE print_jobs SET status='rerouted', rerouted_to=$3, last_error=$4, leased_until=NULL, updated_at=now() WHERE merchant_id=$1 AND id=$2", [this.merchantId, jobId, to.id, `rerouted to ${to.name}: ${error}`.slice(0, 300)]);
+    await this.alert("rerouted", from, to.id, jobId, `${from.name} could not be reached (${error.slice(0, 80)}). Kitchen tickets are now printing on ${to.name}. Please check ${from.name}.`, to.name);
+    const n = Number((await this.db.query("SELECT count(*) FROM print_alerts WHERE merchant_id=$1 AND printer_id=$2 AND kind='rerouted' AND created_at > now() - interval '1 day'", [this.merchantId, from.id])).rows[0].count);
+    const prompted = Number((await this.db.query("SELECT count(*) FROM print_alerts WHERE merchant_id=$1 AND printer_id=$2 AND kind='repeated_reroute' AND created_at > now() - interval '1 day'", [this.merchantId, from.id])).rows[0].count);
+    if (n >= REPEATED_REROUTES && !prompted) {
+      await this.alert("repeated_reroute", from, to.id, jobId, `${from.name} has failed ${n} times today and its tickets keep going to ${to.name}. Please set ${to.name} as its permanent route, or have ${from.name} checked. Head office has been told.`, to.name);
+    }
+    return true;
+  }
+
+  /** A kitchen ticket ran out of tries and there is no backup to take it: say so, once in a while, so it is never a silent queue. */
+  private async noBackupAlert(jobId: string, error: string): Promise<void> {
+    const row = (await this.db.query("SELECT printer_id, doc_type, title FROM print_jobs WHERE merchant_id=$1 AND id=$2", [this.merchantId, jobId])).rows[0];
+    if (!row || row.doc_type !== "kitchen") return;
+    const from = (await this.listPrinters()).find((x) => x.id === row.printer_id);
+    if (!from) return;
+    const recent = Number((await this.db.query("SELECT count(*) FROM print_alerts WHERE merchant_id=$1 AND printer_id=$2 AND kind='no_backup' AND created_at > now() - interval '10 minutes'", [this.merchantId, from.id])).rows[0].count);
+    if (recent) return;
+    await this.alert("no_backup", from, null, jobId, `${from.name} cannot print (${error.slice(0, 80)}) and has no backup printer set, so kitchen tickets are waiting. Check ${from.name}, or set a backup printer in Printers.`);
+  }
+
+  /** Open alerts, newest first. */
+  async listAlerts(limit = 50): Promise<Array<{ id: string; kind: string; printerId: string; backupId: string | null; outletId: string; detail: string; createdAt: Date }>> {
+    const r = await this.db.query("SELECT id, kind, printer_id, backup_id, outlet_id, detail, created_at FROM print_alerts WHERE merchant_id=$1 AND resolved_at IS NULL ORDER BY created_at DESC LIMIT $2", [this.merchantId, Math.max(1, Math.min(limit, 200))]);
+    return r.rows.map((x) => ({ id: x.id, kind: x.kind, printerId: x.printer_id, backupId: x.backup_id, outletId: x.outlet_id, detail: x.detail, createdAt: x.created_at }));
+  }
+
+  async resolveAlert(id: string): Promise<boolean> {
+    return ((await this.db.query("UPDATE print_alerts SET resolved_at=now() WHERE merchant_id=$1 AND id=$2 AND resolved_at IS NULL", [this.merchantId, id])).rowCount ?? 0) > 0;
   }
 
   /** A person chose to print this job again (failed, or unconfirmed and they checked the printer). */
@@ -354,7 +418,7 @@ export class PrintStore {
     if (!orderIds.length) return {};
     const r = await this.db.query(
       `SELECT DISTINCT ON (order_id, doc_type, printer_id) order_id, status, last_error
-       FROM print_jobs WHERE merchant_id=$1 AND order_id = ANY($2::text[])
+       FROM print_jobs WHERE merchant_id=$1 AND order_id = ANY($2::text[]) AND status <> 'rerouted'
        ORDER BY order_id, doc_type, printer_id, created_at DESC`,
       [this.merchantId, orderIds],
     );

@@ -1,7 +1,7 @@
 import type { OrderState } from "./events.js";
 import type { BusinessConfig } from "./config.js";
 import { orderTotals } from "./events.js";
-import { totalsLines, type TotalsLine } from "./pricing.js";
+import { totalsLines } from "./pricing.js";
 import { buildTicketLines } from "./builder.js";
 import { optionLines } from "./options.js";
 import { formatMoney } from "./money.js";
@@ -28,7 +28,7 @@ export interface DisplayState {
   orderType?: string;
   orderNo?: string;
   lines: DisplayLine[];
-  totals: Array<Pick<TotalsLine, "key" | "label" | "cents"> & { negative?: boolean }>;
+  totals: Array<{ key: string; label: string; cents: number; negative?: boolean }>;
   totalCents: number;
   /** A picture for the highlighted item (the one just added). */
   imageUrl?: string;

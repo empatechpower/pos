@@ -7,6 +7,7 @@ import { liveSmsNumber } from "./devices.js";
 import type { Db } from "./db/pool.js";
 import { balanceOf, creditBlockedFor, creditFrozen, refund as refundCredit, spend as spendCredit } from "./ledger.js";
 import { FailureLimiter } from "./rateLimit.js";
+import { PROMO_BASIS, claimPromo, judgePromo, promoStacksWithCoupons, releasePromo, type PromoVerdict } from "./promo.js";
 import { normaliseEmail, type MemberStore } from "./members.js";
 import { authorizeUrl, createStripeCheckout, createStripeRefund, fetchProfile, sendMail, newState, newVerifier, sameSecret, verifyStripeSignature, type Integrations, type OAuthProvider } from "./integrations.js";
 import type { EventStore } from "./store.js";
@@ -48,14 +49,14 @@ function cleanBuild(raw: unknown): BuildInput | undefined {
 const MAX_QTY_LINE = 20;
 const singaporeDay = (now = Date.now()) => new Intl.DateTimeFormat("en-CA", { timeZone: "Asia/Singapore" }).format(now);
 
-/** W001, W002… restarting each day. Atomic, so two customers ordering together never share a number. */
+/** 101, 102… restarting each day (the kiosk handover's collection number, K9: a plain number, no prefix). Atomic, so two customers ordering together never share a number. */
 async function nextOnlineNumber(db: Db, merchantId: string): Promise<string> {
   const r = await db.query(
     `INSERT INTO counters (merchant_id, name, day, value) VALUES ($1,'online',$2,1)
      ON CONFLICT (merchant_id, name, day) DO UPDATE SET value = counters.value + 1 RETURNING value`,
     [merchantId, singaporeDay()],
   );
-  return `W${String(r.rows[0].value).padStart(3, "0")}`;
+  return String(100 + Number(r.rows[0].value));
 }
 
 /**
@@ -236,7 +237,8 @@ export function registerShop(app: FastifyInstance, d: ShopDeps) {
       channels: cat.channels.filter((c) => c.active && (outlet.mode === "qsr" || c.kind === "dine_in")).map((c) => ({ id: c.id, name: c.name, kind: c.kind })),
       brand: await brandPayload(),
       // What this deployment can do beyond email sign-in and paying at the counter. The page enables only these.
-      auth: { google: !!integ.google && !!d.members, microsoft: !!integ.microsoft && !!d.members, phone: !!d.members && (openSignin ? { number: "", open: true } : smsTo ? { number: smsTo } : membersOnly ? { number: "", manual: true } : showCodes ? { number: "+65 8000 0000", simulated: true } : null) },
+      // Email sign-in is off: phone SMS is the identity channel (kiosk handover 4.3 and open decision 3). EMAIL_SIGNIN=on brings the email option back, for a demo.
+      auth: { email: /^(1|true|yes|on)$/i.test(process.env.EMAIL_SIGNIN ?? ""), google: !!integ.google && !!d.members, microsoft: !!integ.microsoft && !!d.members, phone: !!d.members && (openSignin ? { number: "", open: true } : smsTo ? { number: smsTo } : membersOnly ? { number: "", manual: true } : showCodes ? { number: "+65 8000 0000", simulated: true } : null) },
       payments: { online: !!integ.stripe, methods: integ.stripe ? ["card", "paynow"] : [] },
       // The kiosk's operator settings, as the owner set them in Manager.
       kiosk: await loadKiosk(d.db, merchantId),
@@ -545,6 +547,8 @@ export function registerShop(app: FastifyInstance, d: ShopDeps) {
     idempotencyKey?: string;
     /** Pickup at a chosen time (epoch ms, one of the outlet's slots). Missing = as soon as possible. */
     pickupAt?: number;
+    /** A typed promo code. Judged on the items subtotal, before service charge, tax and deposits. */
+    promoCode?: string;
   }
 
   /** A customer places an order. Held for staff to accept; nothing reaches the kitchen yet. */
@@ -617,7 +621,19 @@ export function registerShop(app: FastifyInstance, d: ShopDeps) {
       if (!coupon) return reply.code(400).send({ error: "coupon_not_available" });
     }
     if (outlet.mode === "tsr" && cat.channels.find((c) => c.id === b.channelId)?.kind !== "dine_in") return reply.code(400).send({ error: "this shop takes dine-in orders only" });
-    const quote = quoteOrder(cat, d.config, { outletId: outlet.id, channelId: b.channelId }, items, pointsAsk, coupon ? { amountCents: coupon.amountCents, minSpendCents: coupon.minSpendCents } : null);
+    // A typed promo code is judged here, again, whatever the app showed: on the items subtotal, before service charge, tax and deposits.
+    let promo: Extract<PromoVerdict, { ok: true }> | null = null;
+    if (typeof b.promoCode === "string" && b.promoCode.trim()) {
+      const base = quoteOrder(cat, d.config, { outletId: outlet.id, channelId: b.channelId }, items, null, null);
+      if (!base.ok) return reply.code(400).send({ error: base.error, productId: base.productId, ...(base.validation ? { validation: base.validation } : {}) });
+      const verdict = await judgePromo(d.db, merchantId, b.promoCode, { now: nowMs, subtotalCents: base.priced.subtotal, memberId: member?.id ?? null });
+      if (!verdict.ok) return reply.code(400).send({ error: "promo_rejected", reason: verdict.reason, ...(verdict.shortfallCents !== undefined ? { shortfallCents: verdict.shortfallCents, minSpendCents: verdict.minSpendCents } : {}) });
+      // One code or coupon per order unless the merchant allows both. Points are independent of both.
+      if (coupon && !(await promoStacksWithCoupons(d.db, merchantId))) return reply.code(400).send({ error: "one_code_or_coupon" });
+      promo = verdict;
+    }
+    const discountIn = coupon || promo ? { amountCents: (coupon?.amountCents ?? 0) + (promo?.discountCents ?? 0), minSpendCents: coupon?.minSpendCents ?? 0 } : null;
+    const quote = quoteOrder(cat, d.config, { outletId: outlet.id, channelId: b.channelId }, items, pointsAsk, discountIn);
     if (!quote.ok) return reply.code(400).send({ error: quote.error, productId: quote.productId, ...(quote.validation ? { validation: quote.validation } : {}) });
     if (b.expectedTotalCents !== undefined && b.expectedTotalCents !== quote.priced.total) {
       return reply.code(409).send({ error: "price_changed", totalCents: quote.priced.total });
@@ -684,6 +700,13 @@ export function registerShop(app: FastifyInstance, d: ShopDeps) {
       return reply.code(409).send({ error: "coupon_not_available" });
     }
     if (member) await members!.linkOrder(orderId, member.id, pointsUsed);
+    // The code's use is recorded now, with its limits checked once more; if another order took the last use, everything taken so far is given back.
+    const promoUsed = !!promo && quote.priced.couponDiscount > 0;
+    if (promo && promoUsed && !(await claimPromo(d.db, merchantId, promo.promo.code, orderId, member?.id ?? null, Math.min(promo.discountCents, quote.priced.couponDiscount)))) {
+      if (member) await members!.reverseForOrder(orderId);
+      await giveCreditBack();
+      return reply.code(409).send({ error: "promo_rejected", reason: "usage_exhausted" });
+    }
     let seq = 0;
     const mk = <T extends object>(extra: T) => ({ id: newId(), orderId, deviceId: SHOP_DEVICE, ts, seq: ++seq, ...extra }) as unknown as OrderEvent;
     const events: OrderEvent[] = [
@@ -701,7 +724,8 @@ export function registerShop(app: FastifyInstance, d: ShopDeps) {
         spot: quote.channel.kind === "dine_in" && (outlet.mode === "tsr" || !outlet.chosen) ? table ?? clean(b.spot, 30)?.replace(/[^\w #-]/g, "") : undefined,
         queueNumber,
       }),
-      ...(couponUsed ? [mk({ type: "CouponApplied", title: coupon!.title, amountCents: coupon!.amountCents, minSpendCents: coupon!.minSpendCents })] : []),
+      // One discount slot on the order: the member's coupon, the typed code, or both (when the merchant allows) read as one line.
+      ...(couponUsed || promoUsed ? [mk({ type: "CouponApplied", title: [couponUsed ? coupon!.title : "", promoUsed ? `Code ${promo!.promo.code}` : ""].filter(Boolean).join(" + "), amountCents: quote.priced.couponDiscount, minSpendCents: couponUsed ? coupon!.minSpendCents : 0 })] : []),
       ...(pointsUsed > 0 ? [mk({ type: "PointsRedeemed", points: pointsUsed })] : []),
       ...quote.lines.map((l) => mk({ type: "ItemAdded", lineId: newId(), productId: l.productId, name: l.name, unitCents: l.unitCents, qty: l.qty, pointsExempt: l.pointsExempt, bcrs: l.bcrs, ...(l.taxInclusive !== undefined ? { taxInclusive: l.taxInclusive } : {}), ...(l.taxGroup ? { taxGroup: l.taxGroup } : {}), ...(l.build ? { build: l.build } : {}), options: l.options.length ? l.options : undefined })),
       // Paid with the member's credit: the order is paid and accepted at once, so it goes straight to the kitchen.
@@ -711,10 +735,11 @@ export function registerShop(app: FastifyInstance, d: ShopDeps) {
       await d.ingest(events, outlet.id);
     } catch (err) {
       await giveCreditBack(); // the order was not recorded, so the customer keeps their credit
+      await releasePromo(d.db, merchantId, orderId);
       throw err;
     }
     if (pickupAt !== undefined) await d.db.query("INSERT INTO scheduled_orders (merchant_id, order_id, outlet_id, fire_at) VALUES ($1,$2,$3,$4) ON CONFLICT DO NOTHING", [merchantId, orderId, outlet.id, pickupAt - (outlet.prepMinutes ?? 0) * 60_000]);
-    return { orderId, queueNumber, totalCents: quote.priced.total, pointsUsed, couponDiscountCents: quote.priced.couponDiscount, paidWithCreditCents: creditCents, creditBalanceCents: member ? await balanceOf(d.db, merchantId, member.id) : undefined, status: creditCents > 0 ? "queued" : "received" };
+    return { orderId, queueNumber, totalCents: quote.priced.total, pointsUsed, couponDiscountCents: quote.priced.couponDiscount, ...(promoUsed ? { promoCode: promo!.promo.code } : {}), paidWithCreditCents: creditCents, creditBalanceCents: member ? await balanceOf(d.db, merchantId, member.id) : undefined, status: creditCents > 0 ? "queued" : "received" };
     });
     } catch (e) {
       await dropAttempt();
@@ -949,6 +974,21 @@ export function registerShop(app: FastifyInstance, d: ShopDeps) {
     const v = await outletView(req.query.outlet);
     await saveCart(owner, v.outlet.id, []);
     return cartView(owner, v, defaultChannel(v.cat));
+  });
+
+  /** Check a typed code against a cart before ordering: accepted with what it takes off, or rejected with the reason. Never a silent failure. */
+  app.post<{ Body: { outletId?: string; channelId?: string; items?: Array<{ productId?: string; qty?: number; note?: string; build?: BuildInput; options?: Array<{ groupId?: string; choiceId?: string; qty?: number }> }>; code?: string } }>("/api/shop/promo/validate", async (req, reply) => {
+    if (limited(readLimit, req, reply)) return;
+    const b = req.body ?? {};
+    if (!Array.isArray(b.items)) return reply.code(400).send({ error: "items are required" });
+    const v = await outletView(b.outletId);
+    const member = members ? await members.fromToken(bearer(req)) : null;
+    const items = b.items.map((i) => ({ productId: String(i?.productId ?? ""), qty: Number(i?.qty), note: cleanNote(i?.note), build: cleanBuild(i?.build), options: (Array.isArray(i?.options) ? i.options.slice(0, 40) : []).map((o) => ({ groupId: String(o?.groupId ?? ""), choiceId: String(o?.choiceId ?? ""), qty: o?.qty === undefined ? undefined : Number(o.qty) })) }));
+    const base = quoteOrder(v.cat, d.config, { outletId: v.outlet.id, channelId: defaultChannel(v.cat, b.channelId) }, items, null, null);
+    if (!base.ok) return reply.code(400).send({ error: base.error, productId: base.productId });
+    const verdict = await judgePromo(d.db, merchantId, b.code, { now: v.nowMs, subtotalCents: base.priced.subtotal, memberId: member?.id ?? null });
+    if (!verdict.ok) return { ok: false, reason: verdict.reason, basis: PROMO_BASIS, ...(verdict.shortfallCents !== undefined ? { minSpendCents: verdict.minSpendCents, shortfallCents: verdict.shortfallCents } : {}) };
+    return { ok: true, code: verdict.promo.code, title: verdict.promo.title, discountCents: verdict.discountCents, minSpendCents: verdict.promo.minSpendCents, basis: PROMO_BASIS, itemsSubtotalCents: base.priced.subtotal };
   });
 
   /** The pickup times an outlet offers on one day (YYYY-MM-DD on its own clock), for these items. Public. */

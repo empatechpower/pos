@@ -11,6 +11,8 @@ import { authenticateDevice, createEnrollmentCode, enroll, markPrintPoll, setSms
 import { BrandStore } from "./brand.js";
 import { PrintStore, validatePrinter, type Printer } from "./print.js";
 import { registerShop } from "./shop.js";
+import { registerDisplay } from "./display.js";
+import { registerPromoAdmin, releasePromo } from "./promo.js";
 import { loadKiosk, optionsOf, saveKiosk, saveSetting } from "./settings.js";
 import { sendMail, type Integrations } from "./integrations.js";
 import { registerTelegram } from "./telegram.js";
@@ -159,6 +161,8 @@ export async function buildApp({ config, store, db, catalog, catalogAdmin, print
     const added = await store.append(events, outletId);
     if (added.length) for (const push of streams) push(added);
     const touched = [...new Set(added.map((a) => a.event.orderId))];
+    // A cancelled order gives its promo code use back.
+    for (const a of added) if (db && a.event.type === "StageSet" && a.event.stage === "cancelled") await releasePromo(db, merchantId, a.event.orderId).catch(() => undefined);
     if (added.length && print) await queuePrints(touched);
     if (added.length && members) await settleMemberOrders(touched);
     return added;
@@ -583,6 +587,8 @@ export async function buildApp({ config, store, db, catalog, catalogAdmin, print
 
   // ---- customer ordering and shop look ------------------------------------------------------
 
+  registerDisplay(app, { db, merchantId, needsDevice });
+  registerPromoAdmin(app, { db, merchantId, needs });
   registerShop(app, { db, config, store, catalog, catalogAdmin, brand: new BrandStore(db, merchantId), ingest, members, needs, integrations, now });
 
   // ---- the Telegram bot for managing prices ---------------------------------------------------
@@ -784,6 +790,12 @@ export async function buildApp({ config, store, db, catalog, catalogAdmin, print
 
   if (print) {
     const queue = print;
+    // Printer problems that need a person (a ticket moved to a backup, a printer with none, one that keeps failing) also go to linked managers and owners on Telegram.
+    const alertedBefore = queue.onAlert;
+    queue.onAlert = async (text, a) => {
+      await alertedBefore?.(text, a);
+      await (app as unknown as { notifyManagers?: (t: string) => Promise<void> }).notifyManagers?.(`Printer alert: ${text}`);
+    };
     const manage = { preHandler: needs("print.manage") };
 
     app.get("/api/printers", manage, async (req) => {
@@ -811,8 +823,18 @@ export async function buildApp({ config, store, db, catalog, catalogAdmin, print
         active: b.active !== false,
         cutMode: (b.cutMode ?? "grouped") as Printer["cutMode"],
         showQueue: b.showQueue === true,
+        backupPrinterId: typeof b.backupPrinterId === "string" && b.backupPrinterId ? b.backupPrinterId : null,
       };
       const problems = validatePrinter(p);
+      // The backup takes the same bytes, so it has to be a real, different kitchen printer at this outlet with the same width and mode.
+      if (p.backupPrinterId) {
+        const bk = (await queue.listPrinters()).find((x) => x.id === p.backupPrinterId);
+        if (p.backupPrinterId === p.id) problems.push("a printer cannot be its own backup");
+        else if (!bk) problems.push("the backup printer does not exist");
+        else if (bk.outletId !== p.outletId) problems.push("the backup printer must be at the same outlet");
+        else if (!bk.roles.includes("kitchen") || !p.roles.includes("kitchen")) problems.push("only a kitchen printer can have a kitchen backup");
+        else if (bk.widthChars !== p.widthChars || bk.raster !== p.raster || bk.language !== p.language) problems.push("the backup must have the same paper width and print mode, so the same ticket prints correctly on it");
+      }
       if (problems.length) return reply.code(400).send({ error: "invalid_printer", problems });
       const visible = await visibleOutletIds(db, merchantId, req.staff!);
       const existing = (await queue.listPrinters()).find((x) => x.id === p.id);
@@ -821,6 +843,13 @@ export async function buildApp({ config, store, db, catalog, catalogAdmin, print
       await audit(db, merchantId, req.staff!.id, "printer.save", { id: p.id, name: p.name, roles: p.roles });
       return { ok: true };
     });
+
+    /** What staff need to act on: tickets that were moved to a backup, printers with no backup, and printers that keep failing. */
+    app.get("/api/print/alerts", manage, async (req) => {
+      const visible = await visibleOutletIds(db, merchantId, req.staff!);
+      return { alerts: (await queue.listAlerts()).filter((a) => outletAllowed(visible, a.outletId)) };
+    });
+    app.post<{ Params: { id: string } }>("/api/print/alerts/:id/resolve", manage, async (req, reply) => ((await queue.resolveAlert(req.params.id)) ? { ok: true } : reply.code(404).send({ error: "alert_not_found" })));
 
     app.post<{ Params: { id: string } }>("/api/printers/:id/test", manage, async (req, reply) => {
       const mineOnly = await visibleOutletIds(db, merchantId, req.staff!);

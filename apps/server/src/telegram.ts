@@ -168,6 +168,16 @@ export function registerTelegram(app: FastifyInstance, d: TelegramDeps): void {
   const send = (chatId: number, text: string, buttons?: Button[][]) =>
     api("sendMessage", { chat_id: chatId, text, disable_web_page_preview: true, ...(buttons ? { reply_markup: { inline_keyboard: buttons } } : {}) });
 
+  /** Tell every linked manager and owner something that needs attention (used for printer alerts). Does nothing without a Telegram bot. */
+  (app as unknown as { notifyManagers?: (text: string) => Promise<void> }).notifyManagers = async (text: string) => {
+    if (!t) return;
+    const r = await d.db.query(
+      `SELECT DISTINCT l.chat_id FROM telegram_links l JOIN staff s ON s.id = l.staff_id WHERE l.merchant_id=$1 AND s.active AND s.role IN ('owner','manager')`,
+      [d.merchantId],
+    );
+    for (const row of r.rows) await send(Number(row.chat_id), text);
+  };
+
   /** Send a small text file (a CSV) into the chat. */
   const sendFile = async (chatId: number, filename: string, content: string, caption: string) => {
     if (!t) return;

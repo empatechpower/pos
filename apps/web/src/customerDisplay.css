@@ -8,9 +8,9 @@
 .cd-status { margin-left: auto; padding: 10px 26px; border-radius: 999px; background: var(--cd-soft); color: #11204a; font-size: 24px; font-weight: 700; text-transform: uppercase; }
 .cd-body { flex: 1; min-height: 0; display: grid; grid-template-columns: minmax(300px, 38%) 1fr; gap: 24px; padding: 20px 24px; }
 .cd-side { display: flex; flex-direction: column; gap: 18px; min-height: 0; }
-.cd-photo { width: 100%; max-height: 34%; object-fit: cover; border-radius: 16px; background: #eee; }
+.cd-photo { width: 100%; max-height: 28%; object-fit: cover; border-radius: 16px; background: #eee; }
 .cd-qr { display: flex; flex-direction: column; align-items: center; gap: 8px; padding: 16px; border-radius: 16px; background: #fff; border: 1px solid #dfe3ee; }
-.cd-qr img { width: min(100%, 280px); aspect-ratio: 1; }
+.cd-qr img { width: min(100%, 220px); aspect-ratio: 1; }
 .cd-qr b { font-size: 26px; } .cd-qr small { color: #6a7596; letter-spacing: .08em; }
 .cd-totals { margin-top: auto; padding: 22px 26px; border-radius: 18px; background: var(--cd-brand); color: var(--cd-brand-ink); }
 .cd-row { display: flex; justify-content: space-between; font-size: 24px; padding: 4px 0; }
@@ -31,3 +31,7 @@
 @media (max-width: 800px) { .cd-body { grid-template-columns: 1fr; } .cd-side { order: 2; } .cd-chip { font-size: 20px; } .cd-chip.cd-big { font-size: 24px; } .cd-name b { font-size: 22px; } .cd-price { font-size: 24px; } }
 .cd-brandcard { display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 12px; padding: 20px; border-radius: 16px; background: #fff; border: 1px solid #dfe3ee; }
 .cd-brandcard img { max-width: 70%; max-height: 220px; } .cd-brandcard p { margin: 0; font-size: 22px; color: #5f6e9a; text-align: center; }
+.cd-wait-logo { max-width: 28vw; max-height: 22vh; border-radius: 12px; }
+.cd-wait p { font-size: 34px; margin: 0; }
+.cd-code { font-size: clamp(72px, 14vw, 180px); font-weight: 800; letter-spacing: .12em; line-height: 1; padding: 16px 36px; border-radius: 22px; background: rgba(255,255,255,.14); }
+.cd-wait small { font-size: 22px; opacity: .85; max-width: 70vw; }

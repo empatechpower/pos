@@ -66,7 +66,7 @@ class PosActivity : Activity() {
         immersive()
         web.loadUrl("$base/pos")
 
-        display = DisplayHost(this, "$base/display").also { it.start() }
+        display = DisplayHost(this, "$base/display?local").also { it.start() }
         val filter = IntentFilter().also { f -> DisplayBridge.SCAN_ACTIONS.keys.forEach { f.addAction(it) } }
         if (Build.VERSION.SDK_INT >= 33) registerReceiver(scanReceiver, filter, Context.RECEIVER_EXPORTED) else registerReceiver(scanReceiver, filter)
     }

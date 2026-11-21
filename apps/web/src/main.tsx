@@ -12,6 +12,10 @@ if (location.pathname === "/kiosk" || location.pathname.startsWith("/kiosk/")) {
   const link = document.querySelector<HTMLLinkElement>('link[rel="manifest"]') ?? document.head.appendChild(Object.assign(document.createElement("link"), { rel: "manifest" }));
   link.href = "/manifest-kiosk.webmanifest";
 }
+if (location.pathname === "/display" || location.pathname.startsWith("/display/")) {
+  const link = document.querySelector<HTMLLinkElement>('link[rel="manifest"]');
+  if (link) link.href = "/manifest-display.webmanifest";
+}
 installLinkHandler();
 const onKiosk = location.pathname === "/kiosk" || location.pathname.startsWith("/kiosk/");
 const updateSW = registerSW({

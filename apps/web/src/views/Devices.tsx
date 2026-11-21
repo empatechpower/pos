@@ -1,3 +1,4 @@
+import { DisplayLink } from "./DisplayLink";
 import { useEffect, useState } from "react";
 import { authHeader, useStaff } from "../auth";
 
@@ -68,6 +69,7 @@ export function Devices() {
   return (
     <div className="credit">
       <h2>Devices</h2>
+      <DisplayLink />
       {outlets.length > 1 && (
         <label className="cust" style={{ marginBottom: 8 }}>
           <span>Which outlet is the device for?</span>
