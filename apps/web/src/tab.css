@@ -53,3 +53,11 @@
 .tbl-dlg .inline { display: flex; gap: 8px; align-items: center; }
 .tbl-dlg .chip { padding: 8px 14px; border-radius: 999px; border: 1px solid #ede4d6; background: #fff; }
 .tbl-dlg .chip.on { background: var(--orange, #ea7016); color: #fff; border-color: var(--orange, #ea7016); }
+.tab-coupon-off { opacity: .6; }
+/* A share points covered in full shows S$0.00 and its original amount in a framed pill (Spec 8.2), never a strikethrough. */
+.tab-pill { display: inline-block; margin-left: 8px; padding: 1px 10px; border-radius: 999px; background: #f5eedd; border: 1px solid #e7dcc4; color: #a2937a; font-size: 12.5px; font-weight: 600; }
+.tab-coupon-off { opacity: .6; }
+/* A share points covered in full shows S$0.00 and its original amount in a framed pill (Spec 8.2), never a strikethrough. */
+.tab-pill { display: inline-block; margin-left: 8px; padding: 1px 10px; border-radius: 999px; background: #f5eedd; border: 1px solid #e7dcc4; color: #a2937a; font-size: 12.5px; font-weight: 600; }
+
+.tab-chip.staff { background: #e6ecf7; border: 1px solid #b9c7e4; }

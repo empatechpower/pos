@@ -52,10 +52,13 @@ export interface PaymentAlloc {
   deposit: Cents;
   /** Value paid that is not tied to units (Equal, "reduce only", the part of a custom amount no unit could take). Negative when a unit payment used some. */
   credit: Cents;
+  /** This payment's part of the tab's coupon discount, taken off its liability (D3: shared pro-rata across the payers of the eligible items). */
+  discount?: Cents;
   units: ReadonlyArray<{ lineId: string; idx: number }>;
 }
 
-export const allocTotal = (a: PaymentAlloc): Cents => a.items + a.service + a.tax + a.deposit + a.credit;
+/** The LIABILITY a payment settles. Points a payer spends reduce their cash, never this: what the tab owes drops by the same amount either way. */
+export const allocTotal = (a: PaymentAlloc): Cents => a.items + a.service + a.tax + a.deposit + a.credit - (a.discount ?? 0);
 
 export interface TabBill {
   itemsCents: Cents;
@@ -66,18 +69,21 @@ export interface TabBill {
   totalCents: Cents;
   /** Tax already inside the prices: shown, never added. */
   taxIncludedCents: Cents;
+  /** The coupon discount taken off the whole bill (0 without a coupon). */
+  discountCents: Cents;
 }
 
 /** The whole tab, priced once on the whole bill. */
-export function tabBill(lines: readonly TabLineIn[], opts: TabOpts): TabBill {
+export function tabBill(lines: readonly TabLineIn[], opts: TabOpts, couponCents = 0): TabBill {
   const cfg = opts.pricing ?? DEFAULT_PRICING;
   const r = priceOrder({
     lines: lines.filter((l) => l.qty > 0).map((l) => ({ name: l.name, unitCents: l.unitCents, qty: l.qty, bcrs: l.bcrs ?? false, taxInclusive: l.taxInclusive, taxGroup: l.taxGroup })),
     fulfilment: "dine_in",
     serviceCharge: opts.serviceCharge,
+    coupon: couponCents > 0 ? { amountCents: couponCents, minSpendCents: 0 } : null,
     config: cfg,
   });
-  return { itemsCents: r.subtotal, serviceCents: r.service, taxCents: r.gst, depositCents: r.bcrs, totalCents: r.total, taxIncludedCents: r.taxIncluded };
+  return { itemsCents: r.subtotal, serviceCents: r.service, taxCents: r.gst, depositCents: r.bcrs, totalCents: r.total, taxIncludedCents: r.taxIncluded, discountCents: r.couponDiscount };
 }
 
 /** Split `total` into k parts to the cent: the odd cents go to the first parts. */
@@ -110,6 +116,8 @@ export interface TabState {
   /** Completed and reserved payments (a reserved one counts: that liability is spoken for). */
   payments: readonly PaymentAlloc[];
   opts: TabOpts;
+  /** Coupons applied to the tab (D3), in cents off the items. Set before the first payment. */
+  couponCents?: Cents;
 }
 
 export interface TabStanding {
@@ -123,15 +131,17 @@ export interface TabStanding {
   taxLeft: Cents;
   /** Value paid that no unit has absorbed yet. */
   creditLeft: Cents;
+  /** What is left of the coupon discount to share out. */
+  discountLeft: Cents;
 }
 
 export function tabStanding(s: TabState): TabStanding {
-  const bill = tabBill(s.lines, s.opts);
+  const bill = tabBill(s.lines, s.opts, s.couponCents ?? 0);
   const claimed = new Set(s.payments.flatMap((p) => p.units.map(key)));
   const unpaid = tabUnits(s.lines, s.opts).filter((u) => !claimed.has(key(u)));
   const sum = (f: (a: PaymentAlloc) => number) => s.payments.reduce((n, p) => n + f(p), 0);
   const paid = sum(allocTotal);
-  return { bill, paidCents: paid, remainingCents: Math.max(0, bill.totalCents - paid), unpaid, serviceLeft: bill.serviceCents - sum((a) => a.service), taxLeft: bill.taxCents - sum((a) => a.tax), creditLeft: sum((a) => a.credit) };
+  return { bill, paidCents: paid, remainingCents: Math.max(0, bill.totalCents - paid), unpaid, serviceLeft: bill.serviceCents - sum((a) => a.service), taxLeft: bill.taxCents - sum((a) => a.tax), creditLeft: sum((a) => a.credit), discountLeft: bill.discountCents - sum((a) => a.discount ?? 0) };
 }
 
 export interface TabQuote {
@@ -146,6 +156,12 @@ export interface TabQuote {
   depositCents: Cents;
   /** Value already paid by someone that reduces this share (negative amounts only appear on unit payments). */
   creditAppliedCents: Cents;
+  /** Their part of the tab's coupon discount. */
+  discountCents: Cents;
+  /** Points the payer spends against this share (1 point = 1 cent), and what is then left to pay in cash (amountCents). */
+  pointsUsed: number;
+  /** What this payment settles on the tab: the cash plus the points. */
+  liabilityCents: Cents;
 }
 
 /** Price a claim on specific units: their items and deposits plus their pro-rata part of the service and tax left, less their part of any unattributed credit. */
@@ -160,7 +176,8 @@ function quoteUnits(s: TabState, st: TabStanding, claim: readonly Unit[], mode: 
   const tax = shareProRata(Math.max(0, st.taxLeft), weights)[mine] ?? 0;
   const items = claim.reduce((n, u) => n + u.items, 0);
   const deposit = claim.reduce((n, u) => n + u.deposit, 0);
-  const gross = items + service + tax + deposit;
+  const discountShare = Math.min(items, Math.max(0, shareProRata(Math.max(0, st.discountLeft), weights)[mine] ?? 0));
+  const gross = items + service + tax + deposit - discountShare;
   // Value someone already paid without claiming units reduces everyone's share pro-rata, so the shares still add up to what remains.
   const pool = Math.max(0, st.creditLeft);
   const take = pool > 0 ? Math.min(gross, shareProRata(pool, weights)[mine] ?? 0) : 0;
@@ -171,8 +188,8 @@ function quoteUnits(s: TabState, st: TabStanding, claim: readonly Unit[], mode: 
     e.units += 1; e.items += u.items; e.deposit += u.deposit;
     byLine.set(u.lineId, e);
   }
-  const alloc: PaymentAlloc = { items, service, tax, deposit, credit: -take, units: claim.map((u) => ({ lineId: u.lineId, idx: u.idx })) };
-  return { mode, amountCents: gross - take, alloc, lines: [...byLine.values()], itemsCents: items, serviceCents: service, taxCents: tax, depositCents: deposit, creditAppliedCents: take };
+  const alloc: PaymentAlloc = { items, service, tax, deposit, credit: -take, discount: discountShare, units: claim.map((u) => ({ lineId: u.lineId, idx: u.idx })) };
+  return { mode, amountCents: gross - take, alloc, lines: [...byLine.values()], itemsCents: items, serviceCents: service, taxCents: tax, depositCents: deposit, creditAppliedCents: take, discountCents: discountShare, pointsUsed: 0, liabilityCents: gross - take };
 }
 
 /** "Pay mine": every unit I ordered, or my slice of a shared line. */
@@ -212,7 +229,7 @@ export function quoteEqual(s: TabState, payers: readonly string[], payerId: stri
   const mine = each + (payerId === host ? odd : 0) + (deposits[payerId] ?? 0);
   const amount = Math.min(mine, st.remainingCents);
   const alloc: PaymentAlloc = { items: 0, service: 0, tax: 0, deposit: 0, credit: amount, units: [] };
-  return { mode: "equal", amountCents: amount, alloc, lines: [], itemsCents: 0, serviceCents: 0, taxCents: 0, depositCents: deposits[payerId] ?? 0, creditAppliedCents: 0 };
+  return { mode: "equal", amountCents: amount, alloc, lines: [], itemsCents: 0, serviceCents: 0, taxCents: 0, depositCents: deposits[payerId] ?? 0, creditAppliedCents: 0, discountCents: 0, pointsUsed: 0, liabilityCents: amount };
 }
 
 /**
@@ -224,7 +241,7 @@ export function quoteCustom(s: TabState, amountCents: Cents, allocation: "oldest
   const amount = Math.min(Math.max(0, Math.floor(amountCents)), st.remainingCents);
   if (allocation === "reduce_only" || amount === 0) {
     const alloc: PaymentAlloc = { items: 0, service: 0, tax: 0, deposit: 0, credit: amount, units: [] };
-    return { mode: "custom", amountCents: amount, alloc, lines: [], itemsCents: 0, serviceCents: 0, taxCents: 0, depositCents: 0, creditAppliedCents: 0 };
+    return { mode: "custom", amountCents: amount, alloc, lines: [], itemsCents: 0, serviceCents: 0, taxCents: 0, depositCents: 0, creditAppliedCents: 0, discountCents: 0, pointsUsed: 0, liabilityCents: amount };
   }
   const claim: Unit[] = [];
   let best: TabQuote | null = null;
@@ -236,10 +253,10 @@ export function quoteCustom(s: TabState, amountCents: Cents, allocation: "oldest
   }
   if (!best) {
     const alloc: PaymentAlloc = { items: 0, service: 0, tax: 0, deposit: 0, credit: amount, units: [] };
-    return { mode: "custom", amountCents: amount, alloc, lines: [], itemsCents: 0, serviceCents: 0, taxCents: 0, depositCents: 0, creditAppliedCents: 0 };
+    return { mode: "custom", amountCents: amount, alloc, lines: [], itemsCents: 0, serviceCents: 0, taxCents: 0, depositCents: 0, creditAppliedCents: 0, discountCents: 0, pointsUsed: 0, liabilityCents: amount };
   }
   const left = amount - best.amountCents;
-  return { ...best, amountCents: amount, alloc: { ...best.alloc, credit: best.alloc.credit + left } };
+  return { ...best, amountCents: amount, liabilityCents: amount, alloc: { ...best.alloc, credit: best.alloc.credit + left } };
 }
 
 /** Where each line of the tab stands: how many units are paid, and how many are only reserved. */
@@ -249,4 +266,24 @@ export function lineStates(lines: readonly TabLineIn[], opts: TabOpts, paid: Rea
   for (const p of paid) if (out[p.lineId]) out[p.lineId]!.paid++;
   for (const p of reserved) if (out[p.lineId]) out[p.lineId]!.reserved++;
   return out;
+}
+
+/**
+ * Points a payer spends against THEIR OWN payment (Spec 12.7, 8.2): the deductible base is this payment's own items and the components the merchant allows
+ * (service, tax, deposit), less its part of any coupon, capped at their balance and at what is owed. One point is one cent; there is a minimum claim.
+ * Only the payer's cash falls: the tab's liability settled is the same, so nobody else's share moves, and no share can go below zero.
+ * `requested` null means "as many as possible". Without enough room for the minimum claim, no points are used.
+ */
+export function applyPoints(q: TabQuote, cfg: PricingConfig, balance: number, requested: number | null): TabQuote {
+  if (balance <= 0 || q.amountCents <= 0) return q;
+  const d = cfg.pointsDeduct;
+  const base = q.lines.length
+    ? q.itemsCents + (d.service ? q.serviceCents : 0) + (d.tax ? q.taxCents : 0) + (d.deposit ? q.depositCents : 0)
+    : q.amountCents - (d.deposit ? 0 : q.depositCents); // a value payment: its own amount, less any deposit points may not pay
+  const room = Math.min(q.amountCents, Math.max(0, base - q.discountCents));
+  const max = Math.max(0, Math.min(Math.floor(balance), room));
+  if (max <= 0) return q;
+  const used = requested == null ? max : Math.max(Math.min(cfg.minPointsRedeem, max), Math.min(Math.floor(requested), max));
+  if (used <= 0) return q;
+  return { ...q, pointsUsed: used, amountCents: q.amountCents - used, liabilityCents: q.amountCents };
 }

@@ -1,7 +1,8 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import QRCode from "qrcode";
-import { cleanNote, defaultSelection, formatMoney, hasBuilder, menuFor, priceRange, quoteOrder, readableOn, resolveOptions, type BusinessConfig, type Catalog, type ChosenOptionInput, type MenuEntry } from "@pos/core";
+import { cleanNote, defaultSelection, formatMoney, hasBuilder, menuFor, priceBuild, priceRange, quoteOrder, readableOn, resolveOptions, type BuildInput, type BusinessConfig, type Catalog, type ChosenOptionInput, type MenuEntry } from "@pos/core";
 import { OptionSheet } from "./OptionSheet";
+import { BuilderSheet } from "./BuilderSheet";
 import { RollMoney } from "./RollMoney";
 import { Icon, SwipeRow, categoryLabel, itemMatches, itemName, linkOutlet, photo, tint, useDialog, type BagLine, type Info, type OrderView } from "./Shop";
 import { applyUpdate, useUpdatePending } from "../pwaUpdate";
@@ -153,10 +154,9 @@ function KioskSession({ info, catalog, config }: { info: Info; catalog: Catalog;
 
   // ---- menu data
   const ctx = { outletId: info.outletId ?? info.outletName, channelId };
-  // Build-your-own items need the builder screen, which the kiosk does not have yet: they are left off its menu rather than offered and refused at payment.
-  const menu = useMemo(() => menuFor(catalog, ctx).filter((m) => !hasBuilder(m.builder)), [catalog, info.outletId, info.outletName, channelId]);
+  const menu = useMemo(() => menuFor(catalog, ctx), [catalog, info.outletId, info.outletName, channelId]);
   const byId = useMemo(() => new Map(menu.map((m) => [m.id, m])), [menu]);
-  const items = bag.map((l) => ({ productId: l.productId, qty: l.qty, options: l.selection, ...(l.note ? { note: l.note } : {}) }));
+  const items = bag.map((l) => ({ productId: l.productId, qty: l.qty, options: l.selection, ...(l.build ? { build: l.build } : {}), ...(l.note ? { note: l.note } : {}) }));
   // Points and a coupon, for a signed-in member (handover 4.2). The core applies them in the shop's order: the coupon off the items first,
   // points paid at the end, and usable points capped at items + service charge (never the deposit).
   const chosenCoupon = member?.coupons.find((c) => c.id === couponId) ?? null;
@@ -199,13 +199,27 @@ function KioskSession({ info, catalog, config }: { info: Info; catalog: Catalog;
       return have ? cur.map((l) => (l.key === key ? { ...l, qty: next } : l)) : [...cur, { key, productId: m.id, qty: next, selection, ...(note ? { note } : {}) }];
     });
   };
+  /** A build-your-own line: the same product with the same picks is one line; the server prices and checks the build again at payment. */
+  const addBuild = (m: MenuEntry, build: BuildInput, d = 1, rawNote = "") => {
+    if (!hasBuilder(m.builder) || !priceBuild(m.builder, build, m.priceCents).ok) return;
+    const note = cleanNote(rawNote);
+    const key = `${m.id}#b:${JSON.stringify(build)}${note ? `#${note}` : ""}`;
+    setBag((cur) => {
+      const have = cur.find((l) => l.key === key);
+      const qty = (have?.qty ?? 0) + d;
+      if (qty <= 0) return cur.filter((l) => l.key !== key);
+      const next = Math.min(20, qty);
+      return have ? cur.map((l) => (l.key === key ? { ...l, qty: next } : l)) : [...cur, { key, productId: m.id, qty: next, selection: [], build, ...(note ? { note } : {}) }];
+    });
+  };
   /** The item's plain line: the one added with its default choices and no note. */
   const plain = (m: MenuEntry) => {
     const r = resolveOptions(m.options, m.options?.length ? defaultSelection(m.options) : []);
     return r.ok ? bag.find((l) => l.key === `${m.id}#${r.key}`) : undefined;
   };
   const qtyOf = (m: MenuEntry) => bag.filter((l) => l.productId === m.id).reduce((n, l) => n + l.qty, 0);
-  const addQuick = (m: MenuEntry, d: number) => addLine(m, m.options?.length ? defaultSelection(m.options) : [], d);
+  // A build-your-own item cannot be added with defaults: it needs its screen.
+  const addQuick = (m: MenuEntry, d: number) => (hasBuilder(m.builder) ? setPicking(m) : addLine(m, m.options?.length ? defaultSelection(m.options) : [], d));
   /** The card's minus: takes one off the plain line; if the item is in the bag only with choices, it opens Review & pay instead of guessing. */
   const lessOf = (m: MenuEntry) => {
     const p = plain(m);
@@ -486,13 +500,13 @@ function KioskSession({ info, catalog, config }: { info: Info; catalog: Catalog;
               <SwipeRow key={l.key} label={tx("Remove")} onRemove={() => setBag((c) => c.filter((x) => x.key !== l.key))}>
                 <div className="k-line">
                   {photo(m) && <img src={photo(m)!} alt="" />}
-                  <div className="k-line-name" onClick={() => m.options?.length && setEditing(l)}>
+                  <div className="k-line-name" onClick={() => (m.options?.length || l.build) && setEditing(l)}>
                     <b>{itemName(m)}</b>
                     {pl?.bcrs ? <small>+{config.pricing.bcrsDepositCents}c BCRS {tx("Deposit per item")}</small> : null}
                     <small>{formatMoney(pl?.unitCents ?? m.priceCents)} {tx("each")}</small>
-                    {m.options?.length ? <small className="k-edit">{tx("Change")}</small> : null}
+                    {m.options?.length || l.build ? <small className="k-edit">{tx("Change")}</small> : null}
                   </div>
-                  <div className="k-step"><button aria-label="−" onClick={() => addLine(m, l.selection, -1, l.note)}>−</button><span>{l.qty}</span><button aria-label="+" onClick={() => addLine(m, l.selection, 1, l.note)}>+</button></div>
+                  <div className="k-step"><button aria-label="−" onClick={() => (l.build ? addBuild(m, l.build, -1, l.note) : addLine(m, l.selection, -1, l.note))}>−</button><span>{l.qty}</span><button aria-label="+" onClick={() => (l.build ? addBuild(m, l.build, 1, l.note) : addLine(m, l.selection, 1, l.note))}>+</button></div>
                   <span className="k-line-price"><RollMoney cents={(pl?.unitCents ?? m.priceCents) * l.qty} /></span>
                 </div>
               </SwipeRow>
@@ -598,11 +612,15 @@ function KioskSession({ info, catalog, config }: { info: Info; catalog: Catalog;
   return (
     <div className="kiosk shop" style={theme}>
       {body}
-      {picking && (
+      {picking && hasBuilder(picking.builder) && (
+        <BuilderSheet kiosk cta="Add to order" name={itemName(picking)} description={picking.description} photoUrl={photo(picking)} baseCents={picking.priceCents} spec={picking.builder} onClose={() => setPicking(null)} onAdd={(build, note) => { addBuild(picking, build, 1, note); setPicking(null); }} />
+      )}
+      {picking && !hasBuilder(picking.builder) && (
         <OptionSheet kiosk notes cta="Add to order" name={itemName(picking)} description={picking.description} photoUrl={photo(picking)} baseCents={picking.priceCents} groups={picking.options ?? []} onClose={() => setPicking(null)} onAdd={(sel, note, qty) => { addLine(picking, sel, qty, note); setPicking(null); }} />
       )}
       {editing && byId.get(editing.productId) && (() => {
         const em = byId.get(editing.productId)!;
+        if (editing.build && hasBuilder(em.builder)) return <BuilderSheet kiosk cta={tx("Save changes")} name={itemName(em)} description={em.description} photoUrl={photo(em)} baseCents={em.priceCents} spec={em.builder} initial={editing.build} initialNote={editing.note ?? ""} onClose={() => setEditing(null)} onAdd={(build, note) => { setBag((cur) => cur.filter((x) => x.key !== editing.key)); addBuild(em, build, editing.qty, note); setEditing(null); }} />;
         return <OptionSheet notes cta={tx("Save changes")} name={itemName(em)} description={em.description} photoUrl={photo(em)} baseCents={em.priceCents} groups={em.options ?? []} initial={editing.selection} initialNote={editing.note ?? ""} onClose={() => setEditing(null)} onAdd={(sel, note) => { setBag((cur) => cur.filter((x) => x.key !== editing.key)); addLine(em, sel, editing.qty, note); setEditing(null); }} />;
       })()}
       {soon && <div className="k-toast" role="status">{soon}</div>}

@@ -246,6 +246,15 @@ export class PrintStore {
     return made;
   }
 
+  /** Queue a ready-made document on every active receipt printer at an outlet (a tab payment's receipt). One job per printer per key, so it prints once. */
+  async enqueueDoc(outletId: string, doc: Doc, key: string, title: string): Promise<number> {
+    let made = 0;
+    for (const p of (await this.listPrinters()).filter((x) => x.active && x.outletId === outletId && x.roles.includes("receipt"))) {
+      if (await this.insertJob(this.db, p, "receipt", null, `${key}:${p.id}`, enc(p, doc), title)) made++;
+    }
+    return made;
+  }
+
   /** Print something again on request. Always a new job, never blocked by the original. */
   async reprint(order: OrderState, docType: "receipt" | "kitchen", ctx: EnqueueCtx, printerId?: string): Promise<number> {
     const printers = (await this.listPrinters()).filter((p) => p.active && p.roles.includes(docType) && (!printerId || p.id === printerId));

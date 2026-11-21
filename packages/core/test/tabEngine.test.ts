@@ -163,3 +163,64 @@ describe("totals always reconcile", () => {
     expect(payments.reduce((n, p) => n + allocTotal(p), 0)).toBe(tabBill(lines, opts).totalCents);
   });
 });
+
+import { applyPoints } from "../src/index.js";
+
+describe("a coupon on the tab (D3) and personal points (Spec 12.7)", () => {
+  const withCoupon = (payments: PaymentAlloc[] = []): TabState => ({ lines: seed, payments, opts, couponCents: 200 });
+
+  it("the coupon comes off the whole bill, once, and the shares still add up to the new total", () => {
+    const bill = tabBill(seed, opts, 200);
+    expect(bill.discountCents).toBe(200);
+    expect(bill.itemsCents).toBe(1750);
+    expect(bill.totalCents).toBeLessThan(1918);
+    const shares = ["alex", "sam", "guest"].map((p) => quoteMine(withCoupon(), p));
+    expect(shares.reduce((n, q) => n + q.amountCents, 0)).toBe(bill.totalCents);
+    expect(shares.reduce((n, q) => n + q.discountCents, 0)).toBe(200); // the benefit is shared across the payers, pro-rata
+    expect(shares[0]!.discountCents).toBeGreaterThan(shares[2]!.discountCents); // Alex's bigger share gets the bigger part
+  });
+
+  it("whoever pays first, the discount is shared out exactly and the tab settles to zero", () => {
+    for (const order of [["alex", "sam", "guest"], ["guest", "alex", "sam"]]) {
+      const payments: PaymentAlloc[] = [];
+      let total = 0, discount = 0;
+      for (const who of order) { const q = quoteMine(withCoupon(payments), who); payments.push(q.alloc); total += q.amountCents; discount += q.discountCents; }
+      expect(discount).toBe(200);
+      expect(total).toBe(tabBill(seed, opts, 200).totalCents);
+      expect(tabStanding(withCoupon(payments)).remainingCents).toBe(0);
+    }
+  });
+
+  it("points reduce only the payer's own cash, one point a cent, and what the tab owes drops by the same amount", () => {
+    const q = quoteMine(state(), "sam"); // S$4.58
+    const p = applyPoints(q, opts.pricing, 10_000, 100);
+    expect(p.pointsUsed).toBe(100);
+    expect(p.amountCents).toBe(q.amountCents - 100);
+    expect(p.liabilityCents).toBe(q.amountCents); // the tab is settled by the full S$4.58
+    // Sam spending points does not change what Alex or the Guest owe
+    const after = state(seed, [p.alloc]);
+    expect(quoteMine(after, "alex").amountCents).toBe(1177);
+    expect(quoteMine(after, "guest").amountCents).toBe(283);
+    expect(tabStanding(after).remainingCents).toBe(1918 - q.amountCents);
+  });
+
+  it("points never push a share below zero, are capped at the balance, need the minimum claim, and cannot pay the deposit by default", () => {
+    const g = quoteMine(state(), "guest"); // S$2.83 = 2.50 + 0.23 service + 0.10 deposit
+    const all = applyPoints(g, opts.pricing, 100_000, null);
+    expect(all.pointsUsed).toBe(250 + 23); // items and service, not the deposit (the default)
+    expect(all.amountCents).toBe(10); // only the deposit is left in cash
+    expect(applyPoints(g, opts.pricing, 150, null).pointsUsed).toBe(150); // capped at the balance
+    expect(applyPoints(g, opts.pricing, 150, 150).amountCents).toBe(g.amountCents - 150);
+    const withDeposit = applyPoints(g, { ...opts.pricing, pointsDeduct: { ...opts.pricing.pointsDeduct, deposit: true } }, 100_000, null);
+    expect(withDeposit.amountCents).toBe(0); // fully covered: the share is S$0.00
+    expect(withDeposit.liabilityCents).toBe(283);
+    expect(applyPoints(g, opts.pricing, 0, null)).toBe(g); // no points, no change
+  });
+
+  it("points and a coupon together: the points can only use what the coupon left", () => {
+    const q = quoteMine(withCoupon(), "alex");
+    const p = applyPoints(q, opts.pricing, 100_000, null);
+    expect(p.pointsUsed).toBeLessThanOrEqual(q.itemsCents + q.serviceCents - q.discountCents);
+    expect(p.amountCents).toBeGreaterThanOrEqual(0);
+  });
+});

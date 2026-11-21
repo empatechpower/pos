@@ -29,7 +29,7 @@ export interface Coupon {
 
 const toCoupon = (r: Record<string, any>): Coupon => ({ id: r.id, title: r.title, amountCents: Number(r.amount_cents), minSpendCents: Number(r.min_spend_cents), expiresAt: r.expires_at, usedOrderId: r.used_order_id });
 
-export type PointsKind = "welcome" | "earn" | "redeem" | "refund" | "adjust";
+export type PointsKind = "welcome" | "earn" | "redeem" | "refund" | "adjust" | "reversal";
 
 const toMember = (r: Record<string, any>): Member => ({ id: r.id, email: r.email, name: r.name, phone: r.phone, pointsBalance: Number(r.points_balance), prefs: { orderUpdates: r.pref_order_updates !== false, promos: r.pref_promos === true } });
 
@@ -327,6 +327,33 @@ export class MemberStore {
     }
   }
 
+  /**
+   * A compensating entry that takes back points an earlier entry gave (a refund after settlement). It posts IN FULL even if the points were already
+   * spent: the balance may go below zero and is offset by what the member earns next. Never blocked or reduced because the points are gone.
+   * One entry per key, so the same reversal twice is one.
+   */
+  async reverse(memberId: string, points: number, key: string, o: { note?: string; orderId?: string } = {}): Promise<{ balance: number; replayed: boolean } | null> {
+    if (!Number.isSafeInteger(points) || points <= 0) throw new Error("a reversal takes back a positive number of points");
+    const client = await this.db.connect();
+    try {
+      await client.query("BEGIN");
+      const m = await client.query("SELECT points_balance FROM members WHERE id=$1 AND merchant_id=$2 FOR UPDATE", [memberId, this.merchantId]);
+      if (!m.rows[0]) { await client.query("ROLLBACK"); return null; }
+      const dup = await client.query("SELECT balance_after FROM points_entries WHERE member_id=$1 AND idempotency_key=$2", [memberId, key]);
+      if (dup.rowCount) { await client.query("COMMIT"); return { balance: Number(dup.rows[0].balance_after), replayed: true }; }
+      const after = Number(m.rows[0].points_balance) - points;
+      await client.query("INSERT INTO points_entries (member_id, kind, points, balance_after, idempotency_key, order_id, note) VALUES ($1,'reversal',$2,$3,$4,$5,$6)", [memberId, -points, after, key, o.orderId ?? null, o.note ?? null]);
+      await client.query("UPDATE members SET points_balance=$2 WHERE id=$1", [memberId, after]);
+      await client.query("COMMIT");
+      return { balance: after, replayed: false };
+    } catch (e) {
+      await client.query("ROLLBACK").catch(() => undefined);
+      throw e;
+    } finally {
+      client.release();
+    }
+  }
+
   async history(memberId: string, limit = 50) {
     const r = await this.db.query("SELECT kind, points, balance_after, order_id, note, created_at FROM points_entries WHERE member_id=$1 ORDER BY created_at DESC, id DESC LIMIT $2", [memberId, Math.min(limit, 200)]);
     return r.rows.map((x) => ({ kind: x.kind as PointsKind, points: Number(x.points), balanceAfter: Number(x.balance_after), orderId: x.order_id as string | null, note: x.note as string | null, at: x.created_at as Date }));
@@ -401,6 +428,11 @@ export class MemberStore {
   async coupon(memberId: string, couponId: string): Promise<Coupon | null> {
     const r = await this.db.query("SELECT * FROM member_coupons WHERE id::text=$1 AND member_id=$2 AND merchant_id=$3 AND used_order_id IS NULL AND (expires_at IS NULL OR expires_at > now())", [couponId, memberId, this.merchantId]);
     return r.rows[0] ? toCoupon(r.rows[0]) : null;
+  }
+
+  /** A coupon applied to a tab and then taken off again is free to use again. */
+  async releaseCoupon(memberId: string, couponId: string, usedKey: string): Promise<void> {
+    await this.db.query("UPDATE member_coupons SET used_order_id=NULL WHERE id::text=$1 AND member_id=$2 AND merchant_id=$3 AND used_order_id=$4", [couponId, memberId, this.merchantId, usedKey]);
   }
 
   /** Spend a coupon on an order, atomically: two orders cannot use the same one. */

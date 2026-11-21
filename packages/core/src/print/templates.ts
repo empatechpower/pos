@@ -73,6 +73,66 @@ export function receipt(order: OrderState, config: BusinessConfig, ctx: PrintCon
   return { blocks: b };
 }
 
+/** What a tab payment's receipt shows. It reproduces the quote the payment was taken against, so quote, payment and receipt reconcile exactly. */
+export interface TabReceiptInput {
+  /** "Table 12", or null for a bar tab. */
+  spot: string | null;
+  code: string;
+  payer: string;
+  /** Set when the payer paid someone else's share. */
+  forName?: string | null;
+  /** Set only for a payment a staff member recorded (cash at the counter, a manual fallback). */
+  recordedBy?: string | null;
+  method: string;
+  reference?: string | null;
+  at: number;
+  lines: Array<{ name: string; units: number; items: number; deposit: number }>;
+  itemsCents: number;
+  discountCents: number;
+  serviceCents: number;
+  taxCents: number;
+  depositCents: number;
+  /** Value already paid toward the bill that reduced this share. */
+  creditAppliedCents: number;
+  pointsUsed: number;
+  /** The cash this payment took. */
+  amountCents: number;
+  tab: { totalCents: number; paidCents: number; remainingCents: number };
+}
+
+/**
+ * A receipt for one payment on a tab (Addendum 2.4, 5.1): the share's lines and components as quoted, who the item owner was, who actually paid, and who
+ * (if anyone) recorded it. The tab's own position follows, so the table can see what is left.
+ */
+export function tabPaymentReceipt(r: TabReceiptInput, ctx: PrintContext): Doc {
+  const b: Block[] = [
+    { t: "text", text: ctx.merchantName, align: "center", bold: true, size: 2 },
+    { t: "text", text: ctx.outletName, align: "center" },
+    { t: "rule" },
+    { t: "cols", left: r.spot ? `Tab ${r.spot}` : "Bar tab", right: r.code },
+    { t: "cols", left: "Paid by", right: r.payer },
+    ...(r.forName ? [{ t: "cols", left: "For", right: r.forName } as Block] : []),
+    { t: "text", text: stamp(r.at, ctx.timeZone) },
+    { t: "rule" },
+  ];
+  for (const l of r.lines) b.push({ t: "cols", left: `${l.units} x ${l.name}`, right: formatMoney(l.items) });
+  if (!r.lines.length) b.push({ t: "cols", left: "Toward the bill", right: formatMoney(r.amountCents + r.pointsUsed) });
+  else b.push({ t: "rule" }, { t: "cols", left: "Items", right: formatMoney(r.itemsCents) });
+  if (r.discountCents) b.push({ t: "cols", left: "Coupon (your part)", right: "-" + formatMoney(r.discountCents) });
+  if (r.serviceCents) b.push({ t: "cols", left: "Service charge", right: formatMoney(r.serviceCents) });
+  if (r.taxCents) b.push({ t: "cols", left: "GST", right: formatMoney(r.taxCents) });
+  if (r.depositCents) b.push({ t: "cols", left: "BCRS deposit", right: formatMoney(r.depositCents) });
+  if (r.creditAppliedCents) b.push({ t: "cols", left: "Already paid toward the bill", right: "-" + formatMoney(r.creditAppliedCents) });
+  if (r.pointsUsed) b.push({ t: "cols", left: `Points (${r.pointsUsed})`, right: "-" + formatMoney(r.pointsUsed) });
+  b.push({ t: "rule", ch: "=" }, { t: "cols", left: "PAID", right: formatMoney(r.amountCents), bold: true }, { t: "cols", left: METHOD[r.method] ?? (r.method === "counter" ? "At the counter" : r.method === "manual" ? "Manual payment" : r.method), right: "" });
+  if (r.reference) b.push({ t: "cols", left: "Reference", right: r.reference });
+  if (r.recordedBy) b.push({ t: "cols", left: "Recorded by", right: r.recordedBy });
+  b.push({ t: "rule" }, { t: "cols", left: "Tab total", right: formatMoney(r.tab.totalCents) }, { t: "cols", left: "Paid so far", right: formatMoney(r.tab.paidCents) }, { t: "cols", left: "Remaining", right: formatMoney(r.tab.remainingCents), bold: r.tab.remainingCents > 0 });
+  for (const f of ctx.footer ?? ["Thank you"]) b.push({ t: "text", text: f, align: "center" });
+  b.push({ t: "rule" }, { t: "text", text: printedAt(ctx.now, ctx.timeZone) }, { t: "feed", n: 3 }, { t: "cut" });
+  return { blocks: b };
+}
+
 /** Add `drawer` first so a cash sale opens the till as the receipt prints. */
 export const withDrawer = (doc: Doc): Doc => ({ blocks: [{ t: "drawer" }, ...doc.blocks] });
 

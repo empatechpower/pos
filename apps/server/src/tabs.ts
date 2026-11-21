@@ -1,15 +1,15 @@
 import { createHash, randomBytes, randomUUID } from "node:crypto";
 import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
 import {
-  allocTotal, lineStates, optionLines, orderTotals, quoteAll, quoteCustom, quoteEqual, quoteMine, quoteRound, reduceOrder, tabBill, tabStanding,
-  type BusinessConfig, type OrderEvent, type OrderState, type PaymentAlloc, type TabLineIn, type TabOpts, type TabQuote, type TabState,
+  allocTotal, applyPoints, formatMoney, lineStates, newId, optionLines, orderTotals, quoteAll, quoteOrder, quoteCustom, quoteEqual, quoteMine, quoteRound, reduceOrder, tabBill, tabStanding,
+  type BusinessConfig, type Catalog, type OrderEvent, type OrderState, type PaymentAlloc, type TabLineIn, type TabOpts, type TabQuote, type TabState,
 } from "@pos/core";
 import type pg from "pg";
 import type { Db } from "./db/pool.js";
 import type { Permission } from "./auth.js";
 import { audit } from "./auth.js";
 import type { Member, MemberStore } from "./members.js";
-import { creditBlockedFor, spend as spendCredit } from "./ledger.js";
+import { creditBlockedFor, refund as refundCreditLedger, spend as spendCredit } from "./ledger.js";
 import { FailureLimiter } from "./rateLimit.js";
 
 /**
@@ -33,14 +33,16 @@ export interface TabDeps {
   config: BusinessConfig;
   eventsForOrder: (orderId: string) => Promise<OrderEvent[]>;
   members?: MemberStore;
+  /** The catalogue, for items a staff member adds to a tab. */
+  loadCatalog?: () => Promise<Catalog>;
   /** Writes events (used to record the Tab's payment on its round orders when it settles). */
   ingest: (events: OrderEvent[], outletId?: string) => Promise<unknown>;
   now?: () => number;
 }
 
 interface TabRow { id: string; outlet_id: string; spot: string | null; code: string; status: "open" | "closed"; host_id: string | null; version: number; released_at: Date | null; bill_requested: boolean; waiter_paged: boolean; paged_kind: string | null; closed_at: Date | null; rewards_credited_at: Date | null }
-interface PersonRow { id: string; display_name: string; member_id: string | null; ord: number; left_at: Date | null; claimed_by: string | null }
-interface PayRow { id: string; payer_id: string; for_id: string | null; mode: string; method: string; amount_cents: number; status: string; host_keep: boolean; alloc: PaymentAlloc; staff_id: string | null; created_at: Date; completed_at: Date | null; note: string | null }
+interface PersonRow { is_staff?: boolean; id: string; display_name: string; member_id: string | null; ord: number; left_at: Date | null; claimed_by: string | null }
+interface PayRow { points_used?: number; id: string; payer_id: string; for_id: string | null; mode: string; method: string; amount_cents: number; status: string; host_keep: boolean; alloc: PaymentAlloc; staff_id: string | null; created_at: Date; completed_at: Date | null; note: string | null }
 
 export class TabError extends Error {
   constructor(readonly status: number, readonly body: Record<string, unknown>) { super(String(body.error ?? "tab_error")); }
@@ -60,10 +62,38 @@ export interface Snapshot {
   payableLines: TabLineIn[];
   opts: TabOpts;
   allocs: PaymentAlloc[];
+  /** Coupons applied to the tab (D3), in cents off the whole bill. */
+  coupons: Array<{ id: string; participantId: string; title: string; amountCents: number; minSpendCents: number }>;
+  couponCents: number;
 }
 
 export class TabService {
   constructor(private readonly d: TabDeps) {}
+
+  /** Called when a payment completes, to print its receipt. Set by the app; a failure here never fails the payment. */
+  onPaymentCompleted?: (paymentId: string) => Promise<void>;
+
+  /** Everything a payment's receipt shows: the quote it was taken against, who paid, who recorded it, and where the tab stands. */
+  async receiptData(paymentId: string): Promise<{ outletId: string; input: import("@pos/core").TabReceiptInput } | null> {
+    const p = (await this.d.db.query("SELECT * FROM tab_payments WHERE id=$1", [paymentId])).rows[0];
+    if (!p) return null;
+    const s = await this.snapshot(p.tab_id as string);
+    const name = (id: string | null) => s.people.find((x) => x.id === id)?.display_name ?? "";
+    const q = ((await this.d.db.query("SELECT breakdown FROM tab_quotes WHERE id=$1", [p.quote_id])).rows[0]?.breakdown ?? null) as TabQuote | null;
+    const staff = p.staff_id ? ((await this.d.db.query("SELECT name FROM staff WHERE id=$1", [p.staff_id])).rows[0]?.name as string | undefined) ?? null : null;
+    const whole = tabBill(s.lines, s.opts, s.couponCents);
+    const paid = s.payments.filter((x) => x.status === "completed").reduce((n, x) => n + allocTotal(x.alloc), 0);
+    return {
+      outletId: s.tab.outlet_id,
+      input: {
+        spot: s.tab.spot, code: s.tab.code, payer: name(p.payer_id), forName: p.for_id ? name(p.for_id) : null, recordedBy: staff, method: p.method, reference: p.manual_ref ?? p.provider_ref ?? null,
+        at: new Date(p.completed_at ?? p.created_at).getTime(),
+        lines: q?.lines ?? [], itemsCents: q?.itemsCents ?? 0, discountCents: q?.discountCents ?? 0, serviceCents: q?.serviceCents ?? 0, taxCents: q?.taxCents ?? 0, depositCents: q?.depositCents ?? 0,
+        creditAppliedCents: q?.creditAppliedCents ?? 0, pointsUsed: p.points_used ?? 0, amountCents: p.amount_cents,
+        tab: { totalCents: whole.totalCents, paidCents: Math.min(paid, whole.totalCents), remainingCents: Math.max(0, whole.totalCents - paid) },
+      },
+    };
+  }
   private now() { return (this.d.now ?? Date.now)(); }
   private get m() { return this.d.merchantId; }
 
@@ -171,9 +201,9 @@ export class TabService {
   async snapshot(tabId: string, q: Pick<pg.Pool, "query"> = this.d.db): Promise<Snapshot> {
     const tab = (await q.query("SELECT * FROM tabs WHERE id=$1 AND merchant_id=$2", [tabId, this.m])).rows[0] as TabRow | undefined;
     if (!tab) return fail(404, "tab_not_found");
-    const people = (await q.query("SELECT id, display_name, member_id, ord, left_at, claimed_by FROM tab_participants WHERE tab_id=$1 ORDER BY ord", [tabId])).rows as PersonRow[];
+    const people = (await q.query("SELECT id, display_name, member_id, ord, left_at, claimed_by, is_staff FROM tab_participants WHERE tab_id=$1 ORDER BY ord", [tabId])).rows as PersonRow[];
     const roundRows = (await q.query("SELECT order_id, round_no, participant_id, created_at FROM tab_rounds WHERE tab_id=$1 ORDER BY round_no", [tabId])).rows;
-    const payments = (await q.query("SELECT id, payer_id, for_id, mode, method, amount_cents, status, host_keep, alloc, staff_id, created_at, completed_at, note FROM tab_payments WHERE tab_id=$1 ORDER BY created_at", [tabId])).rows as PayRow[];
+    const payments = (await q.query("SELECT id, payer_id, for_id, mode, method, amount_cents, points_used, status, host_keep, alloc, staff_id, created_at, completed_at, note FROM tab_payments WHERE tab_id=$1 ORDER BY created_at", [tabId])).rows as PayRow[];
     const claims = (await q.query("SELECT line_id, idx, payment_id FROM tab_claims WHERE tab_id=$1", [tabId])).rows.map((x) => ({ lineId: x.line_id as string, idx: x.idx as number, paymentId: x.payment_id as string }));
     const shares = new Map<string, string[]>();
     for (const s of (await q.query("SELECT line_id, participant_id FROM tab_line_shares WHERE tab_id=$1 ORDER BY ord", [tabId])).rows) shares.set(s.line_id, [...(shares.get(s.line_id) ?? []), s.participant_id]);
@@ -190,25 +220,27 @@ export class TabService {
     const first = rounds.find((r) => r.order);
     const opts: TabOpts = { serviceCharge: first?.order?.serviceCharge !== false, pricing: this.d.config.pricing };
     const counted = payments.filter((p) => p.status === "reserved" || p.status === "completed" || p.status === "unknown");
-    return { tab, people, rounds, payments, claims, shares, lines: toLines(rounds), payableLines: toLines(rounds.filter((r) => !r.locked)), opts, allocs: counted.map((p) => p.alloc) };
+    const coupons = (await q.query("SELECT id, participant_id, title, amount_cents, min_spend_cents FROM tab_coupons WHERE tab_id=$1 AND removed_at IS NULL ORDER BY applied_at", [tabId])).rows.map((c) => ({ id: c.id as string, participantId: c.participant_id as string, title: c.title as string, amountCents: c.amount_cents as number, minSpendCents: c.min_spend_cents as number }));
+    return { tab, people, rounds, payments, claims, shares, lines: toLines(rounds), payableLines: toLines(rounds.filter((r) => !r.locked)), opts, allocs: counted.map((p) => p.alloc), coupons, couponCents: coupons.reduce((n, c) => n + c.amountCents, 0) };
   }
 
-  private state(s: Snapshot): TabState { return { lines: s.payableLines, payments: s.allocs, opts: s.opts }; }
+  private state(s: Snapshot): TabState { return { lines: s.payableLines, payments: s.allocs, opts: s.opts, couponCents: s.couponCents }; }
 
   /** Who stands in as Host: the Host, or if they have left, the earliest-joined person still here. */
   private effectiveHost(s: Snapshot): string {
     const host = s.people.find((p) => p.id === s.tab.host_id);
     if (host && !host.left_at) return host.id;
-    return (s.people.find((p) => !p.left_at) ?? s.people[0])?.id ?? "";
+    return (s.people.find((p) => !p.left_at && !p.is_staff) ?? s.people.find((p) => !p.is_staff))?.id ?? "";
   }
 
   /** What a person sees: the whole tab, who ordered and paid what, their own share, and what is locked. */
-  async view(tabId: string, viewerId: string): Promise<Record<string, unknown>> {
+  async view(tabId: string, viewerId: string, member: Member | null = null): Promise<Record<string, unknown>> {
     const s = await this.snapshot(tabId);
     const name = (id: string | null) => s.people.find((p) => p.id === id)?.display_name ?? null;
-    const whole = tabBill(s.lines, s.opts);
+    const whole = tabBill(s.lines, s.opts, s.couponCents);
     const counted = s.payments.filter((p) => p.status === "reserved" || p.status === "completed" || p.status === "unknown");
-    const paid = counted.reduce((n, p) => n + p.amount_cents, 0);
+    // What the tab has settled is the liability of its payments (cash plus the points payers spent), not just the cash.
+    const paid = counted.reduce((n, p) => n + allocTotal(p.alloc), 0);
     const remaining = Math.max(0, whole.totalCents - paid);
     const payById = new Map(s.payments.map((p) => [p.id, p]));
     const claimPay = new Map(s.claims.map((c) => [`${c.lineId}#${c.idx}`, payById.get(c.paymentId)]));
@@ -223,8 +255,8 @@ export class TabService {
     return {
       id: s.tab.id, spot: s.tab.spot, code: s.tab.code, outletId: s.tab.outlet_id, status: s.tab.status, version: s.tab.version,
       host: { id: this.effectiveHost(s), name: name(this.effectiveHost(s)) },
-      people: s.people.map((p) => ({ id: p.id, name: p.display_name, isHost: p.id === this.effectiveHost(s), isMe: p.id === viewerId, left: !!p.left_at, member: !!p.member_id })),
-      totals: { totalCents: whole.totalCents, paidCents: Math.min(paid, whole.totalCents), remainingCents: remaining, itemsCents: whole.itemsCents, serviceCents: whole.serviceCents, taxCents: whole.taxCents, depositCents: whole.depositCents, taxIncludedCents: whole.taxIncludedCents },
+      people: s.people.filter((p) => !p.is_staff).map((p) => ({ id: p.id, name: p.display_name, isHost: p.id === this.effectiveHost(s), isMe: p.id === viewerId, left: !!p.left_at, member: !!p.member_id })),
+      totals: { totalCents: whole.totalCents, paidCents: Math.min(paid, whole.totalCents), remainingCents: remaining, itemsCents: whole.itemsCents, discountCents: whole.discountCents, serviceCents: whole.serviceCents, taxCents: whole.taxCents, depositCents: whole.depositCents, taxIncludedCents: whole.taxIncludedCents },
       // The pay area is locked until the waiter releases it; a round ordered after a release starts locked again.
       paymentLocked: !anyPayable && s.rounds.some((r) => r.order && r.order.stage !== "cancelled"),
       lockNote: LOCK_NOTE,
@@ -232,6 +264,7 @@ export class TabService {
       rounds: s.rounds.filter((r) => r.order).map((r) => ({
         round: r.roundNo, orderId: r.orderId, orderedBy: { id: r.participantId, name: name(r.participantId) }, at: r.createdAt, locked: r.locked,
         kitchen: r.order!.stage === "cancelled" ? "Cancelled" : r.order!.stage === "ready" || r.order!.stage === "completed" ? "Served" : r.order!.stage === "preparing" ? "Preparing" : r.order!.acceptedAt ? "Sent to the kitchen" : "Waiting for the waiter",
+        staffAdded: s.people.find((p) => p.id === r.participantId)?.is_staff === true,
         lines: r.order!.lines.filter((l) => l.qty > 0).map((l) => {
           const total = states[l.lineId]?.total ?? l.qty;
           const owners = (s.shares.get(l.lineId) ?? []).map((id) => ({ id, name: name(id) }));
@@ -244,9 +277,11 @@ export class TabService {
           return { lineId: l.lineId, productId: l.productId, name: l.name, qty: l.qty, unitCents: l.unitCents, options: optionLines(l.options), deposit: !!l.bcrs, owner: { id: r.participantId, name: name(r.participantId) }, sharedWith: owners, units: total, paidUnits, reservedUnits, paidBy: [...paidBy] };
         }),
       })),
-      payments: s.payments.filter((p) => p.status !== "cancelled" && p.status !== "rejected").map((p) => ({ id: p.id, payer: { id: p.payer_id, name: name(p.payer_id) }, for: p.for_id ? { id: p.for_id, name: name(p.for_id) } : null, amountCents: p.amount_cents, status: p.status, method: p.method, mode: p.mode, staffRecorded: !!p.staff_id, hostKeep: p.host_keep, at: p.completed_at ?? p.created_at })),
+      payments: s.payments.filter((p) => p.status !== "cancelled" && p.status !== "rejected").map((p) => ({ id: p.id, payer: { id: p.payer_id, name: name(p.payer_id) }, for: p.for_id ? { id: p.for_id, name: name(p.for_id) } : null, amountCents: p.amount_cents, pointsUsed: p.points_used ?? 0, status: p.status, method: p.method, mode: p.mode, staffRecorded: !!p.staff_id, hostKeep: p.host_keep, at: p.completed_at ?? p.created_at })),
       billRequested: s.tab.bill_requested, waiterPaged: s.tab.waiter_paged, pagedKind: s.tab.paged_kind,
-      me: me ? { id: me.id, name: me.display_name, memberId: me.member_id, owesCents: owes, paidCents: myPaid, pendingPoints: remaining > 0 ? Math.floor((myPaid / 100) * rate) : 0 } : null,
+      coupons: s.coupons.map((c) => ({ id: c.id, title: c.title, amountCents: c.amountCents, minSpendCents: c.minSpendCents, owner: { id: c.participantId, name: name(c.participantId) }, mine: c.participantId === viewerId })),
+      couponOptions: await this.couponOptions(s, me, member),
+      me: me ? { id: me.id, name: me.display_name, memberId: me.member_id, owesCents: owes, paidCents: myPaid, pendingPoints: remaining > 0 ? Math.floor((myPaid / 100) * rate) : 0, pointsBalance: member && me.member_id === member.id ? member.pointsBalance : null } : null,
       closed: s.tab.status === "closed",
       pendingRewardsNote: remaining > 0 && rate > 0 ? "These points become available when the whole table bill is paid." : null,
       customAllocation: (await this.outletSettings(s.tab.outlet_id)).allocation,
@@ -326,8 +361,8 @@ export class TabService {
       }
       case "all": return quoteAll(st);
       case "equal": {
-        const n = Math.max(1, Math.min(30, Math.floor(p.people ?? 0) || s.people.filter((x) => !x.left_at).length));
-        const here = s.people.filter((x) => !x.left_at && x.id !== requester).map((x) => x.id);
+        const n = Math.max(1, Math.min(30, Math.floor(p.people ?? 0) || s.people.filter((x) => !x.left_at && !x.is_staff).length));
+        const here = s.people.filter((x) => !x.left_at && !x.is_staff && x.id !== requester).map((x) => x.id);
         const payers = [requester, ...here.slice(0, n - 1)];
         for (let i = payers.length; i < n; i++) payers.push(`seat-${i + 1}`); // a seat for someone not on the tab
         return quoteEqual(st, payers, requester, host);
@@ -341,13 +376,13 @@ export class TabService {
   }
 
   /** Issue a frozen quote: the maths as it stands now, with the tab's version, to be paid against or rejected. */
-  async quote(tabId: string, requester: string, p: QuoteParams): Promise<Record<string, unknown>> {
+  async quote(tabId: string, requester: string, p: QuoteParams, member: Member | null = null): Promise<Record<string, unknown>> {
     const s = await this.snapshot(tabId);
     if (s.tab.status !== "open") fail(409, "tab_closed");
     const allocation = (await this.outletSettings(s.tab.outlet_id)).allocation;
     const params = { ...p, allocation };
-    const q = this.quoteFor(s, requester, params);
-    if (q.amountCents <= 0) fail(409, "nothing_to_pay_for_this");
+    const q = this.withPoints(this.quoteFor(s, requester, params), params, member, s.couponCents);
+    if (q.liabilityCents <= 0) fail(409, "nothing_to_pay_for_this");
     const row = (await this.d.db.query(
       "INSERT INTO tab_quotes (tab_id, participant_id, version, mode, params, amount_cents, breakdown, expires_at) VALUES ($1,$2,$3,$4,$5::jsonb,$6,$7::jsonb, now() + make_interval(mins => $8)) RETURNING id, issued_at, expires_at",
       [tabId, requester, s.tab.version, p.mode, JSON.stringify(params), q.amountCents, JSON.stringify(q), QUOTE_MINUTES],
@@ -360,6 +395,7 @@ export class TabService {
       quoteId: id, version, mode: q.mode, amountCents: q.amountCents, issuedAt, expiresAt,
       // The maths in the standard Bag format: what is being paid for, then the components.
       lines: q.lines, itemsCents: q.itemsCents, serviceCents: q.serviceCents, taxCents: q.taxCents, depositCents: q.depositCents, creditAppliedCents: q.creditAppliedCents,
+      discountCents: q.discountCents, pointsUsed: q.pointsUsed, liabilityCents: q.liabilityCents,
       tabTotalCents: tot.totalCents,
     };
   }
@@ -394,25 +430,25 @@ export class TabService {
       const s = await this.snapshot(o.tabId, client);
       if (s.tab.status !== "open") fail(409, "tab_closed");
       const params = qrow.params as QuoteParams & { allocation?: "oldest_first" | "reduce_only" };
-      const fresh = this.quoteFor(s, qrow.participant_id as string, params);
+      const fresh = this.withPoints(this.quoteFor(s, qrow.participant_id as string, params), params, o.member ?? null, s.couponCents);
       const frozen = qrow.breakdown as TabQuote;
       const expired = new Date(qrow.expires_at).getTime() < this.now();
-      const same = fresh.amountCents === frozen.amountCents && sameAlloc(fresh.alloc, frozen.alloc);
+      const same = fresh.amountCents === frozen.amountCents && (fresh.pointsUsed ?? 0) === (frozen.pointsUsed ?? 0) && sameAlloc(fresh.alloc, frozen.alloc);
       if (expired || !same) {
         // The tab moved on: a new quote is issued, visibly. A changed price is never charged under a stale quote.
         await client.query("ROLLBACK");
-        const newQuote = fresh.amountCents > 0 ? await this.quote(o.tabId, qrow.participant_id as string, params) : null;
+        const newQuote = fresh.liabilityCents > 0 ? await this.quote(o.tabId, qrow.participant_id as string, params, o.member ?? null) : null;
         return fail(409, expired ? "quote_expired" : "quote_changed", { quote: newQuote });
       }
       // One payment in flight per party.
       const party = params.mode === "mine" ? (params.forParticipantId ?? qrow.participant_id) : qrow.participant_id;
       const busy = (await client.query("SELECT 1 FROM tab_payments WHERE tab_id=$1 AND status IN ('reserved','unknown') AND COALESCE(for_id, payer_id)=$2", [o.tabId, party])).rowCount;
       if (busy) fail(409, "payment_in_flight", { message: "A payment for this share is already in progress." });
-      if (frozen.amountCents > Math.max(0, tabStanding(this.state(s)).remainingCents)) fail(409, "would_overpay");
+      if (frozen.liabilityCents > Math.max(0, tabStanding(this.state(s)).remainingCents)) fail(409, "would_overpay");
       const id = randomUUID();
       await client.query(
-        "INSERT INTO tab_payments (id, tab_id, payer_id, for_id, mode, method, amount_cents, status, quote_id, idem_key, host_keep, alloc, staff_id, history) VALUES ($1,$2,$3,$4,$5,$6,$7,'reserved',$8,$9,$10,$11::jsonb,$12,$13::jsonb)",
-        [id, o.tabId, o.payerId, params.mode === "mine" && params.forParticipantId && params.forParticipantId !== o.payerId ? params.forParticipantId : null, params.mode, o.method, frozen.amountCents, o.quoteId, o.idempotencyKey, !!o.hostKeep, JSON.stringify(frozen.alloc), o.asStaff ? (o.staffId ?? null) : null, JSON.stringify([{ at: new Date(this.now()).toISOString(), status: "reserved" }])],
+        "INSERT INTO tab_payments (id, tab_id, payer_id, for_id, mode, method, amount_cents, status, quote_id, idem_key, host_keep, alloc, staff_id, history, points_used) VALUES ($1,$2,$3,$4,$5,$6,$7,'reserved',$8,$9,$10,$11::jsonb,$12,$13::jsonb,$14)",
+        [id, o.tabId, o.payerId, params.mode === "mine" && params.forParticipantId && params.forParticipantId !== o.payerId ? params.forParticipantId : null, params.mode, o.method, frozen.amountCents, o.quoteId, o.idempotencyKey, !!o.hostKeep, JSON.stringify(frozen.alloc), o.asStaff ? (o.staffId ?? null) : null, JSON.stringify([{ at: new Date(this.now()).toISOString(), status: "reserved" }]), frozen.pointsUsed ?? 0],
       );
       try {
         for (const u of frozen.alloc.units) await client.query("INSERT INTO tab_claims (tab_id, line_id, idx, payment_id) VALUES ($1,$2,$3,$4)", [o.tabId, u.lineId, u.idx, id]);
@@ -423,7 +459,7 @@ export class TabService {
       await client.query("UPDATE tab_quotes SET used=true WHERE id=$1", [o.quoteId]);
       await client.query("UPDATE tabs SET version = version + 1 WHERE id=$1", [o.tabId]);
       await client.query("COMMIT");
-      result = { paymentId: id, status: "reserved", amountCents: frozen.amountCents, method: o.method };
+      result = { paymentId: id, status: "reserved", amountCents: frozen.amountCents, pointsUsed: frozen.pointsUsed ?? 0, method: o.method };
     } catch (e) {
       await client.query("ROLLBACK").catch(() => undefined);
       throw e;
@@ -431,6 +467,13 @@ export class TabService {
       client.release();
     }
     const paymentId = result.paymentId as string;
+    // The payer's own points are spent now, atomically with the reservation; if they are not there any more the reservation is released.
+    const pts = (result.pointsUsed as number) ?? 0;
+    if (pts > 0) {
+      const posted = o.member && this.d.members ? await this.d.members.post(o.member.id, "redeem", -pts, `tab-redeem:${paymentId}`, { note: "Tab payment" }) : null;
+      if (!posted) { await this.release(paymentId, "rejected", "not enough points"); return fail(409, "not_enough_points"); }
+    }
+    if ((result.amountCents as number) === 0) { await this.complete(paymentId); result.status = "completed"; return result; } // the points covered the whole share
     if (o.method === "credit") {
       if (!o.member) { await this.release(paymentId, "rejected", "a member must be signed in to pay with credit"); return fail(401, "sign_in_to_use_credit"); }
       // Frozen credit cannot be spent on a tab either.
@@ -455,6 +498,7 @@ export class TabService {
     if (!r) return;
     await this.d.db.query("UPDATE tabs SET version = version + 1 WHERE id=$1", [r.tab_id]);
     await this.settleIfPaid(r.tab_id as string);
+    void this.onPaymentCompleted?.(paymentId).catch(() => undefined);
   }
 
   /** Cancel before completion, or a terminal rejection: the units and the amount are free again. A completed payment can never be released. */
@@ -472,6 +516,7 @@ export class TabService {
       await client.query("DELETE FROM tab_claims WHERE payment_id=$1", [paymentId]);
       await client.query("UPDATE tabs SET version = version + 1 WHERE id=$1", [p.tab_id]);
       await client.query("COMMIT");
+      await this.refundPoints(paymentId);
       return true;
     } catch (e) {
       await client.query("ROLLBACK").catch(() => undefined);
@@ -492,8 +537,8 @@ export class TabService {
   async settleIfPaid(tabId: string): Promise<boolean> {
     const s = await this.snapshot(tabId);
     if (s.tab.status !== "open" || !s.rounds.length) return false;
-    const whole = tabBill(s.lines, s.opts);
-    const paid = s.payments.filter((p) => p.status === "completed").reduce((n, p) => n + p.amount_cents, 0);
+    const whole = tabBill(s.lines, s.opts, s.couponCents);
+    const paid = s.payments.filter((p) => p.status === "completed").reduce((n, p) => n + allocTotal(p.alloc), 0);
     const outstanding = s.payments.some((p) => p.status === "reserved" || p.status === "unknown");
     if (whole.totalCents <= 0 || paid < whole.totalCents || outstanding) return false;
     const closed = (await this.d.db.query("UPDATE tabs SET status='closed', closed_at=now(), version=version+1 WHERE id=$1 AND status='open' RETURNING id", [tabId])).rows[0];
@@ -517,6 +562,16 @@ export class TabService {
     const points = new Map<string, number>();
     if (cfg.pointsEnabled) for (const p of done) { const to = p.host_keep ? host : p.payer_id; points.set(to, (points.get(to) ?? 0) + Math.floor((p.amount_cents / 100) * cfg.earnPointsPerDollar)); }
     const note = `Tab rewards · ${s.tab.spot ?? "bar tab"}`;
+    // Remember what each payment earned and who received it, so a refund after settlement can reverse exactly that (6.5).
+    if (cfg.pointsEnabled) {
+      for (const p of done) {
+        const earned = Math.floor((p.amount_cents / 100) * cfg.earnPointsPerDollar);
+        if (earned <= 0) continue;
+        const to = p.host_keep ? host : p.payer_id;
+        const who = s.people.find((x) => x.id === to);
+        await this.d.db.query("INSERT INTO tab_reward_credits (tab_id, payment_id, beneficiary_id, member_id, points) VALUES ($1,$2,$3,$4,$5)", [s.tab.id, p.id, to, who?.member_id ?? who?.claimed_by ?? null, earned]);
+      }
+    }
     for (const [pid, pts] of points) {
       if (pts <= 0) continue;
       const who = s.people.find((x) => x.id === pid);
@@ -566,6 +621,284 @@ export class TabService {
     await this.d.db.query("UPDATE tabs SET waiter_paged=false, paged_kind=NULL, bill_requested=false, version=version+1 WHERE id=$1 AND merchant_id=$2", [tabId, this.m]);
   }
 
+  // ---- points and coupons ---------------------------------------------------------------
+
+  private withPoints(q: TabQuote, p: QuoteParams, member: Member | null, couponCents = 0): TabQuote {
+    if (!p.usePoints || !member || !this.d.config.rewards.pointsEnabled) return q;
+    // Promotions that are not stackable: the coupon is kept and the points are not offered (Spec 8.2).
+    if (couponCents > 0 && !this.d.config.pricing.stackable) return q;
+    const requested = p.usePoints === "max" ? null : Math.floor(Number(p.usePoints));
+    if (requested !== null && (!Number.isFinite(requested) || requested < 1)) return q;
+    return applyPoints(q, this.d.config.pricing, member.pointsBalance, requested);
+  }
+
+  /** A payment that is cancelled or rejected gives the points back, once (only if they were actually spent). */
+  private async refundPoints(paymentId: string): Promise<void> {
+    if (!this.d.members) return;
+    const p = (await this.d.db.query("SELECT t.points_used, pp.member_id FROM tab_payments t JOIN tab_participants pp ON pp.id=t.payer_id WHERE t.id=$1", [paymentId])).rows[0];
+    if (!p || !(p.points_used > 0) || !p.member_id) return;
+    const spent = (await this.d.db.query("SELECT 1 FROM points_entries WHERE member_id=$1 AND idempotency_key=$2", [p.member_id, `tab-redeem:${paymentId}`])).rowCount;
+    if (spent) await this.d.members.post(p.member_id as string, "refund", Number(p.points_used), `tab-refund:${paymentId}`, { note: "Tab payment not completed" });
+  }
+
+  /** The wallet coupons this viewer could apply, each with why not, in the words the spec asks for (items only, before service charge, tax and deposits). */
+  private async couponOptions(s: Snapshot, me: PersonRow | undefined, member: Member | null): Promise<Array<Record<string, unknown>>> {
+    if (!me || !member || me.member_id !== member.id || !this.d.members || s.tab.status !== "open") return [];
+    const items = tabBill(s.lines, s.opts).itemsCents;
+    const started = s.payments.some((p) => ["reserved", "completed", "unknown"].includes(p.status));
+    const taken = s.coupons.length > 0 && !this.d.config.pricing.stackable;
+    return (await this.d.members.coupons(member.id)).map((c) => {
+      const short = Math.max(0, c.minSpendCents - items);
+      const reason = started ? "Coupons can only be added before anyone has paid." : taken ? "A coupon is already applied to this tab." : short > 0 ? `Min. spend ${formatMoney(c.minSpendCents)} on items only, before service charge and any tax, deposits excluded. Add ${formatMoney(short)} more in items.` : null;
+      return { id: c.id, title: c.title, amountCents: c.amountCents, minSpendCents: c.minSpendCents, shortfallCents: short, eligible: !reason, reason };
+    });
+  }
+
+  /**
+   * Any person on the tab can apply their own coupon to the shared bill (D3). Its benefit is shared pro-rata across the payers. The minimum spend is
+   * on the whole tab's ITEMS. Before the first payment only. With stackable promotions off, the first coupon holds the slot until its owner removes it.
+   */
+  async applyCoupon(tabId: string, person: PersonRow, member: Member, couponId: string): Promise<void> {
+    if (!this.d.members) return fail(400, "no_members");
+    if (person.member_id !== member.id) return fail(403, "not_your_tab_identity");
+    const client = await this.d.db.connect();
+    try {
+      await client.query("BEGIN");
+      await client.query("SELECT pg_advisory_xact_lock(hashtext($1))", [`tab/${tabId}`]);
+      const s = await this.snapshot(tabId, client);
+      if (s.tab.status !== "open") fail(409, "tab_closed");
+      if (s.payments.some((p) => ["reserved", "completed", "unknown"].includes(p.status))) fail(409, "coupon_too_late", { message: "Coupons can only be added before anyone has paid." });
+      if (s.coupons.length > 0 && !this.d.config.pricing.stackable) fail(409, "coupon_slot_taken", { message: "A coupon is already applied to this tab." });
+      const c = await this.d.members.coupon(member.id, couponId);
+      if (!c) fail(404, "coupon_not_available");
+      const items = tabBill(s.lines, s.opts).itemsCents;
+      if (items < c!.minSpendCents) fail(400, "coupon_not_eligible", { minSpendCents: c!.minSpendCents, shortfallCents: c!.minSpendCents - items, basis: "items subtotal before service charge, tax and deposits" });
+      if (!(await this.d.members.useCoupon(member.id, c!.id, `tab:${tabId}`))) fail(409, "coupon_not_available");
+      await client.query("INSERT INTO tab_coupons (tab_id, participant_id, member_id, member_coupon_id, title, amount_cents, min_spend_cents) VALUES ($1,$2,$3,$4,$5,$6,$7)", [tabId, person.id, member.id, c!.id, c!.title, c!.amountCents, c!.minSpendCents]);
+      await client.query("UPDATE tabs SET version = version + 1 WHERE id=$1", [tabId]);
+      await client.query("COMMIT");
+    } catch (e) {
+      await client.query("ROLLBACK").catch(() => undefined);
+      throw e;
+    } finally {
+      client.release();
+    }
+  }
+
+  /** Only the owner takes their coupon off, and only before anyone has paid; it is then theirs to use again. */
+  async removeCoupon(tabId: string, person: PersonRow, tabCouponId: string): Promise<void> {
+    const s = await this.snapshot(tabId);
+    const c = s.coupons.find((x) => x.id === tabCouponId);
+    if (!c) return fail(404, "coupon_not_found");
+    if (c.participantId !== person.id) return fail(403, "only_the_owner_can_remove_it");
+    if (s.payments.some((p) => ["reserved", "completed", "unknown"].includes(p.status))) fail(409, "coupon_too_late", { message: "A coupon cannot come off once someone has paid." });
+    await this.dropCoupon(tabId, tabCouponId);
+  }
+
+  private async dropCoupon(tabId: string, tabCouponId: string): Promise<void> {
+    const r = (await this.d.db.query("UPDATE tab_coupons SET removed_at=now() WHERE id=$1 AND tab_id=$2 AND removed_at IS NULL RETURNING member_id, member_coupon_id", [tabCouponId, tabId])).rows[0];
+    if (!r) return;
+    await this.d.members?.releaseCoupon(r.member_id as string, r.member_coupon_id as string, `tab:${tabId}`);
+    await this.d.db.query("UPDATE tabs SET version = version + 1 WHERE id=$1", [tabId]);
+  }
+
+  /** A tab closed without being paid gives its coupons back and returns the points of any payment that was only reserved. */
+  async abandon(tabId: string): Promise<void> {
+    for (const p of (await this.d.db.query("SELECT id FROM tab_payments WHERE tab_id=$1 AND status IN ('reserved','unknown')", [tabId])).rows) await this.release(p.id as string, "cancelled", "the tab was closed");
+    for (const c of (await this.d.db.query("SELECT id FROM tab_coupons WHERE tab_id=$1 AND removed_at IS NULL", [tabId])).rows) await this.dropCoupon(tabId, c.id as string);
+  }
+
+  // ---- money safety: manual fallback, provider outcomes, refunds ------------------------------
+
+  /**
+   * The unknown-outcome workflow (Addendum 4.4): while an integrated attempt's outcome is not known, staff may record a manual payment for the same
+   * liability. The attempt is flagged "superseded", the manual record references it and takes over its claims. If the integrated payment later
+   * succeeds, a duplicate-payment exception is raised for staff to refund: the two are never silently netted off.
+   */
+  async manualForUnknown(paymentId: string, staffId: string, reference: string): Promise<string> {
+    const ref = reference.trim().slice(0, 80);
+    if (ref.length < 3) fail(400, "a_reference_is_required", { message: "Record the trace or reference number of the manual payment." });
+    const tabId = ((await this.d.db.query("SELECT tab_id FROM tab_payments WHERE id=$1", [paymentId])).rows[0]?.tab_id as string | undefined) ?? fail(404, "payment_not_found");
+    const client = await this.d.db.connect();
+    let manualId = "";
+    try {
+      await client.query("BEGIN");
+      await client.query("SELECT pg_advisory_xact_lock(hashtext($1))", [`tab/${tabId}`]);
+      const p = (await client.query("SELECT * FROM tab_payments WHERE id=$1 FOR UPDATE", [paymentId])).rows[0];
+      if (!p || p.status !== "unknown") fail(409, "only_for_an_unknown_outcome");
+      if (p.points_used > 0) fail(409, "resolve_the_points_first", { message: "This attempt spent points; resolve it from the provider's evidence instead." });
+      manualId = randomUUID();
+      await client.query(
+        `INSERT INTO tab_payments (id, tab_id, payer_id, for_id, mode, method, amount_cents, status, quote_id, idem_key, host_keep, alloc, staff_id, manual_ref, note, history, completed_at)
+         VALUES ($1,$2,$3,$4,$5,'manual',$6,'completed',$7,$8,$9,$10::jsonb,$11,$12,$13,$14::jsonb, now())`,
+        [manualId, tabId, p.payer_id, p.for_id, p.mode, p.amount_cents, p.quote_id, `manual-${manualId}`, p.host_keep, JSON.stringify(p.alloc), staffId, ref, `Manual record for the unknown attempt ${paymentId}`, JSON.stringify([{ at: new Date(this.now()).toISOString(), status: "completed" }])]);
+      await client.query("UPDATE tab_claims SET payment_id=$2 WHERE payment_id=$1", [paymentId, manualId]);
+      await client.query("UPDATE tab_payments SET status='superseded', superseded_by=$2, updated_at=now(), history = history || jsonb_build_array(jsonb_build_object('at', now()::text, 'status', 'superseded')) WHERE id=$1", [paymentId, manualId]);
+      await client.query("UPDATE tabs SET version = version + 1 WHERE id=$1", [tabId]);
+      await client.query("COMMIT");
+    } catch (e) {
+      await client.query("ROLLBACK").catch(() => undefined);
+      throw e;
+    } finally {
+      client.release();
+    }
+    await this.settleIfPaid(tabId);
+    void this.onPaymentCompleted?.(manualId).catch(() => undefined);
+    return manualId;
+  }
+
+  /**
+   * What the provider says happened to an attempt (a signature-verified webhook, or staff reading the provider's dashboard). Duplicates are harmless:
+   * a payment already completed is one settlement and one reward. A success the tab no longer expects raises an exception for staff.
+   */
+  async providerOutcome(paymentId: string, outcome: "succeeded" | "failed", providerRef?: string): Promise<{ result: string }> {
+    const p = (await this.d.db.query("SELECT id, tab_id, status, amount_cents, superseded_by FROM tab_payments WHERE id=$1", [paymentId])).rows[0];
+    if (!p) return fail(404, "payment_not_found");
+    if (outcome === "failed") {
+      if (p.status === "reserved" || p.status === "unknown") { await this.release(paymentId, "rejected", "the provider rejected it"); return { result: "rejected" }; }
+      return { result: "ignored" };
+    }
+    if (p.status === "completed") return { result: "already_settled" }; // a duplicate event: one settlement
+    if (p.status === "reserved" || p.status === "unknown") { await this.complete(paymentId, providerRef); return { result: "completed" }; }
+    // superseded (a manual payment already settled it) or rejected/cancelled (the liability was released): the money was taken for nothing the tab expects.
+    const kind = p.status === "superseded" ? "duplicate_payment" : "late_success";
+    const detail = p.status === "superseded"
+      ? `The integrated payment succeeded after staff had already recorded a manual payment for the same share. It needs refunding.`
+      : `A payment the tab had released succeeded at the provider. It needs refunding or applying by hand.`;
+    await this.d.db.query(
+      "INSERT INTO tab_exceptions (tab_id, kind, payment_id, related_payment_id, amount_cents, provider_ref, detail) VALUES ($1,$2,$3,$4,$5,$6,$7) ON CONFLICT (payment_id, kind) DO NOTHING",
+      [p.tab_id, kind, paymentId, p.superseded_by ?? null, p.amount_cents, providerRef ?? null, detail]);
+    return { result: kind };
+  }
+
+  /**
+   * A refund (6.5): bounded by what the payment still has to give back, never the original deleted. For a payment made with member credit the credit goes
+   * back to the payer. Rewards the payment earned at settlement are reversed as compensating entries, exactly its share of what was credited, routed to the
+   * account that received it. Nothing was credited before settlement, so before settlement nothing is reversed.
+   */
+  async refundPayment(paymentId: string, amountCents: number, reason: string, staffId: string): Promise<{ refundId: string; reversedPoints: number }> {
+    if (!Number.isInteger(amountCents) || amountCents <= 0) fail(400, "amount_is_whole_cents");
+    if (reason.trim().length < 3) fail(400, "a_reason_is_required");
+    const client = await this.d.db.connect();
+    let refundId = "";
+    let tabId = "";
+    let payerMember: string | null = null;
+    let method = "";
+    try {
+      await client.query("BEGIN");
+      const p = (await client.query("SELECT p.*, pp.member_id FROM tab_payments p JOIN tab_participants pp ON pp.id=p.payer_id WHERE p.id=$1 FOR UPDATE OF p", [paymentId])).rows[0];
+      if (!p) fail(404, "payment_not_found");
+      tabId = p.tab_id as string;
+      await client.query("SELECT pg_advisory_xact_lock(hashtext($1))", [`tab/${tabId}`]);
+      if (p.status !== "completed") fail(409, "only_a_completed_payment_can_be_refunded");
+      const left = (p.amount_cents as number) - (p.refunded_cents as number);
+      if (amountCents > left) fail(409, "refund_exceeds_what_was_paid", { refundableCents: left });
+      refundId = randomUUID();
+      payerMember = (p.member_id as string | null) ?? null;
+      method = p.method as string;
+      await client.query("INSERT INTO tab_refunds (id, tab_id, payment_id, amount_cents, reason, staff_id) VALUES ($1,$2,$3,$4,$5,$6)", [refundId, tabId, paymentId, amountCents, reason.trim().slice(0, 200), staffId]);
+      await client.query("UPDATE tab_payments SET refunded_cents = refunded_cents + $2, updated_at=now() WHERE id=$1", [paymentId, amountCents]);
+      await client.query("COMMIT");
+    } catch (e) {
+      await client.query("ROLLBACK").catch(() => undefined);
+      throw e;
+    } finally {
+      client.release();
+    }
+    // Credit paid on the tab goes back into the payer's wallet.
+    if (method === "credit" && payerMember) await refundCreditLedger(this.d.db, { merchantId: this.m, customerId: payerMember, amountCents, idempotencyKey: `tab-refund-credit:${refundId}`, orderId: tabId, deviceId: "shop", staffId, note: "Tab payment refunded" });
+    return { refundId, reversedPoints: await this.reverseRewards(paymentId, refundId, tabId) };
+  }
+
+  /** Take back the share of a payment's rewards that matches how much of it was refunded: one compensating entry per original credit. */
+  private async reverseRewards(paymentId: string, refundId: string, tabId: string): Promise<number> {
+    const pay = (await this.d.db.query("SELECT amount_cents, refunded_cents FROM tab_payments WHERE id=$1", [paymentId])).rows[0];
+    let total = 0;
+    for (const c of (await this.d.db.query("SELECT id, beneficiary_id, member_id, points, reversed FROM tab_reward_credits WHERE payment_id=$1", [paymentId])).rows) {
+      // Exactly its share: points x refunded / paid, rounded down, never more than was credited, and only the part not already reversed.
+      const target = Math.min(Number(c.points), Math.floor((Number(c.points) * Number(pay.refunded_cents)) / Number(pay.amount_cents)));
+      const delta = target - Number(c.reversed);
+      if (delta <= 0) continue;
+      if (c.member_id && this.d.members) await this.d.members.reverse(c.member_id as string, delta, `tab-reverse:${refundId}:${c.id}`, { note: "Tab rewards reversed (refund)" });
+      else await this.d.db.query("UPDATE tab_entitlements SET points = GREATEST(0, points - $3) WHERE tab_id=$1 AND participant_id=$2", [tabId, c.beneficiary_id, delta]);
+      await this.d.db.query("UPDATE tab_reward_credits SET reversed = reversed + $2 WHERE id=$1", [c.id, delta]);
+      total += delta;
+    }
+    return total;
+  }
+
+  // ---- bar tabs and staff-added items --------------------------------------------------------
+
+  /** A bar tab: the same object with no table, opened by code. Customers join with the code and the first one in is the Host. */
+  async openBar(outletId: string): Promise<{ tabId: string; code: string }> {
+    const client = await this.d.db.connect();
+    try {
+      await client.query("BEGIN");
+      await client.query("SELECT pg_advisory_xact_lock(hashtext($1))", [`tab-code/${this.m}`]);
+      const t = (await client.query("INSERT INTO tabs (merchant_id, outlet_id, spot, code) VALUES ($1,$2,NULL,$3) RETURNING id, code", [this.m, outletId, await this.newCode(client)])).rows[0];
+      await client.query("COMMIT");
+      return { tabId: t.id as string, code: t.code as string };
+    } catch (e) {
+      await client.query("ROLLBACK").catch(() => undefined);
+      throw e;
+    } finally {
+      client.release();
+    }
+  }
+
+  /** The Staff pseudo-person a tab keeps for items a waiter adds (the "Staff" chip). They never pay and cannot sign in. */
+  private async staffPerson(tabId: string): Promise<string> {
+    const have = (await this.d.db.query("SELECT id FROM tab_participants WHERE tab_id=$1 AND is_staff", [tabId])).rows[0];
+    if (have) return have.id as string;
+    const ord = Number((await this.d.db.query("SELECT COALESCE(MAX(ord),0)+1 AS n FROM tab_participants WHERE tab_id=$1", [tabId])).rows[0].n);
+    return (await this.d.db.query("INSERT INTO tab_participants (tab_id, display_name, token_hash, ord, is_staff) VALUES ($1,'Staff',$2,$3,true) RETURNING id", [tabId, sha256(randomBytes(24).toString("hex")), ord])).rows[0].id as string;
+  }
+
+  /**
+   * A waiter adds items to the tab (the "Staff" chip). They are priced by the server like any order, go to the kitchen at once, and are Unclaimed until
+   * someone pays for them or the Host claims them.
+   */
+  async addStaffItems(tabId: string, items: Array<{ productId: string; qty: number }>): Promise<{ orderId: string; round: number }> {
+    if (!this.d.loadCatalog) return fail(501, "not_available");
+    const t = await this.tabOpen(tabId);
+    if (!t.open) fail(409, "tab_closed");
+    const cat = await this.d.loadCatalog();
+    const channel = cat.channels.find((c) => c.kind === "dine_in" && c.active);
+    if (!channel) fail(400, "no_dine_in_channel");
+    const quote = quoteOrder(cat, this.d.config, { outletId: t.outletId, channelId: channel!.id }, items.map((i) => ({ productId: String(i.productId), qty: Number(i.qty) })));
+    if (!quote.ok) return fail(400, quote.error, { productId: quote.productId });
+    const orderId = newId();
+    const ts = this.now();
+    let seq = 0;
+    const mk = (extra: object) => ({ id: newId(), orderId, deviceId: "shop", ts, seq: ++seq, ...extra }) as unknown as OrderEvent;
+    await this.d.ingest([
+      mk({ type: "OrderOpened", fulfilment: quote.fulfilment, channelId: quote.channel.id, channelName: quote.channel.name, serviceCharge: quote.channel.serviceCharge, source: "online", customerName: "Staff", spot: t.spot ?? undefined, onTab: true }),
+      ...quote.lines.map((l) => mk({ type: "ItemAdded", lineId: newId(), productId: l.productId, name: l.name, unitCents: l.unitCents, qty: l.qty, pointsExempt: l.pointsExempt, bcrs: l.bcrs, ...(l.taxInclusive !== undefined ? { taxInclusive: l.taxInclusive } : {}), ...(l.taxGroup ? { taxGroup: l.taxGroup } : {}), options: l.options.length ? l.options : undefined, ...(l.build ? { build: l.build } : {}) })),
+      mk({ type: "OrderAccepted" }),
+    ], t.outletId);
+    const round = await this.addRound(tabId, orderId, await this.staffPerson(tabId));
+    return { orderId, round };
+  }
+
+  /** The Host takes Staff-added rounds that nobody has paid for onto their own share. */
+  async claimStaffItems(tabId: string, claimerId: string): Promise<number> {
+    const s = await this.snapshot(tabId);
+    if (s.tab.status !== "open") fail(409, "tab_closed");
+    if (this.effectiveHost(s) !== claimerId) fail(403, "only_the_host_can_claim_staff_items");
+    const staff = s.people.find((p) => (p as PersonRow & { is_staff?: boolean }).is_staff) ?? (await this.d.db.query("SELECT id FROM tab_participants WHERE tab_id=$1 AND is_staff", [tabId])).rows[0];
+    if (!staff) return 0;
+    const lineIdsPaid = new Set(s.claims.filter((c) => s.payments.some((p) => p.id === c.paymentId && ["reserved", "completed", "unknown"].includes(p.status))).map((c) => c.lineId));
+    let moved = 0;
+    for (const r of s.rounds) {
+      if (r.participantId !== staff.id || !r.order) continue;
+      if (r.order.lines.some((l) => lineIdsPaid.has(l.lineId))) continue; // a round that is being or has been paid is left alone
+      await this.d.db.query("UPDATE tab_rounds SET participant_id=$3 WHERE tab_id=$1 AND order_id=$2", [tabId, r.orderId, claimerId]);
+      moved++;
+    }
+    if (moved) await this.d.db.query("UPDATE tabs SET version = version + 1 WHERE id=$1", [tabId]);
+    return moved;
+  }
+
   /** A guest who has signed up claims what they earned, before settlement. Verified ownership, single use. */
   async claimAsMember(participantId: string, memberId: string): Promise<boolean> {
     const r = await this.d.db.query(
@@ -576,6 +909,8 @@ export class TabService {
 
 export interface QuoteParams {
   mode: "mine" | "round" | "all" | "equal" | "custom";
+  /** The payer's own points to spend against this payment: a number, or "max". Needs the signed-in member. */
+  usePoints?: number | "max";
   forParticipantId?: string;
   round?: number;
   people?: number;
@@ -590,7 +925,7 @@ function sameAlloc(a: PaymentAlloc, b: PaymentAlloc): boolean {
     && a.units.length === b.units.length && a.units.every((u, i) => u.lineId === b.units[i]!.lineId && u.idx === b.units[i]!.idx);
 }
 
-const whole = (s: Snapshot) => tabBill(s.lines, s.opts);
+const whole = (s: Snapshot) => tabBill(s.lines, s.opts, s.couponCents);
 export { whole as wholeBill };
 export type { TabQuote, PaymentAlloc };
 void allocTotal;

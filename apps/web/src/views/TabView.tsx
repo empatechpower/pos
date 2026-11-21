@@ -14,15 +14,17 @@ export interface TabView {
   id: string; spot: string | null; code: string; outletId: string; status: "open" | "closed"; version: number;
   host: { id: string; name: string | null };
   people: Array<{ id: string; name: string; isHost: boolean; isMe: boolean; left: boolean; member: boolean }>;
-  totals: { totalCents: number; paidCents: number; remainingCents: number; itemsCents: number; serviceCents: number; taxCents: number; depositCents: number; taxIncludedCents: number };
+  coupons: Array<{ id: string; title: string; amountCents: number; owner: { id: string; name: string | null }; mine: boolean }>;
+  couponOptions: Array<{ id: string; title: string; amountCents: number; eligible: boolean; reason: string | null }>;
+  totals: { discountCents: number; totalCents: number; paidCents: number; remainingCents: number; itemsCents: number; serviceCents: number; taxCents: number; depositCents: number; taxIncludedCents: number };
   paymentLocked: boolean; lockNote: string; released: boolean;
   rounds: Array<{
-    round: number; orderId: string; orderedBy: { id: string; name: string | null }; at: string; locked: boolean; kitchen: string;
+    round: number; orderId: string; orderedBy: { id: string; name: string | null }; at: string; locked: boolean; kitchen: string; staffAdded?: boolean;
     lines: Array<{ lineId: string; productId: string; name: string; qty: number; unitCents: number; options: string[]; deposit: boolean; owner: { id: string; name: string | null }; sharedWith: Array<{ id: string; name: string | null }>; units: number; paidUnits: number; reservedUnits: number; paidBy: string[] }>;
   }>;
-  payments: Array<{ id: string; payer: { id: string; name: string | null }; for: { id: string; name: string | null } | null; amountCents: number; status: string; method: string; mode: string; staffRecorded: boolean; hostKeep: boolean; at: string }>;
+  payments: Array<{ id: string; pointsUsed: number; payer: { id: string; name: string | null }; for: { id: string; name: string | null } | null; amountCents: number; status: string; method: string; mode: string; staffRecorded: boolean; hostKeep: boolean; at: string }>;
   billRequested: boolean; waiterPaged: boolean; pagedKind: string | null;
-  me: { id: string; name: string; memberId: string | null; owesCents: number; paidCents: number; pendingPoints: number } | null;
+  me: { id: string; name: string; memberId: string | null; owesCents: number; paidCents: number; pendingPoints: number; pointsBalance: number | null } | null;
   closed: boolean; pendingRewardsNote: string | null; customAllocation: "oldest_first" | "reduce_only";
 }
 
@@ -77,11 +79,11 @@ export function useTab(outletId: string | undefined, spot: string, enabled: bool
 
   const refresh = useCallback(async () => {
     if (!session) { setView(null); return; }
-    const r = await tabCall<TabView & { error?: string }>(session, "/api/shop/tab");
+    const r = await tabCall<TabView & { error?: string }>(session, "/api/shop/tab", { bearer });
     if (!alive.current) return;
     if (r.status === 401) { saveSession(outletId, spot, null); setSession(null); setView(null); return; }
     if (r.status === 200) setView(r.json);
-  }, [session, outletId, spot]);
+  }, [session, outletId, spot, bearer]);
 
   useEffect(() => {
     void refresh();
@@ -189,10 +191,13 @@ export function TabScreen({ view, session, bearer, creditCents, rewardsOn, onBac
 
       <div className="e2e-card tab-totals">
         <div className="tab-tot-row"><span>{tx("Tab total")}</span><b>{formatMoney(view.totals.totalCents)}</b></div>
+        {view.totals.discountCents > 0 && <div className="tab-tot-row"><span>{tx("Includes coupon")}</span><b>−{formatMoney(view.totals.discountCents)}</b></div>}
         <div className="tab-tot-row"><span>{tx("Paid")}</span><b>{formatMoney(view.totals.paidCents)}</b></div>
         <div className="tab-tot-row tab-rem"><span>{tx("Remaining")}</span><b>{formatMoney(rem)}</b></div>
         {view.totals.serviceCents > 0 && <div className="muted tab-break">{tx("Items")} {formatMoney(view.totals.itemsCents)} · {tx("Service")} {formatMoney(view.totals.serviceCents)}{view.totals.taxCents > 0 ? ` · ${tx("Tax")} ${formatMoney(view.totals.taxCents)}` : ""}{view.totals.depositCents > 0 ? ` · ${tx("Deposit")} ${formatMoney(view.totals.depositCents)}` : ""}</div>}
       </div>
+
+      <TabCoupons view={view} session={session} bearer={bearer} onChanged={onChanged} />
 
       {rewardsOn && view.pendingRewardsNote && (
         <div className="e2e-card tab-reward">
@@ -204,16 +209,17 @@ export function TabScreen({ view, session, bearer, creditCents, rewardsOn, onBac
 
       {view.rounds.map((r) => (
         <div className="e2e-card" key={r.orderId}>
-          <h3>{tx("Round {n}", { n: r.round })} <span className="muted">· {r.orderedBy.name} · {r.kitchen}{r.locked && view.released ? ` · ${tx("Locked until the waiter releases it")}` : ""}</span></h3>
+          <h3>{tx("Round {n}", { n: r.round })} <span className="muted">· {r.staffAdded ? tx("Added by staff") : r.orderedBy.name} · {r.kitchen}{r.locked && view.released ? ` · ${tx("Locked until the waiter releases it")}` : ""}</span></h3>
+          {r.staffAdded && view.people.find((p) => p.isMe)?.isHost && open && r.lines.every((l) => l.paidUnits + l.reservedUnits === 0) && <button className="secondary sm" onClick={() => void tabCall(session, "/api/shop/tab/claim-staff-items", { method: "POST", body: {} }).then(onChanged)}>{tx("Add these to my share")}</button>}
           {r.lines.map((l) => {
             const unpaid = l.units - l.paidUnits - l.reservedUnits;
-            const state = l.paidUnits === l.units ? `${tx("Paid by")} ${l.paidBy.join(", ")}` : l.reservedUnits > 0 ? tx("Locked (someone is paying)") : l.paidUnits > 0 ? `${l.paidUnits} ${tx("paid")}, ${unpaid} ${tx("unpaid")}` : tx("Unpaid");
+            const state = l.paidUnits === l.units ? `${tx("Paid by")} ${l.paidBy.join(", ")}` : r.staffAdded && l.paidUnits + l.reservedUnits === 0 ? tx("Unclaimed") : l.reservedUnits > 0 ? tx("Locked (someone is paying)") : l.paidUnits > 0 ? `${l.paidUnits} ${tx("paid")}, ${unpaid} ${tx("unpaid")}` : tx("Unpaid");
             return (
               <div className="sum-row tab-line" key={l.lineId}>
                 <span className="k">
                   {l.name} × {l.qty}
                   {l.options.length > 0 && <small className="muted" style={{ display: "block" }}>{l.options.join(" · ")}</small>}
-                  <small className="muted" style={{ display: "block" }}><span className="tab-chip">{l.owner.name}</span>{l.sharedWith.length > 1 ? ` ${tx("shared")}: ${l.sharedWith.map((x) => x.name).join(", ")}` : ""} · {state}</small>
+                  <small className="muted" style={{ display: "block" }}><span className={`tab-chip ${r.staffAdded ? "staff" : ""}`}>{r.staffAdded ? tx("Staff") : l.owner.name}</span>{l.sharedWith.length > 1 ? ` ${tx("shared")}: ${l.sharedWith.map((x) => x.name).join(", ")}` : ""} · {state}</small>
                   {open && l.paidUnits + l.reservedUnits === 0 && <button className="shop-link tab-share" onClick={() => setSharing(l)}>{tx("Share this item")}</button>}
                 </span>
                 <span className="v">{formatMoney(l.unitCents * l.qty)}</span>
@@ -228,7 +234,7 @@ export function TabScreen({ view, session, bearer, creditCents, rewardsOn, onBac
           <h3>{tx("Payments")}</h3>
           {view.payments.map((p) => (
             <div className="sum-row" key={p.id}>
-              <span className="k">{p.status === "completed" ? tx("Paid by {n}", { n: p.payer.name ?? "" }) : p.status === "unknown" ? tx("Checking…") : tx("Paying…")}{p.for ? ` ${tx("for {n}", { n: p.for.name ?? "" })}` : ""}{p.staffRecorded ? ` · ${tx("recorded by staff")}` : ""}{p.hostKeep ? ` · ${tx("reward to the host")}` : ""}</span>
+              <span className="k">{p.status === "completed" ? tx("Paid by {n}", { n: p.payer.name ?? "" }) : p.status === "unknown" ? tx("Checking…") : tx("Paying…")}{p.pointsUsed > 0 ? ` · ${p.pointsUsed.toLocaleString()} ${tx("points")}` : ""}{p.for ? ` ${tx("for {n}", { n: p.for.name ?? "" })}` : ""}{p.staffRecorded ? ` · ${tx("recorded by staff")}` : ""}{p.hostKeep ? ` · ${tx("reward to the host")}` : ""}</span>
               <span className="v">{formatMoney(p.amountCents)}</span>
             </div>
           ))}
@@ -255,6 +261,35 @@ export function TabScreen({ view, session, bearer, creditCents, rewardsOn, onBac
           </div>
         </div>
       )}
+    </div>
+  );
+}
+
+// ---- coupons on the tab -----------------------------------------------------------------------------
+
+/**
+ * Any person on the tab can apply their own coupon to the shared bill (D3). The card says why one cannot be used, in its own row: the minimum is on
+ * the items only, before service charge and tax, deposits excluded. Only its owner takes it off, and only before anyone has paid.
+ */
+function TabCoupons({ view, session, bearer, onChanged }: { view: TabView; session: TabSession; bearer: string | null; onChanged: () => void }) {
+  const [err, setErr] = useState("");
+  if (view.closed || (view.coupons.length === 0 && (!bearer || view.couponOptions.length === 0))) return null;
+  return (
+    <div className="e2e-card">
+      <h3>{tx("Coupons")}</h3>
+      {view.coupons.map((c) => (
+        <div className="sum-row" key={c.id}>
+          <span className="k">{c.title}<small className="muted" style={{ display: "block" }}>{tx("Applied by {n}. Shared between the payers.", { n: c.owner.name ?? "" })}</small></span>
+          <span className="v">−{formatMoney(c.amountCents)}{c.mine && <> <button className="shop-link" onClick={() => void tabCall(session, `/api/shop/tab/coupons/${c.id}`, { method: "DELETE" }).then((r) => { setErr(r.status === 200 ? "" : tx("A coupon cannot come off once someone has paid.")); onChanged(); })}>{tx("Remove")}</button></>}</span>
+        </div>
+      ))}
+      {bearer && view.couponOptions.map((o) => (
+        <div className={`sum-row ${o.eligible ? "" : "tab-coupon-off"}`} key={o.id}>
+          <span className="k">{o.title} · {formatMoney(o.amountCents)}{o.reason && <small className="muted" style={{ display: "block" }}>{o.reason}</small>}</span>
+          <button className="secondary sm" disabled={!o.eligible} onClick={() => void tabCall(session, "/api/shop/tab/coupons", { body: { couponId: o.id }, bearer }).then((r) => { setErr(r.status === 200 ? "" : r.json.message ?? tx("That coupon cannot be used here.")); onChanged(); })}>{tx("Apply")}</button>
+        </div>
+      ))}
+      {err && <p className="e2e-note" role="alert">{err}</p>}
     </div>
   );
 }
@@ -286,7 +321,7 @@ function ShareSheet({ line, view, session, onClose, onDone }: { line: TabView["r
 
 // ---- Split & Pay ---------------------------------------------------------------------------------------
 
-interface Quote { quoteId: string; amountCents: number; lines: Array<{ lineId: string; name: string; units: number; items: number; deposit: number }>; itemsCents: number; serviceCents: number; taxCents: number; depositCents: number; creditAppliedCents: number; tabTotalCents: number }
+interface Quote { quoteId: string; amountCents: number; lines: Array<{ lineId: string; name: string; units: number; items: number; deposit: number }>; itemsCents: number; serviceCents: number; taxCents: number; depositCents: number; creditAppliedCents: number; discountCents: number; pointsUsed: number; liabilityCents: number; tabTotalCents: number }
 type Mode = "mine" | "equal" | "round" | "custom" | "all";
 
 /**
@@ -305,17 +340,22 @@ function SplitPaySheet({ view, session, bearer, creditCents, rewardsOn, onClose 
   const [quote, setQuote] = useState<Quote | null>(null);
   const [method, setMethod] = useState<"counter" | "credit">("counter");
   const [hostKeep, setHostKeep] = useState(false);
+  // Personal points against my own share (12.7): off, as many as possible, or an amount I type. One point is one cent; the minimum claim is 100.
+  const [pts, setPts] = useState<"off" | "max" | "custom">("off");
+  const [ptsAmount, setPtsAmount] = useState("");
+  const balance = view.me?.pointsBalance ?? 0;
   const [busy, setBusy] = useState(false);
   const [notice, setNotice] = useState("");
   const [waiting, setWaiting] = useState<string | null>(null); // a payment waiting for staff to confirm
   const reservedByMe = view.payments.some((p) => (p.status === "reserved" || p.status === "unknown") && (p.payer.id === me?.id));
 
   const params = (): Record<string, unknown> | null => {
-    if (mode === "mine") return { mode, ...(forId && forId !== me?.id ? { forParticipantId: forId } : {}) };
-    if (mode === "equal") return { mode, people };
-    if (mode === "round") return round ? { mode, round } : null;
-    if (mode === "custom") { const c = Math.round(Number(amount) * 100); return Number.isFinite(c) && c > 0 ? { mode, amountCents: c } : null; }
-    if (mode === "all") return { mode };
+    const points = rewardsOn && balance > 0 && pts !== "off" ? { usePoints: pts === "max" ? "max" : Math.floor(Number(ptsAmount)) || 0 } : {};
+    if (mode === "mine") return { mode, ...(forId && forId !== me?.id ? { forParticipantId: forId } : {}), ...points };
+    if (mode === "equal") return { mode, people, ...points };
+    if (mode === "round") return round ? { mode, round, ...points } : null;
+    if (mode === "custom") { const c = Math.round(Number(amount) * 100); return Number.isFinite(c) && c > 0 ? { mode, amountCents: c, ...points } : null; }
+    if (mode === "all") return { mode, ...points };
     return null;
   };
 
@@ -324,17 +364,17 @@ function SplitPaySheet({ view, session, bearer, creditCents, rewardsOn, onClose 
     const p = params();
     if (!p) return;
     let live = true;
-    const t = window.setTimeout(() => void tabCall<Quote & { error?: string; message?: string }>(session, "/api/shop/tab/quote", { body: p }).then((r) => {
+    const t = window.setTimeout(() => void tabCall<Quote & { error?: string; message?: string }>(session, "/api/shop/tab/quote", { body: p, bearer }).then((r) => {
       if (!live) return;
       if (r.status === 200) setQuote(r.json); else setNotice(r.json.error === "nothing_to_pay_for_this" || r.json.error === "nothing_to_pay" ? tx("There is nothing left to pay for this.") : r.json.message ?? tx("Could not work that out. Please try again."));
     }), 250);
     return () => { live = false; window.clearTimeout(t); };
-  }, [mode, forId, people, round, amount]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [mode, forId, people, round, amount, pts, ptsAmount]); // eslint-disable-line react-hooks/exhaustive-deps
 
   async function pay() {
     if (!quote || busy) return;
     setBusy(true);
-    const r = await tabCall<Record<string, any>>(session, "/api/shop/tab/pay", { body: { quoteId: quote.quoteId, method, idempotencyKey: `q-${quote.quoteId}`, hostKeep }, bearer });
+    const r = await tabCall<Record<string, any>>(session, "/api/shop/tab/pay", { body: { quoteId: quote.quoteId, method: quote.amountCents === 0 ? "counter" : method, idempotencyKey: `q-${quote.quoteId}`, hostKeep }, bearer });
     setBusy(false);
     if (r.status === 200) {
       if (r.json.status === "completed") { onClose(); return; }
@@ -346,7 +386,7 @@ function SplitPaySheet({ view, session, bearer, creditCents, rewardsOn, onClose 
       return;
     }
     const e = r.json.error as string | undefined;
-    setNotice(e === "not_enough_credit" ? tx("Your credit is not enough for this.") : e === "payment_in_flight" || e === "already_being_paid" ? tx("Someone is already paying for this share.") : e === "provider_unavailable" ? tx("Card and PayNow are not available yet.") : e === "payment_locked" ? view.lockNote : tx("The payment could not be started. Please try again."));
+    setNotice(e === "not_enough_credit" ? tx("Your credit is not enough for this.") : e === "not_enough_points" ? tx("You do not have enough points for this any more.") : e === "payment_in_flight" || e === "already_being_paid" ? tx("Someone is already paying for this share.") : e === "provider_unavailable" ? tx("Card and PayNow are not available yet.") : e === "payment_locked" ? view.lockNote : tx("The payment could not be started. Please try again."));
   }
 
   async function cancelWaiting() {
@@ -409,6 +449,19 @@ function SplitPaySheet({ view, session, bearer, creditCents, rewardsOn, onClose 
                 <p className="muted" style={{ fontSize: 12 }}>{view.customAllocation === "oldest_first" ? tx("The amount pays off items, oldest round first.") : tx("The amount only reduces what remains.")}</p></div>
             )}
 
+            {rewardsOn && balance > 0 && mode && !reservedByMe && (
+              <div className="e2e-card">
+                <b>{tx("Use my points")}</b> <span className="muted">· {balance.toLocaleString()} {tx("pts")}</span>
+                <div className="tab-rounds">
+                  <button className={`chip ${pts === "off" ? "on" : ""}`} onClick={() => setPts("off")}>{tx("Not now")}</button>
+                  <button className={`chip ${pts === "max" ? "on" : ""}`} onClick={() => setPts("max")}>{tx("Redeem maximum")}</button>
+                  <button className={`chip ${pts === "custom" ? "on" : ""}`} onClick={() => setPts("custom")}>{tx("Edit amount")}</button>
+                </div>
+                {pts === "custom" && <input className="e2e-input" inputMode="numeric" placeholder={tx("Points, 100 or more")} value={ptsAmount} onChange={(e) => setPtsAmount(e.target.value.replace(/\D/g, ""))} aria-label={tx("Points to use")} />}
+                <p className="muted" style={{ fontSize: 12 }}>{tx("100 points = S$1. Points only pay your own share, and never anyone else's.")}</p>
+              </div>
+            )}
+
             {quote && (
               <div className="e2e-card tab-quote">
                 <h4>{forId && forId !== me?.id ? tx("{n}'s share", { n: view.people.find((p) => p.id === forId)?.name ?? "" }) : tx("Your share")}</h4>
@@ -417,8 +470,10 @@ function SplitPaySheet({ view, session, bearer, creditCents, rewardsOn, onClose 
                 {quote.serviceCents > 0 && <div className="sum-row"><span className="k">{tx("Service charge")}</span><span className="v">{formatMoney(quote.serviceCents)}</span></div>}
                 {quote.taxCents > 0 && <div className="sum-row"><span className="k">{tx("Tax")}</span><span className="v">{formatMoney(quote.taxCents)}</span></div>}
                 {quote.depositCents > 0 && <div className="sum-row"><span className="k">{tx("Deposit")}</span><span className="v">{formatMoney(quote.depositCents)}</span></div>}
+                {quote.discountCents > 0 && <div className="sum-row neg"><span className="k">{tx("Your part of the coupon")}</span><span className="v">−{formatMoney(quote.discountCents)}</span></div>}
                 {quote.creditAppliedCents > 0 && <div className="sum-row neg"><span className="k">{tx("Already paid toward the bill")}</span><span className="v">−{formatMoney(quote.creditAppliedCents)}</span></div>}
-                <div className="sum-row grand"><span className="k">{tx("To pay")}</span><span className="v">{formatMoney(quote.amountCents)}</span></div>
+                {quote.pointsUsed > 0 && <div className="sum-row neg"><span className="k">{tx("Points")} · {quote.pointsUsed.toLocaleString()} {tx("pts")}</span><span className="v">−{formatMoney(quote.pointsUsed)}</span></div>}
+                <div className="sum-row grand"><span className="k">{tx("To pay")}</span><span className="v">{formatMoney(quote.amountCents)}{quote.amountCents === 0 && quote.pointsUsed > 0 && <span className="tab-pill">{formatMoney(quote.liabilityCents)}</span>}</span></div>
               </div>
             )}
             {notice && <p className="e2e-note" role="alert">{notice}</p>}
@@ -432,7 +487,7 @@ function SplitPaySheet({ view, session, bearer, creditCents, rewardsOn, onClose 
                   <label className="inline"><input type="checkbox" checked={hostKeep} onChange={(e) => setHostKeep(e.target.checked)} /> {tx("Let the host keep the reward")}</label>
                 )}
                 <button className="e2e-cta" disabled={busy || reservedByMe} onClick={() => void pay()}>
-                  <span>{busy ? tx("Paying…") : tx("Pay")} · {formatMoney(quote.amountCents)}</span>
+                  <span>{busy ? tx("Paying…") : quote.amountCents === 0 ? tx("Pay with points") : tx("Pay")} · {formatMoney(quote.amountCents)}</span>
                 </button>
               </>
             )}

@@ -2,7 +2,7 @@ import cors from "@fastify/cors";
 import Fastify, { type FastifyReply, type FastifyRequest } from "fastify";
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
-import { type BuilderSpec, type ProductStock, validateProductStock, isTimeZone, validCoordinates, validateOutletOverride, validateWindows, type MenuWindows, confirmedPaid, hourly, isFullyPaid, productMix, summarize, menuFor, newId, orderTotals, reduceAll, reduceOrder, shopStatus, type BusinessConfig, type ChannelKind, type OptionGroup, type OrderEvent } from "@pos/core";
+import { type BuilderSpec, tabPaymentReceipt, type ProductStock, validateProductStock, isTimeZone, validCoordinates, validateOutletOverride, validateWindows, type MenuWindows, confirmedPaid, hourly, isFullyPaid, productMix, summarize, menuFor, newId, orderTotals, reduceAll, reduceOrder, shopStatus, type BusinessConfig, type ChannelKind, type OptionGroup, type OrderEvent } from "@pos/core";
 import { CASHIER_TOPUP_LIMIT_CENTS, audit, authenticate, authenticateAgent, can, createAgent, createConnectCode, redeemConnectCode, createStaff, listAgents, login, logout, recentAudit, revokeAgent, type Permission, type Role, type Staff } from "./auth.js";
 import type { CatalogStore, ChangeResult, PgCatalogStore } from "./catalog.js";
 import type { Db } from "./db/pool.js";
@@ -612,7 +612,16 @@ export async function buildApp({ config, store, db, catalog, catalogAdmin, print
 
   registerDisplay(app, { db, merchantId, needsDevice });
   registerPromoAdmin(app, { db, merchantId, needs });
-  const tabs = new TabService({ db, merchantId, config, eventsForOrder: (id) => store.eventsForOrder(id), members, ingest, now });
+  const tabs = new TabService({ db, merchantId, config, eventsForOrder: (id) => store.eventsForOrder(id), members, ingest, now, loadCatalog: () => catalog.load() });
+  // Every completed tab payment prints its own receipt: the lines and components as quoted, who paid, who recorded it, and what is left on the tab.
+  if (print) {
+    tabs.onPaymentCompleted = async (paymentId) => {
+      const d = await tabs.receiptData(paymentId);
+      if (!d) return;
+      const outletName = (await listOutlets(db, merchantId)).find((o) => o.id === d.outletId)?.name ?? config.outletName;
+      await print.enqueueDoc(d.outletId, tabPaymentReceipt(d.input, { merchantName: config.name, outletName, now: Date.now() }), `tabreceipt:${paymentId}`, `Tab ${d.input.spot ?? d.input.code}`);
+    };
+  }
   registerTabRoutes(app, { db, merchantId, tabs, members, needs, outletIds: async () => (await listOutlets(db, merchantId)).map((o) => o.id) });
   registerStock(app, { db, merchantId, needs, outletIds: async () => (await listOutlets(db, merchantId)).map((o) => o.id), defaultOutlet: config.outletName });
   registerShop(app, { db, config, store, catalog, catalogAdmin, brand: new BrandStore(db, merchantId), ingest, members, needs, integrations, now, tabs });

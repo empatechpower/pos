@@ -13,6 +13,8 @@ interface Props {
   initial?: BuildInput;
   initialNote?: string;
   cta?: string;
+  /** The kiosk's version: larger touch targets and Cancel beside the Add button. */
+  kiosk?: boolean;
   onAdd: (build: BuildInput, note: string) => void;
   onClose: () => void;
 }
@@ -43,7 +45,7 @@ function problem(c: GroupCheck): string | null {
  * minimum and maximum. Allowances are used up in the order things are picked, and every selection shows what it costs: full price,
  * covered by the allowance, or the charge. The server re-checks and re-prices the same build when the order is placed.
  */
-export function BuilderSheet({ name, description, photoUrl, baseCents, spec, initial, initialNote, cta = "Add to bag", onAdd, onClose }: Props) {
+export function BuilderSheet({ name, description, photoUrl, baseCents, spec, initial, initialNote, cta = "Add to bag", kiosk, onAdd, onClose }: Props) {
   const variants = spec.variants ?? [];
   const [variantId, setVariantId] = useState<string | undefined>(initial?.variantId);
   const [picks, setPicks] = useState<Pick[]>(initial?.picks ?? []);
@@ -147,6 +149,12 @@ export function BuilderSheet({ name, description, photoUrl, baseCents, spec, ini
             <textarea className="opt-note" rows={2} maxLength={MAX_NOTE} value={note} onChange={(e) => setNote(e.target.value)} aria-label={tx("Special request")} />
           </section>
         </div>
+        {kiosk ? (
+          <div className="opt-foot kq">
+            <button className="opt-cancel" onClick={onClose}>{tx("Cancel")}</button>
+            <button className="opt-cta" disabled={!priced.ok} title={firstProblem ?? ""} onClick={() => priced.ok && onAdd(input, note)}>{firstProblem ?? `${tx(cta)} · ${formatMoney(total)}`}</button>
+          </div>
+        ) : (
         <div className="opt-foot">
           <div>
             <small className="muted">{tx("Total")}</small>
@@ -156,6 +164,7 @@ export function BuilderSheet({ name, description, photoUrl, baseCents, spec, ini
             {firstProblem ?? tx(cta)}
           </button>
         </div>
+        )}
       </div>
     </div>
   );

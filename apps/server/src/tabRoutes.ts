@@ -54,7 +54,7 @@ export function registerTabRoutes(app: FastifyInstance, d: {
 
   app.get("/api/shop/tab", async (req, reply) => {
     if (limited(actLimit, req, reply)) return;
-    return guard(async () => { const { person, tabId } = await me(req); return d.tabs.view(tabId, person.id); }, reply);
+    return guard(async () => { const { person, tabId } = await me(req); const m = await memberOf(req); return d.tabs.view(tabId, person.id, m && person.member_id === m.id ? m : null); }, reply);
   });
 
   app.post("/api/shop/tab/leave", async (req, reply) => guard(async () => { const { person } = await me(req); await d.tabs.leave(person.id); return { ok: true }; }, reply));
@@ -69,7 +69,7 @@ export function registerTabRoutes(app: FastifyInstance, d: {
   /** The maths of a payment, frozen. Nothing is reserved yet. */
   app.post<{ Body: QuoteParams }>("/api/shop/tab/quote", async (req, reply) => {
     if (limited(actLimit, req, reply)) return;
-    return guard(async () => { const { person, tabId } = await me(req); return d.tabs.quote(tabId, person.id, { ...(req.body ?? {}) } as QuoteParams); }, reply);
+    return guard(async () => { const { person, tabId } = await me(req); const m = await memberOf(req); return d.tabs.quote(tabId, person.id, { ...(req.body ?? {}) } as QuoteParams, m && person.member_id === m.id ? m : null); }, reply);
   });
 
   /**
@@ -84,9 +84,25 @@ export function registerTabRoutes(app: FastifyInstance, d: {
       if ("payerId" in b || "payer" in b || "simulateFor" in b || "asPerson" in b) return reply.code(400).send({ error: "payer_is_the_session_identity" });
       const member = await memberOf(req);
       if (member && person.member_id && person.member_id !== member.id) return reply.code(403).send({ error: "not_your_tab_identity" });
-      return d.tabs.pay({ tabId, payerId: person.id, quoteId: String(b.quoteId ?? ""), method: String(b.method ?? ""), idempotencyKey: String(b.idempotencyKey ?? ""), hostKeep: b.hostKeep === true, member: person.member_id ? member : null });
+      return d.tabs.pay({ tabId, payerId: person.id, quoteId: String(b.quoteId ?? ""), method: String(b.method ?? ""), idempotencyKey: String(b.idempotencyKey ?? ""), hostKeep: b.hostKeep === true, member: person.member_id && member && person.member_id === member.id ? member : null });
     }, reply);
   });
+
+  /** Apply one of my own wallet coupons to the shared bill (D3). Needs the tab credential and my signed-in session. */
+  app.post<{ Body: { couponId?: string } }>("/api/shop/tab/coupons", async (req, reply) => guard(async () => {
+    const { person, tabId } = await me(req);
+    const member = await memberOf(req);
+    if (!member) return reply.code(401).send({ error: "sign_in_to_use_coupons" });
+    await d.tabs.applyCoupon(tabId, person, member, String(req.body?.couponId ?? ""));
+    return { ok: true };
+  }, reply));
+
+  /** Only the person who applied a coupon can take it off. */
+  app.delete<{ Params: { id: string } }>("/api/shop/tab/coupons/:id", async (req, reply) => guard(async () => {
+    const { person, tabId } = await me(req);
+    await d.tabs.removeCoupon(tabId, person, req.params.id);
+    return { ok: true };
+  }, reply));
 
   app.post<{ Params: { id: string } }>("/api/shop/tab/payments/:id/cancel", async (req, reply) => guard(async () => {
     const { person, tabId } = await me(req);
@@ -155,6 +171,31 @@ export function registerTabRoutes(app: FastifyInstance, d: {
     return r;
   }, reply));
 
+  /** Open a bar tab: a tab with no table, opened by code. Tell the customers the code. */
+  app.post<{ Body: { outletId?: string } }>("/api/tabs", staff, async (req, reply) => guard(async () => {
+    const outlets = await d.outletIds();
+    const outletId = req.body?.outletId && outlets.includes(req.body.outletId) ? req.body.outletId : outlets[0] ?? "";
+    if (!(await d.tabs.outletSettings(outletId)).tabService) return reply.code(400).send({ error: "this_outlet_has_no_tabs" });
+    const r = await d.tabs.openBar(outletId);
+    await audit(d.db, d.merchantId, req.staff!.id, "tab.open_bar", { tab: r.tabId, outletId });
+    return r;
+  }, reply));
+
+  /** A waiter adds items to a tab: they carry the Staff chip and are Unclaimed until paid for or claimed by the Host. */
+  app.post<{ Params: { id: string }; Body: { items?: Array<{ productId?: string; qty?: number }> } }>("/api/tabs/:id/items", staff, async (req, reply) => guard(async () => {
+    const items = (Array.isArray(req.body?.items) ? req.body!.items! : []).map((i) => ({ productId: String(i?.productId ?? ""), qty: Number(i?.qty) }));
+    if (!items.length) return reply.code(400).send({ error: "items_required" });
+    const r = await d.tabs.addStaffItems(req.params.id, items);
+    await audit(d.db, d.merchantId, req.staff!.id, "tab.staff_items", { tab: req.params.id, orderId: r.orderId });
+    return r;
+  }, reply));
+
+  /** The Host takes the staff-added items nobody has paid for onto their own share. */
+  app.post("/api/shop/tab/claim-staff-items", async (req, reply) => guard(async () => {
+    const { person, tabId } = await me(req);
+    return { moved: await d.tabs.claimStaffItems(tabId, person.id) };
+  }, reply));
+
   /** A customer chose "pay at the counter": staff confirm they have been paid. */
   app.post<{ Params: { id: string } }>("/api/tabs/payments/:id/confirm", staff, async (req, reply) => guard(async () => {
     const p = (await d.db.query("SELECT status, method FROM tab_payments WHERE id=$1 AND tab_id IN (SELECT id FROM tabs WHERE merchant_id=$2)", [req.params.id, d.merchantId])).rows[0];
@@ -188,14 +229,53 @@ export function registerTabRoutes(app: FastifyInstance, d: {
     return { ok: true };
   }, reply));
 
+  /** While an attempt's outcome is unknown, staff may record a manual payment for the same share. The attempt is flagged, and if it later succeeds that raises a duplicate-payment exception. */
+  app.post<{ Params: { id: string }; Body: { reference?: string } }>("/api/tabs/payments/:id/manual", staff, async (req, reply) => guard(async () => {
+    const id = await d.tabs.manualForUnknown(req.params.id, req.staff!.id, String(req.body?.reference ?? ""));
+    await audit(d.db, d.merchantId, req.staff!.id, "tab.manual_for_unknown", { unknown: req.params.id, manual: id });
+    return { ok: true, manualPaymentId: id };
+  }, reply));
+
+  const refunds = { preHandler: d.needs("wallet.refund") };
+
+  /** What the provider says about an attempt (a verified webhook, or staff reading the provider's dashboard). Managers and owners only. */
+  app.post<{ Params: { id: string }; Body: { outcome?: string; providerRef?: string } }>("/api/tabs/payments/:id/provider-outcome", refunds, async (req, reply) => guard(async () => {
+    const outcome = req.body?.outcome;
+    if (outcome !== "succeeded" && outcome !== "failed") return reply.code(400).send({ error: "outcome is succeeded or failed" });
+    const r = await d.tabs.providerOutcome(req.params.id, outcome, req.body?.providerRef);
+    await audit(d.db, d.merchantId, req.staff!.id, "tab.provider_outcome", { payment: req.params.id, outcome, result: r.result });
+    return r;
+  }, reply));
+
+  app.get("/api/tabs/exceptions", staff, async () => {
+    const r = await d.db.query(
+      `SELECT e.*, t.spot FROM tab_exceptions e JOIN tabs t ON t.id=e.tab_id WHERE t.merchant_id=$1 AND e.status='open' ORDER BY e.created_at`, [d.merchantId]);
+    return { exceptions: r.rows.map((x) => ({ id: x.id, kind: x.kind, tabId: x.tab_id, table: x.spot, paymentId: x.payment_id, relatedPaymentId: x.related_payment_id, amountCents: x.amount_cents, providerRef: x.provider_ref, detail: x.detail, at: x.created_at })) };
+  });
+
+  app.post<{ Params: { id: string }; Body: { resolution?: string } }>("/api/tabs/exceptions/:id/resolve", refunds, async (req, reply) => {
+    const note = String(req.body?.resolution ?? "").trim();
+    if (note.length < 3) return reply.code(400).send({ error: "say_how_it_was_resolved" });
+    const r = await d.db.query("UPDATE tab_exceptions SET status='resolved', resolved_at=now(), resolved_by=$2, resolution=$3 WHERE id=$1 AND status='open' AND tab_id IN (SELECT id FROM tabs WHERE merchant_id=$4) RETURNING id", [req.params.id, req.staff!.id, note.slice(0, 300), d.merchantId]);
+    if (!r.rowCount) return reply.code(404).send({ error: "exception_not_found" });
+    await audit(d.db, d.merchantId, req.staff!.id, "tab.exception_resolved", { exception: req.params.id, note });
+    return { ok: true };
+  });
+
+  /** A refund of a completed payment, up to what it still has to give back. Rewards it earned are reversed as compensating entries. */
+  app.post<{ Params: { id: string }; Body: { amountCents?: number; reason?: string } }>("/api/tabs/payments/:id/refund", refunds, async (req, reply) => guard(async () => {
+    const r = await d.tabs.refundPayment(req.params.id, Number(req.body?.amountCents), String(req.body?.reason ?? ""), req.staff!.id);
+    await audit(d.db, d.merchantId, req.staff!.id, "tab.refund", { payment: req.params.id, amountCents: req.body?.amountCents, reversedPoints: r.reversedPoints });
+    return r;
+  }, reply));
+
   /** Closing a tab that is not fully paid needs staff, with the reason logged. It is never closed or charged automatically. */
   app.post<{ Params: { id: string }; Body: { reason?: string } }>("/api/tabs/:id/close", staff, async (req, reply) => guard(async () => {
     const reason = String(req.body?.reason ?? "").trim();
     if (reason.length < 3) return reply.code(400).send({ error: "a_reason_is_required" });
     const r = await d.db.query("UPDATE tabs SET status='closed', closed_at=now(), closed_reason=$3, version=version+1 WHERE id=$1 AND merchant_id=$2 AND status='open' RETURNING id", [req.params.id, d.merchantId, reason.slice(0, 200)]);
     if (!r.rowCount) return reply.code(404).send({ error: "no_open_tab" });
-    await d.db.query("UPDATE tab_payments SET status='cancelled', updated_at=now() WHERE tab_id=$1 AND status='reserved'", [req.params.id]);
-    await d.db.query("DELETE FROM tab_claims WHERE payment_id IN (SELECT id FROM tab_payments WHERE tab_id=$1 AND status='cancelled')", [req.params.id]);
+    await d.tabs.abandon(req.params.id); // reservations are released, points returned, coupons given back
     await audit(d.db, d.merchantId, req.staff!.id, "tab.close", { tab: req.params.id, reason });
     return { ok: true };
   }, reply));

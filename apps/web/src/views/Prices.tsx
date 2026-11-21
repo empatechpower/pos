@@ -3,6 +3,7 @@ import { useEffect, useState } from "react";
 import { brandColoursFromPixels, formatMoney, isCombo, type Catalog, type ChannelKind, type OptionGroup } from "@pos/core";
 import { OptionsEditor } from "./OptionsEditor";
 import { StockPanel } from "./StockPanel";
+import { PromoPanel } from "./PromoPanel";
 import { authHeader, staffFetch, useStaff } from "../auth";
 import { markDeviceRejected } from "../device";
 
@@ -377,6 +378,7 @@ export function Prices({ catalog, outletId }: { catalog: Catalog; outletId: stri
         <button className="primary sm" disabled={!newBook.trim()} onClick={() => { void send("POST", "pricebooks", { name: newBook }, `${newBook} created. Pick it above and set its prices.`); setNewBook(""); }}>Create</button>
       </div>
       <StockPanel catalog={catalog} outletId={outletId} />
+      <PromoPanel />
       <p className="muted">Outlet: {outletId}. To price one outlet differently, create a pricebook and assign it to that outlet through the API for now.</p>
     </div>
   );

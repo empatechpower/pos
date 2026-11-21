@@ -471,3 +471,13 @@
 .k-method small { font-size: 16px; color: var(--muted); line-height: 1.35; }
 .k-method.on { border-color: var(--orange); background: var(--selected, #fdeee0); }
 .k-pay .k-ghost { flex: none; min-height: 72px; padding: 0 44px; margin-top: 6px; }
+
+/* The build-your-own screen on the kiosk: bigger rows and touch targets. */
+.kiosk .opt-row { padding: 16px 0; }
+.kiosk .opt-row b { font-size: 22px; }
+.kiosk .opt-row .muted { font-size: 18px; }
+.kiosk .opt-tog { width: 60px; height: 60px; font-size: 30px; border-width: 2px; }
+.kiosk .opt-row .opt-step { padding: 5px; }
+.kiosk .opt-row .opt-step button { width: 52px; height: 52px; font-size: 28px; }
+.kiosk .opt-row .opt-step b { min-width: 40px; text-align: center; font-size: 24px; }
+.kiosk .opt-group .opt-note { font-size: 19px; }

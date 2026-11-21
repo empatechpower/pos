@@ -24,7 +24,7 @@ let owner = "";
 let evMgr = "";
 const baseCfg = PRESETS.restaurant("bp", "Bailey & Patch", "EV");
 // The documents' worked examples use a 9% service charge, and the points example earns 1 point per S$1.
-const config = { ...baseCfg, pricing: { ...baseCfg.pricing, serviceRate: 0.09 }, rewards: { ...baseCfg.rewards, pointsEnabled: true, earnPointsPerDollar: 1, welcomePoints: 0, welcomeVoucherCents: 0 } };
+const config = { ...baseCfg, pricing: { ...baseCfg.pricing, serviceRate: 0.09, stackable: false }, rewards: { ...baseCfg.rewards, pointsEnabled: true, earnPointsPerDollar: 1, welcomePoints: 0, welcomeVoucherCents: 0 } };
 
 async function call(url: string, o: { method?: string; body?: unknown; staff?: string } = {}) {
   const res = await fetch(base + url, {
@@ -416,5 +416,271 @@ describe("Split equally, By round, Custom amount, cash at the counter, and the w
     expect(no.status).toBe(409);
     expect(no.json.error).toBe("not_enough_credit");
     expect((await view(pip)).totals.paidCents).toBe(0); // the reservation was released
+  });
+});
+
+describe("a coupon on the tab and personal points (Spec 12.4 D3, 12.7, 8.2)", () => {
+  const members = () => new MemberStore(db, "bp", 0, 0);
+  const memberWith = async (sub: string, points: number, coupons: Array<{ title: string; amountCents: number; minSpendCents: number }> = []) => {
+    const m = await members().signInWithIdentity("test", sub, { name: sub });
+    if (points) await members().post(m.member.id, "earn", points, `seed-${sub}`);
+    for (const [i, c] of coupons.entries()) await members().grantCoupon(m.member.id, `seed-${sub}-${i}`, c);
+    return { token: m.token, id: m.member.id };
+  };
+  const walletOf = async (id: string) => (await members().coupons(id)).map((c) => c.id);
+
+  it("any person can apply their own coupon: the minimum is on the whole tab's items, the reason is said inline, and the slot is held until its owner removes it", async () => {
+    const a = await memberWith("cp-alex", 0, [{ title: "S$2 off", amountCents: 200, minSpendCents: 1500 }, { title: "S$50 off", amountCents: 5000, minSpendCents: 5000 }]);
+    const b = await memberWith("cp-bea", 0, [{ title: "S$1 off", amountCents: 100, minSpendCents: 0 }]);
+    const alex = await join("C1", "x", a.token), bea = await join("C1", "x", b.token);
+    await orderRound(alex, [{ productId: tornado, qty: 1 }]);
+    await orderRound(bea, [{ productId: kaya, qty: 1 }, { productId: coffee, qty: 1 }, { productId: coke, qty: 1 }]);
+    const wallet = await walletOf(a.id);
+    const opts = (await tcall("/api/shop/tab", { who: alex, bearer: a.token })).json.couponOptions as Array<any>;
+    expect(opts.find((o) => o.title === "S$2 off")).toMatchObject({ eligible: true, reason: null });
+    const big = opts.find((o) => o.title === "S$50 off");
+    expect(big.eligible).toBe(false);
+    expect(big.reason).toContain("items only, before service charge and any tax, deposits excluded");
+    expect(big.reason).toContain("S$50.00");
+    const short = await tcall("/api/shop/tab/coupons", { body: { couponId: wallet[1] }, who: alex, bearer: a.token });
+    expect(short.status).toBe(400);
+    expect(short.json).toMatchObject({ error: "coupon_not_eligible", shortfallCents: 5000 - 1750 });
+    expect((await tcall("/api/shop/tab/coupons", { body: { couponId: wallet[0] }, who: alex, bearer: a.token })).status).toBe(200);
+    const v = (await tcall("/api/shop/tab", { who: bea, bearer: b.token })).json;
+    expect(v.totals.discountCents).toBe(200);
+    expect(v.coupons).toMatchObject([{ title: "S$2 off", amountCents: 200, owner: { name: "cp-alex" }, mine: false }]);
+    // promotions are not stackable here: the slot is held by the first coupon
+    expect((await tcall("/api/shop/tab/coupons", { body: { couponId: (await walletOf(b.id))[0] }, who: bea, bearer: b.token })).json.error).toBe("coupon_slot_taken");
+    // only the owner takes it off, and then it is theirs again
+    const tabCouponId = v.coupons[0].id;
+    expect((await tcall(`/api/shop/tab/coupons/${tabCouponId}`, { method: "DELETE", who: bea, bearer: b.token })).status).toBe(403);
+    expect((await tcall(`/api/shop/tab/coupons/${tabCouponId}`, { method: "DELETE", who: alex, bearer: a.token })).status).toBe(200);
+    expect((await walletOf(a.id)).length).toBe(2);
+    expect((await tcall("/api/shop/tab/coupons", { body: { couponId: wallet[0] }, who: alex, bearer: a.token })).status).toBe(200);
+  });
+
+  it("the discount is shared pro-rata across the payers, the shares add up to the new total, and a coupon cannot be added or removed once anyone has paid", async () => {
+    const alex = await join("C1", "x", (await members().signInWithIdentity("test", "cp-alex", {})).token);
+    const tabId = alex.tabId;
+    await tcall(`/api/tabs/${tabId}/release`, { method: "POST", body: {}, staff: staffTok });
+    const bea = await join("C1", "x", (await members().signInWithIdentity("test", "cp-bea", {})).token);
+    const [qa, qb] = await Promise.all([quote(alex, { mode: "mine" }), quote(bea, { mode: "mine" })]);
+    const v = await view(alex);
+    expect(v.totals.totalCents).toBe(qa.json.amountCents + qb.json.amountCents);
+    expect(qa.json.discountCents + qb.json.discountCents).toBe(200);
+    expect(qa.json.discountCents).toBeGreaterThan(qb.json.discountCents - 1); // Alex's S$10.80 carries the larger part
+    const pay1 = await pay(alex, qa.json.quoteId);
+    expect(pay1.status).toBe(200);
+    const a = (await members().signInWithIdentity("test", "cp-alex", {})).token;
+    const myCouponId = ((await view(alex)).coupons as any[])[0].id;
+    expect((await tcall(`/api/shop/tab/coupons/${myCouponId}`, { method: "DELETE", who: alex, bearer: a })).status).toBe(409); // too late
+    await confirm(pay1.json.paymentId);
+    await payNow(bea, { mode: "mine" });
+    const done = await view(alex);
+    expect(done.closed).toBe(true);
+    expect(done.totals.remainingCents).toBe(0);
+  });
+
+  it("points reduce only the payer's own cash; the tab is settled by the full share; nobody else's share moves; cancelling gives the points back", async () => {
+    const s = await memberWith("pt-sam", 10_000);
+    const alex = await join("P1", "Alex"), sam = await join("P1", "x", s.token);
+    await orderRound(alex, [{ productId: tornado, qty: 1 }]);
+    await orderRound(sam, [{ productId: kaya, qty: 1 }, { productId: coffee, qty: 1 }]);
+    await tcall(`/api/tabs/${alex.tabId}/release`, { method: "POST", body: {}, staff: staffTok });
+    const before = (await quote(alex, { mode: "mine" })).json.amountCents;
+    const q = await tcall("/api/shop/tab/quote", { body: { mode: "mine", usePoints: 100 }, who: sam, bearer: s.token });
+    expect(q.json).toMatchObject({ pointsUsed: 100, liabilityCents: q.json.amountCents + 100 });
+    const r = await tcall("/api/shop/tab/pay", { body: { quoteId: q.json.quoteId, method: "counter", idempotencyKey: "idem-pts-1" }, who: sam, bearer: s.token });
+    expect(r.status).toBe(200);
+    expect((await members().byId(s.id))!.pointsBalance).toBe(9900); // spent at payment
+    expect((await quote(alex, { mode: "mine" })).json.amountCents).toBe(before); // Alex's share did not move
+    // cancelled before completion: the points come back
+    expect((await tcall(`/api/shop/tab/payments/${r.json.paymentId}/cancel`, { method: "POST", body: {}, who: sam })).status).toBe(200);
+    expect((await members().byId(s.id))!.pointsBalance).toBe(10_000);
+    // as many as possible: the share has no deposit, so the whole share is covered and costs no cash
+    const full = await tcall("/api/shop/tab/quote", { body: { mode: "mine", usePoints: "max" }, who: sam, bearer: s.token });
+    expect(full.json.amountCents).toBe(0);
+    expect(full.json.pointsUsed).toBe(full.json.liabilityCents);
+    const paid = await tcall("/api/shop/tab/pay", { body: { quoteId: full.json.quoteId, method: "counter", idempotencyKey: "idem-pts-2" }, who: sam, bearer: s.token });
+    expect(paid.json.status).toBe("completed"); // nothing to take in cash: done at once
+    const v = await tcall("/api/shop/tab", { who: sam, bearer: s.token });
+    expect(v.json.totals.paidCents).toBe(full.json.liabilityCents); // the tab counts what the points settled
+    expect(v.json.me.pointsBalance).toBe(10_000 - full.json.pointsUsed);
+    // points cannot be spent by someone who is not signed in, and not above the balance
+    const poorTok = (await members().signInWithIdentity("test", "pt-poor", {})).token;
+    const poor = await join("P2", "x", poorTok);
+    await orderRound(poor, [{ productId: tornado, qty: 1 }]);
+    await tcall(`/api/tabs/${poor.tabId}/release`, { method: "POST", body: {}, staff: staffTok });
+    const capped = await tcall("/api/shop/tab/quote", { body: { mode: "mine", usePoints: 9999 }, who: poor, bearer: poorTok });
+    expect(capped.json.pointsUsed ?? 0).toBe(0); // a balance of nothing
+    const guest = await join("P2", "Gus");
+    await orderRound(guest, [{ productId: kaya, qty: 1 }]);
+    await tcall(`/api/tabs/${guest.tabId}/release`, { method: "POST", body: {}, staff: staffTok });
+    expect((await tcall("/api/shop/tab/quote", { body: { mode: "mine", usePoints: "max" }, who: guest })).json.pointsUsed).toBe(0); // no member, no points
+  });
+
+  it("a payment that settled with points earns rewards only on the cash actually paid", async () => {
+    const s = await memberWith("pt-earn", 10_000);
+    const alex = await join("P3", "x", s.token);
+    await orderRound(alex, [{ productId: tornado, qty: 1 }]); // S$10.80 + service
+    await tcall(`/api/tabs/${alex.tabId}/release`, { method: "POST", body: {}, staff: staffTok });
+    const q = await tcall("/api/shop/tab/quote", { body: { mode: "all", usePoints: 300 }, who: alex, bearer: s.token });
+    const r = await tcall("/api/shop/tab/pay", { body: { quoteId: q.json.quoteId, method: "counter", idempotencyKey: "idem-pts-3" }, who: alex, bearer: s.token });
+    await confirm(r.json.paymentId);
+    expect((await view(alex)).closed).toBe(true);
+    // 10,000 - 300 spent + earned on the cash only
+    expect((await members().byId(s.id))!.pointsBalance).toBe(10_000 - 300 + Math.floor(q.json.amountCents / 100));
+  });
+});
+
+describe("money safety: manual fallback, provider events, refunds and reward reversals (Addendum 4.4, 6.5)", () => {
+  const members = () => new MemberStore(db, "bp", 0, 0);
+  const asOwner = (url: string, body: object = {}, method = "POST") => tcall(url, { method, body, staff: owner });
+
+  it("a manual payment for an unknown outcome supersedes the attempt; a later provider success raises a duplicate-payment exception and never nets off", async () => {
+    const alex = await join("M1", "Alex");
+    await orderRound(alex, [{ productId: tornado, qty: 1 }]);
+    await tcall(`/api/tabs/${alex.tabId}/release`, { method: "POST", body: {}, staff: staffTok });
+    const q = await quote(alex, { mode: "all" });
+    const r = await pay(alex, q.json.quoteId);
+    await db.query("UPDATE tab_payments SET status='unknown', method='card', provider_ref='ref-77' WHERE id=$1", [r.json.paymentId]);
+    expect((await asOwner(`/api/tabs/payments/${r.json.paymentId}/manual`, { reference: "" })).status).toBe(400); // a reference is required
+    const manual = await asOwner(`/api/tabs/payments/${r.json.paymentId}/manual`, { reference: "TRACE-99812" });
+    expect(manual.status).toBe(200);
+    expect((await view(alex)).closed).toBe(true); // the manual record settled the share
+    const rows = (await db.query("SELECT status, method, manual_ref, superseded_by FROM tab_payments WHERE tab_id=$1 ORDER BY created_at", [alex.tabId])).rows;
+    expect(rows.map((x: any) => x.status)).toEqual(["superseded", "completed"]);
+    expect(rows[1]).toMatchObject({ method: "manual", manual_ref: "TRACE-99812" });
+    // the integrated payment later succeeds: an exception for staff, not a silent net-off
+    const late = await asOwner(`/api/tabs/payments/${r.json.paymentId}/provider-outcome`, { outcome: "succeeded", providerRef: "ref-77" });
+    expect(late.json.result).toBe("duplicate_payment");
+    await asOwner(`/api/tabs/payments/${r.json.paymentId}/provider-outcome`, { outcome: "succeeded", providerRef: "ref-77" });
+    const ex = (await tcall("/api/tabs/exceptions", { staff: staffTok })).json.exceptions as any[];
+    const mine = ex.filter((e) => e.paymentId === r.json.paymentId);
+    expect(mine).toHaveLength(1); // a duplicate event is one exception
+    expect(mine[0]).toMatchObject({ kind: "duplicate_payment", providerRef: "ref-77" });
+    expect((await view(alex)).totals.paidCents).toBe((await view(alex)).totals.totalCents); // paid once, not twice
+    expect((await asOwner(`/api/tabs/exceptions/${mine[0].id}/resolve`, { resolution: "refunded on the provider dashboard" })).status).toBe(200);
+  });
+
+  it("a duplicate success event is one settlement and one reward; a success for a released payment raises a late-success exception", async () => {
+    const s = await members().signInWithIdentity("test", "dup-sam", { name: "Sam" });
+    await members().post(s.member.id, "earn", 1, "dup-seed");
+    const alex = await join("M2", "x", s.token);
+    await orderRound(alex, [{ productId: tornado, qty: 1 }]);
+    await tcall(`/api/tabs/${alex.tabId}/release`, { method: "POST", body: {}, staff: staffTok });
+    const q = await quote(alex, { mode: "all" });
+    const r = await pay(alex, q.json.quoteId, "counter");
+    await db.query("UPDATE tab_payments SET method='card' WHERE id=$1", [r.json.paymentId]);
+    const a = await asOwner(`/api/tabs/payments/${r.json.paymentId}/provider-outcome`, { outcome: "succeeded", providerRef: "ref-1" });
+    const b = await asOwner(`/api/tabs/payments/${r.json.paymentId}/provider-outcome`, { outcome: "succeeded", providerRef: "ref-1" });
+    expect([a.json.result, b.json.result]).toEqual(["completed", "already_settled"]);
+    const earned = await db.query("SELECT count(*)::int AS n FROM points_entries WHERE member_id=$1 AND note LIKE 'Tab rewards%'", [s.member.id]);
+    expect(earned.rows[0].n).toBe(1);
+    // a payment that was cancelled, then reported as succeeded
+    const bea = await join("M3", "Bea");
+    await orderRound(bea, [{ productId: kaya, qty: 1 }]);
+    await tcall(`/api/tabs/${bea.tabId}/release`, { method: "POST", body: {}, staff: staffTok });
+    const q2 = await quote(bea, { mode: "all" });
+    const r2 = await pay(bea, q2.json.quoteId);
+    await tcall(`/api/shop/tab/payments/${r2.json.paymentId}/cancel`, { method: "POST", body: {}, who: bea });
+    expect((await asOwner(`/api/tabs/payments/${r2.json.paymentId}/provider-outcome`, { outcome: "succeeded" })).json.result).toBe("late_success");
+  });
+
+  it("a refund is bounded by what was paid; rewards it earned are reversed exactly, to whoever received them (the Host for host-keep), even below zero; before settlement nothing is reversed", async () => {
+    const a = await members().signInWithIdentity("test", "rf-alex", { name: "Alex" });
+    const sm = await members().signInWithIdentity("test", "rf-sam", { name: "Sam" });
+    const alex = await join("M4", "x", a.token), sam = await join("M4", "x", sm.token);
+    await orderRound(alex, [{ productId: tornado, qty: 1 }]);
+    await orderRound(sam, [{ productId: kaya, qty: 1 }, { productId: coffee, qty: 1 }]);
+    await tcall(`/api/tabs/${alex.tabId}/release`, { method: "POST", body: {}, staff: staffTok });
+    // Sam pays and keeps nothing for himself: his reward goes to the Host. A refund before settlement reverses nothing.
+    const sq = await quote(sam, { mode: "mine" });
+    const sp = await tcall("/api/shop/tab/pay", { body: { quoteId: sq.json.quoteId, method: "counter", idempotencyKey: "idem-rf-1", hostKeep: true }, who: sam, bearer: sm.token });
+    await confirm(sp.json.paymentId);
+    const early = await asOwner(`/api/tabs/payments/${sp.json.paymentId}/refund`, { amountCents: 100, reason: "wrong item charged" });
+    expect(early.status).toBe(200);
+    expect(early.json.reversedPoints).toBe(0); // nothing was credited yet
+    await payNow(alex, { mode: "mine" });
+    expect((await view(alex)).closed).toBe(true);
+    const alexId = a.member.id;
+    const before = (await members().byId(alexId))!.pointsBalance;
+    expect(before).toBe(Math.floor(1177 / 100) + Math.floor(458 / 100)); // his own, and Sam's, host-kept
+    // refund the rest of Sam's payment: exactly Sam's 4 points are taken back from the Host
+    const refundable = 458 - 100;
+    expect((await asOwner(`/api/tabs/payments/${sp.json.paymentId}/refund`, { amountCents: refundable + 1, reason: "too much" })).status).toBe(409);
+    await db.query("UPDATE members SET points_balance = 0 WHERE id=$1", [alexId]); // Alex has already spent his points
+    const full = await asOwner(`/api/tabs/payments/${sp.json.paymentId}/refund`, { amountCents: refundable, reason: "customer left without eating" });
+    expect(full.status).toBe(200);
+    expect(full.json.reversedPoints).toBe(Math.floor(458 / 100));
+    expect((await members().byId(alexId))!.pointsBalance).toBe(-4); // posted in full: the balance goes below zero and is offset by future earnings
+    expect((await members().byId(sm.member.id))!.pointsBalance).toBe(0); // Sam never held them
+    // nothing more can be refunded, and reversing again changes nothing
+    expect((await asOwner(`/api/tabs/payments/${sp.json.paymentId}/refund`, { amountCents: 1, reason: "again" })).status).toBe(409);
+    const rev = await db.query("SELECT count(*)::int AS n FROM points_entries WHERE member_id=$1 AND kind='reversal'", [alexId]);
+    expect(rev.rows[0].n).toBe(1);
+    // only managers and owners refund
+    expect((await tcall(`/api/tabs/payments/${sp.json.paymentId}/refund`, { method: "POST", body: { amountCents: 1, reason: "x" }, staff: staffTok })).status).toBe(403);
+  });
+
+  it("partial refunds add up to exactly what was credited, never more; a payment made with credit refunds into the wallet", async () => {
+    const m = await members().signInWithIdentity("test", "rf-cleo", { name: "Cleo" });
+    await topUp(db, { merchantId: "bp", customerId: m.member.id, amountCents: 2000, idempotencyKey: "tab-rf-topup", kind: "topup" } as never);
+    const cleo = await join("M5", "x", m.token);
+    await orderRound(cleo, [{ productId: tornado, qty: 1 }]); // S$10.80 + service = S$11.77
+    await tcall(`/api/tabs/${cleo.tabId}/release`, { method: "POST", body: {}, staff: staffTok });
+    const q = await quote(cleo, { mode: "all" });
+    const r = await tcall("/api/shop/tab/pay", { body: { quoteId: q.json.quoteId, method: "credit", idempotencyKey: "idem-rf-2" }, who: cleo, bearer: m.token });
+    expect(r.json.status).toBe("completed");
+    const credited = Math.floor(q.json.amountCents / 100);
+    expect((await members().byId(m.member.id))!.pointsBalance).toBe(credited);
+    const balAfterPay = (await db.query("SELECT w.balance_cents FROM wallets w WHERE w.customer_id=$1", [m.member.id])).rows[0].balance_cents;
+    const half = Math.floor(q.json.amountCents / 2);
+    const r1 = await asOwner(`/api/tabs/payments/${r.json.paymentId}/refund`, { amountCents: half, reason: "half refunded" });
+    const r2 = await asOwner(`/api/tabs/payments/${r.json.paymentId}/refund`, { amountCents: q.json.amountCents - half, reason: "the rest" });
+    expect(r1.json.reversedPoints + r2.json.reversedPoints).toBe(credited); // exactly what was credited, once
+    expect((await members().byId(m.member.id))!.pointsBalance).toBe(0);
+    const balNow = (await db.query("SELECT w.balance_cents FROM wallets w WHERE w.customer_id=$1", [m.member.id])).rows[0].balance_cents;
+    expect(Number(balNow) - Number(balAfterPay)).toBe(q.json.amountCents); // the credit went back
+  });
+});
+
+describe("bar tabs and staff-added items (Spec 12.1, 12.3)", () => {
+  it("staff open a bar tab by code; people join with it; the first is the Host; orders work without a table", async () => {
+    const open = await tcall("/api/tabs", { body: { outletId: "EV" }, staff: staffTok });
+    expect(open.status).toBe(200);
+    const code = open.json.code as string;
+    const a = await tcall("/api/shop/tab/join", { body: { outletId: "EV", code, displayName: "Ann" } });
+    const b = await tcall("/api/shop/tab/join", { body: { outletId: "EV", code, displayName: "Bo" } });
+    expect(a.json.isHost).toBe(true);
+    expect(b.json.isHost).toBe(false);
+    expect(a.json.tab.spot).toBeNull();
+    const ann = { id: a.json.participantId, token: a.json.token, tabId: a.json.tabId };
+    expect((await orderRound(ann, [{ productId: kaya, qty: 1 }])).status).toBe(200);
+    expect((await tcall("/api/shop/tab/join", { body: { outletId: "EV", code: "NOPE1" } })).status).toBe(404);
+  });
+
+  it("a waiter adds items with the Staff chip: Unclaimed, not in anyone's Pay mine, the Host can claim them, or they are paid in Pay all", async () => {
+    const alex = await join("S1", "Alex"), sam = await join("S1", "Sam");
+    await orderRound(alex, [{ productId: tornado, qty: 1 }]);
+    const added = await tcall(`/api/tabs/${alex.tabId}/items`, { body: { items: [{ productId: coffee, qty: 2 }] }, staff: staffTok });
+    expect(added.status).toBe(200);
+    expect((await tcall(`/api/tabs/${alex.tabId}/items`, { body: { items: [{ productId: "nope", qty: 1 }] }, staff: staffTok })).status).toBe(400);
+    const v = await view(alex);
+    expect(v.people.map((p: any) => p.name)).toEqual(["Alex", "Sam"]); // the Staff pseudo-person is not a diner
+    expect(v.rounds[1]).toMatchObject({ staffAdded: true, orderedBy: { name: "Staff" } });
+    expect(v.totals.itemsCents).toBe(1080 + 440);
+    await tcall(`/api/tabs/${alex.tabId}/release`, { method: "POST", body: {}, staff: staffTok });
+    expect((await quote(alex, { mode: "mine" })).json.itemsCents).toBe(1080); // the staff items are nobody's yet
+    expect((await quote(sam, { mode: "mine" })).status).toBe(409);
+    expect((await tcall("/api/shop/tab/claim-staff-items", { method: "POST", body: {}, who: sam })).status).toBe(403); // only the Host claims
+    expect((await tcall("/api/shop/tab/claim-staff-items", { method: "POST", body: {}, who: alex })).json.moved).toBe(1);
+    expect((await quote(alex, { mode: "mine" })).json.itemsCents).toBe(1080 + 440); // now Alex's
+    // unclaimed items can also simply be paid for: a second tab, Pay all
+    const bea = await join("S2", "Bea");
+    await orderRound(bea, [{ productId: kaya, qty: 1 }]);
+    await tcall(`/api/tabs/${bea.tabId}/items`, { body: { items: [{ productId: coffee, qty: 1 }] }, staff: staffTok });
+    await tcall(`/api/tabs/${bea.tabId}/release`, { method: "POST", body: {}, staff: staffTok });
+    expect((await quote(bea, { mode: "all" })).json.itemsCents).toBe(200 + 220);
   });
 });
