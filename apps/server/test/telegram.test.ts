@@ -526,4 +526,21 @@ describe("menu changes and reports by Telegram (for an AI assistant working Tele
     await press(777, again.callback_data!); // put service charge back
     await press(777, flipped.callback_data!);
   });
+
+  it("a tab from /tabs opens with its buttons: release, close with a confirmation; /move needs the right words", async () => {
+    const list = await say(1001, "/tabs");
+    const open = buttons(list.said[0]).find((b: any) => b.callback_data?.startsWith("tb:"))!;
+    const detail = (await press(1001, open.callback_data!))[0];
+    expect(detail.text).toMatch(/code [A-Z0-9]+/);
+    expect(buttons(detail).map((b: any) => b.text)).toEqual(expect.arrayContaining(["Release payment", "Close tab"]));
+    const released = await press(1001, buttons(detail).find((b: any) => b.text === "Release payment")!.callback_data!);
+    expect(released[0].text).toBe("Payment released.");
+    const ask = (await press(1001, buttons(detail).find((b: any) => b.text === "Close tab")!.callback_data!))[0];
+    expect(ask.text).toMatch(/Close this tab\?/);
+    expect((await say(1001, "/move nonsense")).said[0].text).toMatch(/Say it like this/);
+    expect((await say(1001, "/move Table 99 to Table 98")).said[0].text).toMatch(/can't find an open tab/);
+    const closed = await press(1001, buttons(ask).find((b: any) => /Yes, close/.test(b.text))!.callback_data!);
+    expect(closed[0].text).toBe("Tab closed.");
+    expect((await say(1001, "/tabs")).said[0].text).toMatch(/No open tabs/);
+  });
 });

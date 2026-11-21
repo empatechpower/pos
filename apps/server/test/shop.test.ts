@@ -217,6 +217,22 @@ describe("placing an order", () => {
     expect((await call("/api/brand/sound")).status).toBe(404);
   });
 
+  it("a guest who is keen to sign up is only pending: no member, no points, until the email is verified; then the phone carries over", async () => {
+    const bad = await order({ channelId: "take-away", items: [kaya(1)], customerPhone: "81234567", keen: { email: "not-an-email" } });
+    expect(bad.status).toBe(400);
+    const placed = await order({ channelId: "take-away", items: [kaya(1)], customerName: "Gina", customerPhone: "+65 9123 4567", keen: { email: "Gina@Example.com" } });
+    expect(placed.status).toBe(200);
+    expect(reduceOrder(placed.json.orderId, await events(placed.json.orderId))!.memberId).toBeUndefined();
+    expect((await db.query("SELECT phone, name FROM guest_signups WHERE email='gina@example.com'")).rows[0]).toMatchObject({ phone: "+65 9123 4567", name: "Gina" });
+    expect((await db.query("SELECT count(*)::int AS n FROM members WHERE email='gina@example.com'")).rows[0].n).toBe(0);
+    const { MemberStore } = await import("../src/members.js");
+    const members = new MemberStore(db, "bp", 0, 0);
+    const r = await members.signInWithIdentity("email", "gina@example.com", { email: "gina@example.com", emailVerified: true });
+    expect(r.created).toBe(true);
+    expect(await members.byId(r.member.id)).toMatchObject({ phone: "+65 9123 4567", name: "Gina" });
+    expect((await db.query("SELECT count(*)::int AS n FROM guest_signups WHERE email='gina@example.com'")).rows[0].n).toBe(0);
+  });
+
   it("tells the customer when prices changed since they looked, and places nothing", async () => {
     const before = (await db.query("SELECT count(*) FROM events WHERE type='OrderOpened'")).rows[0].count;
     const r = await order({ channelId: "take-away", items: [kaya(1)], expectedTotalCents: 150 });

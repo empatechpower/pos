@@ -46,8 +46,17 @@ export interface TelegramDeps {
     outlets: () => Promise<Array<{ id: string; name: string; tableService: boolean; tabService: boolean; allocation: "oldest_first" | "reduce_only" }>>;
     setOutlet: (id: string, change: { tabService?: boolean; allocation?: string }, staffId: string) => Promise<string | null>;
   };
-  /** Open tables for /tabs. */
-  tabs?: { open: () => Promise<Array<{ spot: string | null; people: number; paged: string | null; billRequested: boolean; totalCents: number; paidCents: number; remainingCents: number }>> };
+  /** Open tables for /tabs, and what staff can do on one (Spec 18: tab staff view). */
+  tabs?: {
+    open: () => Promise<Array<{ id: string; spot: string | null; people: number; paged: string | null; billRequested: boolean; totalCents: number; paidCents: number; remainingCents: number; paymentLocked: boolean }>>;
+    view: (tabId: string) => Promise<{ spot: string | null; code: string; totals: { totalCents: number; paidCents: number; remainingCents: number }; people: Array<{ name: string; isHost: boolean }>; rounds: Array<{ round: number; kitchen: string; lines: Array<{ name: string; qty: number }> }>; payments: Array<{ id: string; status: string; method: string; amountCents: number; payer: { name: string | null } }>; waiterPaged: boolean; pageAcknowledged?: boolean } | null>;
+    release: (tabId: string, staffId: string) => Promise<void>;
+    ack: (tabId: string) => Promise<boolean>;
+    confirmCash: (paymentId: string, staffId: string) => Promise<"ok" | "not_found" | "not_waiting">;
+    close: (tabId: string, reason: string, staffId: string) => Promise<boolean>;
+    move: (tabId: string, spot: string, staffId: string) => Promise<string>;
+    findBySpot: (spot: string) => Promise<string | null>;
+  };
 }
 
 const sha256 = (s: string) => createHash("sha256").update(s).digest("hex");
@@ -155,6 +164,7 @@ export async function setupTelegramWebhook(integ: Integrations, log: (m: string)
       { command: "sales", description: "Sales totals for a day or period" },
       { command: "orders", description: "Orders as a spreadsheet file" },
       { command: "tabs", description: "Open tables and what is owed" },
+      { command: "move", description: "Move a tab to another table" },
       { command: "settings", description: "Service charge, tax, points, tabs" },
       { command: "help", description: "What I can do" },
     ],
@@ -334,7 +344,8 @@ export function registerTelegram(app: FastifyInstance, d: TelegramDeps): void {
         `/rename Latte > Flat White : rename an item, or a whole category\n` +
         `Send a photo with the item's name as the caption : sets that item's picture\n` +
         `/sales today (or yesterday, week, month, or a date) : sales totals and top items\n` +
-        `/tabs : open tables and what is owed\n` +
+        `/tabs : open tables, with buttons to release, record cash or close\n` +
+        `/move Table 5 to Table 8 : move a tab to another table\n` +
         `/orders week : the orders as a spreadsheet file\n\n` +
         `A price of 0 is allowed: that item sells for free. To stop selling an item in a pricebook, use /off.`,
     );
@@ -436,6 +447,30 @@ export function registerTelegram(app: FastifyInstance, d: TelegramDeps): void {
       rows.push([{ text: `${o.name}: custom amount ${o.allocation === "reduce_only" ? "reduces the total only" : "pays the oldest round first"} (tap to switch)`, callback_data: `so:${o.id}:al:${o.allocation === "reduce_only" ? "oldest_first" : "reduce_only"}` }]);
     }
     return send(chatId, "Settings. Tap one to switch it. Open screens pick a change up on their next reload.", rows);
+  };
+
+  /** Open tabs, one button each. */
+  const showTabs = async (chatId: number) => {
+    if (!d.tabs) return send(chatId, "Tables aren't available here.");
+    const list = await d.tabs.open();
+    if (!list.length) return send(chatId, "No open tabs.");
+    return send(
+      chatId,
+      `Open tabs (${list.length})\n` + list.map((x) => `${x.paged ? (x.paged === "bill" ? "🧾 " : "🔔 ") : "• "}${x.spot ?? "Table"}: ${money(x.remainingCents)} to pay of ${money(x.totalCents)} · ${x.people} ${x.people === 1 ? "person" : "people"}${x.paged === "bill" ? " · asking for the bill" : x.paged ? " · needs the waiter" : ""}`).join("\n"),
+      list.map((x) => [{ text: `${x.paged ? "🔔 " : ""}${x.spot ?? "Table"} · ${money(x.remainingCents)}`, callback_data: `tb:${x.id}` }]),
+    );
+  };
+  /** One tab: who, what was ordered, what is paid, and the buttons for what staff can do. */
+  const showTab = async (chatId: number, tabId: string) => {
+    const v = await d.tabs?.view(tabId);
+    if (!d.tabs || !v) return send(chatId, "That tab is not there any more.");
+    const items = v.rounds.map((r) => `Round ${r.round} (${r.kitchen}): ${r.lines.map((l) => `${l.qty}x ${l.name}`).join(", ") || "nothing"}`).join("\n");
+    const cash = v.payments.filter((p) => p.status === "reserved" && p.method === "counter");
+    const rows: Button[][] = [[{ text: "Release payment", callback_data: `tr:${tabId}` }]];
+    if (v.waiterPaged && !v.pageAcknowledged) rows.push([{ text: "On my way", callback_data: `ta:${tabId}` }]);
+    for (const p of cash) rows.push([{ text: `Cash received ${money(p.amountCents)} (${p.payer.name ?? "guest"})`, callback_data: `tp:${p.id}` }]);
+    rows.push([{ text: "Close tab", callback_data: `tx:${tabId}` }]);
+    return send(chatId, `${v.spot ?? "Bar tab"} · code ${v.code}\nPeople: ${v.people.map((p) => p.name + (p.isHost ? " (host)" : "")).join(", ")}\n${items || "No orders yet."}\nTotal ${money(v.totals.totalCents)} · paid ${money(v.totals.paidCents)} · left ${money(v.totals.remainingCents)}\nTo move it: /move ${v.spot ?? "Table 1"} to Table 8`, rows);
   };
 
   const salesMessage = async (arg: string): Promise<string> => {
@@ -582,11 +617,15 @@ export function registerTelegram(app: FastifyInstance, d: TelegramDeps): void {
       case "/settings":
         if (!can(who.role, "staff.manage")) return send(chatId, "Only the owner can change settings.");
         return showSettings(chatId);
-      case "/tabs": {
+      case "/tabs":
+        return showTabs(chatId);
+      case "/move": {
         if (!d.tabs) return send(chatId, "Tables aren't available here.");
-        const list = await d.tabs.open();
-        if (!list.length) return send(chatId, "No open tabs.");
-        return send(chatId, `Open tabs (${list.length})\n` + list.map((x) => `${x.paged ? (x.paged === "bill" ? "🧾 " : "🔔 ") : "• "}${x.spot ?? "Table"}: ${money(x.remainingCents)} to pay of ${money(x.totalCents)} · ${x.people} ${x.people === 1 ? "person" : "people"}${x.paged === "bill" ? " · asking for the bill" : x.paged ? " · needs the waiter" : ""}`).join("\n"));
+        const m = /^(.+?)\s+to\s+(.+)$/i.exec(arg.trim());
+        if (!m) return send(chatId, "Say it like this: /move Table 5 to Table 8");
+        const id = await d.tabs.findBySpot(m[1]!.trim());
+        if (!id) return send(chatId, `I can't find an open tab at ${m[1]!.trim()}. Send /tabs to see them.`);
+        try { return send(chatId, `Moved to ${await d.tabs.move(id, m[2]!.trim(), who.staffId)}.`); } catch (e) { return send(chatId, String((e as { body?: { message?: string; error?: string } }).body?.message ?? (e as { body?: { error?: string } }).body?.error ?? "That did not work.")); }
       }
       case "/orders":
         if (!can(who.role, "audit.read")) return send(chatId, "Only managers and owners can see orders.");
@@ -627,6 +666,21 @@ export function registerTelegram(app: FastifyInstance, d: TelegramDeps): void {
     const who = await linkedStaff(q.from.id, q.from);
     if (!who || !can(who.role, "catalog.manage")) return send(chatId, "I don't know you, or you can't change the menu.");
     const parts = q.data.split(":");
+    if (["tb", "tr", "ta", "tp", "tx", "ty"].includes(parts[0]!)) {
+      if (!d.tabs) return send(chatId, "Tables aren't available here.");
+      const id = parts[1]!;
+      switch (parts[0]) {
+        case "tb": return showTab(chatId, id);
+        case "tr": await d.tabs.release(id, who.staffId); await send(chatId, "Payment released."); return showTab(chatId, id);
+        case "ta": await d.tabs.ack(id); await send(chatId, "Noted: they can see you are on the way."); return showTab(chatId, id);
+        case "tp": {
+          const r = await d.tabs.confirmCash(id, who.staffId);
+          return send(chatId, r === "ok" ? "Cash recorded." : r === "not_found" ? "I can't find that payment." : "That payment is not waiting for cash any more.");
+        }
+        case "tx": return send(chatId, "Close this tab? Anything not paid stays unpaid, and points and coupons held for it go back.", [[{ text: "Yes, close it", callback_data: `ty:${id}` }, { text: "Keep it open", callback_data: `tb:${id}` }]]);
+        default: return send(chatId, (await d.tabs.close(id, "Closed from Telegram", who.staffId)) ? "Tab closed." : "That tab is not open.");
+      }
+    }
     if (parts[0] === "st" || parts[0] === "so") {
       if (!can(who.role, "staff.manage") || !d.settings) return send(chatId, "Only the owner can change settings.");
       if (parts[0] === "st") {

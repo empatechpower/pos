@@ -1,6 +1,8 @@
 /** Translations for the shop's sentences. Each English phrase maps to [ms, id, zh, ja, fr, de, ta]; English is the phrase itself.
  *  Names that come from the shop's own menu (items, descriptions) are not here: they are shown as the shop wrote them. */
 export const PHRASES: Record<string, string[]> = {
+ "Table": ["Meja", "Meja", "桌子", "テーブル", "Table", "Tisch", "மேசை"],
+ "Bar Tab": ["Bar", "Bar", "吧台", "バー", "Bar", "Bar", "பார்"],
  "Can I cancel my order?": [
   "Bolehkah saya membatalkan pesanan saya?",
   "Bisakah saya membatalkan pesanan saya?",

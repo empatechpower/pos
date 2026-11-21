@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState, type ReactNode } from "react";
 import { formatMoney } from "@pos/core";
-import { tx } from "../shopI18n";
+import { tx, spotLabel } from "../shopI18n";
 import "../tab.css";
 
 /**
@@ -114,7 +114,7 @@ export function JoinTabSheet({ spot, memberName, onJoin, busy, failed }: { spot:
   return (
     <div className="tbl-back" role="dialog" aria-label={tx("Join the table")}>
       <div className="tbl-dlg">
-        <h3>{tx("Join {t}", { t: spot })}</h3>
+        <h3>{tx("Join {t}", { t: spotLabel(spot) })}</h3>
         <p className="muted">{tx("Everyone at the table shares one bill. What is your name? Leave it empty to join as a guest.")}</p>
         <input className="e2e-input" value={name} maxLength={30} placeholder={tx("Your name")} aria-label={tx("Your name")} onChange={(e) => setName(e.target.value)} onKeyDown={(e) => { if (e.key === "Enter" && !busy) onJoin(name); }} />
         {failed && <p className="e2e-note" role="alert">{tx("Could not join the table. Please try again.")}</p>}
@@ -182,7 +182,7 @@ export function TabScreen({ view, session, bearer, creditCents, rewardsOn, onBac
       </div>
 
       <div className="e2e-card">
-        <h3>{view.spot ?? tx("Bar tab")} · {tx("Table service")}</h3>
+        <h3>{spotLabel(view.spot) || tx("Bar tab")} · {tx("Table service")}</h3>
         <div className="muted">{tx("Check-in code")}: <b className="tab-code">{view.code}</b></div>
         <div className="tab-people">
           {view.people.filter((p) => !p.left || p.isMe).map((p) => <span key={p.id} className={`tab-chip ${p.isMe ? "me" : ""}`}>{p.name}{p.isHost ? ` · ${tx("Host")}` : ""}{p.isMe ? ` · ${tx("you")}` : ""}</span>)}

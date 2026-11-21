@@ -170,6 +170,14 @@ export class MemberStore {
       memberId = (await this.db.query("SELECT member_id FROM member_identities WHERE merchant_id=$1 AND provider=$2 AND subject=$3", [this.merchantId, provider, subject])).rows[0].member_id as string;
     }
     if (p.name && !(await this.byId(memberId))?.name) await this.updateProfile(memberId, { name: p.name });
+    // A guest who asked to sign up at checkout becomes a member only now, when the email is verified: their phone and name carry over.
+    if (created && p.email && p.emailVerified) {
+      const pend = (await this.db.query("DELETE FROM guest_signups WHERE merchant_id=$1 AND email=$2 RETURNING phone, name", [this.merchantId, normaliseEmail(p.email)])).rows[0];
+      if (pend) {
+        const cur = await this.byId(memberId);
+        await this.updateProfile(memberId, { ...(!cur?.phone && pend.phone ? { phone: pend.phone as string } : {}), ...(!cur?.name && pend.name ? { name: pend.name as string } : {}) });
+      }
+    }
     const member = await this.welcome((await this.byId(memberId))!);
     return { token: await this.openSession(member.id), member, created };
   }

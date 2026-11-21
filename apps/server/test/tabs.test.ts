@@ -1,5 +1,5 @@
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import { PRESETS } from "@pos/core";
+import { PRESETS, reduceOrder } from "@pos/core";
 import { buildApp } from "../src/app.js";
 import { createStaff } from "../src/auth.js";
 import { PgCatalogStore } from "../src/catalog.js";
@@ -371,6 +371,21 @@ describe("Split equally, By round, Custom amount, cash at the counter, and the w
     await tcall("/api/shop/tab/page", { body: { kind: "help" }, who: alex }); // a re-tap sends nothing more
     expect(alerts).toEqual([{ text: "E5 is asking for the bill.", all: true }]);
     delete (app as any).notifyManagers;
+  });
+
+  it("staff move a whole tab to another table: the tab, its rounds and the bill stay; each round's order changes table; an occupied table is refused", async () => {
+    const alex = await join("M1", "Alex");
+    const r = await orderRound(alex, [{ productId: kaya, qty: 1 }]);
+    const other = await join("M2", "Other");
+    const moved = await tcall(`/api/tabs/${alex.tabId}/move`, { method: "POST", body: { spot: "M3" }, staff: staffTok });
+    expect(moved.json).toEqual({ from: "M1", to: "M3" });
+    expect((await view(alex)).spot).toBe("M3");
+    const orderId = (await view(alex)).rounds[0].orderId as string;
+    expect(reduceOrder(orderId, await new PgEventStore(db, "bp", "EV").eventsForOrder(orderId))!.tableChanges).toMatchObject([{ from: "M1", to: "M3" }]);
+    expect((await tcall(`/api/tabs/${alex.tabId}/move`, { method: "POST", body: { spot: "M2" }, staff: staffTok })).status).toBe(409);
+    expect((await tcall(`/api/tabs/${alex.tabId}/move`, { method: "POST", body: { spot: "  " }, staff: staffTok })).status).toBe(400);
+    expect(other.tabId).not.toBe(alex.tabId);
+    void r;
   });
 
   it("a page has a real state: staff acknowledge it, the customer sees it, and an unanswered page is escalated once", async () => {

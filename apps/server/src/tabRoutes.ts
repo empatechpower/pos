@@ -200,11 +200,9 @@ export function registerTabRoutes(app: FastifyInstance, d: {
 
   /** A customer chose "pay at the counter": staff confirm they have been paid. */
   app.post<{ Params: { id: string } }>("/api/tabs/payments/:id/confirm", staff, async (req, reply) => guard(async () => {
-    const p = (await d.db.query("SELECT status, method FROM tab_payments WHERE id=$1 AND tab_id IN (SELECT id FROM tabs WHERE merchant_id=$2)", [req.params.id, d.merchantId])).rows[0];
-    if (!p) return reply.code(404).send({ error: "payment_not_found" });
-    if (p.status !== "reserved") return reply.code(409).send({ error: "not_waiting_to_be_confirmed" });
-    await d.db.query("UPDATE tab_payments SET staff_id=$2 WHERE id=$1", [req.params.id, req.staff!.id]);
-    await d.tabs.complete(req.params.id);
+    const r = await d.tabs.confirmCash(req.params.id, req.staff!.id);
+    if (r === "not_found") return reply.code(404).send({ error: "payment_not_found" });
+    if (r === "not_waiting") return reply.code(409).send({ error: "not_waiting_to_be_confirmed" });
     await audit(d.db, d.merchantId, req.staff!.id, "tab.payment_confirmed", { payment: req.params.id });
     return { ok: true };
   }, reply));
@@ -275,11 +273,16 @@ export function registerTabRoutes(app: FastifyInstance, d: {
   app.post<{ Params: { id: string }; Body: { reason?: string } }>("/api/tabs/:id/close", staff, async (req, reply) => guard(async () => {
     const reason = String(req.body?.reason ?? "").trim();
     if (reason.length < 3) return reply.code(400).send({ error: "a_reason_is_required" });
-    const r = await d.db.query("UPDATE tabs SET status='closed', closed_at=now(), closed_reason=$3, version=version+1 WHERE id=$1 AND merchant_id=$2 AND status='open' RETURNING id", [req.params.id, d.merchantId, reason.slice(0, 200)]);
-    if (!r.rowCount) return reply.code(404).send({ error: "no_open_tab" });
-    await d.tabs.abandon(req.params.id); // reservations are released, points returned, coupons given back
+    if (!(await d.tabs.closeTab(req.params.id, reason))) return reply.code(404).send({ error: "no_open_tab" });
     await audit(d.db, d.merchantId, req.staff!.id, "tab.close", { tab: req.params.id, reason });
     return { ok: true };
+  }, reply));
+
+  /** Move the whole tab to another table. The old table, the new one, who and when are kept in the audit log and on each round's order. */
+  app.post<{ Params: { id: string }; Body: { spot?: string } }>("/api/tabs/:id/move", staff, async (req, reply) => guard(async () => {
+    const r = await d.tabs.moveTable(req.params.id, String(req.body?.spot ?? ""));
+    await audit(d.db, d.merchantId, req.staff!.id, "tab.move", { tab: req.params.id, from: r.from, to: r.to });
+    return r;
   }, reply));
 
   // ---- settings ---------------------------------------------------------------------------

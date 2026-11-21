@@ -655,6 +655,44 @@ export class TabService {
     return r.rows.length;
   }
 
+  /** Staff confirm a "pay at the counter" payment has been taken. Returns "not_found" or "not_waiting" instead of throwing, so callers can word it. */
+  async confirmCash(paymentId: string, staffId: string): Promise<"ok" | "not_found" | "not_waiting"> {
+    const p = (await this.d.db.query("SELECT status FROM tab_payments WHERE id=$1 AND tab_id IN (SELECT id FROM tabs WHERE merchant_id=$2)", [paymentId, this.m])).rows[0];
+    if (!p) return "not_found";
+    if (p.status !== "reserved") return "not_waiting";
+    await this.d.db.query("UPDATE tab_payments SET staff_id=$2 WHERE id=$1", [paymentId, staffId]);
+    await this.complete(paymentId);
+    return "ok";
+  }
+
+  /** Close an open tab with a reason: reservations are released, points returned, coupons given back. False when there is no open tab. */
+  async closeTab(tabId: string, reason: string): Promise<boolean> {
+    const r = await this.d.db.query("UPDATE tabs SET status='closed', closed_at=now(), closed_reason=$3, version=version+1 WHERE id=$1 AND merchant_id=$2 AND status='open' RETURNING id", [tabId, this.m, reason.slice(0, 200)]);
+    if (!r.rowCount) return false;
+    await this.abandon(tabId);
+    return true;
+  }
+
+  /**
+   * Move the whole tab to another table (staff). The tab, its rounds, shares and payments stay as they are; every round's order changes its table
+   * (the order events keep the old table, the new one and the time). Refused when another open tab already has the new table.
+   */
+  async moveTable(tabId: string, spot: string): Promise<{ from: string | null; to: string }> {
+    const to = spot.trim().slice(0, 30);
+    if (!to) fail(400, "choose_a_table");
+    const t = (await this.d.db.query("SELECT outlet_id, spot, status FROM tabs WHERE id=$1 AND merchant_id=$2", [tabId, this.m])).rows[0];
+    if (!t) return fail(404, "tab_not_found");
+    if (t.status !== "open") fail(409, "tab_closed");
+    if ((t.spot ?? "") === to) return { from: t.spot, to };
+    if ((await this.d.db.query("SELECT 1 FROM tabs WHERE merchant_id=$1 AND outlet_id=$2 AND spot=$3 AND status='open' AND id<>$4", [this.m, t.outlet_id, to, tabId])).rowCount) fail(409, "table_has_another_tab", { message: `${to} already has an open tab.` });
+    await this.d.db.query("UPDATE tabs SET spot=$3, version=version+1 WHERE id=$1 AND merchant_id=$2", [tabId, this.m, to]);
+    const now = (this.d.now ?? Date.now)();
+    for (const r of (await this.d.db.query("SELECT order_id FROM tab_rounds WHERE tab_id=$1 ORDER BY round_no", [tabId])).rows) {
+      await this.d.ingest([{ id: `tab-move-${r.order_id}-${now.toString(36)}`, orderId: r.order_id as string, deviceId: "server", ts: now, seq: now, type: "TableChanged", ...(t.spot ? { from: t.spot as string } : {}), to } as unknown as OrderEvent], t.outlet_id as string);
+    }
+    return { from: t.spot, to };
+  }
+
   async resetPage(tabId: string): Promise<void> {
     await this.d.db.query("UPDATE tabs SET waiter_paged=false, paged_at=NULL, page_acked_at=NULL, page_escalated_at=NULL, paged_kind=NULL, bill_requested=false, version=version+1 WHERE id=$1 AND merchant_id=$2", [tabId, this.m]);
   }

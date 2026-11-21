@@ -111,6 +111,15 @@ export function tx(english: string, vars?: Record<string, string | number>): str
   if (vars) for (const [k, v] of Object.entries(vars)) out = out.split(`{${k}}`).join(String(v));
   return out;
 }
+/**
+ * A spot as the customer sees it: the translated type word + the merchant's identifier, e.g. "Table 12" -> "桌子 12" (Spec 16.2).
+ * The identifier is data and never translates; the stored value stays "Table 12".
+ */
+export function spotLabel(spot: string | null | undefined): string {
+  if (!spot) return "";
+  const m = /^(table|bar tab)\s+(.+)$/i.exec(spot.trim());
+  return m ? `${tx(/^bar/i.test(m[1]!) ? "Bar Tab" : "Table")} ${m[2]}` : spot;
+}
 /** A phrase in the current language: the prototype's wording when it has one, otherwise our own translation, otherwise English. */
 export const t = (key: string, english: string): string => DICT[current]?.[key] ?? tx(english);
 export const greeting = (h = new Date().getHours()): string => {

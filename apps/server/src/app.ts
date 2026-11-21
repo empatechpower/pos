@@ -277,6 +277,27 @@ export async function buildApp({ config, store, db, catalog, catalogAdmin, print
     return { token: r.token, expiresAt: r.expiresAt, staff: { name: r.staff.name, code: r.staff.code, role: r.staff.role, franchiseId: r.staff.franchiseId ?? null, outletId: r.staff.outletId ?? null } };
   });
 
+  // ---- a person's own colour for the staff screens (Q&A F-2); anyone who has not chosen follows the merchant's theme ------------------
+  const luminance = (hex: string) => {
+    const c = [1, 3, 5].map((i) => parseInt(hex.slice(i, i + 2), 16) / 255).map((v) => (v <= 0.03928 ? v / 12.92 : ((v + 0.055) / 1.055) ** 2.4));
+    return 0.2126 * c[0]! + 0.7152 * c[1]! + 0.0722 * c[2]!;
+  };
+  /** Readable as text or a button on white (WCAG 3:1): a colour pale enough to hurt legibility under service pressure is refused. */
+  const readableOnWhite = (hex: string) => 1.05 / (luminance(hex) + 0.05) >= 3;
+  app.get("/api/auth/theme", { preHandler: needs("wallet.read") }, async (req) => {
+    const own = db ? (await db.query("SELECT theme_primary FROM staff WHERE id=$1", [req.staff!.id])).rows[0]?.theme_primary ?? null : null;
+    return { primary: own };
+  });
+  app.put<{ Body: { primary?: string | null } }>("/api/auth/theme", { preHandler: needs("wallet.read") }, async (req, reply) => {
+    if (!db) return reply.code(503).send({ error: "no_database" });
+    const v = req.body?.primary;
+    if (v === null) { await db.query("UPDATE staff SET theme_primary=NULL WHERE id=$1", [req.staff!.id]); return { primary: null }; }
+    if (typeof v !== "string" || !/^#[0-9a-fA-F]{6}$/.test(v)) return reply.code(400).send({ error: "send a colour like #EA7016, or null to follow the shop's colours" });
+    if (!readableOnWhite(v)) return reply.code(400).send({ error: "too_pale", message: "That colour is too pale to read on a screen under service. Choose a darker one." });
+    await db.query("UPDATE staff SET theme_primary=$2 WHERE id=$1", [req.staff!.id, v.toUpperCase()]);
+    return { primary: v.toUpperCase() };
+  });
+
   app.get("/api/auth/me", { preHandler: needs("wallet.read") }, async (req) => ({ name: req.staff!.name, code: req.staff!.code, role: req.staff!.role, franchiseId: req.staff!.franchiseId ?? null, outletId: req.staff!.outletId ?? null }));
 
   app.post("/api/auth/logout", async (req) => {
@@ -665,7 +686,16 @@ export async function buildApp({ config, store, db, catalog, catalogAdmin, print
     timer.unref();
     app.addHook("onClose", async () => clearInterval(timer));
   }
-  if (catalogAdmin) registerTelegram(app, { db, merchantId, outletId: config.outletName, integ: integrations ?? { publicUrl: "" }, cat: catalogAdmin as PgCatalogStore, needs, reports: { sales: salesReport, orders: ordersReport, today: () => dayOf(Date.now()), hour: () => hourOf(Date.now()) }, tabs: { open: () => tabs.openSummary() },
+  if (catalogAdmin) registerTelegram(app, { db, merchantId, outletId: config.outletName, integ: integrations ?? { publicUrl: "" }, cat: catalogAdmin as PgCatalogStore, needs, reports: { sales: salesReport, orders: ordersReport, today: () => dayOf(Date.now()), hour: () => hourOf(Date.now()) }, tabs: {
+      open: () => tabs.openSummary(),
+      view: async (id) => { try { return (await tabs.view(id, "")) as never; } catch { return null; } },
+      release: async (id, staffId) => { await tabs.release_(id); await audit(db, merchantId, staffId, "tab.release", { tab: id, via: "telegram" }); },
+      ack: (id) => tabs.acknowledgePage(id),
+      confirmCash: async (pid, staffId) => { const r = await tabs.confirmCash(pid, staffId); if (r === "ok") await audit(db, merchantId, staffId, "tab.payment_confirmed", { payment: pid, via: "telegram" }); return r; },
+      close: async (id, reason, staffId) => { const ok = await tabs.closeTab(id, reason); if (ok) await audit(db, merchantId, staffId, "tab.close", { tab: id, reason, via: "telegram" }); return ok; },
+      move: async (id, spot, staffId) => { const r = await tabs.moveTable(id, spot); await audit(db, merchantId, staffId, "tab.move", { tab: id, from: r.from, to: r.to, via: "telegram" }); return r.to; },
+      findBySpot: async (spot) => (await db!.query("SELECT id FROM tabs WHERE merchant_id=$1 AND status='open' AND lower(spot)=lower($2) LIMIT 1", [merchantId, spot])).rows[0]?.id ?? null,
+    },
     settings: {
       brand: () => {
         const o = optionsOf(config);

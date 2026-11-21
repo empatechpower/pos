@@ -130,3 +130,15 @@ describe("service charge is an option", () => {
     expect((await call("/api/settings", { method: "PUT", body: { serviceChargeOn: "yes" }, staff: owner })).status).toBe(400);
   });
 });
+
+describe("a person's own colour for the staff screens", () => {
+  it("is per person, must be readable, and null goes back to the shop's colours", async () => {
+    expect((await call("/api/auth/theme", { staff: owner })).json).toEqual({ primary: null });
+    expect((await call("/api/auth/theme", { method: "PUT", body: { primary: "#1f6feb" }, staff: owner })).json).toEqual({ primary: "#1F6FEB" });
+    expect((await call("/api/auth/theme", { staff: owner })).json.primary).toBe("#1F6FEB");
+    expect((await call("/api/auth/theme", { staff: scoped })).json.primary).toBeNull(); // someone else is unaffected
+    expect((await call("/api/auth/theme", { method: "PUT", body: { primary: "#ffeeaa" }, staff: owner })).status).toBe(400); // too pale to read
+    expect((await call("/api/auth/theme", { method: "PUT", body: { primary: "blue" }, staff: owner })).status).toBe(400);
+    expect((await call("/api/auth/theme", { method: "PUT", body: { primary: null }, staff: owner })).json).toEqual({ primary: null });
+  });
+});

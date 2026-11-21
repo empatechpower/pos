@@ -58,6 +58,7 @@ export function Tabs() {
             <button className={t.locked ? "primary sm" : "secondary sm"} onClick={() => void act(`/api/tabs/${t.id}/release`, {}, "Payment released.")}>{t.locked ? "Release payment" : "Release new rounds"}</button>
             <button className="secondary sm" onClick={() => setOpen(open === t.id ? null : t.id)}>{open === t.id ? "Hide payments" : "Payments"}</button>
             <button className="secondary sm" onClick={() => setAddFor(addFor === t.id ? null : t.id)}>Add items</button>
+            <button className="secondary sm" onClick={() => { const to = window.prompt(`Move ${t.spot ?? "this tab"} to which table?`, ""); if (to?.trim()) void act(`/api/tabs/${t.id}/move`, { spot: to.trim() }, `Moved to ${to.trim()}.`); }}>Move table</button>
             <button className="secondary sm" onClick={() => { const reason = window.prompt("Close this tab without it being fully paid. Why?"); if (reason) void act(`/api/tabs/${t.id}/close`, { reason }, "Tab closed."); }}>Close tab</button>
           </div>
           {addFor === t.id && (

@@ -588,6 +588,8 @@ export function registerShop(app: FastifyInstance, d: ShopDeps) {
     promoCode?: string;
     /** Table service: the order is a round on this tab (the credential from joining it). */
     tab?: { participantId?: string; token?: string };
+    /** A guest who ticked "Keen to sign up as a member?": an unverified, pending sign-up. Not a member until the email is verified. */
+    keen?: { email?: string };
   }
 
   /** A customer places an order. Held for staff to accept; nothing reaches the kitchen yet. */
@@ -640,6 +642,15 @@ export function registerShop(app: FastifyInstance, d: ShopDeps) {
     }
     const phone = clean(b.customerPhone, 20);
     if (phone && !/^[+\d][\d\s-]{5,19}$/.test(phone)) return reply.code(400).send({ error: "phone number looks wrong" });
+    // "Keen to sign up": remember the email as a pending, unverified sign-up. The phone stays for collecting this order only.
+    if (b.keen?.email && d.members && d.db) {
+      const email = normaliseEmail(b.keen.email);
+      if (!email) return reply.code(400).send({ error: "that email address does not look right" });
+      await d.db.query(
+        "INSERT INTO guest_signups (merchant_id, email, phone, name) VALUES ($1,$2,$3,$4) ON CONFLICT (merchant_id, email) DO UPDATE SET phone=EXCLUDED.phone, name=EXCLUDED.name",
+        [merchantId, email, phone || null, clean(b.customerName, 40) || null],
+      );
+    }
 
     // The menu as THIS outlet sells it: items it has switched off are gone, sold-out items and options follow the outlet.
     const stockNow = await onHandAt(d.db, merchantId, outlet.id);

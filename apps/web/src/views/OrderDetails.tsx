@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
-import { confirmedPaid, formatMoney, optionLines, orderTotals, type BusinessConfig, type OrderState } from "@pos/core";
+import { commissionOf, confirmedPaid, formatMoney, optionLines, orderTotals, type BusinessConfig, type Catalog, type OrderState } from "@pos/core";
+import { staffFetch } from "../auth";
 
 interface ShopInfo {
   name: string;
@@ -11,6 +12,9 @@ interface ShopInfo {
 let infoCache: Promise<ShopInfo | null> | null = null;
 const loadInfo = () => (infoCache ??= fetch("/api/shop/info").then((r) => (r.ok ? (r.json() as Promise<ShopInfo>) : null)).catch(() => null));
 
+let catalogCache: Promise<Catalog | null> | null = null;
+const loadCatalog = () => (catalogCache ??= fetch("/api/catalog").then((r) => (r.ok ? (r.json() as Promise<Catalog>) : null)).catch(() => null));
+
 const METHOD: Record<string, string> = { cash: "Cash", credit: "Member credit", card: "Card", paynow: "PayNow" };
 const dateOf = (ms: number) => new Intl.DateTimeFormat("en-GB", { timeZone: "Asia/Singapore", day: "2-digit", month: "short", year: "numeric", hour: "2-digit", minute: "2-digit", hour12: false }).format(new Date(ms));
 const orderType = (o: OrderState) => `${o.source === "online" ? "QR" : "POS"} (${o.fulfilment === "dine_in" ? "Dine-in" : o.fulfilment === "takeaway" ? "Take away" : "Delivery"})`;
@@ -18,9 +22,15 @@ const orderType = (o: OrderState) => `${o.source === "online" ? "QR" : "POS"} ($
 /** The full picture of one order for staff: who, where, when, what, and how it was paid. */
 export function OrderDetails({ order: o, config }: { order: OrderState; config: BusinessConfig }) {
   const [info, setInfo] = useState<ShopInfo | null>(null);
+  const [catalog, setCatalog] = useState<Catalog | null>(null);
+  const [entered, setEntered] = useState<number | null>(null); // the actual commission just recorded, until the order syncs back
+  const [amt, setAmt] = useState("");
+  const [note, setNote] = useState("");
+  const [msg, setMsg] = useState("");
   useEffect(() => {
     let alive = true;
     void loadInfo().then((i) => alive && setInfo(i));
+    void loadCatalog().then((c) => alive && setCatalog(c));
     return () => {
       alive = false;
     };
@@ -29,6 +39,15 @@ export function OrderDetails({ order: o, config }: { order: OrderState; config: 
   const paid = confirmedPaid(o);
   const owing = t.total - paid;
   const lines = o.lines.filter((l) => l.qty > 0);
+  const channel = catalog?.channels.find((c) => c.id === o.channelId);
+  const comm = commissionOf(entered !== null ? { commission: { cents: entered } } : o, t.total, channel);
+  async function saveCommission() {
+    const cents = Math.round(Number(amt) * 100);
+    const r = await staffFetch(`/api/orders/${o.orderId}/commission`, { method: "POST", body: { cents, ...(note.trim() ? { note: note.trim() } : {}) } });
+    if ("res" in r && r.res.ok) { setEntered(cents); setMsg("Saved."); setAmt(""); setNote(""); }
+    else if ("res" in r) setMsg(((await r.res.json().catch(() => ({}))) as { error?: string }).error ?? "Could not save.");
+    else setMsg(r.problem);
+  }
   const row = (k: string, v: string | undefined) => (v ? <div className="od-row"><span className="od-k">{k}</span><span className="od-v">{v}</span></div> : null);
   return (
     <div className="order-details" role="region" aria-label={`Details of order ${o.queueNumber ?? ""}`}>
@@ -51,6 +70,18 @@ export function OrderDetails({ order: o, config }: { order: OrderState; config: 
         {row("Table No.", o.spot)}
         {row("Customer", [o.customerName, o.customerPhone].filter(Boolean).join(" · ") || undefined)}
       </div>
+      {comm && (
+        <div className="od-card">
+          {row("Commission", `${formatMoney(comm.cents)} (${comm.source === "actual" ? "actual, entered for this order" : `contract rate ${channel!.commission!.ratePct}%`})`)}
+          {row("Note", o.commission?.note)}
+          <div className="od-row" style={{ gap: 6, flexWrap: "wrap" }}>
+            <input style={{ width: 90 }} inputMode="decimal" placeholder="Actual S$" aria-label="Actual commission in dollars" value={amt} onChange={(e) => setAmt(e.target.value.replace(/[^\d.]/g, ""))} />
+            <input style={{ flex: 1, minWidth: 120 }} maxLength={120} placeholder="Note (e.g. platform promotion)" aria-label="Commission note" value={note} onChange={(e) => setNote(e.target.value)} />
+            <button className="secondary sm" disabled={amt === ""} onClick={() => void saveCommission()}>Record actual</button>
+          </div>
+          {msg && <div className="muted">{msg}</div>}
+        </div>
+      )}
       <table className="od-items">
         <thead><tr><th>Qty</th><th>Item</th><th>Price</th><th>Total</th></tr></thead>
         <tbody>

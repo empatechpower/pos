@@ -2,7 +2,7 @@ import { useEffect, useState } from "react";
 import { getDeviceCode, setDeviceCode } from "./db";
 import { usePending, useReference, useSyncStatus } from "./hooks";
 import { startSync, syncNow } from "./sync";
-import { useStaff } from "./auth";
+import { authHeader, useStaff } from "./auth";
 import { useFailedPrintJobs, useNewOnlineOrders } from "./hooks";
 import { needsEnrollment, useDevice } from "./device";
 import { Credit } from "./views/Credit";
@@ -27,6 +27,30 @@ import { Pos } from "./views/Pos";
 import { Queue } from "./views/Queue";
 import { CustomerDisplay } from "./views/CustomerDisplay";
 
+const lum = (hex: string) => {
+  const c = [1, 3, 5].map((i) => parseInt(hex.slice(i, i + 2), 16) / 255).map((v) => (v <= 0.03928 ? v / 12.92 : ((v + 0.055) / 1.055) ** 2.4));
+  return 0.2126 * c[0]! + 0.7152 * c[1]! + 0.0722 * c[2]!;
+};
+const readableOnWhite = (hex: string) => /^#[0-9a-fA-F]{6}$/.test(hex) && 1.05 / (lum(hex) + 0.05) >= 3;
+const softOf = (hex: string) => "#" + [1, 3, 5].map((i) => Math.round(parseInt(hex.slice(i, i + 2), 16) + (255 - parseInt(hex.slice(i, i + 2), 16)) * 0.88).toString(16).padStart(2, "0")).join("");
+
+/**
+ * The staff screens follow the merchant's theme (Q&A F-2); a person can pick their own colour instead, which is theirs alone and follows them to any
+ * device. A colour too pale to read under service is never applied.
+ */
+function useStaffTheme(signedIn: boolean) {
+  const [own, setOwn] = useState<string | null>(null);
+  const [shop, setShop] = useState<string | null>(null);
+  useEffect(() => { void fetch("/api/brand").then((r) => (r.ok ? r.json() : null)).then((b: { primary?: string } | null) => setShop(b?.primary ?? null)).catch(() => undefined); }, []);
+  useEffect(() => {
+    if (!signedIn) { setOwn(null); return; }
+    void fetch("/api/auth/theme", { headers: authHeader() }).then((r) => (r.ok ? r.json() : null)).then((j: { primary: string | null } | null) => setOwn(j?.primary ?? null)).catch(() => undefined);
+  }, [signedIn]);
+  const colour = own && readableOnWhite(own) ? own : shop && readableOnWhite(shop) ? shop : null;
+  const style = (colour ? { "--orange": colour, "--selected": softOf(colour) } : undefined) as React.CSSProperties | undefined;
+  return { own, shop, setOwn, style };
+}
+
 type Route = "tabs" | "display" | "pos" | "kitchen" | "queue" | "credit" | "login" | "devices" | "prices" | "printers" | "orders" | "online" | "shop" | "kiosk" | "manager" | "tg" | "pricebook" | "pair";
 const routeFromHash = (): Route => {
   const h = routeParts()[0] ?? "";
@@ -38,6 +62,7 @@ export function App() {
   const [code, setCode] = useState(getDeviceCode());
   const [customerId, setCustomerId] = useState("");
   const staff = useStaff();
+  const theme = useStaffTheme(!!staff);
   const device = useDevice();
   const failedJobs = useFailedPrintJobs();
   const newOnline = useNewOnlineOrders();
@@ -76,7 +101,7 @@ export function App() {
 
   const connected = status.online && status.reachable;
   return (
-    <div className="shell">
+    <div className="shell" style={staff ? theme.style : undefined}>
       <header className="top">
         <div className="brand">
           <b>{config?.name ?? "POS"}</b>
@@ -92,6 +117,16 @@ export function App() {
           {device.required && staff && staff.role !== "cashier" && <a href="/devices" className={route === "devices" ? "on" : ""}>Devices</a>}
         </nav>
         <div className="right">
+          {staff && (
+            <label className="dev" title="Your own colour for these screens. Only you see it; it follows you to any device. Leave it and you see the shop's colours.">
+              Colour
+              <input type="color" aria-label="My colour" value={theme.own ?? theme.shop ?? "#ea7016"} onChange={async (e) => {
+                const r = await fetch("/api/auth/theme", { method: "PUT", headers: { "content-type": "application/json", ...authHeader() }, body: JSON.stringify({ primary: e.target.value }) });
+                if (r.ok) theme.setOwn(e.target.value.toUpperCase()); else window.alert(((await r.json().catch(() => ({}))) as { message?: string }).message ?? "That colour was not saved.");
+              }} />
+              {theme.own && <button className="secondary sm" onClick={async () => { await fetch("/api/auth/theme", { method: "PUT", headers: { "content-type": "application/json", ...authHeader() }, body: JSON.stringify({ primary: null }) }); theme.setOwn(null); }}>Reset</button>}
+            </label>
+          )}
           <a href="/login" className="staffbtn" title={staff ? "Signed in" : "Sign in"}>{staff ? `${staff.name} · ${staff.role}` : "Sign in"}</a>
           <label className="dev" title="Each device has its own letter so queue numbers never clash offline">
             Device
