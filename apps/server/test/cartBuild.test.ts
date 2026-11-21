@@ -149,8 +149,10 @@ describe("build pricing, cart and the frozen build", () => {
   });
 
   it("order submission freezes the structured build with each selection's allocation", async () => {
-    const r = await call("/api/shop/orders", { body: { channelId: "take-away", outletId: "EV", items: [{ productId: bowlId, qty: 1, build: salmonBuild }], customerName: "T", customerPhone: "" } });
+    const r = await callK("/api/shop/orders", { body: { channelId: "take-away", outletId: "EV", items: [{ productId: bowlId, qty: 1, build: salmonBuild }], customerName: "T", customerPhone: "" } });
     expect(r.status).toBe(200);
+    expect((await cart({ url: "/api/shop/cart?outlet=EV" })).json.lines.length).toBe(0); // the placed order emptied this outlet's cart
+    expect((await cart({ url: "/api/shop/cart?outlet=CBD" })).json.lines.length).toBe(1); // the other outlet's cart stays
     expect(r.json.totalCents).toBe(1800);
     const ev = (await db.query("SELECT body FROM events WHERE merchant_id='bp' AND order_id=$1 AND type='ItemAdded'", [r.json.orderId])).rows[0].body;
     expect(ev.build.selections.map((s: any) => [s.optionId, s.fullCents, s.coveredCents, s.chargedCents])).toEqual([["salmon", 750, 450, 300], ["broc", 150, 0, 150]]);

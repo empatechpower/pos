@@ -720,6 +720,8 @@ export function registerShop(app: FastifyInstance, d: ShopDeps) {
       await dropAttempt();
       throw e;
     }
+    // A placed order empties this customer's cart at this outlet (their carts elsewhere stay).
+    if (reply.statusCode < 400) { const owner = await cartOwner(req); if (owner) await saveCart(owner, outlet.id, []).catch(() => undefined); }
     if (idemKey) {
       if (reply.statusCode >= 400) await dropAttempt();
       else await d.db.query("UPDATE purchase_requests SET state='done', result=$3 WHERE merchant_id=$1 AND idem_key=$2", [merchantId, idemKey, JSON.stringify(out)]);

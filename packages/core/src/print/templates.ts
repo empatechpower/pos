@@ -3,6 +3,7 @@ import type { OrderLine, OrderState } from "../events.js";
 import { confirmedPaid, orderTotals } from "../events.js";
 import { formatMoney } from "../money.js";
 import { optionLines } from "../options.js";
+import { buildTicketLines } from "../builder.js";
 import type { Block, Doc, Label } from "./doc.js";
 
 export interface PrintContext {
@@ -49,7 +50,11 @@ export function receipt(order: OrderState, config: BusinessConfig, ctx: PrintCon
   for (const l of liveLines(order)) {
     b.push({ t: "cols", left: `${l.qty} x ${l.name}`, right: formatMoney(l.unitCents * l.qty) });
     // Options sit under the item, marked with a dash (leading spaces would be collapsed when wrapping).
-    for (const o of optionLines(l.options)) b.push({ t: "text", text: `- ${o}` });
+    // A build-your-own item reads grouped by its builder group, with what each selection was charged.
+    if (l.build) {
+      for (const o of buildTicketLines(l.build, true, formatMoney)) b.push({ t: "text", text: o.startsWith("  ") ? `- ${o.trim()}` : o });
+      for (const o of optionLines(l.options).filter((x) => x.startsWith("Note: "))) b.push({ t: "text", text: `- ${o}` });
+    } else for (const o of optionLines(l.options)) b.push({ t: "text", text: `- ${o}` });
   }
   b.push({ t: "rule" }, { t: "cols", left: "Subtotal", right: formatMoney(t.subtotal) });
   if (t.service) b.push({ t: "cols", left: "Service charge", right: formatMoney(t.service) });
@@ -94,6 +99,11 @@ export function kitchenTicket(order: OrderState, ctx: PrintContext, opts: Kitche
   for (const l of lines) {
     // The item is big and bold. Its choices (Hot, Iced, Big) are plain and smaller. A customer's special request stays big and bold so it is not missed.
     b.push({ t: "text", text: `${l.qty} x ${l.name}`, bold: true, size: 2 });
+    if (l.build) {
+      for (const o of buildTicketLines(l.build, false, formatMoney)) b.push({ t: "text", text: o.startsWith("  ") ? `- ${o.trim()}` : o, size: 1.4 });
+      for (const o of optionLines(l.options).filter((x) => x.startsWith("Note: "))) b.push({ t: "text", text: `- ${o}`, bold: true, size: 2 });
+      continue;
+    }
     for (const o of optionLines(l.options)) b.push(o.startsWith("Note: ") ? { t: "text", text: `- ${o}`, bold: true, size: 2 } : { t: "text", text: `- ${o}`, size: 1.4 });
   }
   b.push({ t: "rule" }, { t: "text", text: printedAt(ctx.now, ctx.timeZone) }, { t: "feed", n: 3 }, { t: "cut" });

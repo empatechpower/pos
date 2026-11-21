@@ -282,3 +282,19 @@ export function validateBuilderSpec(spec: BuilderSpec, label: string, linkedProd
   }
   return problems;
 }
+
+/** The ticket lines of a build, grouped by builder group: a heading per group, then each selection with its quantity (and, for a receipt, what was charged). */
+export function buildTicketLines(b: Pick<StoredBuild, "selections" | "variantName">, withPrices: boolean, money: (cents: Cents) => string): string[] {
+  const out: string[] = [];
+  if (b.variantName) out.push(b.variantName);
+  for (const g of groupedBuild(b)) {
+    out.push(`${g.group}:`);
+    for (const i of g.items) out.push(`  ${i.qty > 1 ? `${i.qty} x ` : ""}${i.name}${withPrices && i.chargedCents > 0 ? ` (+${money(i.chargedCents)})` : ""}`);
+  }
+  return out;
+}
+
+/** The most that can ever be refunded for one selection of a stored build: what the customer was finally charged for it, never its full price. */
+export function selectionRefundCap(b: Pick<StoredBuild, "selections">, groupId: string, optionId: string): Cents {
+  return b.selections.filter((s) => s.groupId === groupId && s.optionId === optionId).reduce((n, s) => n + s.chargedCents, 0);
+}

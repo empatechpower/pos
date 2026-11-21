@@ -3,7 +3,7 @@ import { formatMoney } from "@pos/core";
 import { staffFetch } from "../auth";
 
 interface Franchise { id: string; name: string; active: boolean }
-interface Outlet { id: string; name: string; franchiseId: string | null; address: string | null; phone: string | null; hours: string | null; active: boolean; serviceMode: "qsr" | "tsr" | null }
+interface Outlet { id: string; name: string; franchiseId: string | null; address: string | null; phone: string | null; hours: string | null; active: boolean; serviceMode: "qsr" | "tsr" | null; prepMinutes?: number | null }
 interface Summary { orders: number; netCents: number; netToAccountForCents: number; discountsCents: number; voided: { orders: number } }
 interface Row { outletId: string; name: string; franchiseId: string | null; summary: Summary }
 interface Info { brand: { id: string; name: string }; scope: { franchiseId: string | null; outletId: string | null; brandWide: boolean }; franchises: Franchise[]; outlets: Outlet[] }
@@ -134,11 +134,13 @@ export function Outlets() {
               </select>
             </label>
           )}
+          <label className="cust"><span>Minutes to prepare an order</span><input value={editing.prepMinutes ?? ""} onChange={(e) => setEditing({ ...editing, prepMinutes: e.target.value === "" ? null : Math.max(0, Math.min(600, Math.round(Number(e.target.value) || 0))) })} inputMode="numeric" placeholder="e.g. 15" /></label>
+          {!isNew && <SchedulingBox outletId={editing.id} />}
           {brandWide && !isNew && <label className="inline"><input type="checkbox" checked={editing.active} onChange={(e) => setEditing({ ...editing, active: e.target.checked })} /> Outlet is open for business</label>}
           <p className="muted">Customers see the address, phone and hours under Help &amp; support.</p>
           <div style={{ display: "flex", gap: 8 }}>
             <button className="primary" disabled={!editing.name.trim() || (isNew && !editing.id)} onClick={async () => {
-              const body = brandWide ? { name: editing.name, address: editing.address, phone: editing.phone, hours: editing.hours, franchiseId: editing.franchiseId, active: editing.active, serviceMode: editing.serviceMode } : { name: editing.name, address: editing.address, phone: editing.phone, hours: editing.hours, serviceMode: editing.serviceMode };
+              const body = brandWide ? { name: editing.name, address: editing.address, phone: editing.phone, hours: editing.hours, franchiseId: editing.franchiseId, active: editing.active, serviceMode: editing.serviceMode, prepMinutes: editing.prepMinutes ?? null } : { name: editing.name, address: editing.address, phone: editing.phone, hours: editing.hours, serviceMode: editing.serviceMode, prepMinutes: editing.prepMinutes ?? null };
               if (await save(`/api/outlets/${encodeURIComponent(editing.id)}`, body, "Saved.")) setEditing(null);
             }}>Save</button>
             <button className="secondary" onClick={() => setEditing(null)}>Cancel</button>
@@ -186,6 +188,40 @@ export function Outlets() {
           </div>
         </div>
       )}
+    </div>
+  );
+}
+
+/** Whether this outlet takes orders for a chosen pickup time, how far apart the times are and how many days ahead. Saves as it changes. */
+function SchedulingBox({ outletId }: { outletId: string }) {
+  const [v, setV] = useState<{ on: boolean; intervalMinutes: number; daysAhead: number } | null>(null);
+  const [saved, setSaved] = useState("");
+  useEffect(() => {
+    void (async () => {
+      const r = await staffFetch(`/api/outlets/${encodeURIComponent(outletId)}/scheduling`);
+      if ("res" in r && r.res.ok) setV((await r.res.json()) as NonNullable<typeof v>);
+    })();
+  }, [outletId]);
+  async function change(body: object) {
+    const r = await staffFetch(`/api/outlets/${encodeURIComponent(outletId)}/scheduling`, { method: "PUT", body });
+    if ("res" in r && r.res.ok) { setV((await r.res.json()) as NonNullable<typeof v>); setSaved("Saved."); } else setSaved("Could not save.");
+  }
+  if (!v) return null;
+  return (
+    <div style={{ marginTop: 8 }}>
+      <label className="inline"><input type="checkbox" checked={v.on} onChange={(e) => void change({ on: e.target.checked })} /> Take orders for a chosen pickup time</label>
+      {v.on && (
+        <>
+          <label className="cust"><span>Pickup times are every</span>
+            <select value={v.intervalMinutes} onChange={(e) => void change({ intervalMinutes: Number(e.target.value) })}>
+              {[5, 10, 15, 20, 30, 60].map((n) => <option key={n} value={n}>{n} minutes</option>)}
+            </select>
+          </label>
+          <label className="cust"><span>Days ahead a customer can book</span><input value={v.daysAhead} inputMode="numeric" onChange={(e) => setV({ ...v, daysAhead: Number(e.target.value) || 0 })} onBlur={() => void change({ daysAhead: Math.max(0, Math.min(30, v.daysAhead)) })} /></label>
+          <p className="muted">Pickup times follow the menu's ordering hours and the minutes to prepare above. An order waits and goes to the kitchen that many minutes before its time.</p>
+        </>
+      )}
+      {saved && <p className="muted">{saved}</p>}
     </div>
   );
 }
