@@ -1,5 +1,5 @@
 import { randomBytes } from "node:crypto";
-import { validateCatalog, withComboAvailability, type BuilderSpec, type Catalog, type Channel, type ChannelKind, type OptionGroup, type PricebookAssignment, type Product, type ProductStock } from "@pos/core";
+import { validateCatalog, withComboAvailability, type BuilderSpec, type Catalog, type Channel, type ChannelKind, type OptionGroup, type PricebookAssignment, type PriceOverride, type PriceZone, type Product, type ProductStock } from "@pos/core";
 import { MAX_IMAGE_BYTES, sniffImage } from "./brand.js";
 import type pg from "pg";
 import type { Db } from "./db/pool.js";
@@ -84,15 +84,19 @@ export class PgCatalogStore implements CatalogStore {
 
   private async read(q: Pick<pg.Pool, "query">): Promise<Catalog> {
     const m = this.merchantId;
-    const [meta, products, books, prices, channels, assigns, offs, catNames] = await Promise.all([
+    const [meta, products, books, prices, channels, assigns, offs, catNames, zoneRows, zoneOutlets, zoneBooks, overrideRows] = await Promise.all([
       q.query("SELECT version, default_pricebook_id FROM catalog_meta WHERE merchant_id=$1", [m]),
       q.query("SELECT id,name,category,sold_out,points_exempt,description,alt_name,options,image_version,bcrs,names,builder,tax_inclusive,tax_group,stock FROM products WHERE merchant_id=$1 ORDER BY sort", [m]),
       q.query("SELECT id,name,missing FROM pricebooks WHERE merchant_id=$1 ORDER BY name", [m]),
       q.query("SELECT pricebook_id, product_id, price_cents FROM pricebook_prices WHERE merchant_id=$1", [m]),
-      q.query("SELECT id,name,kind,service_charge,active FROM channels WHERE merchant_id=$1 ORDER BY sort", [m]),
+      q.query("SELECT id,name,kind,service_charge,active,commission_rate_pct FROM channels WHERE merchant_id=$1 ORDER BY sort", [m]),
       q.query("SELECT pricebook_id, outlet_id, channel_id FROM pricebook_assignments WHERE merchant_id=$1", [m]),
       q.query("SELECT pricebook_id, product_id FROM pricebook_off WHERE merchant_id=$1", [m]),
       q.query("SELECT category, names FROM category_names WHERE merchant_id=$1", [m]),
+      q.query("SELECT id, name FROM price_zones WHERE merchant_id=$1 ORDER BY name", [m]),
+      q.query("SELECT outlet_id, zone_id FROM price_zone_outlets WHERE merchant_id=$1 ORDER BY outlet_id", [m]),
+      q.query("SELECT zone_id, channel_id, pricebook_id FROM price_zone_books WHERE merchant_id=$1", [m]),
+      q.query("SELECT id, title, product_id, pricebook_id, price_cents, starts_at, ends_at FROM price_overrides WHERE merchant_id=$1 ORDER BY starts_at, id", [m]),
     ]);
     const liveCategories = new Set(products.rows.map((p) => p.category as string));
     const categoryNames: Record<string, Record<string, string>> = {};
@@ -128,8 +132,21 @@ export class PgCatalogStore implements CatalogStore {
         }),
       ),
       pricebooks: books.rows.map((b) => ({ id: b.id, name: b.name, missing: b.missing, prices: pb.get(b.id)!, ...(offBy.get(b.id)?.length ? { off: offBy.get(b.id)! } : {}) })),
-      channels: channels.rows.map((c): Channel => ({ id: c.id, name: c.name, kind: c.kind as ChannelKind, serviceCharge: c.service_charge, active: c.active })),
+      channels: channels.rows.map((c): Channel => ({ id: c.id, name: c.name, kind: c.kind as ChannelKind, serviceCharge: c.service_charge, active: c.active, ...(c.commission_rate_pct !== null && c.commission_rate_pct !== undefined ? { commission: { ratePct: Number(c.commission_rate_pct) } } : {}) })),
       assignments: assigns.rows.map((a): PricebookAssignment => ({ pricebookId: a.pricebook_id, outletId: a.outlet_id ?? undefined, channelId: a.channel_id ?? undefined })),
+      ...(zoneRows.rows.length
+        ? {
+            zones: zoneRows.rows.map((z): PriceZone => ({
+              id: z.id,
+              name: z.name,
+              outletIds: zoneOutlets.rows.filter((o) => o.zone_id === z.id).map((o) => o.outlet_id as string),
+              books: zoneBooks.rows.filter((b) => b.zone_id === z.id).map((b) => ({ ...(b.channel_id ? { channelId: b.channel_id as string } : {}), pricebookId: b.pricebook_id as string })),
+            })),
+          }
+        : {}),
+      ...(overrideRows.rows.length
+        ? { overrides: overrideRows.rows.map((o): PriceOverride => ({ id: o.id, title: o.title, productId: o.product_id, ...(o.pricebook_id ? { pricebookId: o.pricebook_id as string } : {}), priceCents: Number(o.price_cents), startsAt: new Date(o.starts_at).getTime(), endsAt: new Date(o.ends_at).getTime() })) }
+        : {}),
       ...(Object.keys(categoryNames).length ? { categoryNames } : {}),
     };
   }
@@ -277,13 +294,15 @@ export class PgCatalogStore implements CatalogStore {
     });
   }
 
-  upsertChannel(ch: { id?: string; name: string; kind: ChannelKind; serviceCharge: boolean; active: boolean }) {
+  /** `commission`: undefined keeps what is there, null stops recording commission for the channel, { ratePct } starts it. */
+  upsertChannel(ch: { id?: string; name: string; kind: ChannelKind; serviceCharge: boolean; active: boolean; commission?: { ratePct: number } | null }) {
     return this.change(async (c) => {
       const id = ch.id ?? shortId("ch");
       await c.query(
-        `INSERT INTO channels (merchant_id,id,name,kind,service_charge,active) VALUES ($1,$2,$3,$4,$5,$6)
-         ON CONFLICT (merchant_id,id) DO UPDATE SET name=EXCLUDED.name, kind=EXCLUDED.kind, service_charge=EXCLUDED.service_charge, active=EXCLUDED.active`,
-        [this.merchantId, id, ch.name, ch.kind, ch.serviceCharge, ch.active],
+        `INSERT INTO channels (merchant_id,id,name,kind,service_charge,active,commission_rate_pct) VALUES ($1,$2,$3,$4,$5,$6,$7)
+         ON CONFLICT (merchant_id,id) DO UPDATE SET name=EXCLUDED.name, kind=EXCLUDED.kind, service_charge=EXCLUDED.service_charge, active=EXCLUDED.active,
+           commission_rate_pct = CASE WHEN $8 THEN EXCLUDED.commission_rate_pct ELSE channels.commission_rate_pct END`,
+        [this.merchantId, id, ch.name, ch.kind, ch.serviceCharge, ch.active, ch.commission ? ch.commission.ratePct : null, ch.commission !== undefined],
       );
       return { ...ch, id };
     });
@@ -297,6 +316,50 @@ export class PgCatalogStore implements CatalogStore {
         [this.merchantId, pricebookId, outletId ?? null, channelId ?? null],
       );
       return { pricebookId, outletId: outletId ?? null, channelId: channelId ?? null };
+    });
+  }
+
+  /** Create or replace a Price Zone: its name, its outlets (taken from any other zone) and its pricebook per channel. HQ only (the route checks). */
+  saveZone(z: { id?: string; name: string; outletIds: string[]; books: Array<{ channelId?: string; pricebookId: string }> }) {
+    return this.change(async (c) => {
+      const m = this.merchantId;
+      const id = z.id?.trim() || z.name.trim().toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "") || `zone-${Date.now().toString(36)}`;
+      await c.query("INSERT INTO price_zones (merchant_id,id,name) VALUES ($1,$2,$3) ON CONFLICT (merchant_id,id) DO UPDATE SET name=EXCLUDED.name", [m, id, z.name.trim()]);
+      await c.query("DELETE FROM price_zone_outlets WHERE merchant_id=$1 AND (zone_id=$2 OR outlet_id = ANY($3::text[]))", [m, id, z.outletIds]);
+      for (const o of [...new Set(z.outletIds)]) await c.query("INSERT INTO price_zone_outlets (merchant_id,outlet_id,zone_id) VALUES ($1,$2,$3)", [m, o, id]);
+      await c.query("DELETE FROM price_zone_books WHERE merchant_id=$1 AND zone_id=$2", [m, id]);
+      for (const b of z.books) await c.query("INSERT INTO price_zone_books (merchant_id,zone_id,channel_id,pricebook_id) VALUES ($1,$2,$3,$4)", [m, id, b.channelId ?? null, b.pricebookId]);
+      return { id };
+    });
+  }
+
+  /** Create or replace a promotional price. */
+  saveOverride(o: { id?: string; title: string; productId: string; pricebookId?: string; priceCents: number; startsAt: number; endsAt: number }) {
+    return this.change(async (c) => {
+      const id = o.id?.trim() || shortId("promo");
+      await c.query(
+        `INSERT INTO price_overrides (merchant_id,id,title,product_id,pricebook_id,price_cents,starts_at,ends_at) VALUES ($1,$2,$3,$4,$5,$6,to_timestamp($7/1000.0),to_timestamp($8/1000.0))
+         ON CONFLICT (merchant_id,id) DO UPDATE SET title=EXCLUDED.title, product_id=EXCLUDED.product_id, pricebook_id=EXCLUDED.pricebook_id, price_cents=EXCLUDED.price_cents, starts_at=EXCLUDED.starts_at, ends_at=EXCLUDED.ends_at`,
+        [this.merchantId, id, o.title.trim(), o.productId, o.pricebookId ?? null, o.priceCents, o.startsAt, o.endsAt],
+      );
+      return { id };
+    });
+  }
+
+  deleteOverride(id: string) {
+    return this.change(async (c) => {
+      await c.query("DELETE FROM price_overrides WHERE merchant_id=$1 AND id=$2", [this.merchantId, id]);
+      return { id };
+    });
+  }
+
+  deleteZone(id: string) {
+    return this.change(async (c) => {
+      const m = this.merchantId;
+      await c.query("DELETE FROM price_zone_books WHERE merchant_id=$1 AND zone_id=$2", [m, id]);
+      await c.query("DELETE FROM price_zone_outlets WHERE merchant_id=$1 AND zone_id=$2", [m, id]);
+      await c.query("DELETE FROM price_zones WHERE merchant_id=$1 AND id=$2", [m, id]);
+      return { id };
     });
   }
 

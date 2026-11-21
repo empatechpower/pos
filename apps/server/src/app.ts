@@ -2,7 +2,7 @@ import cors from "@fastify/cors";
 import Fastify, { type FastifyReply, type FastifyRequest } from "fastify";
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
-import { type BuilderSpec, tabPaymentReceipt, type ProductStock, validateProductStock, isTimeZone, validCoordinates, validateOutletOverride, validateWindows, type MenuWindows, confirmedPaid, hourly, isFullyPaid, productMix, summarize, menuFor, newId, orderTotals, reduceAll, reduceOrder, shopStatus, type BusinessConfig, type ChannelKind, type OptionGroup, type OrderEvent } from "@pos/core";
+import { type BuilderSpec, commissionOf, tabPaymentReceipt, type ProductStock, validateProductStock, isTimeZone, validCoordinates, validateOutletOverride, validateWindows, type MenuWindows, confirmedPaid, hourly, isFullyPaid, productMix, summarize, menuFor, newId, orderTotals, reduceAll, reduceOrder, shopStatus, type BusinessConfig, type ChannelKind, type OptionGroup, type OrderEvent } from "@pos/core";
 import { CASHIER_TOPUP_LIMIT_CENTS, audit, authenticate, authenticateAgent, can, createAgent, createConnectCode, redeemConnectCode, createStaff, listAgents, login, logout, recentAudit, revokeAgent, type Permission, type Role, type Staff } from "./auth.js";
 import type { CatalogStore, ChangeResult, PgCatalogStore } from "./catalog.js";
 import type { Db } from "./db/pool.js";
@@ -16,7 +16,7 @@ import { registerPromoAdmin, releasePromo } from "./promo.js";
 import { reconcileOrderStock, registerStock } from "./stock.js";
 import { TabService } from "./tabs.js";
 import { registerTabRoutes } from "./tabRoutes.js";
-import { loadKiosk, optionsOf, saveKiosk, saveSetting } from "./settings.js";
+import { applyOption, loadKiosk, OPTION_KEYS, optionsOf, saveKiosk, saveSetting } from "./settings.js";
 import { sendMail, type Integrations } from "./integrations.js";
 import { registerTelegram } from "./telegram.js";
 import { MemberStore } from "./members.js";
@@ -397,6 +397,25 @@ export async function buildApp({ config, store, db, catalog, catalogAdmin, print
     return ordersReport(req.query.from, req.query.to, req.query.cancelled === "1", scope);
   });
 
+  /**
+   * Record what a channel's platform actually took on one order (Q&A A-5). Only for a channel this merchant has opted in to recording
+   * commission for; the figure replaces the contract-rate estimate for that order. Managers and owners; audited.
+   */
+  app.post<{ Params: { id: string }; Body: { cents?: number; note?: string } }>("/api/orders/:id/commission", { preHandler: needs("wallet.refund") }, async (req, reply) => {
+    const order = reduceOrder(req.params.id, await store.eventsForOrder(req.params.id));
+    if (!order) return reply.code(404).send({ error: "order_not_found" });
+    const outlet = (await store.outletOfOrder?.(order.orderId)) ?? undefined;
+    if (outlet && !outletAllowed(await visibleOutletIds(db, merchantId, req.staff!), outlet)) return reply.code(403).send({ error: "outside_your_scope" });
+    const channel = (await catalog.load()).channels.find((x) => x.id === order.channelId);
+    if (!channel?.commission) return reply.code(409).send({ error: "commission_not_recorded_for_this_channel" });
+    const cents = Number(req.body?.cents);
+    if (!Number.isSafeInteger(cents) || cents < 0 || cents > orderTotals(order, config).total) return reply.code(400).send({ error: "cents must be between 0 and the order total" });
+    const note = typeof req.body?.note === "string" ? req.body.note.trim().slice(0, 120) : undefined;
+    await ingest([{ id: `commission-${order.orderId}-${Date.now().toString(36)}`, orderId: order.orderId, deviceId: "server", ts: Date.now(), seq: Date.now(), type: "CommissionRecorded", cents, ...(note ? { note } : {}) } as unknown as OrderEvent], outlet);
+    await audit(db, merchantId, req.staff!.id, "order.commission", { orderId: order.orderId, cents, note: note ?? null });
+    return { ok: true, cents };
+  });
+
   /** Sales summary for a date range: totals, by day, by hour, by channel, and products ranked. */
   const salesReport = async (fromDate?: string, toDate?: string, outlets: string[] | null = null) => {
     const { from, to, orders } = await ordersBetween(fromDate, toDate, false, outlets);
@@ -405,6 +424,8 @@ export async function buildApp({ config, store, db, catalog, catalogAdmin, print
     const days = new Map<string, { orders: number; cents: number }>();
     const hours = new Map<number, { orders: number; cents: number }>();
     const channels = new Map<string, { orders: number; cents: number }>();
+    const commissions = new Map<string, number>();
+    const chans = (await catalog.load()).channels;
     const products = new Map<string, { qty: number; cents: number }>();
     let subtotal = 0, service = 0, gross = 0, items = 0;
     const bump = <K>(m: Map<K, { orders: number; cents: number }>, k: K, cents: number) => { const x = m.get(k) ?? { orders: 0, cents: 0 }; x.orders++; x.cents += cents; m.set(k, x); };
@@ -412,6 +433,8 @@ export async function buildApp({ config, store, db, catalog, catalogAdmin, print
       const t = orderTotals(o, config);
       subtotal += t.subtotal; service += t.service; gross += t.total;
       bump(days, dayOf(o.openedAt), t.total); bump(hours, hourOf(o.openedAt), t.total); bump(channels, o.channelName ?? o.fulfilment, t.total);
+      const comm = commissionOf(o, t.total, chans.find((x) => x.id === o.channelId));
+      if (comm) commissions.set(o.channelName ?? o.fulfilment, (commissions.get(o.channelName ?? o.fulfilment) ?? 0) + comm.cents);
       for (const l of o.lines) {
         if (l.qty <= 0) continue;
         items += l.qty;
@@ -423,7 +446,7 @@ export async function buildApp({ config, store, db, catalog, catalogAdmin, print
     return {
       summary: summarize(everyOne, config), hourly: hourly(orders, config), mix: productMix(orders, (id) => cat.get(id) ?? ""),
       from, to, orders: orders.length, items, subtotalCents: subtotal, serviceCents: service, grossCents: gross, averageOrderCents: orders.length ? Math.round(gross / orders.length) : 0,
-      byDay: list(days, "day"), byHour: list(hours, "hour"), byChannel: [...channels].sort((a, b) => (a[0] < b[0] ? -1 : 1)).map(([channel, v]) => ({ channel, orders: v.orders, cents: v.cents })),
+      byDay: list(days, "day"), byHour: list(hours, "hour"), byChannel: [...channels].sort((a, b) => (a[0] < b[0] ? -1 : 1)).map(([channel, v]) => ({ channel, orders: v.orders, cents: v.cents, ...(commissions.has(channel) ? { commissionCents: commissions.get(channel)! } : {}) })),
       products: [...products].map(([name, v]) => ({ name, qty: v.qty, cents: v.cents })).sort((a, b) => b.qty - a.qty || b.cents - a.cents),
     };
   };
@@ -576,14 +599,18 @@ export async function buildApp({ config, store, db, catalog, catalogAdmin, print
   // ---- options the owner can switch: service charge and tax ------------------------------------
 
   app.get("/api/settings", { preHandler: needs("wallet.read") }, async () => ({ ...optionsOf(config), serviceRate: config.pricing.serviceRate, gstRate: config.pricing.gstRate }));
-  app.put<{ Body: { serviceChargeOn?: boolean; gstOn?: boolean } }>("/api/settings", { preHandler: needs("staff.manage") }, async (req, reply) => {
+  app.put<{ Body: Partial<Record<(typeof OPTION_KEYS)[number], boolean>> }>("/api/settings", { preHandler: needs("staff.manage") }, async (req, reply) => {
     if ((await visibleOutletIds(db, merchantId, req.staff!)) !== null) return reply.code(403).send({ error: "brand_only" });
-    const b = req.body ?? {};
-    if (b.serviceChargeOn !== undefined && typeof b.serviceChargeOn !== "boolean") return reply.code(400).send({ error: "serviceChargeOn must be true or false" });
-    if (b.gstOn !== undefined && typeof b.gstOn !== "boolean") return reply.code(400).send({ error: "gstOn must be true or false" });
-    if (b.serviceChargeOn !== undefined) { await saveSetting(db, merchantId, "serviceChargeOn", b.serviceChargeOn); config.pricing.serviceOn = b.serviceChargeOn; }
-    if (b.gstOn !== undefined) { await saveSetting(db, merchantId, "gstOn", b.gstOn); config.pricing.gstOn = b.gstOn; }
-    await audit(db, merchantId, req.staff!.id, "settings.save", { serviceChargeOn: b.serviceChargeOn, gstOn: b.gstOn });
+    const b = (req.body ?? {}) as Record<string, unknown>;
+    for (const k of OPTION_KEYS) if (b[k] !== undefined && typeof b[k] !== "boolean") return reply.code(400).send({ error: `${k} must be true or false` });
+    const changed: Record<string, boolean> = {};
+    for (const k of OPTION_KEYS) {
+      if (typeof b[k] !== "boolean") continue;
+      await saveSetting(db, merchantId, k, b[k]);
+      applyOption(config, k, b[k] as boolean);
+      changed[k] = b[k] as boolean;
+    }
+    await audit(db, merchantId, req.staff!.id, "settings.save", changed);
     return { ...optionsOf(config), serviceRate: config.pricing.serviceRate, gstRate: config.pricing.gstRate };
   });
 
@@ -612,7 +639,7 @@ export async function buildApp({ config, store, db, catalog, catalogAdmin, print
 
   registerDisplay(app, { db, merchantId, needsDevice });
   registerPromoAdmin(app, { db, merchantId, needs });
-  const tabs = new TabService({ db, merchantId, config, eventsForOrder: (id) => store.eventsForOrder(id), members, ingest, now, loadCatalog: () => catalog.load() });
+  const tabs = new TabService({ db, merchantId, config, eventsForOrder: (id) => store.eventsForOrder(id), members, ingest, now, loadCatalog: () => catalog.load(), alert: (text) => { void (app as unknown as { notifyManagers?: (t: string, all?: boolean) => Promise<void> }).notifyManagers?.(text, true)?.catch(() => undefined); } });
   // Every completed tab payment prints its own receipt: the lines and components as quoted, who paid, who recorded it, and what is left on the tab.
   if (print) {
     tabs.onPaymentCompleted = async (paymentId) => {
@@ -628,7 +655,15 @@ export async function buildApp({ config, store, db, catalog, catalogAdmin, print
 
   // ---- the Telegram bot for managing prices ---------------------------------------------------
 
-  if (catalogAdmin) registerTelegram(app, { db, merchantId, outletId: config.outletName, integ: integrations ?? { publicUrl: "" }, cat: catalogAdmin as PgCatalogStore, needs, reports: { sales: salesReport, orders: ordersReport, today: () => dayOf(Date.now()) } });
+  (app as unknown as { escalateTabPages?: (m: number) => Promise<number> }).escalateTabPages = (m) => tabs.escalateUnacknowledged(m);
+  // A page for the waiter that nobody answers is sent again after TAB_PAGE_ESCALATE_MIN minutes (default 2).
+  if (db && process.env.NODE_ENV !== "test") {
+    const mins = Number(process.env.TAB_PAGE_ESCALATE_MIN) > 0 ? Number(process.env.TAB_PAGE_ESCALATE_MIN) : 2;
+    const timer = setInterval(() => { void tabs.escalateUnacknowledged(mins).catch(() => undefined); }, 30_000);
+    timer.unref();
+    app.addHook("onClose", async () => clearInterval(timer));
+  }
+  if (catalogAdmin) registerTelegram(app, { db, merchantId, outletId: config.outletName, integ: integrations ?? { publicUrl: "" }, cat: catalogAdmin as PgCatalogStore, needs, reports: { sales: salesReport, orders: ordersReport, today: () => dayOf(Date.now()), hour: () => hourOf(Date.now()) }, tabs: { open: () => tabs.openSummary() } });
 
   // ---- devices ----------------------------------------------------------------------------
 
@@ -741,11 +776,11 @@ export async function buildApp({ config, store, db, catalog, catalogAdmin, print
       return changed(req, reply, "pricebook.clone", () => cat.clonePricebook(name, { fromPricebookId: req.params.id, kind: req.body?.kind }));
     });
 
-    app.post<{ Body: { id?: string; name?: string; kind?: ChannelKind; serviceCharge?: boolean; active?: boolean } }>("/api/catalog/channels", manage, async (req, reply) => {
+    app.post<{ Body: { id?: string; name?: string; kind?: ChannelKind; serviceCharge?: boolean; active?: boolean; commission?: { ratePct?: number } | null } }>("/api/catalog/channels", manage, async (req, reply) => {
       const b = req.body ?? {};
       if (!b.name?.trim() || !b.kind || !KINDS.includes(b.kind)) return bad(reply, "name and a valid kind are required");
       return changed(req, reply, "channel", () =>
-        cat.upsertChannel({ id: b.id, name: b.name!.trim(), kind: b.kind!, serviceCharge: !!b.serviceCharge, active: b.active !== false }),
+        cat.upsertChannel({ id: b.id, name: b.name!.trim(), kind: b.kind!, serviceCharge: !!b.serviceCharge, active: b.active !== false, ...(b.commission === null ? { commission: null } : b.commission && typeof b.commission.ratePct === "number" ? { commission: { ratePct: b.commission.ratePct } } : {}) }),
       );
     });
 
@@ -759,6 +794,39 @@ export async function buildApp({ config, store, db, catalog, catalogAdmin, print
       const { outletId, channelId } = req.body ?? {};
       if (!outletId && !channelId) return bad(reply, "an outletId and/or channelId is required");
       return changed(req, reply, "unassign", () => cat.unassign(outletId, channelId));
+    });
+
+    // Price Zones: HQ (brand-wide logins) only; a store login can never change who uses which pricebook.
+    app.put<{ Body: { id?: string; name?: string; outletIds?: string[]; books?: Array<{ channelId?: string; pricebookId?: string }> } }>("/api/catalog/zones", manage, async (req, reply) => {
+      if ((await visibleOutletIds(db, merchantId, req.staff!)) !== null) return reply.code(403).send({ error: "brand_only" });
+      const b = req.body ?? {};
+      if (!b.name?.trim()) return bad(reply, "a zone needs a name");
+      if (!Array.isArray(b.outletIds) || b.outletIds.some((x) => typeof x !== "string")) return bad(reply, "outletIds must be a list of outlet ids");
+      const known = new Set((await listOutlets(db, merchantId)).map((o) => o.id));
+      const unknown = b.outletIds.filter((x) => !known.has(x));
+      if (unknown.length) return bad(reply, `unknown outlets: ${unknown.join(", ")}`);
+      const books = (Array.isArray(b.books) ? b.books : []).map((x) => ({ ...(x.channelId ? { channelId: String(x.channelId) } : {}), pricebookId: String(x.pricebookId ?? "") }));
+      return changed(req, reply, "zone", () => cat.saveZone({ id: b.id, name: b.name!, outletIds: b.outletIds!, books }));
+    });
+
+    app.delete<{ Params: { id: string } }>("/api/catalog/zones/:id", manage, async (req, reply) => {
+      if ((await visibleOutletIds(db, merchantId, req.staff!)) !== null) return reply.code(403).send({ error: "brand_only" });
+      return changed(req, reply, "zone.delete", () => cat.deleteZone(req.params.id));
+    });
+
+    // Promotional prices: a price for one item for a stretch of time. HQ (brand-wide logins) only.
+    app.put<{ Body: { id?: string; title?: string; productId?: string; pricebookId?: string | null; priceCents?: number; startsAt?: number | string; endsAt?: number | string } }>("/api/catalog/overrides", manage, async (req, reply) => {
+      if ((await visibleOutletIds(db, merchantId, req.staff!)) !== null) return reply.code(403).send({ error: "brand_only" });
+      const b = req.body ?? {};
+      const at = (v: unknown) => (typeof v === "number" ? v : typeof v === "string" ? Date.parse(v) : NaN);
+      const startsAt = at(b.startsAt), endsAt = at(b.endsAt);
+      if (!b.title?.trim() || !b.productId || !Number.isSafeInteger(b.priceCents) || !Number.isFinite(startsAt) || !Number.isFinite(endsAt)) return bad(reply, "title, productId, priceCents, startsAt and endsAt are required");
+      return changed(req, reply, "override", () => cat.saveOverride({ id: b.id, title: b.title!, productId: b.productId!, ...(b.pricebookId ? { pricebookId: b.pricebookId } : {}), priceCents: b.priceCents!, startsAt, endsAt }));
+    });
+
+    app.delete<{ Params: { id: string } }>("/api/catalog/overrides/:id", manage, async (req, reply) => {
+      if ((await visibleOutletIds(db, merchantId, req.staff!)) !== null) return reply.code(403).send({ error: "brand_only" });
+      return changed(req, reply, "override.delete", () => cat.deleteOverride(req.params.id));
     });
 
     app.put<{ Body: { pricebookId?: string } }>("/api/catalog/default-pricebook", manage, async (req, reply) => {

@@ -20,7 +20,7 @@ See the full lists in the project discussion. The ones that gate code:
 
 
 ## Assumptions made while building channels and pricebooks (confirm with the client)
-- **Missing price in a pricebook:** falls back to the default pricebook. Each pricebook can instead be set to hide the item. (Question A1)
+- **Missing price in a pricebook:** the item can never be ordered on that channel, and no other pricebook's price is used. Each pricebook decides whether the unpriced item is hidden or shown (blocked). Settled by the owner (Q&A A-1).
 - **Service charge:** decided per channel (on for Dine in only in the sample data), not per outlet. (Question A2)
 - **Grab uplift:** the sample Grab pricebook is the default price + 15% rounded up to 5c. Invented, not from the client.
 - **Cashier top-up cap:** S$200 per top-up. Managers and owners are uncapped.

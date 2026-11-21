@@ -23,8 +23,8 @@ export interface TabView {
     lines: Array<{ lineId: string; productId: string; name: string; qty: number; unitCents: number; options: string[]; deposit: boolean; owner: { id: string; name: string | null }; sharedWith: Array<{ id: string; name: string | null }>; units: number; paidUnits: number; reservedUnits: number; paidBy: string[] }>;
   }>;
   payments: Array<{ id: string; pointsUsed: number; payer: { id: string; name: string | null }; for: { id: string; name: string | null } | null; amountCents: number; status: string; method: string; mode: string; staffRecorded: boolean; hostKeep: boolean; at: string }>;
-  billRequested: boolean; waiterPaged: boolean; pagedKind: string | null;
-  me: { id: string; name: string; memberId: string | null; owesCents: number; paidCents: number; pendingPoints: number; pointsBalance: number | null } | null;
+  billRequested: boolean; waiterPaged: boolean; pagedKind: string | null; pageAcknowledged?: boolean;
+  me: { id: string; name: string; memberId: string | null; owesCents: number; paidCents: number; pendingPoints: number; earnedPoints?: number; pointsBalance: number | null } | null;
   closed: boolean; pendingRewardsNote: string | null; customAllocation: "oldest_first" | "reduce_only";
 }
 
@@ -144,7 +144,7 @@ export function PageBell({ logo, view, session, onPaged }: { logo: ReactNode; vi
         <span className="pw-logo">{logo}</span>
         <span className="pw-bell" aria-hidden="true">
           <span className="pw-badge"><svg width="30" height="30" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M18 8a6 6 0 0 0-12 0c0 7-3 9-3 9h18s-3-2-3-9" /><path d="M13.7 21a2 2 0 0 1-3.4 0" /></svg></span>
-          <span className="pw-pill">{paged ? tx("Waiter paged") : tx("Page the Waiter")}</span>
+          <span className="pw-pill">{paged ? (view?.pageAcknowledged ? tx("Waiter is on the way") : tx("Waiter paged")) : tx("Page the Waiter")}</span>
         </span>
       </button>
       {open && (
@@ -206,6 +206,12 @@ export function TabScreen({ view, session, bearer, creditCents, rewardsOn, onBac
         </div>
       )}
       {view.closed && <div className="e2e-card tab-closed"><b>{tx("Fully paid ✓ — this tab is closed")}</b></div>}
+      {rewardsOn && view.closed && (view.me?.earnedPoints ?? 0) > 0 && (
+        <div className="e2e-card tab-reward" role="status">
+          <b>{tx("Rewards earned")}: {(view.me?.earnedPoints ?? 0).toLocaleString()} {tx("points")}</b>
+          <div className="muted">{tx(view.me?.memberId ? "Credited to your account." : "Sign up to keep these points.")}</div>
+        </div>
+      )}
 
       {view.rounds.map((r) => (
         <div className="e2e-card" key={r.orderId}>

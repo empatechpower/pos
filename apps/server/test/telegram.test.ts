@@ -11,6 +11,7 @@ import type { Integrations } from "../src/integrations.js";
 import { startTestDb } from "./pg.js";
 import type { Db } from "../src/db/pool.js";
 
+process.env.DAILY_SUMMARY_HOUR = "0"; // the end-of-day summary is due as soon as there is something to say
 const config = PRESETS.fastServe("bp", "Bailey & Patch", "EV");
 let db: Db;
 let stop: () => Promise<void>;
@@ -484,5 +485,27 @@ describe("menu changes and reports by Telegram (for an AI assistant working Tele
 
     // A cashier-level link cannot read reports: only managers and owners can use the bot at all.
     expect((await say(900, "/sales")).said[0].text).toMatch(/link/i);
+  });
+
+  it("/tabs lists open tables and what is owed", async () => {
+    expect((await say(1001, "/tabs")).said[0].text).toMatch(/No open tabs/);
+    const own = (await call("POST", "/api/auth/login", { body: { code: "OWN", pin: "999999" } })).json.token;
+    await call("PUT", "/api/outlets/EV", { body: { name: "Table shop", serviceMode: "tsr" }, staff: own });
+    expect((await call("PUT", "/api/outlets/EV/tab-settings", { body: { tabService: true }, staff: own })).status).toBe(200);
+    const opened = await call("POST", "/api/tabs", { body: { outletId: "EV" }, staff: mgr });
+    expect(opened.status).toBe(200);
+    const text = (await say(1001, "/tabs")).said[0].text as string;
+    expect(text).toMatch(/Open tabs \(1\)/);
+    expect(text).toMatch(/S\$0\.00 to pay/);
+  });
+
+  it("sends the day's sales to managers once, after the set hour", async () => {
+    const start = sent.length;
+    const run = (app as unknown as { sendDailySummary: () => Promise<boolean> }).sendDailySummary;
+    expect(await run()).toBe(true);
+    const out = sent.slice(start).filter((x) => x.method === "sendMessage").map((x) => x.body.text as string);
+    expect(out.length).toBeGreaterThan(0);
+    expect(out[0]).toMatch(/^End of day\nSales for today/);
+    expect(await run()).toBe(false); // already sent for today
   });
 });

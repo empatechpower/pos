@@ -104,3 +104,14 @@ export function productMix(all: readonly OrderState[], categoryOf: (productId: s
   }
   return [...m.values()].map((x) => ({ ...x, averageCents: Math.round(x.cents / x.qty), share: total ? x.cents / total : 0 })).sort((a, b) => b.qty - a.qty || b.cents - a.cents);
 }
+
+/**
+ * What a channel's platform took on one order, when this merchant records commission for the channel (an opt-in, Q&A A-5).
+ * The figure entered for the order wins (it is the actual one, which can differ from the contract during platform promotions);
+ * without one it is the contract rate on the order total. Null when the channel does not record commission.
+ */
+export function commissionOf(order: { commission?: { cents: number } }, totalCents: number, channel: { commission?: { ratePct: number } } | undefined): { cents: number; source: "actual" | "contract" } | null {
+  if (!channel?.commission) return null;
+  if (order.commission) return { cents: order.commission.cents, source: "actual" };
+  return { cents: Math.round((totalCents * channel.commission.ratePct) / 100), source: "contract" };
+}

@@ -114,6 +114,15 @@ describe("service charge is an option", () => {
     expect(without).toBeLessThan(withService);
     expect((await call("/api/settings", { staff: owner })).json.serviceChargeOn).toBe(false);
   });
+  it("promotion stacking and what points may pay are owner options too", async () => {
+    const r = (await call("/api/settings", { method: "PUT", body: { stackable: false, pointsItemsEligibleOnly: true, pointsDeductService: false, pointsDeductTax: false }, staff: owner })).json;
+    expect(r).toMatchObject({ stackable: false, pointsItemsEligibleOnly: true, pointsDeductService: false, pointsDeductTax: false });
+    expect((await call("/api/settings", { staff: owner })).json).toMatchObject({ stackable: false, pointsDeductService: false });
+    const back = (await call("/api/settings", { method: "PUT", body: { stackable: true, pointsItemsEligibleOnly: false, pointsDeductService: true, pointsDeductTax: true }, staff: owner })).json;
+    expect(back).toMatchObject({ stackable: true, pointsItemsEligibleOnly: false, pointsDeductService: true, pointsDeductTax: true });
+    expect((await call("/api/settings", { method: "PUT", body: { stackable: "no" }, staff: owner })).status).toBe(400);
+    expect((await call("/api/settings", { method: "PUT", body: { stackable: false }, staff: scoped })).status).toBe(403);
+  });
   it("a store login cannot change it", async () => {
     expect((await call("/api/settings", { method: "PUT", body: { serviceChargeOn: true }, staff: scoped })).status).toBe(403);
   });

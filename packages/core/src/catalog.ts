@@ -14,6 +14,9 @@ import type { Availability } from "./windows.js";
  *   2. assigned to this channel, any outlet       (Grab, everywhere)
  *   3. assigned to this outlet, any channel       (LIDO, everything)
  *   4. the merchant's default pricebook
+ *
+ * A Price Zone (HQ's thin layer, Q&A A-3) is a named group of outlets; per channel it points at one pricebook. It slots in after
+ * the outlet's own assignment of the same kind: zone + channel after (1), zone for any channel after (3). Prices still live only in pricebooks.
  * Only the winning pricebook is ever consulted. A product with no price in it is NOT sold in that
  * context and no other pricebook's price is substituted (spec A-1). The pricebook's `missing`
  * setting only decides whether such a product is hidden from the menu or shown but blocked.
@@ -71,12 +74,39 @@ export interface Channel {
   /** Whether the service charge applies to orders in this channel. */
   serviceCharge: boolean;
   active: boolean;
+  /** Opt-in (Q&A A-5): this merchant records commission for this channel, at this contract rate unless an order says otherwise. Absent = not recorded. */
+  commission?: { ratePct: number };
 }
 
 export interface PricebookAssignment {
   pricebookId: string;
   outletId?: string;
   channelId?: string;
+}
+
+/** A named group of outlets. Per channel (or for any channel) it points at one pricebook. An outlet belongs to at most one zone. */
+export interface PriceZone {
+  id: string;
+  name: string;
+  outletIds: string[];
+  books: Array<{ channelId?: string; pricebookId: string }>;
+}
+
+/**
+ * A promotional price for a stretch of time (Q&A A-3: "promotions never create pricebooks; they are date-ranged overrides").
+ * It replaces the pricebook price of one product while it is running, in one pricebook or in every pricebook. When several run at once the
+ * one that started last wins. Prices stay in the pricebooks: ending the promotion simply puts the pricebook price back.
+ */
+export interface PriceOverride {
+  id: string;
+  title: string;
+  productId: string;
+  /** Absent = whichever pricebook applies. */
+  pricebookId?: string;
+  priceCents: Cents;
+  /** ms since the epoch; the override runs from startsAt (included) to endsAt (excluded). */
+  startsAt: number;
+  endsAt: number;
 }
 
 export interface Catalog {
@@ -87,6 +117,10 @@ export interface Catalog {
   pricebooks: Pricebook[];
   channels: Channel[];
   assignments: PricebookAssignment[];
+  /** Price Zones: who uses which pricebook, assigned by HQ. Absent = no zones. */
+  zones?: PriceZone[];
+  /** Promotional prices that run for a stretch of time. Absent = none. */
+  overrides?: PriceOverride[];
   /** The merchant's own name for a category in each language: category -> (language code -> name). Never machine-translated; a language with no entry shows the category as entered. */
   categoryNames?: Record<string, Record<string, string>>;
 }
@@ -94,6 +128,8 @@ export interface Catalog {
 export interface PriceContext {
   outletId: string;
   channelId: string;
+  /** When the sale happens (ms). Default: now. Only promotional overrides care. */
+  at?: number;
 }
 
 /** The old three-way fulfilment an order still records, for anything that predates channels. */
@@ -102,10 +138,13 @@ export const fulfilmentOf = (kind: ChannelKind): Fulfilment => (kind === "other"
 /** Pricebooks that apply in this context, most specific first, without repeats. */
 export function pricebookChain(catalog: Catalog, ctx: PriceContext): Pricebook[] {
   const a = catalog.assignments;
+  const zone = catalog.zones?.find((z) => z.outletIds.includes(ctx.outletId));
   const ids = [
     a.find((x) => x.outletId === ctx.outletId && x.channelId === ctx.channelId)?.pricebookId,
+    zone?.books.find((x) => x.channelId === ctx.channelId)?.pricebookId,
     a.find((x) => !x.outletId && x.channelId === ctx.channelId)?.pricebookId,
     a.find((x) => x.outletId === ctx.outletId && !x.channelId)?.pricebookId,
+    zone?.books.find((x) => !x.channelId)?.pricebookId,
     catalog.defaultPricebookId,
   ];
   const seen = new Set<string>();
@@ -122,6 +161,8 @@ export function pricebookChain(catalog: Catalog, ctx: PriceContext): Pricebook[]
 export interface ResolvedPrice {
   priceCents: Cents;
   pricebookId: string;
+  /** Set when a promotional override set this price. */
+  overrideId?: string;
 }
 
 /** The price of one product here, or null when it is not sold in this context. */
@@ -129,7 +170,13 @@ export function resolvePrice(catalog: Catalog, productId: string, ctx: PriceCont
   const book = pricebookChain(catalog, ctx)[0];
   if (!book || !Object.prototype.hasOwnProperty.call(book.prices, productId)) return null;
   if (book.off?.includes(productId)) return null;
-  return { priceCents: book.prices[productId]!, pricebookId: book.id };
+  const at = ctx.at ?? Date.now();
+  let promo: PriceOverride | undefined;
+  for (const o of catalog.overrides ?? []) {
+    if (o.productId !== productId || (o.pricebookId && o.pricebookId !== book.id) || at < o.startsAt || at >= o.endsAt) continue;
+    if (!promo || o.startsAt > promo.startsAt) promo = o;
+  }
+  return promo ? { priceCents: promo.priceCents, pricebookId: book.id, overrideId: promo.id } : { priceCents: book.prices[productId]!, pricebookId: book.id };
 }
 
 /** Products shown on the menu but not orderable here: no price in the winning book, and the book says "show". */
@@ -172,10 +219,36 @@ export function validateCatalog(c: Catalog): string[] {
   const products = new Set(c.products.map((p) => p.id));
   const byId = new Map(c.products.map((p) => [p.id, p]));
   if (!books.has(c.defaultPricebookId)) problems.push("default pricebook does not exist");
+  for (const o of c.overrides ?? []) {
+    if (!products.has(o.productId)) problems.push(`promotion ${o.id} prices unknown product ${o.productId}`);
+    if (o.pricebookId && !books.has(o.pricebookId)) problems.push(`promotion ${o.id} points at missing pricebook ${o.pricebookId}`);
+    if (!Number.isSafeInteger(o.priceCents) || o.priceCents < 0) problems.push(`promotion ${o.id} has an invalid price`);
+    if (!(o.endsAt > o.startsAt)) problems.push(`promotion ${o.id} must end after it starts`);
+  }
+  for (const ch of c.channels) {
+    const r = ch.commission?.ratePct;
+    if (r !== undefined && !(Number.isFinite(r) && r >= 0 && r <= 100)) problems.push(`channel ${ch.id}: the commission rate must be between 0 and 100`);
+  }
   for (const a of c.assignments) {
     if (!a.outletId && !a.channelId) problems.push("an assignment needs an outlet, a channel, or both");
     if (!books.has(a.pricebookId)) problems.push(`assignment points at missing pricebook ${a.pricebookId}`);
     if (a.channelId && !channels.has(a.channelId)) problems.push(`assignment points at missing channel ${a.channelId}`);
+  }
+  const inZone = new Map<string, string>();
+  for (const z of c.zones ?? []) {
+    if (!z.name.trim()) problems.push(`zone ${z.id} needs a name`);
+    for (const o of z.outletIds) {
+      if (inZone.has(o)) problems.push(`outlet ${o} is in two price zones (${inZone.get(o)} and ${z.id})`);
+      inZone.set(o, z.id);
+    }
+    const seenCh = new Set<string>();
+    for (const x of z.books) {
+      if (!books.has(x.pricebookId)) problems.push(`zone ${z.id} points at missing pricebook ${x.pricebookId}`);
+      if (x.channelId && !channels.has(x.channelId)) problems.push(`zone ${z.id} points at missing channel ${x.channelId}`);
+      const k = x.channelId ?? "";
+      if (seenCh.has(k)) problems.push(`zone ${z.id} has two pricebooks for the same channel`);
+      seenCh.add(k);
+    }
   }
   for (const b of c.pricebooks) {
     for (const [pid, cents] of Object.entries(b.prices)) {

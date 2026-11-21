@@ -42,6 +42,8 @@ export interface OrderView {
   scheduledFor?: number;
   channelName?: string;
   spot?: string;
+  canChangeTable?: boolean;
+  tables?: string[];
   items: Array<{ name: string; qty: number; unitCents: number; options: string[] }>;
   totalCents: number;
   paidCents: number;
@@ -73,6 +75,22 @@ export interface BagLine {
 }
 
 const LS_LAST = "shop.lastOrder";
+const LS_RECENT = "shop.recentOrders";
+/** A guest's phone keeps the last 5 orders for 24 hours (no account needed to find them again). */
+function recentGuestOrders(): string[] {
+  try {
+    const now = Date.now();
+    const list = (JSON.parse(localStorage.getItem(LS_RECENT) ?? "[]") as Array<{ id: string; at: number }>).filter((x) => x && typeof x.id === "string" && now - x.at < 24 * 3600 * 1000).slice(0, 5);
+    return list.map((x) => x.id);
+  } catch { return []; }
+}
+function rememberGuestOrder(id: string): void {
+  try {
+    const now = Date.now();
+    const list = (JSON.parse(localStorage.getItem(LS_RECENT) ?? "[]") as Array<{ id: string; at: number }>).filter((x) => x && x.id !== id && now - x.at < 24 * 3600 * 1000);
+    localStorage.setItem(LS_RECENT, JSON.stringify([{ id, at: now }, ...list].slice(0, 5)));
+  } catch { /* storage may be blocked */ }
+}
 const LS_ENTERED = "shop.entered";
 const LS_MEMBER = "shop.member";
 interface CouponView {
@@ -512,6 +530,24 @@ function Menu({ info, catalog, config, loginError, recheck }: { info: Info; cata
   const [pEditAmt, setPEditAmt] = useState(false);
   const [coupons, setCoupons] = useState<CouponView[]>([]);
   const [couponId, setCouponId] = useState<string | null>(null);
+  const [keen, setKeen] = useState(false);
+  // A removed line can be brought back for a few seconds (a swipe is easy to do by accident).
+  const [undo, setUndo] = useState<{ line: BagLine; at: number } | null>(null);
+  const undoTimer = useRef<number | undefined>(undefined);
+  const removeLine = (l: BagLine) => {
+    const at = bag.findIndex((x) => x.key === l.key);
+    setBag(bag.filter((x) => x.key !== l.key));
+    setUndo({ line: l, at: Math.max(0, at) });
+    window.clearTimeout(undoTimer.current);
+    undoTimer.current = window.setTimeout(() => setUndo(null), 6000);
+  };
+  const undoRemove = () => {
+    if (!undo) return;
+    const next = bag.filter((x) => x.key !== undo.line.key);
+    next.splice(Math.min(undo.at, next.length), 0, undo.line);
+    setBag(next);
+    setUndo(null);
+  };
   const [stamps, setStamps] = useState<StampView | null>(null);
   const [confirmClear, setConfirmClear] = useState(false);
   const [wallet, setWallet] = useState(false);
@@ -822,6 +858,7 @@ function Menu({ info, catalog, config, loginError, recheck }: { info: Info; cata
       const j = (await res.json().catch(() => ({}))) as { orderId?: string; error?: string; totalCents?: number };
       if (res.ok && j.orderId) {
         localStorage.setItem(LS_LAST, j.orderId);
+        rememberGuestOrder(j.orderId);
         clearPurchaseKey();
         saveBag(bagKey, [], spot); // the order is placed: do not bring this bag back, but remember the table for the next order
         if (payMethod === "credit") void loadMember(); // the balance has gone down
@@ -1030,14 +1067,14 @@ function Menu({ info, catalog, config, loginError, recheck }: { info: Info; cata
       <h3>{t("detailsW", "Details")}</h3>
       <div className="sum-row"><span className="k">{t("outletW", "Outlet")}</span><span className="v">{info.outletName}</span></div>
       <div className="sum-row"><span className="k">{t("modeW", "Mode")}</span><span className="v">{channel?.name}{dine ? ` · ${spot || tx("no table yet")}` : ` · ${tx("Pickup counter")}`}</span></div>
-      <div className="sum-row"><span className="k">{t("memberW", "Member")}</span><span className="v">{member ? (rewardsOn ? `${who} · ${member.pointsBalance.toLocaleString()} points` : `${who} · ${formatMoney(credit)} ${tx("credit")}`) : "Guest"}</span></div>
+      <div className="sum-row"><span className="k">{t("memberW", "Member")}</span><span className="v">{member ? (rewardsOn ? `${who} · ${member.pointsBalance.toLocaleString()} points` : `${who} · ${formatMoney(credit)} ${tx("credit")}`) : tx("Checkout — Guest")}</span></div>
       {phone && <div className="sum-row"><span className="k">{t("phoneW", "Phone")}</span><span className="v">{phone}</span></div>}
     </div>
   );
 
   const nav = (
     <nav className="shop-nav" aria-label="Sections">
-      {([["order", "basket", screen !== "order" && count > 0 ? tx("Add More") : t("order", "Order")], ...(rewardsOn ? [["rewards", "gift", t("rewards", "Rewards")] as const] : []), ["account", "user", t("account", "Account")]] as const).map(([id, ic, label]) => (
+      {([["order", "basket", screen !== "order" && (count > 0 || (tabMode && !!tab.session && !tab.view?.closed)) ? tx("Add More") : t("order", "Order")], ...(rewardsOn ? [["rewards", "gift", t("rewards", "Rewards")] as const] : []), ["account", "user", t("account", "Account")]] as const).map(([id, ic, label]) => (
         <button key={id} aria-current={navActive === id ? "page" : undefined} onClick={() => setScreen(id)}><Icon name={ic} size={20} /><span>{label}</span></button>
       ))}
     </nav>
@@ -1085,23 +1122,38 @@ function Menu({ info, catalog, config, loginError, recheck }: { info: Info; cata
     <div className="shop-sheet" role="dialog" aria-modal="true" aria-label={tx("Coupons and vouchers")}>
       <div className="shop-sheet-in" ref={walletBox}>
         <div className="shop-sheet-head"><h2>{tx("Coupons & vouchers")}</h2><button onClick={() => setWallet(false)} aria-label="Close">✕</button></div>
-        {!member && <button className="shop-link" onClick={() => { setWallet(false); setScreen("login"); }}>{tx("Sign in to use your coupons & vouchers")}</button>}
+        {!member && (
+          <div className="e2e-card wallet-lure">
+            <b>{tx("Sign up to use these coupons & vouchers")}</b>
+            <p className="muted" style={{ margin: "4px 0 8px" }}>{tx("Members get a welcome gift and can use their coupons at checkout.")}</p>
+            <button className="shop-link" onClick={() => { setWallet(false); setScreen("login"); }}>{tx("Sign in to use your coupons & vouchers")}</button>
+          </div>
+        )}
         {member && coupons.length === 0 && <p className="muted">{tx("You have no coupons right now.")}</p>}
-        {coupons.map((c) => {
-          const ok = itemsSubtotal >= c.minSpendCents;
-          return (
+        {member && (() => {
+          const card = (c: CouponView, ok: boolean) => (
             <label key={c.id} className={`shop-coupon ${ok ? "" : "off"}`}>
               <input type="radio" name="coupon" disabled={!ok} checked={couponId === c.id} onChange={() => { setCouponId(c.id); setAgreed(null); }} onClick={() => couponId === c.id && setCouponId(null)} />
               <span>
                 {c.title}
                 <small className="muted">
                   {c.minSpendCents > 0 ? tx("Min. spend {amt} on items only (before service charge, tax and deposits)", { amt: formatMoney(c.minSpendCents) }) : tx("No minimum spend")}
-                  {!ok && ` · Add ${formatMoney(c.minSpendCents - itemsSubtotal)} more in items`}
+                  {!ok && ` · ${tx("Add {amt} more in items", { amt: formatMoney(c.minSpendCents - itemsSubtotal) })}`}
                 </small>
               </span>
             </label>
           );
-        })}
+          const yes = coupons.filter((c) => itemsSubtotal >= c.minSpendCents);
+          const no = coupons.filter((c) => itemsSubtotal < c.minSpendCents);
+          return (
+            <>
+              {yes.length > 0 && <h4 className="wallet-h">{tx("Applicable for this order")}</h4>}
+              {yes.map((c) => card(c, true))}
+              {no.length > 0 && <h4 className="wallet-h">{tx("Not applicable")}</h4>}
+              {no.map((c) => card(c, false))}
+            </>
+          );
+        })()}
         <button className="shop-primary" onClick={() => setWallet(false)}>{t("done", "Done")}</button>
       </div>
     </div>
@@ -1475,7 +1527,13 @@ function Menu({ info, catalog, config, loginError, recheck }: { info: Info; cata
             <div className="acct-sec">{t("orderHistory", "Order history")}</div>
             <div className="order-hist">
               {!member ? (
-                last ? <a className="acct-row" href={`/shop/order/${last}`}><span className="aic"><Icon name="ticket" size={21} /></span><span className="at">{tx("View my last order")}<span className="ad">{tx("See its status and items")}</span></span><span className="chev"><Icon name="chevR" size={16} /></span></a> : null
+                (() => {
+                  const ids = recentGuestOrders();
+                  const all = ids.length ? ids : last ? [last] : [];
+                  return all.length ? <>{all.map((id, i) => (
+                    <a key={id} className="acct-row" href={`/shop/order/${id}`}><span className="aic"><Icon name="ticket" size={21} /></span><span className="at">{i === 0 ? tx("View my last order") : tx("Earlier order")}<span className="ad">{tx("See its status and items")}</span></span><span className="chev"><Icon name="chevR" size={16} /></span></a>
+                  ))}<p className="e2e-sub" style={{ textAlign: "left" }}>{tx("Orders from this phone are kept for 24 hours. Sign up to keep them.")}</p></> : null;
+                })()
               ) : history === null ? (
                 <p className="e2e-sub" style={{ textAlign: "left" }}>{tx("Loading…")}</p>
               ) : history.length === 0 ? (
@@ -1526,45 +1584,24 @@ function Menu({ info, catalog, config, loginError, recheck }: { info: Info; cata
             <input type="range" className="pedit-slider" min={minPts} max={maxPts} step={1} value={pVal} onChange={(e) => choosePts(Number(e.target.value))} style={{ background: `linear-gradient(90deg,var(--orange) ${pPct}%,#e9dec9 ${pPct}%)` }} aria-label={t("redeemSliderAria", "Points to redeem")} />
             <div className="pedit-scale"><span>{minPts.toLocaleString()}</span><span>{t("maxW", "Max")} {maxPts.toLocaleString()}</span></div>
           </div>
-          <button className="pedit-all" aria-expanded={pEditAmt} onClick={() => setPEditAmt(!pEditAmt)}>{t("editAmount", "Type an exact amount")}</button>
+          <button className="pedit-all" aria-expanded={pEditAmt} onClick={() => setPEditAmt(!pEditAmt)}>{t("editAmount", "Edit amount")}</button>
           {pEditAmt && <div className="pedit-amt-row"><input className="qty-input" type="number" inputMode="numeric" min={minPts} max={maxPts} step={1} value={pVal} onChange={(e) => choosePts(Number(e.target.value))} aria-label={t("redeemExactAria", "Exact points to redeem")} /><span className="pedit-amt-unit">{t("points", "points")} · = <RollMoney cents={pVal} /> {t("offShort", "off")}</span></div>}
-          <button className="pedit-all" onClick={() => { setPointsPts(null); setAgreed(null); }}>{t("redeemMax", "Use the most")} · {maxPts.toLocaleString()} {t("points", "points")}</button>
+          <button className="pedit-all" onClick={() => { setPointsPts(null); setAgreed(null); }}>{t("redeemMax", "Redeem maximum")} · {maxPts.toLocaleString()} {t("points", "points")}</button>
           <button className="popup-close" onClick={() => setPEdit(false)}>{t("done", "Done")}</button>
         </div>
       </div>
     </div>
   );
 
-  /* ================= Bag ================= */
-  const bagScreen = (
+  const bagBody = (
     <>
-      <div className="shop-headwrap">
-        {header(false)}
-        {seg}
-        <div className="title-row">
-          <button className="back-btn" onClick={() => setScreen("order")} aria-label={tx("Back")}><Icon name="chevL" size={20} /></button>
-          <h2 className="page-title">{t("yourBag", "Your bag")}</h2>
-          {tableMode && tableList.length > 0 && !tableLocked ? (
-            <button className="table-tag tag-with-icon table-tag-btn" onClick={() => setTableEdit(true)} aria-label={`${tx("Change table")}: ${spotText}`}><Icon name="table" size={15} />{spotText}</button>
-          ) : (
-            <span className="table-tag tag-with-icon"><Icon name={dine ? "table" : "bag"} size={15} />{spotText}</span>
-          )}
-          {confirmClear ? (
-            <span className="clear-confirm">{t("clearBagQ", "Clear bag?")}<button className="yes" onClick={() => { setBag([]); setConfirmClear(false); setScreen("order"); }}>{t("clear", "Clear")}</button><button className="no" onClick={() => setConfirmClear(false)}>{t("keep", "Keep")}</button></span>
-          ) : (
-            bag.length > 0 && <button className="clear-btn" onClick={() => setConfirmClear(true)}>{t("clearAll", "Clear all")}</button>
-          )}
-        </div>
-      </div>
-      <div className="bag-sheet shop-body">
-        {noteEl}
-        {bag.length === 0 && <div className="bag-empty">{t("bagEmptyShort", "Your bag is empty.")}<br />{t("emptyBagD", "Add items from the Order tab.")}</div>}
+      {undo && <div className="undo-toast" role="status"><span>{tx("Item removed")}</span><button className="shop-link" onClick={undoRemove}>{tx("Undo")}</button></div>}
         {bag.map((l) => {
           const v = lineView(l);
           if (!v) return null;
           const img = photo(v.m);
           return (
-            <SwipeRow key={l.key} label={itemName(v.m)} onRemove={() => setBag(bag.filter((x) => x.key !== l.key))}>
+            <SwipeRow key={l.key} label={itemName(v.m)} onRemove={() => removeLine(l)}>
             <div className="bag-card">
               {img ? <img className="bag-photo" src={img} alt={v.m.name} /> : <span className="bag-photo-ph"><Icon name="paw" size={26} /></span>}
               <div className="bag-copy2">
@@ -1573,7 +1610,7 @@ function Menu({ info, catalog, config, loginError, recheck }: { info: Info; cata
                 {v.note && <p className="bag-desc bag-note">{v.note}</p>}
                 <div className="bag-pricerow"><RollMoney cents={v.lineCents} /></div>
               </div>
-              <div className="sc-act sc-act-col"><button className="sc-edit" aria-label={`Edit ${v.m.name}`} onClick={() => setEditing(l)}>{t("edit", "Edit")}</button><span className="sc-step"><button className="minus" aria-label={`Fewer ${v.m.name}`} onClick={() => bump(l, -1)}>−</button><b>{l.qty}</b><button className="plus" aria-label={`More ${v.m.name}`} onClick={() => bump(l, 1)}>+</button></span></div>
+              <div className="sc-act sc-act-col"><button className="sc-edit" aria-label={`${tx("Remove")} ${v.m.name}`} onClick={() => removeLine(l)}>{tx("Remove")}</button><button className="sc-edit" aria-label={`Edit ${v.m.name}`} onClick={() => setEditing(l)}>{t("edit", "Edit")}</button><span className="sc-step"><button className="minus" aria-label={`Fewer ${v.m.name}`} onClick={() => bump(l, -1)}>−</button><b>{l.qty}</b><button className="plus" aria-label={`More ${v.m.name}`} onClick={() => bump(l, 1)}>+</button></span></div>
             </div>
             </SwipeRow>
           );
@@ -1604,12 +1641,37 @@ function Menu({ info, catalog, config, loginError, recheck }: { info: Info; cata
             {rewardsOn && <div className="stamp-note"><span style={{ display: "flex", color: "var(--ink)" }}><Icon name="gift" size={27} /></span><span><span className="t">{t("stampNoteT", "1 stamp after confirmed payment")}</span><br /><span className="d">{tx("You'll earn 1 stamp for this order.")}</span></span></div>}
           </>
         )}
+    </>
+  );
+
+  /* ================= Bag ================= */
+  const bagScreen = (
+    <>
+      <div className="shop-headwrap">
+        {header(false)}
+        {seg}
+        <div className="title-row">
+          <button className="back-btn" onClick={() => setScreen("order")} aria-label={tx("Back")}><Icon name="chevL" size={20} /></button>
+          <h2 className="page-title">{t("yourBag", "Your bag")}</h2>
+          {tableMode && tableList.length > 0 && !tableLocked ? (
+            <button className="table-tag tag-with-icon table-tag-btn" onClick={() => setTableEdit(true)} aria-label={`${tx("Change table")}: ${spotText}`}><Icon name="table" size={15} />{spotText}</button>
+          ) : (
+            <span className="table-tag tag-with-icon"><Icon name={dine ? "table" : "bag"} size={15} />{spotText}</span>
+          )}
+          {confirmClear ? (
+            <span className="clear-confirm">{t("clearBagQ", "Clear bag?")}<button className="yes" onClick={() => { setBag([]); setConfirmClear(false); setScreen("order"); }}>{t("clear", "Clear")}</button><button className="no" onClick={() => setConfirmClear(false)}>{t("keep", "Keep")}</button></span>
+          ) : (
+            bag.length > 0 && <button className="clear-btn" onClick={() => setConfirmClear(true)}>{t("clearAll", "Clear all")}</button>
+          )}
+        </div>
+      </div>
+      <div className="bag-sheet shop-body">
+        {noteEl}
+        {bag.length === 0 && <div className="bag-empty">{t("bagEmptyShort", "Your bag is empty.")}<br />{t("emptyBagD", "Add items from the Order tab.")}</div>}
+        {bagBody}
         {/* Add more and Review order stay together above the bottom bar. Add more only goes back to the menu: the bag is untouched. */}
         <div className="pay-sticky bag-actions">
           <button className="e2e-cta" onClick={() => setScreen("order")}><span>{tx("Add More")}</span><Icon name="arrowR" size={19} /></button>
-          <button className={`review-cta ${bag.length === 0 ? "off" : ""}`} disabled={bag.length === 0 || !quote?.ok} onClick={() => setScreen("summary")}>
-            <Icon name="bag" size={19} /><span>{tx(count === 1 ? "Review order · {n} item" : "Review order · {n} items", { n: count })}</span><span className="div" /><span><RollMoney cents={shownTotal} /></span><Icon name="arrowR" size={19} />
-          </button>
         </div>
       </div>
       {pointsEditor}
@@ -1619,18 +1681,27 @@ function Menu({ info, catalog, config, loginError, recheck }: { info: Info; cata
   /* ================= Order summary ================= */
   const summaryScreen = quote?.ok ? (
     <>
-      {pageHead(tx("Order Summary"))}
+      {pageHead(tx("Review & pay"))}
       <div className="e2e-scroll shop-body">
         <div className="sum-topbar">
-          {back("Back to bag", "bag")}
-          {/* As in the prototype: a jump to the bottom, where the order is placed. */}
+          {back(tx("Add More"), "order")}
+          {/* A jump to the bottom, where the order is placed. */}
           <button className="e2e-back" onClick={() => document.getElementById("sum-end")?.scrollIntoView({ behavior: "smooth", block: "center" })}>{tx("Checkout")} <Icon name="chevD" size={16} /></button>
         </div>
         {noteEl}
-        <div className="e2e-card">
-          <h3>{t("itemsCardT", "Items")}</h3>
-          {itemRows(true)}
-          {totalsRows(quote)}
+        {dine && (
+          <p className="e2e-note sum-context">{[channel?.name, spot || null, quote && quote.priced.service > 0 ? tx("{pct}% service charge applies", { pct: Math.round(config.pricing.serviceRate * 1000) / 10 }) : null].filter(Boolean).join(" · ")}</p>
+        )}
+        <div className="bag-sheet review-bag">
+          <h3 className="review-h" style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+            <span>{t("itemsCardT", "Items")}</span>
+            {confirmClear ? (
+              <span className="clear-confirm">{t("clearBagQ", "Clear bag?")}<button className="yes" onClick={() => { setBag([]); setConfirmClear(false); setScreen("order"); }}>{t("clear", "Clear")}</button><button className="no" onClick={() => setConfirmClear(false)}>{t("keep", "Keep")}</button></span>
+            ) : (
+              <button className="clear-btn" onClick={() => setConfirmClear(true)}>{t("clearAll", "Clear all")}</button>
+            )}
+          </h3>
+          {bagBody}
         </div>
         <div className="e2e-card">
           <h3>{rewardsOn ? tx("Voucher & payment") : t("payMethodW", "Payment method")}</h3>
@@ -1638,9 +1709,9 @@ function Menu({ info, catalog, config, loginError, recheck }: { info: Info; cata
           {info.membersOnly && member ? (
             <div className="sum-link-row" style={{ cursor: "default" }}><span className="sl-ic"><Icon name="stack" size={21} /></span><span className="sl-t">{tx("Paying with member credit")}<span className="sl-d">{credit >= shownTotal ? tx("{a} now → {b} after this order", { a: formatMoney(credit), b: formatMoney(credit - shownTotal) }) : tx("Not enough credit: {amt} available.", { amt: formatMoney(credit) })}</span></span></div>
           ) : (
-          <button className="sum-link-row" onClick={() => setScreen("payment")}><span className="sl-ic"><Icon name="card" size={21} /></span><span className="sl-t">{t("payMethodW", "Payment method")}<span className="sl-d">{tx("Chosen at the payment step")}</span></span><span className="sl-v">{t("chooseLater", "Choose later")}</span><span className="chev"><Icon name="chevR" size={16} /></span></button>
+          <button className="sum-link-row" onClick={() => setScreen("payment")}><span className="sl-ic"><Icon name="card" size={21} /></span><span className="sl-t">{t("payMethodW", "Payment method")}<span className="sl-d">{tx("None saved")}</span></span><span className="sl-v">{tx("Choose at payment")}</span><span className="chev"><Icon name="chevR" size={16} /></span></button>
           )}
-          <div className="sum-link-row" style={{ cursor: "default" }}><span className="sl-ic"><Icon name="pin" size={21} /></span><span className="sl-t">{dine ? `${channel?.name} · ${spot || tx("no table yet")}` : `${channel?.name} · Pickup counter`}<span className="sl-d">{info.outletName}</span></span></div>
+          <div className="sum-link-row" style={{ cursor: "default" }}><span className="sl-ic"><Icon name="pin" size={21} /></span><span className="sl-t">{dine ? tx("Dine in at {outlet} · {spot}", { outlet: info.outletName, spot: spot || tx("no table yet") }) : `${channel?.name} · Pickup counter`}<span className="sl-d">{info.outletName}</span></span></div>
         </div>
         {detailsCard}
         {tableMode && !tableLocked && (
@@ -1668,7 +1739,17 @@ function Menu({ info, catalog, config, loginError, recheck }: { info: Info; cata
             <div className="e2e-field"><label htmlFor="g-name">{tx("Name (optional)")}</label><input className="e2e-input" id="g-name" value={name} maxLength={40} autoComplete="name" onChange={(e) => setName(e.target.value)} /></div>
             <div className="e2e-field"><label htmlFor="g-phone">{t("phoneReq", "Phone number (required)")}</label><input className="e2e-input" id="g-phone" type="tel" inputMode="tel" value={phone} maxLength={20} placeholder={tx("e.g. +65 9123 4567")} autoComplete="tel" onChange={(e) => setPhone(e.target.value)} /></div>
             {phone !== "" && !phoneOk && <p className="login-err" role="alert">{tx("That number doesn't look right.")}</p>}
-            {!member && <button className="e2e-cta" disabled={!phoneOk} onClick={() => { setGuestOk(true); setGuestForm(false); }}><span>{t("continueW", "Continue")}</span><Icon name="arrowR" size={19} /></button>}
+            {!member && (
+              <label className="inline" style={{ marginTop: 8 }}><input type="checkbox" checked={keen} onChange={(e) => setKeen(e.target.checked)} /> {tx("Keen to sign up as a member?")}</label>
+            )}
+            {!member && keen && (
+              <div className="e2e-field">
+                <p className="e2e-sub" style={{ textAlign: "left", margin: "4px 0" }}>{tx("Create an account to earn points on your next order. You can verify your email later; your phone number is only used for collecting this order until then.")}</p>
+                <button className="secondary sm" onClick={() => { setGuestOk(true); setGuestForm(false); }} disabled={!phoneOk}>{tx("Verify later")}</button>{" "}
+                <button className="secondary sm" onClick={() => setScreen("login")}>{tx("Sign up now")}</button>
+              </div>
+            )}
+            {!member && !keen && <button className="e2e-cta" disabled={!phoneOk} onClick={() => { setGuestOk(true); setGuestForm(false); }}><span>{t("continueW", "Continue")}</span><Icon name="arrowR" size={19} /></button>}
           </div>
         )}
         {rewardsOn && !member && guestOk && <p className="e2e-note">{t("guestNoPoints", "Continuing as guest — no points will be earned on this order.")}</p>}
@@ -1689,26 +1770,12 @@ function Menu({ info, catalog, config, loginError, recheck }: { info: Info; cata
             <span>{busy ? tx("Sending…") : tx(count === 1 ? "Add to Tab · {n} item" : "Add to Tab · {n} items", { n: count })}</span><span><RollMoney cents={shownTotal} /></span>
           </button>
         ) : (
-        <button className={`e2e-cta ${canOrder && (!tableMode || !!spot) ? "" : "off"}`} disabled={!canOrder || (tableMode && !spot)} onClick={() => setScreen("checkout")}>
+        <button className={`e2e-cta ${canOrder && (!tableMode || !!spot) ? "" : "off"}`} disabled={!canOrder || (tableMode && !spot)} onClick={() => setScreen("payment")}>
           <span>{tx(count === 1 ? "Order Now · {n} item" : "Order Now · {n} items", { n: count })}</span><span><RollMoney cents={shownTotal} /></span>
         </button>
         )
         )}
         {!canOrder && !tabMode && <p className="e2e-sub">{member ? "Add your phone number to place this order." : "Tap Sign up, or Check out as guest, to place this order."}</p>}
-      </div>
-    </>
-  ) : null;
-
-  /* ================= Checkout ================= */
-  const checkoutScreen = quote?.ok ? (
-    <>
-      {pageHead(tx("Checkout"))}
-      <div className="e2e-scroll shop-body">
-        {back("Back to order summary", "summary")}
-        <div className="e2e-card"><h3>{t("orderSummaryCard", "Order summary")}</h3>{itemRows(false)}</div>
-        <div className="e2e-card"><h3>{tx("Charges & rewards")}</h3>{totalsRows(quote)}</div>
-        {detailsCard}
-        <button className="e2e-cta" onClick={() => setScreen("payment")}><span>{t("jumpPay", "Proceed to payment")}</span><span><RollMoney cents={shownTotal} /></span></button>
       </div>
     </>
   ) : null;
@@ -1774,9 +1841,7 @@ function Menu({ info, catalog, config, loginError, recheck }: { info: Info; cata
     screen === "tab" ? tabScreen :
     screen === "rewards" ? rewardsScreen :
     screen === "account" ? accountScreen :
-    screen === "bag" ? bagScreen :
-    screen === "summary" ? summaryScreen :
-    screen === "checkout" ? checkoutScreen :
+    screen === "bag" || screen === "summary" || screen === "checkout" ? (summaryScreen ?? bagScreen) :
     screen === "payment" ? paymentScreen :
     orderScreen;
 
@@ -2124,7 +2189,9 @@ function Status({ orderId, info }: { orderId: string; info: Info }) {
   const [confirmCancel, setConfirmCancel] = useState(false);
   const [working, setWorking] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
-  // Ready alert: best effort. It works while this page is open (even in the background for a while), not when the phone has closed it.
+  const [tableOpen, setTableOpen] = useState(false);
+  const [tableErr, setTableErr] = useState("");
+  const [tableText, setTableText] = useState("");  // Ready alert: best effort. It works while this page is open (even in the background for a while), not when the phone has closed it.
   const canAlert = typeof Notification !== "undefined";
   const [alertOn, setAlertOn] = useState(() => canAlert && Notification.permission === "granted" && (localStorage.getItem(`pos.alert.${orderId}`) === "1" || localStorage.getItem(LS_ORDER_UPDATES) !== "0"));
   const lastStatus = useRef<ShopStatus | null>(null);
@@ -2147,6 +2214,11 @@ function Status({ orderId, info }: { orderId: string; info: Info }) {
       setProblem(tx("No connection. Retrying…"));
     }
   };
+  async function moveTable(spot: string) {
+    setTableErr("");
+    const r = await fetch(`/api/shop/orders/${orderId}/table`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ spot }) });
+    if (r.ok) { setTableOpen(false); await load(); } else setTableErr(tx("Could not change the table. Please ask at the counter."));
+  }
   async function refreshNow() {
     setRefreshing(true);
     await load();
@@ -2219,6 +2291,7 @@ function Status({ orderId, info }: { orderId: string; info: Info }) {
       <div className="e2e-scroll shop-body">
         <button className="e2e-back" onClick={goBack}><Icon name="chevL" size={16} /> {tx("Back")}</button>
         <p className="e2e-sub" style={{ marginTop: 2 }}>{cancelled ? tx("Order cancelled") : paid ? "Payment successful" : tx("Order sent")}</p>
+        {cancelled && o.paidCents > 0 && <p className="e2e-sub" style={{ marginTop: 0 }}>{tx("Payment refunded")}</p>}
         <div className="status-coll-label">{t("collectionNo", "Collection number")}</div>
         <div className="status-headline" aria-label={tx("Your number is {n}", { n: o.queueNumber })}>{o.queueNumber}</div>
         <p className="status-coll-hint">Your collection number is {o.queueNumber} — watch for it on the counter screen</p>
@@ -2227,6 +2300,22 @@ function Status({ orderId, info }: { orderId: string; info: Info }) {
           <button className="copy-id-btn" onClick={(e) => void copyOrderId(o.orderId, e.currentTarget.closest(".status-order-row")?.querySelector(".status-id") ?? null)}><Icon name="ticket" size={15} />{copied ? "ORDER ID copied" : copyFailed ? tx("Long-press to copy") : "Copy ORDER ID"}</button>
         </div>
         {o.channelName && <p className="e2e-sub">{o.channelName}{o.spot ? ` · ${o.spot}` : ""}</p>}
+        {o.canChangeTable && !cancelled && (
+          <>
+            <button className="secondary sm" onClick={() => { setTableOpen(!tableOpen); setTableErr(""); setTableText(""); }}>{tx("Change table")}</button>
+            {tableOpen && (
+              <div className="e2e-card">
+                <p className="e2e-sub" style={{ textAlign: "left", margin: 0 }}>{tx("Your order is moved to the table you choose.")}</p>
+                {(o.tables ?? []).length > 0 ? (
+                  <div className="tbl-list">{(o.tables ?? []).map((x) => <button key={x} className="tbl-opt" aria-current={x === o.spot} onClick={() => void moveTable(x)}><Icon name="table" size={18} /><span>{x}</span>{x === o.spot && <span className="cur">{tx("Current")}</span>}</button>)}</div>
+                ) : (
+                  <div className="e2e-field"><input className="e2e-input" value={tableText} maxLength={30} placeholder={tx("e.g. Table 12")} onChange={(e) => setTableText(e.target.value)} /><button className="e2e-cta" disabled={!tableText.trim()} onClick={() => void moveTable(tableText.trim())}><span>{tx("Change table")}</span></button></div>
+                )}
+                {tableErr && <p className="login-err" role="alert">{tableErr}</p>}
+              </div>
+            )}
+          </>
+        )}
         {!cancelled && o.queue && (
           <div className="e2e-card queue-card">
             <h3>{o.queue.ahead === 0 ? (o.status === "preparing" ? tx("Your order is being made") : tx("You're next")) : o.queue.ahead === 1 ? tx("1 order ahead of you") : tx("{n} orders ahead of you", { n: o.queue.ahead })}</h3>

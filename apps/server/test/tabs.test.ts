@@ -289,6 +289,9 @@ describe("rewards: individual, host-keep, claim, once (Spec 12.10, Addendum 6)",
     expect((await members.byId(alexId))!.pointsBalance).toBe(Math.floor(1177 / 100) + Math.floor(458 / 100));
     expect((await members.byId(samId))!.pointsBalance).toBe(0);
     expect((await members.byId(newcomerId))!.pointsBalance).toBe(Math.floor(283 / 100));
+    // the closed tab tells each person what they earned (shown as "Rewards earned")
+    expect((await view(alex)).me.earnedPoints).toBe(Math.floor(1177 / 100) + Math.floor(458 / 100));
+    expect((await view(sam)).me.earnedPoints).toBe(0);
     // settling again, or any later duplicate, credits nothing more
     await tcall(`/api/tabs/${alex.tabId}/release`, { method: "POST", body: {}, staff: staffTok });
     const again = await db.query("SELECT count(*)::int AS n FROM points_entries WHERE note LIKE 'Tab rewards%'");
@@ -357,6 +360,35 @@ describe("Split equally, By round, Custom amount, cash at the counter, and the w
     expect(v).toMatchObject({ waiterPaged: false, billRequested: false });
     const list = (await tcall("/api/tabs?outlet=EV", { staff: staffTok })).json.tabs as any[];
     expect(list.find((t) => t.id === alex.tabId)).toMatchObject({ spot: "E4", people: 1, released: false });
+  });
+
+  it("paging the waiter alerts staff once, naming the table; ", async () => {
+    const alerts: Array<{ text: string; all?: boolean }> = [];
+    (app as any).notifyManagers = async (text: string, all?: boolean) => { alerts.push({ text, all }); };
+    const alex = await join("E5", "Alex");
+    await orderRound(alex, [{ productId: kaya, qty: 1 }]);
+    await tcall("/api/shop/tab/page", { body: { kind: "bill" }, who: alex });
+    await tcall("/api/shop/tab/page", { body: { kind: "help" }, who: alex }); // a re-tap sends nothing more
+    expect(alerts).toEqual([{ text: "E5 is asking for the bill.", all: true }]);
+    delete (app as any).notifyManagers;
+  });
+
+  it("a page has a real state: staff acknowledge it, the customer sees it, and an unanswered page is escalated once", async () => {
+    const alerts: string[] = [];
+    (app as any).notifyManagers = async (text: string) => { alerts.push(text); };
+    const alex = await join("E6", "Alex");
+    await orderRound(alex, [{ productId: kaya, qty: 1 }]);
+    await tcall("/api/shop/tab/page", { body: { kind: "help" }, who: alex });
+    expect((await view(alex)).pageAcknowledged).toBe(false);
+    await db.query("UPDATE tabs SET paged_at = now() - interval '5 minutes' WHERE id=$1", [alex.tabId]);
+    expect(await (app as any).escalateTabPages(2)).toBe(1);
+    expect(await (app as any).escalateTabPages(2)).toBe(0); // once only
+    expect(alerts.at(-1)).toBe("Nobody has answered yet: E6 still needs the waiter.");
+    await tcall(`/api/tabs/${alex.tabId}/ack-page`, { method: "POST", body: {}, staff: staffTok });
+    expect((await view(alex)).pageAcknowledged).toBe(true);
+    await tcall(`/api/tabs/${alex.tabId}/reset-page`, { method: "POST", body: {}, staff: staffTok });
+    expect((await view(alex)).pageAcknowledged).toBe(false);
+    delete (app as any).notifyManagers;
   });
 
   it("an unknown outcome keeps its reservation and shows on the staff list until resolved from evidence; closing needs a reason", async () => {

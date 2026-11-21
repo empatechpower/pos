@@ -2,7 +2,7 @@ import { useCallback, useEffect, useState } from "react";
 import { formatMoney } from "@pos/core";
 import { staffFetch, useStaff } from "../auth";
 
-interface TabRow { id: string; spot: string | null; code: string; outletId: string; people: number; released: boolean; billRequested: boolean; waiterPaged: boolean; pagedKind: string | null; totalCents: number; paidCents: number; remainingCents: number; locked: boolean }
+interface TabRow { id: string; spot: string | null; code: string; outletId: string; people: number; released: boolean; billRequested: boolean; waiterPaged: boolean; pagedKind: string | null; pageAcknowledged?: boolean; totalCents: number; paidCents: number; remainingCents: number; locked: boolean }
 interface TabDetail { payments: Array<{ id: string; payer: { name: string | null }; for: { name: string | null } | null; amountCents: number; status: string; method: string; staffRecorded: boolean }>; people: Array<{ id: string; name: string }>; rounds: Array<{ round: number; locked: boolean }> }
 
 /**
@@ -53,7 +53,7 @@ export function Tabs() {
             <b style={{ flex: 1 }}>{t.spot ?? "Bar tab"} <span className="muted">· {t.code} · {t.people} {t.people === 1 ? "person" : "people"}</span></b>
             <span>{formatMoney(t.remainingCents)} <span className="muted">of {formatMoney(t.totalCents)}</span></span>
           </div>
-          {(t.waiterPaged || t.billRequested) && <div className="flash warn">{t.billRequested ? "Asked for the bill." : "Called for help."} <button className="secondary sm" onClick={() => void act(`/api/tabs/${t.id}/reset-page`, {}, "Page reset.")}>Reset page</button></div>}
+          {(t.waiterPaged || t.billRequested) && <div className="flash warn">{t.billRequested ? "Asked for the bill." : "Called for help."} {t.waiterPaged && !t.pageAcknowledged && <button className="primary sm" onClick={() => void act(`/api/tabs/${t.id}/ack-page`, {}, "Page acknowledged.")}>On my way</button>} {t.pageAcknowledged && <span className="muted">Someone is on the way. </span>}<button className="secondary sm" onClick={() => void act(`/api/tabs/${t.id}/reset-page`, {}, "Page reset.")}>Reset page</button></div>}
           <div className="row">
             <button className={t.locked ? "primary sm" : "secondary sm"} onClick={() => void act(`/api/tabs/${t.id}/release`, {}, "Payment released.")}>{t.locked ? "Release payment" : "Release new rounds"}</button>
             <button className="secondary sm" onClick={() => setOpen(open === t.id ? null : t.id)}>{open === t.id ? "Hide payments" : "Payments"}</button>

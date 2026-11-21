@@ -4,6 +4,8 @@ import { brandColoursFromPixels, formatMoney, isCombo, type Catalog, type Channe
 import { OptionsEditor } from "./OptionsEditor";
 import { StockPanel } from "./StockPanel";
 import { PromoPanel } from "./PromoPanel";
+import { ZonesPanel } from "./ZonesPanel";
+import { PromoPricesPanel } from "./PromoPricesPanel";
 import { authHeader, staffFetch, useStaff } from "../auth";
 import { markDeviceRejected } from "../device";
 
@@ -314,6 +316,8 @@ export function Prices({ catalog, outletId }: { catalog: Catalog; outletId: stri
           </select>
           <label className="inline"><input type="checkbox" checked={c.serviceCharge} onChange={(e) => void send("POST", "channels", { ...c, serviceCharge: e.target.checked }, "Saved.")} /> service charge</label>
           <label className="inline"><input type="checkbox" checked={c.active} onChange={(e) => void send("POST", "channels", { ...c, active: e.target.checked }, "Saved.")} /> on</label>
+          <label className="inline"><input type="checkbox" checked={!!c.commission} onChange={(e) => void send("POST", "channels", { ...c, commission: e.target.checked ? { ratePct: c.commission?.ratePct ?? 0 } : null }, "Saved.")} /> record commission</label>
+          {c.commission && <label className="inline">at <input style={{ width: 56 }} inputMode="decimal" defaultValue={c.commission.ratePct} aria-label={`Commission rate for ${c.name}`} onBlur={(e) => { const n = Number(e.target.value); if (Number.isFinite(n) && n >= 0 && n <= 100 && n !== c.commission!.ratePct) void send("POST", "channels", { ...c, commission: { ratePct: n } }, "Saved."); }} />% (an order can record the platform's actual figure)</label>}
         </div>
       ))}
       <div className="row">
@@ -378,6 +382,8 @@ export function Prices({ catalog, outletId }: { catalog: Catalog; outletId: stri
         <button className="primary sm" disabled={!newBook.trim()} onClick={() => { void send("POST", "pricebooks", { name: newBook }, `${newBook} created. Pick it above and set its prices.`); setNewBook(""); }}>Create</button>
       </div>
       <StockPanel catalog={catalog} outletId={outletId} />
+      <ZonesPanel catalog={catalog} />
+      <PromoPricesPanel catalog={catalog} />
       <PromoPanel />
       <p className="muted">Outlet: {outletId}. To price one outlet differently, create a pricebook and assign it to that outlet through the API for now.</p>
     </div>

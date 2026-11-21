@@ -114,3 +114,21 @@ describe("offline-safe queue numbers", () => {
     expect(formatQueueNumber("A", 1)).not.toBe(formatQueueNumber("B", 1));
   });
 });
+
+describe("a table change after ordering", () => {
+  it("moves the same order, keeps the old table and the time, and does nothing once closed", () => {
+    const open = ev("d", "t1", 1, { type: "OrderOpened", fulfilment: "dine_in", spot: "Table 7" } as OrderEventBody);
+    const item = ev("d", "t1", 2, { type: "ItemAdded", lineId: "l", productId: "p", name: "Kaya", unitCents: 200, qty: 1 } as OrderEventBody);
+    const move = ev("d", "t1", 3, { type: "TableChanged", from: "Table 7", to: "Table 12" });
+    const o = reduceOrder("t1", [open, item, move])!;
+    expect(o.spot).toBe("Table 12");
+    expect(o.tableChanges).toEqual([{ from: "Table 7", to: "Table 12", at: 3 }]);
+    expect(o.lines).toHaveLength(1);
+    expect(o.stage).toBe("open");
+    // arrival order does not matter
+    expect(reduceOrder("t1", [move, item, open])).toEqual(o);
+    const done = reduceOrder("t1", [open, item, ev("d", "t1", 4, { type: "StageSet", stage: "cancelled" }), ev("d", "t1", 5, { type: "TableChanged", to: "Table 3" })])!;
+    expect(done.spot).toBe("Table 7");
+  });
+});
+

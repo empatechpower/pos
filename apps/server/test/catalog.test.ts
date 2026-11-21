@@ -323,3 +323,64 @@ describe("turning items off in a pricebook, free items, bulk edits and copying a
     expect((await call("GET", "/api/catalog/version")).json.version).toBe(v1 + 1);
   });
 });
+
+describe("price zones (HQ assigns who uses which pricebook)", () => {
+  it("a zone points its outlets at a pricebook per channel; prices stay in the pricebook; removing the zone puts things back", async () => {
+    const pid = "kaya-toast";
+    await cat.upsertChannel({ id: "zone-ch", name: "Zone test", kind: "takeaway", serviceCharge: false, active: true });
+    const book = (await cat.createPricebook("Zone book", "show")) as { ok: true; detail: { id: string } };
+    await cat.setPrice(book.detail.id, pid, 4242);
+    const ctx = { outletId: "EV", channelId: "zone-ch" };
+    const before = resolvePrice(await getCatalog(), pid, ctx)!;
+    expect(before.priceCents).not.toBe(4242);
+    const saved = await put("/api/catalog/zones", { name: "Premium", outletIds: ["EV"], books: [{ channelId: "zone-ch", pricebookId: book.detail.id }] });
+    expect(saved.status).toBe(200);
+    const c = await getCatalog();
+    expect(c.zones).toMatchObject([{ id: "premium", name: "Premium", outletIds: ["EV"], books: [{ channelId: "zone-ch", pricebookId: book.detail.id }] }]);
+    expect(resolvePrice(c, pid, ctx)).toMatchObject({ pricebookId: book.detail.id, priceCents: 4242 });
+    expect(resolvePrice(c, pid, { outletId: "EV", channelId: "take-away" })!.pricebookId).not.toBe(book.detail.id); // other channels unchanged
+    // an outlet is in one zone: moving it to a second zone takes it out of the first
+    await put("/api/catalog/zones", { name: "Second", outletIds: ["EV"], books: [] });
+    const two = (await getCatalog()).zones!;
+    expect(two.find((z) => z.id === "premium")!.outletIds).toEqual([]);
+    expect(two.find((z) => z.id === "second")!.outletIds).toEqual(["EV"]);
+    expect((await call("DELETE", "/api/catalog/zones/premium", { staff: mgr })).status).toBe(200);
+    expect((await call("DELETE", "/api/catalog/zones/second", { staff: mgr })).status).toBe(200);
+    expect(resolvePrice(await getCatalog(), pid, ctx)).toEqual(before);
+  });
+  it("refuses a missing pricebook, an unknown outlet and a cashier", async () => {
+    expect((await put("/api/catalog/zones", { name: "Bad", outletIds: ["EV"], books: [{ pricebookId: "nope" }] })).status).toBe(400);
+    expect((await put("/api/catalog/zones", { name: "Bad", outletIds: ["ghost"], books: [] })).status).toBe(400);
+    expect((await put("/api/catalog/zones", { name: "Bad", outletIds: [], books: [] }, cashier)).status).toBe(403);
+    expect((await put("/api/catalog/zones", { name: "", outletIds: [], books: [] })).status).toBe(400);
+  });
+});
+
+describe("promotional prices (date-ranged overrides)", () => {
+  it("replace the pricebook price only while they run; the pricebook is untouched", async () => {
+    const pid = "kaya-toast";
+    const ctx = { outletId: "EV", channelId: "dine-in" };
+    const base = resolvePrice(await getCatalog(), pid, ctx)!;
+    const now = Date.now();
+    const saved = await put("/api/catalog/overrides", { title: "Happy hour", productId: pid, priceCents: 111, startsAt: now - 1000, endsAt: now + 3_600_000 });
+    expect(saved.status).toBe(200);
+    const c = await getCatalog();
+    expect(resolvePrice(c, pid, ctx)).toMatchObject({ priceCents: 111, pricebookId: base.pricebookId });
+    expect(resolvePrice(c, pid, ctx)!.overrideId).toBe(saved.json.id);
+    expect(resolvePrice(c, pid, { ...ctx, at: now + 7_200_000 })!.priceCents).toBe(base.priceCents); // after it ends
+    expect(resolvePrice(c, pid, { ...ctx, at: now - 60_000 })!.priceCents).toBe(base.priceCents); // before it starts
+    expect(c.pricebooks.find((b) => b.id === base.pricebookId)!.prices[pid]).toBe(base.priceCents);
+    // the one that started last wins; one aimed at another pricebook does not apply
+    await put("/api/catalog/overrides", { title: "Flash", productId: pid, priceCents: 99, startsAt: now - 500, endsAt: now + 1_000_000 });
+    await put("/api/catalog/overrides", { title: "Other book", productId: pid, pricebookId: "grab", priceCents: 5, startsAt: now - 900, endsAt: now + 1_000_000 });
+    expect(resolvePrice(await getCatalog(), pid, ctx)!.priceCents).toBe(99);
+    for (const o of (await getCatalog()).overrides!) expect((await call("DELETE", `/api/catalog/overrides/${o.id}`, { staff: mgr })).status).toBe(200);
+    expect(resolvePrice(await getCatalog(), pid, ctx)).toEqual(base);
+  });
+  it("refuses a bad range, an unknown item and a cashier", async () => {
+    const now = Date.now();
+    expect((await put("/api/catalog/overrides", { title: "x", productId: "kaya-toast", priceCents: 1, startsAt: now, endsAt: now })).status).toBe(400);
+    expect((await put("/api/catalog/overrides", { title: "x", productId: "nope", priceCents: 1, startsAt: now, endsAt: now + 1000 })).status).toBe(400);
+    expect((await put("/api/catalog/overrides", { title: "x", productId: "kaya-toast", priceCents: 1, startsAt: now, endsAt: now + 1000 }, cashier)).status).toBe(403);
+  });
+});

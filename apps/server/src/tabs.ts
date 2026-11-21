@@ -38,9 +38,11 @@ export interface TabDeps {
   /** Writes events (used to record the Tab's payment on its round orders when it settles). */
   ingest: (events: OrderEvent[], outletId?: string) => Promise<unknown>;
   now?: () => number;
+  /** Something staff must act on (a table paging the waiter). Best effort; never blocks the customer. */
+  alert?: (text: string) => void;
 }
 
-interface TabRow { id: string; outlet_id: string; spot: string | null; code: string; status: "open" | "closed"; host_id: string | null; version: number; released_at: Date | null; bill_requested: boolean; waiter_paged: boolean; paged_kind: string | null; closed_at: Date | null; rewards_credited_at: Date | null }
+interface TabRow { id: string; outlet_id: string; spot: string | null; code: string; status: "open" | "closed"; host_id: string | null; version: number; released_at: Date | null; bill_requested: boolean; waiter_paged: boolean; paged_kind: string | null; paged_at: Date | null; page_acked_at: Date | null; page_escalated_at: Date | null; closed_at: Date | null; rewards_credited_at: Date | null }
 interface PersonRow { is_staff?: boolean; id: string; display_name: string; member_id: string | null; ord: number; left_at: Date | null; claimed_by: string | null }
 interface PayRow { points_used?: number; id: string; payer_id: string; for_id: string | null; mode: string; method: string; amount_cents: number; status: string; host_keep: boolean; alloc: PaymentAlloc; staff_id: string | null; created_at: Date; completed_at: Date | null; note: string | null }
 
@@ -252,6 +254,9 @@ export class TabService {
     if (anyPayable && s.tab.status === "open") owes = quoteMine(this.state(s), viewerId).amountCents;
     const rate = this.d.config.rewards.pointsEnabled ? this.d.config.rewards.earnPointsPerDollar : 0;
     const myPaid = s.payments.filter((p) => p.status === "completed" && p.payer_id === viewerId).reduce((n, p) => n + p.amount_cents, 0);
+    const earnedPoints = me && remaining <= 0 && s.tab.status === "closed"
+      ? Number((await this.d.db.query("SELECT COALESCE(SUM(points - reversed),0)::int AS n FROM tab_reward_credits WHERE tab_id=$1 AND beneficiary_id=$2", [s.tab.id, me.id])).rows[0]?.n ?? 0)
+      : 0;
     return {
       id: s.tab.id, spot: s.tab.spot, code: s.tab.code, outletId: s.tab.outlet_id, status: s.tab.status, version: s.tab.version,
       host: { id: this.effectiveHost(s), name: name(this.effectiveHost(s)) },
@@ -278,10 +283,10 @@ export class TabService {
         }),
       })),
       payments: s.payments.filter((p) => p.status !== "cancelled" && p.status !== "rejected").map((p) => ({ id: p.id, payer: { id: p.payer_id, name: name(p.payer_id) }, for: p.for_id ? { id: p.for_id, name: name(p.for_id) } : null, amountCents: p.amount_cents, pointsUsed: p.points_used ?? 0, status: p.status, method: p.method, mode: p.mode, staffRecorded: !!p.staff_id, hostKeep: p.host_keep, at: p.completed_at ?? p.created_at })),
-      billRequested: s.tab.bill_requested, waiterPaged: s.tab.waiter_paged, pagedKind: s.tab.paged_kind,
+      billRequested: s.tab.bill_requested, waiterPaged: s.tab.waiter_paged, pagedKind: s.tab.paged_kind, pageAcknowledged: !!s.tab.page_acked_at,
       coupons: s.coupons.map((c) => ({ id: c.id, title: c.title, amountCents: c.amountCents, minSpendCents: c.minSpendCents, owner: { id: c.participantId, name: name(c.participantId) }, mine: c.participantId === viewerId })),
       couponOptions: await this.couponOptions(s, me, member),
-      me: me ? { id: me.id, name: me.display_name, memberId: me.member_id, owesCents: owes, paidCents: myPaid, pendingPoints: remaining > 0 ? Math.floor((myPaid / 100) * rate) : 0, pointsBalance: member && me.member_id === member.id ? member.pointsBalance : null } : null,
+      me: me ? { id: me.id, name: me.display_name, memberId: me.member_id, owesCents: owes, paidCents: myPaid, pendingPoints: remaining > 0 ? Math.floor((myPaid / 100) * rate) : 0, earnedPoints, pointsBalance: member && me.member_id === member.id ? member.pointsBalance : null } : null,
       closed: s.tab.status === "closed",
       pendingRewardsNote: remaining > 0 && rate > 0 ? "These points become available when the whole table bill is paid." : null,
       customAllocation: (await this.outletSettings(s.tab.outlet_id)).allocation,
@@ -614,11 +619,44 @@ export class TabService {
   }
 
   async page(tabId: string, kind: "bill" | "help"): Promise<void> {
-    await this.d.db.query("UPDATE tabs SET waiter_paged=true, paged_kind=$3, bill_requested = bill_requested OR $4, version=version+1 WHERE id=$1 AND merchant_id=$2 AND status='open' AND NOT waiter_paged", [tabId, this.m, kind, kind === "bill"]);
+    const r = await this.d.db.query("UPDATE tabs SET waiter_paged=true, paged_at=now(), page_acked_at=NULL, page_escalated_at=NULL, paged_kind=$3, bill_requested = bill_requested OR $4, version=version+1 WHERE id=$1 AND merchant_id=$2 AND status='open' AND NOT waiter_paged RETURNING spot", [tabId, this.m, kind, kind === "bill"]);
+    if (r.rows[0]) {
+      try { this.d.alert?.(`${r.rows[0].spot ?? "A table"} ${kind === "bill" ? "is asking for the bill" : "needs the waiter"}.`); } catch { /* an alert must never fail the customer */ }
+    }
+  }
+
+  /** Every open tab with what is owed, for the staff screen and the Telegram bot. */
+  async openSummary(outletId?: string | null): Promise<Array<{ id: string; spot: string | null; code: string; outletId: string; people: number; paged: string | null; billRequested: boolean; totalCents: number; paidCents: number; remainingCents: number; paymentLocked: boolean }>> {
+    const r = await this.d.db.query(
+      `SELECT t.id, t.spot, t.code, t.outlet_id, t.bill_requested, t.waiter_paged, t.paged_kind,
+              (SELECT count(*) FROM tab_participants p WHERE p.tab_id=t.id AND p.left_at IS NULL)::int AS people
+       FROM tabs t WHERE t.merchant_id=$1 AND t.status='open' AND ($2::text IS NULL OR t.outlet_id=$2) ORDER BY t.opened_at`, [this.m, outletId ?? null]);
+    const out = [];
+    for (const t of r.rows) {
+      const v = (await this.view(t.id, "")) as { totals: { totalCents: number; paidCents: number; remainingCents: number }; paymentLocked: boolean };
+      out.push({ id: t.id, spot: t.spot, code: t.code, outletId: t.outlet_id, people: t.people, paged: t.waiter_paged ? t.paged_kind : null, billRequested: t.bill_requested, totalCents: v.totals.totalCents, paidCents: v.totals.paidCents, remainingCents: v.totals.remainingCents, paymentLocked: v.paymentLocked });
+    }
+    return out;
+  }
+
+  /** Staff saw the page. The customer's bell then says someone is on the way. */
+  async acknowledgePage(tabId: string): Promise<boolean> {
+    const r = await this.d.db.query("UPDATE tabs SET page_acked_at=now(), version=version+1 WHERE id=$1 AND merchant_id=$2 AND status='open' AND waiter_paged AND page_acked_at IS NULL", [tabId, this.m]);
+    return (r.rowCount ?? 0) > 0;
+  }
+
+  /** A page nobody has acknowledged within `minutes` is sent again, once, so a lost request is not silently assumed delivered. */
+  async escalateUnacknowledged(minutes: number): Promise<number> {
+    const r = await this.d.db.query(
+      "UPDATE tabs SET page_escalated_at=now(), version=version+1 WHERE merchant_id=$1 AND status='open' AND waiter_paged AND page_acked_at IS NULL AND page_escalated_at IS NULL AND paged_at < now() - ($2 || ' minutes')::interval RETURNING spot, paged_kind",
+      [this.m, String(minutes)],
+    );
+    for (const t of r.rows) { try { this.d.alert?.(`Nobody has answered yet: ${t.spot ?? "A table"} ${t.paged_kind === "bill" ? "is still waiting for the bill" : "still needs the waiter"}.`); } catch { /* best effort */ } }
+    return r.rows.length;
   }
 
   async resetPage(tabId: string): Promise<void> {
-    await this.d.db.query("UPDATE tabs SET waiter_paged=false, paged_kind=NULL, bill_requested=false, version=version+1 WHERE id=$1 AND merchant_id=$2", [tabId, this.m]);
+    await this.d.db.query("UPDATE tabs SET waiter_paged=false, paged_at=NULL, page_acked_at=NULL, page_escalated_at=NULL, paged_kind=NULL, bill_requested=false, version=version+1 WHERE id=$1 AND merchant_id=$2", [tabId, this.m]);
   }
 
   // ---- points and coupons ---------------------------------------------------------------

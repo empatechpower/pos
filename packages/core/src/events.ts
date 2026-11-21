@@ -47,7 +47,11 @@ export type OrderEventBody =
   | { type: "ItemQtySet"; lineId: string; qty: number }
   | { type: "PaymentRecorded"; paymentId: string; method: PaymentMethod; amountCents: Cents; /** false = awaiting gateway confirmation */ confirmed: boolean }
   | { type: "PaymentConfirmed"; paymentId: string }
-  | { type: "StageSet"; stage: Exclude<OrderStage, "open"> };
+  | { type: "StageSet"; stage: Exclude<OrderStage, "open"> }
+  /** The customer moved to another table after ordering: the same order, same status, now at `to`. The old table and the time are kept. */
+  | { type: "TableChanged"; from?: string; to: string }
+  /** The commission the channel's platform actually took on this order (its own promotions can differ from the contract rate). The latest one wins. */
+  | { type: "CommissionRecorded"; cents: Cents; note?: string };
 
 export type OrderEvent = OrderEventBody & {
   /** Globally unique, generated on the device that created the event. */
@@ -90,6 +94,10 @@ export interface OrderState {
   fireAt?: number;
   firedAt?: number;
   spot?: string;
+  /** The actual commission recorded for this order, when one was entered. */
+  commission?: { cents: Cents; note?: string; at: number };
+  /** Every table move after the order was placed, oldest first. */
+  tableChanges?: Array<{ from?: string; to: string; at: number }>;
   queueNumber?: string;
   openedAt: number;
   lines: OrderLine[];
@@ -161,6 +169,14 @@ export function reduceOrder(orderId: string, events: readonly OrderEvent[]): Ord
         break;
       case "OrderFired":
         state.firedAt ??= e.ts;
+        break;
+      case "CommissionRecorded":
+        state.commission = { cents: Math.max(0, Math.round(e.cents)), ...(e.note ? { note: e.note.slice(0, 120) } : {}), at: e.ts };
+        break;
+      case "TableChanged":
+        if (state.stage === "completed" || state.stage === "cancelled") break;
+        (state.tableChanges ??= []).push({ ...(state.spot ? { from: state.spot } : {}), to: e.to, at: e.ts });
+        state.spot = e.to;
         break;
       case "StageSet":
         state.stage = e.stage;

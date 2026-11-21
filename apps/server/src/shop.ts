@@ -197,7 +197,9 @@ export function registerShop(app: FastifyInstance, d: ShopDeps) {
     // Every item carries its one state (orderable, available later with the next opening, sold out). The version also moves at each window boundary,
     // so a phone that keeps asking "has the menu changed?" sees an item flip with nothing to reload by hand.
     const catalog = { ...applied, products: applied.products.map((p) => ({ ...p, availability: availabilityOf(p, w.windows, now, w.timeZone) })) };
-    const menuVersion = c.version + o.version + (await stockVersion(d.db, merchantId, id)) + Math.floor(lastBoundaryAt(w.windows, now, w.timeZone) / 60_000);
+    // A promotional price starting or ending is a boundary too: the version moves when one passes.
+    const promoBoundaries = (c.overrides ?? []).reduce((n, x) => n + (x.startsAt <= now ? 1 : 0) + (x.endsAt <= now ? 1 : 0), 0);
+    const menuVersion = c.version + o.version + promoBoundaries + (await stockVersion(d.db, merchantId, id)) + Math.floor(lastBoundaryAt(w.windows, now, w.timeZone) / 60_000);
     return { outletId: id, prepMinutes: outlet?.prepMinutes ?? null, menuVersion, menuState: menuState(w.windows, now, w.timeZone), timeZone: w.timeZone, serverTime: now, catalog };
   };
   app.get<{ Querystring: { outlet?: string } }>("/api/shop/menu", async (req, reply) => {
@@ -1082,6 +1084,8 @@ export function registerShop(app: FastifyInstance, d: ShopDeps) {
       ...(await (async () => { const m = await menuOf(await outletOfOrder(order.orderId)); return { menuVersion: m.menuVersion, menuState: m.menuState }; })()),
       channelName: order.channelName,
       spot: order.spot,
+      tables,
+      canChangeTable: !!order.spot && !order.onTab && order.stage !== "completed" && order.stage !== "cancelled",
       items: order.lines.filter((l) => l.qty > 0).map((l) => ({ name: l.name, qty: l.qty, unitCents: l.unitCents, options: optionLines(l.options) })),
       totalCents: total,
       // The bill line by line, with the tax basis said plainly (tax inside the prices is shown, never added) and the deposit as its own line.
@@ -1108,6 +1112,23 @@ export function registerShop(app: FastifyInstance, d: ShopDeps) {
     // A fixed id: pressing twice, or a retry, cancels once.
     await d.ingest([{ id: `shop-cancel-${order.orderId}`, orderId: order.orderId, deviceId: SHOP_DEVICE, ts: Date.now(), seq: Date.now(), type: "StageSet", stage: "cancelled" } as unknown as OrderEvent], await outletOfOrder(order.orderId));
     return { status: "cancelled" };
+  });
+
+  /** The customer moved to another table after ordering: the same order changes its table (kept: old table, new table, time). */
+  app.post<{ Params: { id: string }; Body: { spot?: string } }>("/api/shop/orders/:id/table", async (req, reply) => {
+    if ((await orderGate(req, reply)).blocked) return;
+    const order = reduceOrder(req.params.id, await d.store.eventsForOrder(req.params.id));
+    if (!order || order.source !== "online") return reply.code(404).send({ error: "order_not_found" });
+    if (order.onTab) return reply.code(409).send({ error: "on_a_tab", message: "Ask the host to move the whole tab." });
+    if (!order.spot || order.stage === "completed" || order.stage === "cancelled") return reply.code(409).send({ error: "cannot_change_table" });
+    const wanted = String(req.body?.spot ?? "").trim().replace(/^table\s*/i, "");
+    let table: string | undefined;
+    if (tables.length) table = tables.find((x) => x === `Table ${Number(wanted)}`);
+    else table = clean(req.body?.spot, 30)?.replace(/[^\w #-]/g, "") || undefined;
+    if (!table || (tables.length && !/^\d{1,3}$/.test(wanted))) return reply.code(400).send({ error: "choose your table" });
+    if (table === order.spot) return { spot: table };
+    await d.ingest([{ id: `shop-table-${order.orderId}-${Date.now().toString(36)}`, orderId: order.orderId, deviceId: SHOP_DEVICE, ts: Date.now(), seq: Date.now(), type: "TableChanged", from: order.spot, to: table } as unknown as OrderEvent], await outletOfOrder(order.orderId));
+    return { spot: table };
   });
 
   // ---- online payment (Stripe: card and PayNow) -----------------------------------------------------

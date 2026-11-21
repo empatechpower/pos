@@ -43,8 +43,8 @@ export function StoresSheet({ stores, currentId, onPick, onClose }: { stores: St
         {anyCoords && !here && <button className="secondary sm" onClick={locate}>{tx("Show the nearest first")}</button>}
         {note && <p className="muted" role="status">{note}</p>}
         {list.map((s) => (
-          <div key={s.id} className="e2e-card" style={{ marginTop: 10 }}>
-            <b>{s.name}{s.id === currentId ? ` · ${tx("you are ordering here")}` : ""}</b>
+          <div key={s.id} className="e2e-card" style={{ marginTop: 10, ...(s.id === currentId ? { borderColor: "var(--orange-dark, #c2410c)" } : {}) }}>
+            <b>{s.name}</b>{s.id === currentId && <span className="cur-tag" style={{ marginLeft: 8, fontSize: 12, fontWeight: 600, color: "var(--orange-dark, #c2410c)" }}>{tx("Current outlet")}</span>}
             {s.distanceKm !== null && <span className="muted"> · {formatDistance(s.distanceKm)}</span>}
             {s.address && <div className="muted">{s.address}</div>}
             {(s.hours || s.phone) && <div className="muted">{[s.hours, s.phone].filter(Boolean).join(" · ")}</div>}

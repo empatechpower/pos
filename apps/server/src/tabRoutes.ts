@@ -136,11 +136,11 @@ export function registerTabRoutes(app: FastifyInstance, d: {
 
   app.get<{ Querystring: { outlet?: string } }>("/api/tabs", staff, async (req) => {
     const r = await d.db.query(
-      `SELECT t.id, t.spot, t.code, t.outlet_id, t.released_at, t.bill_requested, t.waiter_paged, t.paged_kind, t.opened_at,
+      `SELECT t.id, t.spot, t.code, t.outlet_id, t.released_at, t.bill_requested, t.waiter_paged, t.paged_kind, t.paged_at, t.page_acked_at, t.opened_at,
               (SELECT count(*) FROM tab_participants p WHERE p.tab_id=t.id AND p.left_at IS NULL)::int AS people
        FROM tabs t WHERE t.merchant_id=$1 AND t.status='open' AND ($2::text IS NULL OR t.outlet_id=$2) ORDER BY t.opened_at`, [d.merchantId, req.query.outlet ?? null]);
     const out = [];
-    for (const t of r.rows) { const v = (await d.tabs.view(t.id, "")) as { totals: { totalCents: number; paidCents: number; remainingCents: number }; paymentLocked: boolean }; out.push({ id: t.id, spot: t.spot, code: t.code, outletId: t.outlet_id, people: t.people, released: !!t.released_at, billRequested: t.bill_requested, waiterPaged: t.waiter_paged, pagedKind: t.paged_kind, openedAt: t.opened_at, ...v.totals, locked: v.paymentLocked }); }
+    for (const t of r.rows) { const v = (await d.tabs.view(t.id, "")) as { totals: { totalCents: number; paidCents: number; remainingCents: number }; paymentLocked: boolean }; out.push({ id: t.id, spot: t.spot, code: t.code, outletId: t.outlet_id, people: t.people, released: !!t.released_at, billRequested: t.bill_requested, waiterPaged: t.waiter_paged, pagedKind: t.paged_kind, pagedAt: t.paged_at, pageAcknowledged: !!t.page_acked_at, openedAt: t.opened_at, ...v.totals, locked: v.paymentLocked }); }
     return { tabs: out };
   });
 
@@ -152,6 +152,8 @@ export function registerTabRoutes(app: FastifyInstance, d: {
     await audit(d.db, d.merchantId, req.staff!.id, "tab.release", { tab: req.params.id });
     return { ok: true };
   }, reply));
+
+  app.post<{ Params: { id: string } }>("/api/tabs/:id/ack-page", staff, async (req, reply) => guard(async () => ({ ok: await d.tabs.acknowledgePage(req.params.id) }), reply));
 
   app.post<{ Params: { id: string } }>("/api/tabs/:id/reset-page", staff, async (req, reply) => guard(async () => {
     await d.tabs.resetPage(req.params.id);

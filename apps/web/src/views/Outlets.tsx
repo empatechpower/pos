@@ -25,7 +25,7 @@ export function Outlets() {
   const [editing, setEditing] = useState<Outlet | null>(null);
   const [isNew, setIsNew] = useState(false);
   const [fr, setFr] = useState({ id: "", name: "" });
-  const [opts, setOpts] = useState<{ serviceChargeOn: boolean; gstOn: boolean; serviceRate: number; gstRate: number } | null>(null);
+  const [opts, setOpts] = useState<{ serviceChargeOn: boolean; gstOn: boolean; stackable: boolean; pointsItemsEligibleOnly: boolean; pointsDeductService: boolean; pointsDeductTax: boolean; serviceRate: number; gstRate: number } | null>(null);
   const [kiosk, setKiosk] = useState<{ idleMinutes: number; signinBlock: boolean; chips: { earn: boolean; rate: boolean; stamps: boolean } } | null>(null);
 
   const load = useCallback(async () => {
@@ -49,7 +49,7 @@ export function Outlets() {
     const r = await staffFetch("/api/settings/kiosk", { method: "PUT", body });
     if ("res" in r && r.res.ok) { setKiosk((await r.res.json()) as NonNullable<typeof kiosk>); say("Saved. A kiosk picks it up when its screen is next reloaded."); } else say("Could not save.");
   }
-  async function setOption(body: { serviceChargeOn?: boolean; gstOn?: boolean }) {
+  async function setOption(body: Partial<Record<"serviceChargeOn" | "gstOn" | "stackable" | "pointsItemsEligibleOnly" | "pointsDeductService" | "pointsDeductTax", boolean>>) {
     const r = await staffFetch("/api/settings", { method: "PUT", body });
     if ("res" in r && r.res.ok) { setOpts((await r.res.json()) as NonNullable<typeof opts>); say("Saved. Open screens pick it up on their next reload."); } else say("Could not save.");
   }
@@ -160,6 +160,11 @@ export function Outlets() {
           <p className="muted">Off by default. Most quick-service shops have neither; turn them on only if you charge them.</p>
           <label className="inline"><input type="checkbox" checked={opts.serviceChargeOn} onChange={(e) => void setOption({ serviceChargeOn: e.target.checked })} /> Service charge ({Math.round(opts.serviceRate * 1000) / 10}%, dine-in only)</label>
           <label className="inline" style={{ marginTop: 6 }}><input type="checkbox" checked={opts.gstOn} onChange={(e) => void setOption({ gstOn: e.target.checked })} /> Tax (GST {Math.round(opts.gstRate * 1000) / 10}%)</label>
+          <p className="muted" style={{ margin: "10px 0 4px" }}>Promotions and points</p>
+          <label className="inline"><input type="checkbox" checked={opts.stackable} onChange={(e) => void setOption({ stackable: e.target.checked })} /> A coupon and points can be used on the same order</label>
+          <label className="inline" style={{ marginTop: 6 }}><input type="checkbox" checked={opts.pointsItemsEligibleOnly} onChange={(e) => void setOption({ pointsItemsEligibleOnly: e.target.checked })} /> Points pay only for items that earn points</label>
+          <label className="inline" style={{ marginTop: 6 }}><input type="checkbox" checked={opts.pointsDeductService} onChange={(e) => void setOption({ pointsDeductService: e.target.checked })} /> Points can pay the service charge</label>
+          <label className="inline" style={{ marginTop: 6 }}><input type="checkbox" checked={opts.pointsDeductTax} onChange={(e) => void setOption({ pointsDeductTax: e.target.checked })} /> Points can pay the tax</label>
         </div>
       )}
 

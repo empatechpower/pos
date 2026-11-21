@@ -161,6 +161,48 @@ describe("placing an order", () => {
     expect((await call(`/api/shop/orders/${id}`)).json).toMatchObject({ status: "cancelled", spot: "Table 7" });
   });
 
+  it("moving to another table after ordering updates the same order: old table, new table and time kept, status kept", async () => {
+    const placed = await order({ channelId: "dine-in", items: [kaya(1)], spot: "Table 7" });
+    const id = placed.json.orderId;
+    expect((await call(`/api/shop/orders/${id}`)).json.canChangeTable).toBe(true);
+    const before = (await db.query("SELECT count(*)::int AS n FROM events WHERE type='OrderOpened'")).rows[0].n;
+    expect((await call(`/api/shop/orders/${id}/table`, { body: { spot: "Table 12" } })).json).toEqual({ spot: "Table 12" });
+    expect((await db.query("SELECT count(*)::int AS n FROM events WHERE type='OrderOpened'")).rows[0].n).toBe(before); // no new order
+    const o = reduceOrder(id, await events(id))!;
+    expect(o.spot).toBe("Table 12");
+    expect(o.tableChanges).toMatchObject([{ from: "Table 7", to: "Table 12" }]);
+    expect(o.tableChanges![0]!.at).toBeGreaterThan(0);
+    expect((await call(`/api/shop/orders/${id}`)).json).toMatchObject({ spot: "Table 12", status: (await call(`/api/shop/orders/${id}`)).json.status });
+    await call(`/api/shop/orders/${id}/cancel`, { method: "POST" });
+    expect((await call(`/api/shop/orders/${id}/table`, { body: { spot: "Table 3" } })).status).toBe(409); // a closed order stays where it was
+    const take = await order({ channelId: "take-away", items: [kaya(1)] });
+    expect((await call(`/api/shop/orders/${take.json.orderId}/table`, { body: { spot: "Table 3" } })).status).toBe(409);
+  });
+
+  it("channel commission is opt-in; the estimate follows the contract rate and the figure entered for an order wins", async () => {
+    const grabRow = { id: "grab", name: "Grab", kind: "delivery", serviceCharge: false, active: true };
+    const placed = await order({ channelId: "grab", items: [kaya(1)] });
+    const id = placed.json.orderId;
+    const total = placed.json.totalCents as number;
+    const sales = async () => ((await staffCall("/api/reports/sales?from=2000-01-01&to=2999-12-31")).json.byChannel as any[]).find((c) => c.channel === "Grab");
+    expect((await sales()).commissionCents).toBeUndefined(); // not recorded unless the merchant opts in
+    expect((await staffCall(`/api/orders/${id}/commission`, { body: { cents: 10 } })).status).toBe(409);
+    expect((await staffCall("/api/catalog/channels", { body: { ...grabRow, commission: { ratePct: 20 } } })).status).toBe(200);
+    const orders = (await sales()).orders as number;
+    expect((await sales()).commissionCents).toBeGreaterThanOrEqual(Math.round(total * 0.2) * 1);
+    expect((await staffCall(`/api/orders/${id}/commission`, { body: { cents: total + 1 } })).status).toBe(400);
+    expect((await staffCall(`/api/orders/${id}/commission`, { body: { cents: 7, note: "Platform promo" } })).json).toEqual({ ok: true, cents: 7 });
+    expect(reduceOrder(id, await events(id))!.commission).toMatchObject({ cents: 7, note: "Platform promo" });
+    const after = (await sales()).commissionCents as number;
+    expect(after).toBeGreaterThanOrEqual(7);
+    expect(orders).toBeGreaterThan(0);
+    // saving the channel again without a commission setting keeps it; null stops recording
+    await staffCall("/api/catalog/channels", { body: grabRow });
+    expect((await sales()).commissionCents).toBeDefined();
+    await staffCall("/api/catalog/channels", { body: { ...grabRow, commission: null } });
+    expect((await sales()).commissionCents).toBeUndefined();
+  });
+
   it("tells the customer when prices changed since they looked, and places nothing", async () => {
     const before = (await db.query("SELECT count(*) FROM events WHERE type='OrderOpened'")).rows[0].count;
     const r = await order({ channelId: "take-away", items: [kaya(1)], expectedTotalCents: 150 });

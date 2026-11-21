@@ -33,10 +33,14 @@ export interface TelegramDeps {
   needs: (permission: Permission) => (req: FastifyRequest, reply: FastifyReply) => unknown;
   /** Sales and order data for /sales and /orders. */
   reports?: {
-    sales: (from?: string, to?: string) => Promise<{ from: string; to: string; orders: number; items: number; grossCents: number; serviceCents: number; averageOrderCents: number; byChannel: { channel: string; orders: number; cents: number }[]; products: { name: string; qty: number; cents: number }[] }>;
+    sales: (from?: string, to?: string) => Promise<{ from: string; to: string; orders: number; items: number; grossCents: number; serviceCents: number; averageOrderCents: number; byChannel: { commissionCents?: number; channel: string; orders: number; cents: number }[]; products: { name: string; qty: number; cents: number }[] }>;
     orders: (from?: string, to?: string, includeCancelled?: boolean) => Promise<{ from: string; to: string; count: number; orders: { orderId: string; queueNumber: string | null; openedAt: string; channel: string; table: string | null; stage: string; customerName: string | null; lines: { name: string; qty: number; unitCents: number; options: string[] }[]; subtotalCents: number; serviceCents: number; totalCents: number; paidCents: number }[] }>;
     today: () => string;
+    /** The hour (0-23) in the shop's time zone, for the end-of-day summary. */
+    hour?: () => number;
   };
+  /** Open tables for /tabs. */
+  tabs?: { open: () => Promise<Array<{ spot: string | null; people: number; paged: string | null; billRequested: boolean; totalCents: number; paidCents: number; remainingCents: number }>> };
 }
 
 const sha256 = (s: string) => createHash("sha256").update(s).digest("hex");
@@ -143,6 +147,7 @@ export async function setupTelegramWebhook(integ: Integrations, log: (m: string)
       { command: "rename", description: "Rename an item or category" },
       { command: "sales", description: "Sales totals for a day or period" },
       { command: "orders", description: "Orders as a spreadsheet file" },
+      { command: "tabs", description: "Open tables and what is owed" },
       { command: "help", description: "What I can do" },
     ],
   });
@@ -168,15 +173,40 @@ export function registerTelegram(app: FastifyInstance, d: TelegramDeps): void {
   const send = (chatId: number, text: string, buttons?: Button[][]) =>
     api("sendMessage", { chat_id: chatId, text, disable_web_page_preview: true, ...(buttons ? { reply_markup: { inline_keyboard: buttons } } : {}) });
 
-  /** Tell every linked manager and owner something that needs attention (used for printer alerts). Does nothing without a Telegram bot. */
-  (app as unknown as { notifyManagers?: (text: string) => Promise<void> }).notifyManagers = async (text: string) => {
+  /** Tell every linked manager and owner something that needs attention (printer and table alerts). `all` also reaches every other linked staff member. Does nothing without a Telegram bot. */
+  (app as unknown as { notifyManagers?: (text: string, all?: boolean) => Promise<void> }).notifyManagers = async (text: string, all = false) => {
     if (!t) return;
     const r = await d.db.query(
-      `SELECT DISTINCT l.chat_id FROM telegram_links l JOIN staff s ON s.id = l.staff_id WHERE l.merchant_id=$1 AND s.active AND s.role IN ('owner','manager')`,
+      `SELECT DISTINCT l.chat_id FROM telegram_links l JOIN staff s ON s.id = l.staff_id WHERE l.merchant_id=$1 AND s.active ${all ? "" : "AND s.role IN ('owner','manager')"}`,
       [d.merchantId],
     );
     for (const row of r.rows) await send(Number(row.chat_id), text);
   };
+
+  /**
+   * Day-one reporting: once a day, after DAILY_SUMMARY_HOUR (default 22, the shop's time; "off" turns it off), the day's sales go to
+   * every linked manager and owner. The day is claimed in the database first so two server instances never send it twice.
+   */
+  const summaryHour = /^off$/i.test(process.env.DAILY_SUMMARY_HOUR ?? "") ? null : (() => { const n = Number(process.env.DAILY_SUMMARY_HOUR ?? ""); return process.env.DAILY_SUMMARY_HOUR?.trim() && Number.isInteger(n) && n >= 0 && n <= 23 ? n : 22; })();
+  const sendDailySummary = async (): Promise<boolean> => {
+    if (!t || summaryHour === null || !d.reports?.hour || d.reports.hour() < summaryHour) return false;
+    const today = d.reports.today();
+    const won = await d.db.query(
+      "INSERT INTO merchant_settings (merchant_id, key, value) VALUES ($1,'dailySummaryLast',$2::jsonb) ON CONFLICT (merchant_id, key) DO UPDATE SET value=EXCLUDED.value, updated_at=now() WHERE merchant_settings.value IS DISTINCT FROM EXCLUDED.value RETURNING 1",
+      [d.merchantId, JSON.stringify(today)],
+    );
+    if (!won.rowCount) return false;
+    const text = await salesMessage("today");
+    if (text.startsWith("No sales")) return false;
+    await (app as unknown as { notifyManagers: (x: string) => Promise<void> }).notifyManagers(`End of day\n${text}`);
+    return true;
+  };
+  (app as unknown as { sendDailySummary?: () => Promise<boolean> }).sendDailySummary = sendDailySummary;
+  if (t && summaryHour !== null && process.env.NODE_ENV !== "test") {
+    const timer = setInterval(() => { void sendDailySummary().catch(() => undefined); }, 60_000);
+    timer.unref();
+    app.addHook("onClose", async () => clearInterval(timer));
+  }
 
   /** Send a small text file (a CSV) into the chat. */
   const sendFile = async (chatId: number, filename: string, content: string, caption: string) => {
@@ -296,6 +326,7 @@ export function registerTelegram(app: FastifyInstance, d: TelegramDeps): void {
         `/rename Latte > Flat White : rename an item, or a whole category\n` +
         `Send a photo with the item's name as the caption : sets that item's picture\n` +
         `/sales today (or yesterday, week, month, or a date) : sales totals and top items\n` +
+        `/tabs : open tables and what is owed\n` +
         `/orders week : the orders as a spreadsheet file\n\n` +
         `A price of 0 is allowed: that item sells for free. To stop selling an item in a pricebook, use /off.`,
     );
@@ -385,16 +416,17 @@ export function registerTelegram(app: FastifyInstance, d: TelegramDeps): void {
     return send(chatId, `✅ New picture for ${p.name}. It shows on the menu now.`);
   };
 
-  const showSales = async (chatId: number, arg: string) => {
-    if (!d.reports) return send(chatId, "Reports aren't available here.");
+  const salesMessage = async (arg: string): Promise<string> => {
+    if (!d.reports) return "Reports aren't available here.";
     const range = parseRange(arg, d.reports.today());
-    if (!range) return send(chatId, "Try /sales today, /sales yesterday, /sales week, /sales month, or a date like /sales 2026-11-14.");
+    if (!range) return "Try /sales today, /sales yesterday, /sales week, /sales month, or a date like /sales 2026-11-14.";
     const r = await d.reports.sales(range.from, range.to);
-    if (!r.orders) return send(chatId, `No sales for ${range.label}.`);
+    if (!r.orders) return `No sales for ${range.label}.`;
     const top = r.products.slice(0, 8).map((x, i) => `${i + 1}. ${x.name}: ${x.qty} (${money(x.cents)})`).join("\n");
-    const ch = r.byChannel.map((x) => `${x.channel}: ${x.orders} orders, ${money(x.cents)}`).join("\n");
-    return send(chatId, `Sales for ${range.label} (${r.from}${r.from === r.to ? "" : ` to ${r.to}`})\n${r.orders} orders · ${r.items} items\nTotal ${money(r.grossCents)} (service charge ${money(r.serviceCents)}) · average ${money(r.averageOrderCents)}\n\n${ch}\n\nTop items:\n${top}\n\nFor every order as a spreadsheet: /orders ${arg || "today"}`);
+    const ch = r.byChannel.map((x) => `${x.channel}: ${x.orders} orders, ${money(x.cents)}${x.commissionCents !== undefined ? ` (commission ${money(x.commissionCents)})` : ""}`).join("\n");
+    return `Sales for ${range.label} (${r.from}${r.from === r.to ? "" : ` to ${r.to}`})\n${r.orders} orders · ${r.items} items\nTotal ${money(r.grossCents)} (service charge ${money(r.serviceCents)}) · average ${money(r.averageOrderCents)}\n\n${ch}\n\nTop items:\n${top}\n\nFor every order as a spreadsheet: /orders ${arg || "today"}`;
   };
+  const showSales = async (chatId: number, arg: string) => send(chatId, await salesMessage(arg));
 
   const sendOrders = async (chatId: number, arg: string) => {
     if (!d.reports) return send(chatId, "Reports aren't available here.");
@@ -525,6 +557,12 @@ export function registerTelegram(app: FastifyInstance, d: TelegramDeps): void {
       case "/sales":
         if (!can(who.role, "audit.read")) return send(chatId, "Only managers and owners can see sales.");
         return showSales(chatId, arg);
+      case "/tabs": {
+        if (!d.tabs) return send(chatId, "Tables aren't available here.");
+        const list = await d.tabs.open();
+        if (!list.length) return send(chatId, "No open tabs.");
+        return send(chatId, `Open tabs (${list.length})\n` + list.map((x) => `${x.paged ? (x.paged === "bill" ? "🧾 " : "🔔 ") : "• "}${x.spot ?? "Table"}: ${money(x.remainingCents)} to pay of ${money(x.totalCents)} · ${x.people} ${x.people === 1 ? "person" : "people"}${x.paged === "bill" ? " · asking for the bill" : x.paged ? " · needs the waiter" : ""}`).join("\n"));
+      }
       case "/orders":
         if (!can(who.role, "audit.read")) return send(chatId, "Only managers and owners can see orders.");
         return sendOrders(chatId, arg);

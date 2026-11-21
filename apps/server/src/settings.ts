@@ -5,16 +5,49 @@ import type { Db } from "./db/pool.js";
  * Options the owner can switch without a deploy. The service charge is OFF unless it is switched on here (or SERVICE_CHARGE=on is
  * set on the server as the starting value). Tax follows the shop's configuration until it is set here.
  */
-export interface PricingOptions { serviceChargeOn: boolean; gstOn: boolean }
+export interface PricingOptions {
+  serviceChargeOn: boolean;
+  gstOn: boolean;
+  /** A coupon/voucher and points can be used on the same order (Spec 8.2). */
+  stackable: boolean;
+  /** What points may pay for, besides items: items "all" or only the "eligible" ones, service charge, tax. The container deposit is never payable in points. */
+  pointsItemsEligibleOnly: boolean;
+  pointsDeductService: boolean;
+  pointsDeductTax: boolean;
+}
 
-export const optionsOf = (config: BusinessConfig): PricingOptions => ({ serviceChargeOn: config.pricing.serviceOn !== false, gstOn: config.pricing.gstOn });
+export const optionsOf = (config: BusinessConfig): PricingOptions => ({
+  serviceChargeOn: config.pricing.serviceOn !== false,
+  gstOn: config.pricing.gstOn,
+  stackable: config.pricing.stackable,
+  pointsItemsEligibleOnly: config.pricing.pointsDeduct.items === "eligible",
+  pointsDeductService: config.pricing.pointsDeduct.service,
+  pointsDeductTax: config.pricing.pointsDeduct.tax,
+});
+
+/** Applies one owner setting to the live config. Returns false for a key that is not a pricing option. */
+export function applyOption(config: BusinessConfig, key: string, value: boolean): boolean {
+  switch (key) {
+    case "serviceChargeOn": config.pricing.serviceOn = value; return true;
+    case "gstOn": config.pricing.gstOn = value; return true;
+    case "stackable": config.pricing.stackable = value; return true;
+    case "pointsItemsEligibleOnly": config.pricing.pointsDeduct = { ...config.pricing.pointsDeduct, items: value ? "eligible" : "all" }; return true;
+    case "pointsDeductService": config.pricing.pointsDeduct = { ...config.pricing.pointsDeduct, service: value }; return true;
+    case "pointsDeductTax": config.pricing.pointsDeduct = { ...config.pricing.pointsDeduct, tax: value }; return true;
+    default: return false;
+  }
+}
+export const OPTION_KEYS = ["serviceChargeOn", "gstOn", "stackable", "pointsItemsEligibleOnly", "pointsDeductService", "pointsDeductTax"] as const;
 
 export async function loadSettings(db: Db | null, merchantId: string, config: BusinessConfig): Promise<void> {
   const rows = db ? (await db.query("SELECT key, value FROM merchant_settings WHERE merchant_id=$1", [merchantId])).rows : [];
   const get = (k: string): boolean | undefined => (typeof rows.find((r) => r.key === k)?.value === "boolean" ? (rows.find((r) => r.key === k)!.value as boolean) : undefined);
   config.pricing.serviceOn = get("serviceChargeOn") ?? /^(1|true|yes|on)$/i.test(process.env.SERVICE_CHARGE ?? "");
-  const gst = get("gstOn");
-  if (gst !== undefined) config.pricing.gstOn = gst;
+  for (const k of OPTION_KEYS) {
+    if (k === "serviceChargeOn") continue;
+    const v = get(k);
+    if (v !== undefined) applyOption(config, k, v);
+  }
 }
 
 export async function saveSetting(db: Db, merchantId: string, key: string, value: unknown): Promise<void> {
