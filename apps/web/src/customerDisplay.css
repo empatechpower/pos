@@ -1,0 +1,33 @@
+/* The screen that faces the customer. Large type, high contrast, no scrolling controls; the list scrolls by itself only when it has to. */
+.cd { position: fixed; inset: 0; display: flex; flex-direction: column; background: #fbfaf6; color: #11204a; font-family: Poppins, ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; overflow: hidden; }
+.cd-head { display: flex; align-items: center; gap: 22px; padding: 14px 28px; background: var(--cd-brand); color: var(--cd-brand-ink); flex: none; }
+.cd-logo { height: 58px; width: auto; border-radius: 8px; }
+.cd-logo-text { font-size: 28px; }
+.cd-chip { padding: 6px 18px; border-left: 2px solid rgba(255,255,255,.35); font-size: 30px; font-weight: 700; letter-spacing: .02em; text-transform: uppercase; }
+.cd-chip.cd-big { font-size: 38px; }
+.cd-status { margin-left: auto; padding: 10px 26px; border-radius: 999px; background: var(--cd-soft); color: #11204a; font-size: 24px; font-weight: 700; text-transform: uppercase; }
+.cd-body { flex: 1; min-height: 0; display: grid; grid-template-columns: minmax(300px, 38%) 1fr; gap: 24px; padding: 20px 24px; }
+.cd-side { display: flex; flex-direction: column; gap: 18px; min-height: 0; }
+.cd-photo { width: 100%; max-height: 34%; object-fit: cover; border-radius: 16px; background: #eee; }
+.cd-qr { display: flex; flex-direction: column; align-items: center; gap: 8px; padding: 16px; border-radius: 16px; background: #fff; border: 1px solid #dfe3ee; }
+.cd-qr img { width: min(100%, 280px); aspect-ratio: 1; }
+.cd-qr b { font-size: 26px; } .cd-qr small { color: #6a7596; letter-spacing: .08em; }
+.cd-totals { margin-top: auto; padding: 22px 26px; border-radius: 18px; background: var(--cd-brand); color: var(--cd-brand-ink); }
+.cd-row { display: flex; justify-content: space-between; font-size: 24px; padding: 4px 0; }
+.cd-grand { margin-top: 12px; padding-top: 12px; border-top: 2px solid rgba(255,255,255,.3); }
+.cd-grand span { display: block; font-size: 22px; font-weight: 700; color: #7fe3ee; letter-spacing: .04em; }
+.cd-grand b { display: block; font-size: clamp(48px, 7.5vw, 92px); line-height: 1.05; }
+.cd-lines { list-style: none; margin: 0; padding: 0; overflow-y: auto; scrollbar-width: none; display: flex; flex-direction: column; }
+.cd-lines::-webkit-scrollbar { display: none; }
+.cd-lines li { display: grid; grid-template-columns: 64px 1fr auto; align-items: center; gap: 18px; padding: 16px 12px; border-bottom: 1px solid #e3e6ee; }
+.cd-lines li.cd-new { background: #d9f4fa; border-left: 8px solid var(--cd-accent); border-radius: 10px; }
+.cd-qty { display: grid; place-items: center; height: 60px; border-radius: 12px; background: #e9ecf3; font-size: 30px; font-weight: 700; }
+.cd-name b { display: block; font-size: 32px; font-weight: 600; }
+.cd-name small { display: block; font-size: 22px; color: #5f6e9a; }
+.cd-name em { display: inline-block; margin-top: 4px; padding: 2px 12px; border-radius: 8px; background: #fbe9a8; font-style: normal; font-size: 18px; font-weight: 600; }
+.cd-price { font-size: 34px; font-weight: 700; }
+.cd-idle { align-items: center; justify-content: center; background: var(--cd-brand); color: var(--cd-brand-ink); text-align: center; gap: 24px; }
+.cd-idle-logo { max-width: 46vw; max-height: 46vh; } .cd-idle h1 { font-size: 64px; margin: 0; } .cd-idle p { font-size: 30px; margin: 0; opacity: .85; }
+@media (max-width: 800px) { .cd-body { grid-template-columns: 1fr; } .cd-side { order: 2; } .cd-chip { font-size: 20px; } .cd-chip.cd-big { font-size: 24px; } .cd-name b { font-size: 22px; } .cd-price { font-size: 24px; } }
+.cd-brandcard { display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 12px; padding: 20px; border-radius: 16px; background: #fff; border: 1px solid #dfe3ee; }
+.cd-brandcard img { max-width: 70%; max-height: 220px; } .cd-brandcard p { margin: 0; font-size: 22px; color: #5f6e9a; text-align: center; }

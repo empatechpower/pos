@@ -24,11 +24,12 @@ import { Kitchen } from "./views/Kitchen";
 import { Pair } from "./views/Pair";
 import { Pos } from "./views/Pos";
 import { Queue } from "./views/Queue";
+import { CustomerDisplay } from "./views/CustomerDisplay";
 
-type Route = "pos" | "kitchen" | "queue" | "credit" | "login" | "devices" | "prices" | "printers" | "orders" | "online" | "shop" | "kiosk" | "manager" | "tg" | "pricebook" | "pair";
+type Route = "display" | "pos" | "kitchen" | "queue" | "credit" | "login" | "devices" | "prices" | "printers" | "orders" | "online" | "shop" | "kiosk" | "manager" | "tg" | "pricebook" | "pair";
 const routeFromHash = (): Route => {
   const h = routeParts()[0] ?? "";
-  return h === "kitchen" || h === "queue" || h === "credit" || h === "login" || h === "devices" || h === "prices" || h === "printers" || h === "orders" || h === "online" || h === "shop" || h === "kiosk" || h === "manager" || h === "pos" || h === "tg" || h === "pricebook" || h === "pair" ? h : "manager";
+  return h === "display" || h === "kitchen" || h === "queue" || h === "credit" || h === "login" || h === "devices" || h === "prices" || h === "printers" || h === "orders" || h === "online" || h === "shop" || h === "kiosk" || h === "manager" || h === "pos" || h === "tg" || h === "pricebook" || h === "pair" ? h : "manager";
 };
 
 export function App() {
@@ -59,6 +60,9 @@ export function App() {
   if (route === "pair") return <ErrorBoundary><Pair /></ErrorBoundary>;
   // The in-store self-order kiosk is public too: it is opened full screen on the kiosk tablet (/kiosk?outlet=CODE).
   if (route === "kiosk") return <ErrorBoundary><Kiosk /></ErrorBoundary>;
+
+  // The customer-facing screen (items, totals, payment QR): public, full screen, fed by the till on the same device.
+  if (route === "display") return <ErrorBoundary><CustomerDisplay /></ErrorBoundary>;
 
   // A one-time link from the Telegram bot: it enrols this browser and signs the person in, so it comes before the enrolment screen.
   if (route === "tg") return <TelegramSignIn />;

@@ -18,13 +18,25 @@ restarts, and shows whether it is connected and what it printed.
 
 Keep the tablet plugged in and on the same Wi-Fi as the printers.
 
+## Two editions
+
+The same app builds in two editions (Gradle "flavors"):
+
+- **hub**: the background hub only (what is installed today). Prints and passes sign-in texts. Opens on the hub's own screen.
+- **pos** (Hub plus POS, `-pos` version, package `com.rezein.hub.pos`): runs the same hub, but opens on the shop's POS web app (`/pos`) full screen on screen 1,
+  shows the customer's items and total (`/display`) on the till's second screen, and passes the till's scanner reads to the POS.
+  The POS tells the app what to show by calling `RezeinNative.display(json)` (see `apps/web/src/customerDisplayBus.ts`), and receives scans as a
+  `rezein-scan` event on `window`. Scanner broadcasts understood: Sunmi's built-in scanner, and `com.rezein.SCAN` (extra `data`) for any other.
+  With no second screen attached, the customer display simply is not shown.
+
 ## Building it
 
 Needs JDK 17 or newer and the Android SDK (platform 34, build-tools 34). From this folder:
 
 ```
-./gradlew testDebugUnitTest        # the hub logic against a pretend shop and printers
-./gradlew assembleRelease          # app/build/outputs/apk/release/app-release.apk
+./gradlew testHubDebugUnitTest testPosDebugUnitTest   # the hub logic against a pretend shop and printers, and the POS edition's bridge
+./gradlew assembleHubRelease       # app/build/outputs/apk/hub/release/app-hub-release.apk (hub only)
+./gradlew assemblePosRelease       # app/build/outputs/apk/pos/release/app-pos-release.apk (Hub plus POS)
 ```
 
 The release APK is signed with the standard Android test key so it can be installed directly. A Play Store build needs a real

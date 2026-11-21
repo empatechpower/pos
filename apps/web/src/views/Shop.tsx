@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { cleanNote, comboSaving, defaultSelection, formatMoney, isCombo, menuFor, optionLines, priceRange, quoteOrder, readableOn, resolveOptions, type BusinessConfig, type Catalog, type ChosenOptionInput, type MenuEntry, type ShopStatus } from "@pos/core";
 import { OptionSheet } from "./OptionSheet";
 import { RollMoney } from "./RollMoney";
+import { PickupPicker } from "./PickupPicker";
 import "../shopProto.css";
 import { go, onRouteChange, queryParams } from "../nav";
 import { LANGS, detectedLang, greeting, lang, langMode, setLangMode, shortLabel, t, tx, useLang } from "../shopI18n";
@@ -765,6 +766,8 @@ function Menu({ info, catalog, config, loginError, recheck }: { info: Info; cata
     menu.slice(0, n).forEach((m) => addLine(m, m.options?.length ? defaultSelection(m.options) : [], 1));
   }, [menu]);
 
+  const [pickupAt, setPickupAt] = useState<number | null>(null);
+
   async function place() {
     if (!quote?.ok || busy) return;
     setBusy(true);
@@ -773,7 +776,7 @@ function Menu({ info, catalog, config, loginError, recheck }: { info: Info; cata
       const res = await fetch("/api/shop/orders", {
         method: "POST",
         headers: { "content-type": "application/json", ...(member ? { authorization: `Bearer ${localStorage.getItem(LS_MEMBER) ?? ""}` } : {}) },
-        body: JSON.stringify({ channelId, outletId: info.outletId, items, customerName: name, customerPhone: phone, spot: tableMode ? spot : "", expectedTotalCents: agreed ?? total, ...(payMethod === "credit" && member ? { payWithCredit: true, idempotencyKey: purchaseKey(JSON.stringify({ channelId, items, spot, m: member.id })) } : {}), ...(pointsAsk ? { usePoints: reqPts ?? "max" } : {}), ...(chosen && chosenOk ? { couponId: chosen.id } : {}) }),
+        body: JSON.stringify({ channelId, outletId: info.outletId, items, customerName: name, customerPhone: phone, spot: tableMode ? spot : "", expectedTotalCents: agreed ?? total, ...(pickupAt ? { pickupAt } : {}), ...(payMethod === "credit" && member ? { payWithCredit: true, idempotencyKey: purchaseKey(JSON.stringify({ channelId, items, spot, m: member.id })) } : {}), ...(pointsAsk ? { usePoints: reqPts ?? "max" } : {}), ...(chosen && chosenOk ? { couponId: chosen.id } : {}) }),
       });
       const j = (await res.json().catch(() => ({}))) as { orderId?: string; error?: string; totalCents?: number };
       if (res.ok && j.orderId) {
@@ -796,6 +799,9 @@ function Menu({ info, catalog, config, loginError, recheck }: { info: Info; cata
       } else if (res.status === 409 && j.error === "price_changed") {
         setAgreed(j.totalCents ?? null);
         setNote(`Prices changed while you were ordering. The new total is ${formatMoney(j.totalCents ?? 0)}. Tap Pay again to confirm.`);
+      } else if (j.error === "slot_not_available") {
+        setPickupAt(null);
+        setNote(tx("That pickup time is no longer available. Please choose another time."));
       } else if (j.error === "purchase_in_progress") {
         setNote(tx("Your order is still being placed. Please wait a moment, then tap Pay again. You will not be charged twice."));
       } else if (j.error === "idempotency_key_reused") {
@@ -1625,6 +1631,7 @@ function Menu({ info, catalog, config, loginError, recheck }: { info: Info; cata
           <>
             {back("Back to order summary", "summary")}
             {noteEl}
+            <PickupPicker outletId={info.outletId} productIds={[...new Set(items.map((i) => i.productId))]} value={pickupAt} onChange={setPickupAt} />
             <div className="e2e-card"><h3>{t("totalToPay", "Total to pay")}</h3><div className="sum-row grand" style={{ border: 0, margin: 0, padding: 0 }}><span className="k">{t("total", "Total")}</span><span className="v"><RollMoney cents={shownTotal} /></span></div></div>
             {member && (() => {
               const enough = credit >= shownTotal;

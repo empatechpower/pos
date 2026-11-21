@@ -36,6 +36,18 @@ android {
 
     buildFeatures { buildConfig = true }
 
+    // Two editions of the same app. "hub" is the background hub only (what is installed today). "pos" adds the POS on screen 1 and the
+    // customer's items and total on the till's second screen, and passes scanner reads to the POS. Both run the hub.
+    flavorDimensions += "edition"
+    productFlavors {
+        create("hub") { dimension = "edition" }
+        create("pos") {
+            dimension = "edition"
+            applicationIdSuffix = ".pos"
+            versionNameSuffix = "-pos"
+        }
+    }
+
     buildTypes {
         // `./gradlew bundleStore` makes the file for the Play Store (an .aab signed with the upload key).
         if (keystoreFile.exists()) {

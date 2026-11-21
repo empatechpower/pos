@@ -1,0 +1,20 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- The Hub plus POS edition: the same app, but it opens on the POS (screen 1) and shows the customer's items and total on a second screen.
+     The hub (printing, sign-in texts) runs exactly as in the hub-only edition. -->
+<manifest xmlns:android="http://schemas.android.com/apk/res/android" xmlns:tools="http://schemas.android.com/tools">
+    <application android:label="Rezein POS" tools:replace="android:label">
+        <!-- The hub's own screen is still there (to link the tablet and add printers), but it is no longer the launcher: the POS is. -->
+        <activity android:name=".MainActivity" android:exported="true" android:launchMode="singleTask" tools:node="replace" />
+        <activity
+            android:name=".PosActivity"
+            android:exported="true"
+            android:launchMode="singleTask"
+            android:configChanges="orientation|screenSize|keyboardHidden|smallestScreenSize|screenLayout"
+            android:windowSoftInputMode="adjustResize">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+        </activity>
+    </application>
+</manifest>
