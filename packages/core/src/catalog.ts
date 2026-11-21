@@ -1,6 +1,7 @@
 import type { Cents } from "./money.js";
 import { hasBuilder, validateBuilderSpec, type BuilderSpec } from "./builder.js";
 import type { OptionGroup } from "./options.js";
+import type { Availability } from "./windows.js";
 
 /**
  * Catalog: what is sold, the price lists it is sold under, and the channels (dining / fulfilment
@@ -37,6 +38,8 @@ export interface Product {
   names?: Record<string, string>;
   /** A build-your-own product: groups with rules and allowances (see builder.ts). A product has options OR a builder, not both. */
   builder?: BuilderSpec;
+  /** Computed for an outlet when its menu is read (never stored): orderable, available later (with the next opening), sold out. */
+  availability?: Availability;
   /** 0 or absent = no photo. Changes whenever the photo does, so devices refetch it. */
   imageVersion?: number;
   /** Hot/cold, protein, extras... Prices here are deltas on top of the pricebook's price. */

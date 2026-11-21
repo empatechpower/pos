@@ -15,6 +15,7 @@ export * from "./shop.js";
 export * from "./options.js";
 export * from "./builder.js";
 export * from "./outletMenu.js";
+export * from "./windows.js";
 export * from "./tab.js";
 export * from "./print/raster.js";
 export * from "./reports.js";
