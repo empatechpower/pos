@@ -35,7 +35,7 @@ export type OrderEventBody =
   | { type: "CouponApplied"; title: string; amountCents: Cents; minSpendCents: Cents }
   /** Points the member spent on this order (100 points = S$1). Reduces what is owed. */
   | { type: "PointsRedeemed"; points: number }
-  | { type: "ItemAdded"; lineId: string; productId: string; name: string; /** includes the price of any options */ unitCents: Cents; qty: number; bcrs?: boolean; pointsExempt?: boolean; options?: ChosenOption[] }
+  | { type: "ItemAdded"; lineId: string; productId: string; name: string; /** includes the price of any options */ unitCents: Cents; qty: number; bcrs?: boolean; pointsExempt?: boolean; taxInclusive?: boolean; taxGroup?: string; options?: ChosenOption[] }
   | { type: "ItemQtySet"; lineId: string; qty: number }
   | { type: "PaymentRecorded"; paymentId: string; method: PaymentMethod; amountCents: Cents; /** false = awaiting gateway confirmation */ confirmed: boolean }
   | { type: "PaymentConfirmed"; paymentId: string }
@@ -117,7 +117,7 @@ export function reduceOrder(orderId: string, events: readonly OrderEvent[]): Ord
     switch (e.type) {
       case "ItemAdded": {
         if (state.lines.some((l) => l.lineId === e.lineId)) break;
-        state.lines.push({ lineId: e.lineId, productId: e.productId, name: e.name, unitCents: e.unitCents, qty: e.qty, bcrs: e.bcrs, pointsExempt: e.pointsExempt, options: e.options });
+        state.lines.push({ lineId: e.lineId, productId: e.productId, name: e.name, unitCents: e.unitCents, qty: e.qty, bcrs: e.bcrs, pointsExempt: e.pointsExempt, ...(e.taxInclusive !== undefined ? { taxInclusive: e.taxInclusive } : {}), ...(e.taxGroup ? { taxGroup: e.taxGroup } : {}), options: e.options });
         break;
       }
       case "ItemQtySet": {

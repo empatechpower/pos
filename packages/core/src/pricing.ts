@@ -26,6 +26,10 @@ export interface PricingConfig {
   stackable: boolean;
   /** Smallest points redemption when points are applied. */
   minPointsRedeem: number;
+  /** Prices already include tax (the default for every line that does not say otherwise). Missing = tax is added on top, as before. */
+  taxInclusive?: boolean;
+  /** Tax groups beyond the default GST rate: id -> { name, rate }. A line names its group; a line with none uses `gstRate` as "GST". */
+  taxGroups?: Record<string, { name: string; rate: number }>;
 }
 
 export const DEFAULT_PRICING: PricingConfig = {
@@ -46,6 +50,10 @@ export interface PricedLine {
   /** Carries the deposit. Set from the item at the moment of sale. Only lines from before this setting existed have it unset, and they keep the old name rule so past orders do not change. */
   bcrs?: boolean;
   pointsExempt?: boolean;
+  /** This line's price already includes its tax. Overrides the merchant default. */
+  taxInclusive?: boolean;
+  /** Which tax group this line belongs to (see `taxGroups`). Default: the GST rate. */
+  taxGroup?: string;
 }
 
 export interface CouponInput {
@@ -83,9 +91,91 @@ export interface PriceResult {
   ignored?: "points";
   /** Coupon given but items subtotal below its minimum spend. */
   couponIneligible?: boolean;
+  /** The tax portion already INSIDE the total (for tax-inclusive prices); never added on top. */
+  taxIncluded: Cents;
+  /** Every tax, per group, said plainly: charged on top (`added`, part of `gst`) or already inside the prices (`included`). */
+  taxes: TaxLine[];
 }
 
+export interface TaxLine {
+  group: string;
+  name: string;
+  rate: number;
+  basis: "added" | "included";
+  cents: Cents;
+}
+
+const DEFAULT_TAX_GROUP = "default";
+
 const isBcrs = (l: PricedLine) => l.bcrs ?? /bcrs/i.test(l.name);
+
+/**
+ * Tax, per group. Prices that EXCLUDE tax have it added on top (rate x base). Prices that INCLUDE tax contain it already: the tax portion is
+ * gross x rate / (1 + rate), shown but never added (S$30.00 including 9% GST holds S$2.48 of tax). The deposit is never taxed. The bill
+ * discount and the service charge are shared between the lines in proportion to what each line is worth, so every cent is accounted for.
+ */
+function taxOf(lines: PricedLine[], subtotal: Cents, service: Cents, discount: Cents, cfg: PricingConfig): { added: Cents; included: Cents; taxes: TaxLine[] } {
+  if (!cfg.gstOn || subtotal <= 0) return { added: 0, included: 0, taxes: [] };
+  const buckets = new Map<string, { group: string; inclusive: boolean; gross: Cents }>();
+  for (const l of lines) {
+    const group = l.taxGroup ?? DEFAULT_TAX_GROUP;
+    const inclusive = l.taxInclusive ?? cfg.taxInclusive ?? false;
+    const key = `${group}|${inclusive ? "i" : "x"}`;
+    const b = buckets.get(key) ?? { group, inclusive, gross: 0 };
+    b.gross += l.unitCents * l.qty;
+    buckets.set(key, b);
+  }
+  // Share the discount and the service charge across the buckets by value; the last bucket takes the rounding remainder.
+  const list = [...buckets.values()];
+  let discLeft = discount;
+  let svcLeft = service;
+  let added = 0;
+  let included = 0;
+  const taxes: TaxLine[] = [];
+  list.forEach((b, i) => {
+    const last = i === list.length - 1;
+    const d = last ? discLeft : Math.round((discount * b.gross) / subtotal);
+    const sv = last ? svcLeft : Math.round((service * b.gross) / subtotal);
+    discLeft -= d;
+    svcLeft -= sv;
+    const base = Math.max(0, b.gross - d) + sv;
+    const g = b.group === DEFAULT_TAX_GROUP ? undefined : cfg.taxGroups?.[b.group];
+    const rate = g?.rate ?? cfg.gstRate;
+    const name = g?.name ?? "GST";
+    const cents = b.inclusive ? Math.round((base * rate) / (1 + rate)) : percentOf(base, rate);
+    if (b.inclusive) included += cents;
+    else added += cents;
+    const same = taxes.find((t) => t.group === b.group && t.basis === (b.inclusive ? "included" : "added"));
+    if (same) same.cents += cents;
+    else taxes.push({ group: b.group, name, rate, basis: b.inclusive ? "included" : "added", cents });
+  });
+  return { added, included, taxes: taxes.filter((t) => t.cents > 0) };
+}
+
+/** What a receipt or the checkout shows, in order, with the basis said plainly: "Taxes (included)" is inside the total, "GST" is added to it. */
+export interface TotalsLine {
+  key: "subtotal" | "coupon" | "service" | "tax_added" | "tax_included" | "deposit" | "points" | "total";
+  label: string;
+  cents: Cents;
+  /** Money taken off (a coupon or points). */
+  negative?: boolean;
+  /** The deposit is refundable cash and is never taxed. */
+  taxable?: boolean;
+  /** For tax lines: the group and rate, so the basis is never hidden. */
+  group?: string;
+  rate?: number;
+}
+
+export function totalsLines(r: PriceResult): TotalsLine[] {
+  const out: TotalsLine[] = [{ key: "subtotal", label: "Subtotal", cents: r.subtotal }];
+  if (r.couponDiscount > 0) out.push({ key: "coupon", label: "Coupon", cents: r.couponDiscount, negative: true });
+  if (r.service > 0) out.push({ key: "service", label: "Service charge", cents: r.service });
+  for (const t of r.taxes) out.push({ key: t.basis === "added" ? "tax_added" : "tax_included", label: t.basis === "added" ? t.name : `${t.name} (included)`, cents: t.cents, group: t.group, rate: t.rate });
+  if (r.bcrs > 0) out.push({ key: "deposit", label: "Deposit", cents: r.bcrs, taxable: false });
+  if (r.pointsDiscount > 0) out.push({ key: "points", label: "Points", cents: r.pointsDiscount, negative: true });
+  out.push({ key: "total", label: "Total", cents: r.total });
+  return out;
+}
 
 export function priceOrder(input: PriceInput): PriceResult {
   const cfg = input.config ?? DEFAULT_PRICING;
@@ -111,10 +201,8 @@ export function priceOrder(input: PriceInput): PriceResult {
   const service = cfg.serviceOn !== false && (input.serviceCharge ?? input.fulfilment === "dine_in") ? percentOf(Math.max(0, subtotal - couponDiscount), cfg.serviceRate) : 0;
 
   // GST is never charged on the deposit. For points, it is fixed on the full items + service.
-  const gstBase = points
-    ? subtotal + service
-    : Math.max(0, subtotal - couponDiscount) + service;
-  const gst = cfg.gstOn ? percentOf(gstBase, cfg.gstRate) : 0;
+  const taxDiscount = points ? 0 : couponDiscount;
+  const { added: gst, taxes, included: taxIncluded } = taxOf(lines, subtotal, service, taxDiscount, cfg);
 
   let pointsUsed = 0;
   let pointsDiscount = 0;
@@ -148,5 +236,7 @@ export function priceOrder(input: PriceInput): PriceResult {
     total,
     ignored,
     couponIneligible: coupon ? !couponEligible : undefined,
+    taxIncluded,
+    taxes,
   };
 }

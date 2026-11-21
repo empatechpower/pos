@@ -39,6 +39,8 @@ export interface QuoteLine {
   unitCents: number;
   qty: number;
   pointsExempt?: boolean;
+  taxInclusive?: boolean;
+  taxGroup?: string;
   /** The item's deposit setting at the moment of sale, frozen on the order line. */
   bcrs: boolean;
   options: ChosenOption[];
@@ -75,12 +77,12 @@ export function quoteOrder(catalog: Catalog, config: BusinessConfig, ctx: PriceC
     const have = merged.get(key);
     const qty = (have?.qty ?? 0) + it.qty;
     if (qty > MAX_QTY) return { ok: false, error: "bad_quantity", productId: it.productId };
-    merged.set(key, { productId: it.productId, name: m.name, unitCents: m.priceCents + r.extraCents, qty, pointsExempt: m.pointsExempt, bcrs: !!m.bcrs, options: note ? [...r.options, { group: "Special request", name: `Note: ${note}`, qty: 1, priceCents: 0 }] : r.options });
+    merged.set(key, { productId: it.productId, name: m.name, unitCents: m.priceCents + r.extraCents, qty, pointsExempt: m.pointsExempt, bcrs: !!m.bcrs, ...(m.taxInclusive !== undefined ? { taxInclusive: m.taxInclusive } : {}), ...(m.taxGroup ? { taxGroup: m.taxGroup } : {}), options: note ? [...r.options, { group: "Special request", name: `Note: ${note}`, qty: 1, priceCents: 0 }] : r.options });
   }
   const lines = [...merged.values()];
   if (lines.length > MAX_LINES) return { ok: false, error: "too_many_items" };
   const fulfilment = fulfilmentOf(channel.kind);
-  const priced = priceOrder({ lines: lines.map((l) => ({ name: l.name, unitCents: l.unitCents, qty: l.qty, pointsExempt: l.pointsExempt, bcrs: l.bcrs })), fulfilment, serviceCharge: channel.serviceCharge, points: points ?? null, coupon: coupon ?? null, config: config.pricing });
+  const priced = priceOrder({ lines: lines.map((l) => ({ name: l.name, unitCents: l.unitCents, qty: l.qty, pointsExempt: l.pointsExempt, bcrs: l.bcrs, taxInclusive: l.taxInclusive, taxGroup: l.taxGroup })), fulfilment, serviceCharge: channel.serviceCharge, points: points ?? null, coupon: coupon ?? null, config: config.pricing });
   return { ok: true, channel, fulfilment, lines, priced };
 }
 

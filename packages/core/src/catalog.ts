@@ -1,4 +1,5 @@
 import type { Cents } from "./money.js";
+import { hasBuilder, validateBuilderSpec, type BuilderSpec } from "./builder.js";
 import type { OptionGroup } from "./options.js";
 
 /**
@@ -22,6 +23,10 @@ export interface Product {
   category: string;
   soldOut?: boolean;
   pointsExempt?: boolean;
+  /** This item's price already includes tax (overrides the merchant default). */
+  taxInclusive?: boolean;
+  /** Its tax group, when it is not taxed at the default GST rate (see PricingConfig.taxGroups). */
+  taxGroup?: string;
   /** Carries the container deposit (BCRS, S$0.10 each). Set on the item; never guessed from its name when it is sold. */
   bcrs?: boolean;
   /** A line or two shown under the name. */
@@ -30,6 +35,8 @@ export interface Product {
   altName?: string;
   /** The merchant's own name for this item in each language (code -> name), e.g. { zh: "咖椰面包" }. Never machine-translated on the fly; a language with no entry shows `name`. */
   names?: Record<string, string>;
+  /** A build-your-own product: groups with rules and allowances (see builder.ts). A product has options OR a builder, not both. */
+  builder?: BuilderSpec;
   /** 0 or absent = no photo. Changes whenever the photo does, so devices refetch it. */
   imageVersion?: number;
   /** Hot/cold, protein, extras... Prices here are deltas on top of the pricebook's price. */
@@ -74,6 +81,8 @@ export interface Catalog {
   pricebooks: Pricebook[];
   channels: Channel[];
   assignments: PricebookAssignment[];
+  /** The merchant's own name for a category in each language: category -> (language code -> name). Never machine-translated; a language with no entry shows the category as entered. */
+  categoryNames?: Record<string, Record<string, string>>;
 }
 
 export interface PriceContext {
@@ -185,6 +194,20 @@ export function validateCatalog(c: Catalog): string[] {
         else if (part.id === p.id) problems.push(`${p.id}: a combo cannot contain itself`);
         else if (part.options?.some((og) => og.choices.some((x) => x.productId))) problems.push(`${p.id}: a combo cannot contain another combo ("${part.name}")`);
       }
+    }
+  }
+  for (const p of c.products) {
+    if (!p.builder) continue;
+    if (p.options?.length) problems.push(`${p.id}: a product has options or a builder, not both`);
+    problems.push(...validateBuilderSpec(p.builder, p.id, (id) => {
+      const l = c.products.find((x) => x.id === id);
+      return { exists: !!l, hasOptions: !!l && (!!l.options?.length || hasBuilder(l.builder)) };
+    }));
+  }
+  for (const [cat, names] of Object.entries(c.categoryNames ?? {})) {
+    for (const [code, n] of Object.entries(names)) {
+      if (!/^[a-z]{2,3}$/.test(code)) problems.push(`category ${cat}: "${code}" is not a language code`);
+      if (typeof n !== "string" || n.length > 80) problems.push(`category ${cat}: the ${code} name is too long`);
     }
   }
   return problems;
