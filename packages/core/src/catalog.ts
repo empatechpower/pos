@@ -1,7 +1,7 @@
 import { validateProductStock, type ProductStock } from "./stock.js";
 import type { Cents } from "./money.js";
 import { hasBuilder, validateBuilderSpec, type BuilderSpec } from "./builder.js";
-import type { OptionGroup } from "./options.js";
+import { OPTION_PREFIXES, type OptionGroup } from "./options.js";
 import type { Availability } from "./windows.js";
 
 /**
@@ -299,6 +299,7 @@ export function validateOptions(productId: string, groups: readonly OptionGroup[
   const out: string[] = [];
   const at = (m: string) => out.push(`${productId}: ${m}`);
   if (groups.length > 6) at("too many option groups (6 at most)");
+  if (groups.filter((g) => g.variant).length > 2) at("a product has at most 2 variant axes");
   const gids = new Set<string>();
   for (const g of groups) {
     if (!g.id || gids.has(g.id)) at(`option group id "${g.id}" is empty or repeated`);
@@ -308,6 +309,12 @@ export function validateOptions(productId: string, groups: readonly OptionGroup[
     if (g.variant && (g.kind !== "single" || !g.required)) at(`variant group "${g.name}" must be a required choose-one group`);
     if (g.required && g.kind !== "single") at(`only a choose-one group can be required ("${g.name}")`);
     if (!g.choices?.length || g.choices.length > 30) at(`option group "${g.name}" needs 1 to 30 choices`);
+    for (const k of ["min", "free"] as const) {
+      if (g[k] === undefined) continue;
+      if (g.kind === "single") at(`a choose-one group cannot have a ${k === "min" ? "minimum" : "free allowance"} ("${g.name}")`);
+      else if (!Number.isInteger(g[k]) || g[k]! < 0) at(`option group "${g.name}": ${k} must be a whole number of 0 or more`);
+    }
+    if (g.min !== undefined && g.max !== undefined && g.min > g.max) at(`option group "${g.name}": the minimum is above the maximum`);
     for (const k of ["max", "maxEach"] as const) if (g[k] !== undefined && (!Number.isInteger(g[k]) || g[k]! < 1)) at(`option group "${g.name}": ${k} must be a whole number of 1 or more`);
     const cids = new Set<string>();
     let defaults = 0;
@@ -316,6 +323,7 @@ export function validateOptions(productId: string, groups: readonly OptionGroup[
       cids.add(c.id);
       if (!c.name?.trim() || c.name.length > 60) at(`a choice in "${g.name}" needs a name of up to 60 characters`);
       if (!Number.isSafeInteger(c.priceCents) || c.priceCents < 0) at(`choice "${c.name}" has an invalid price`);
+      if (c.prefix !== undefined && !OPTION_PREFIXES.includes(c.prefix)) at(`choice "${c.name}" has an unknown prefix`);
       if (c.default) defaults++;
     }
     if (defaults > 1 || (defaults && g.kind !== "single")) at(`option group "${g.name}": only a choose-one group can have one default`);

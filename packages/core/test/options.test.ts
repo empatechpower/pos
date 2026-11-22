@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
-  PRESETS, defaultSelection, itemLabel, kitchenTicket, newId, optionLines, plainText, priceRange, quoteOrder, receipt, reduceOrder, resolveOptions, validateCatalog,
+  PRESETS, defaultSelection, itemLabel, kitchenTicket, newId, optionLines, plainText, priceRange, quoteOrder, receipt, reduceOrder, resolveOptions, validateCatalog, validateOptions,
   type Catalog, type OptionGroup, type OrderEvent,
 } from "../src/index.js";
 
@@ -190,5 +190,48 @@ describe("validating option groups", () => {
   it("limits description and alternative name length", () => {
     const c = { ...base, products: [{ id: "p", name: "P", category: "C", description: "x".repeat(201), altName: "y".repeat(81) }] };
     expect(validateCatalog(c).join()).toMatch(/description is too long[\s\S]*alternative name is too long/);
+  });
+});
+
+describe("modifier classes: Min / Max / Free by selection order, and prefixes (event handout 1.3)", () => {
+  const sup: OptionGroup[] = [{
+    id: "sup", name: "Supplements", kind: "qty", required: false, min: 3, max: 6, free: 3, maxEach: 2,
+    choices: [
+      { id: "avo", name: "Avocado", priceCents: 150 }, { id: "egg", name: "Egg", priceCents: 100 }, { id: "corn", name: "Corn", priceCents: 80 },
+      { id: "mush", name: "Mushroom", priceCents: 150 }, { id: "tofu", name: "Tofu", priceCents: 100 },
+    ],
+  }];
+  const pick = (...ids: string[]) => ids.map((choiceId) => ({ groupId: "sup", choiceId }));
+  it("the first three units picked are free; later ones pay their own price (the worked example: S$2.50)", () => {
+    const r = resolveOptions(sup, pick("avo", "egg", "corn", "mush", "tofu"));
+    expect(r.ok && r.extraCents).toBe(250);
+    expect(r.ok && r.options.map((o) => o.freeQty ?? 0)).toEqual([1, 1, 1, 0, 0]);
+  });
+  it("it is the order picked, not the cheapest: picking the dear ones last charges them", () => {
+    expect(resolveOptions(sup, pick("corn", "egg", "avo", "tofu", "mush"))).toMatchObject({ ok: true, extraCents: 250 });
+    expect(resolveOptions(sup, pick("mush", "tofu", "avo", "egg", "corn"))).toMatchObject({ ok: true, extraCents: 180 }); // mushroom, tofu, avocado free; egg 1.00 + corn 0.80
+  });
+  it("is live: removing a free unit makes the earliest paid one free", () => {
+    expect(resolveOptions(sup, pick("avo", "egg", "corn", "mush", "tofu"))).toMatchObject({ extraCents: 250 });
+    expect(resolveOptions(sup, pick("egg", "corn", "mush", "tofu"))).toMatchObject({ ok: true, extraCents: 100 }); // avocado removed: mushroom is now free, only tofu pays
+  });
+  it("counts units, not options: a doubled choice is two units, and the minimum and maximum count units", () => {
+    expect(resolveOptions(sup, [{ groupId: "sup", choiceId: "avo", qty: 2 }, { groupId: "sup", choiceId: "egg" }])).toMatchObject({ ok: true, extraCents: 0 }); // 3 units, all free
+    expect(resolveOptions(sup, [{ groupId: "sup", choiceId: "avo", qty: 2 }])).toMatchObject({ ok: false, error: "too_few_options" });
+    expect(resolveOptions(sup, [{ groupId: "sup", choiceId: "avo", qty: 2 }, { groupId: "sup", choiceId: "egg", qty: 2 }, { groupId: "sup", choiceId: "corn", qty: 2 }, { groupId: "sup", choiceId: "mush" }])).toMatchObject({ ok: false, error: "too_many_options" });
+  });
+  it("a prefix is an instruction on the ticket and never a price", () => {
+    const g: OptionGroup[] = [{ id: "std", name: "Ingredients", kind: "multi", required: false, choices: [{ id: "onion", name: "Onion", priceCents: 0, prefix: "no" }, { id: "sauce", name: "Sauce", priceCents: 0, prefix: "side" }] }];
+    const r = resolveOptions(g, [{ groupId: "std", choiceId: "onion" }, { groupId: "std", choiceId: "sauce" }]);
+    expect(r.ok && optionLines(r.options)).toEqual(["No Onion", "Side Sauce"]);
+    expect(r.ok && r.extraCents).toBe(0);
+  });
+  it("is checked when the menu is saved: at most 2 variant axes, a sensible minimum, a known prefix", () => {
+    const v = (id: string): OptionGroup => ({ id, name: id, kind: "single", required: true, variant: true, choices: [{ id: "a", name: "A", priceCents: 0 }, { id: "b", name: "B", priceCents: 0 }] });
+    expect(validateOptions("p", [v("size"), v("temp")])).toEqual([]);
+    expect(validateOptions("p", [v("size"), v("temp"), v("colour")]).join()).toMatch(/at most 2 variant axes/);
+    expect(validateOptions("p", [{ ...sup[0]!, min: 7 }]).join()).toMatch(/minimum is above the maximum/);
+    expect(validateOptions("p", [{ id: "s", name: "S", kind: "single", required: false, min: 1, choices: [{ id: "a", name: "A", priceCents: 0 }] }]).join()).toMatch(/cannot have a minimum/);
+    expect(validateOptions("p", [{ ...sup[0]!, choices: [{ id: "a", name: "A", priceCents: 0, prefix: "x" as never }] }]).join()).toMatch(/unknown prefix/);
   });
 });

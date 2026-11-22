@@ -14,7 +14,13 @@ export interface OptionChoice {
   default?: boolean;
   /** Combos: the menu item this choice stands for. Its sold-out state follows that item, and a kitchen ticket prints it as its own item. */
   productId?: string;
+  /** An instruction about the item's standard ingredients (14 Nov handout 1.3): No = leave it out, Side = serve it separately, Only = only this one, Lite = less of it. Preparation only: it never changes stock unless mapped in setup. */
+  prefix?: OptionPrefix;
 }
+
+export type OptionPrefix = "no" | "side" | "only" | "lite";
+export const OPTION_PREFIXES: readonly OptionPrefix[] = ["no", "side", "only", "lite"];
+export const PREFIX_LABEL: Record<OptionPrefix, string> = { no: "No", side: "Side", only: "Only", lite: "Lite" };
 
 export interface OptionGroup {
   id: string;
@@ -29,6 +35,10 @@ export interface OptionGroup {
   max?: number;
   /** qty groups: most of any one choice. Default 5. */
   maxEach?: number;
+  /** multi / qty groups: fewest units in total (counting quantities). A group with a minimum above 0 must be filled in before the item can be added. */
+  min?: number;
+  /** multi / qty groups: the first N units picked, in the order they were picked, are free; every later unit pays its own price (handout 1.3). Live: remove a free unit and the earliest paid one becomes free. */
+  free?: number;
   choices: OptionChoice[];
 }
 
@@ -47,9 +57,12 @@ export interface ChosenOption {
   priceCents: Cents;
   /** Combos: the menu item chosen for this part. */
   productId?: string;
+  /** How many of `qty` fell inside the group's free allowance (charged 0). */
+  freeQty?: number;
+  prefix?: OptionPrefix;
 }
 
-export type OptionError = "unknown_option" | "option_sold_out" | "missing_required" | "too_many_options" | "bad_option_quantity";
+export type OptionError = "unknown_option" | "option_sold_out" | "missing_required" | "too_many_options" | "too_few_options" | "bad_option_quantity";
 
 export const MAX_EACH_DEFAULT = 5;
 export const QTY_MAX_DEFAULT = 10;
@@ -62,6 +75,8 @@ export type Resolved = { ok: true; options: ChosenOption[]; extraCents: Cents; k
  */
 export function resolveOptions(groups: readonly OptionGroup[] | undefined, input: readonly ChosenOptionInput[] = []): Resolved {
   const byGroup = new Map<string, Map<string, number>>();
+  const freeBy = new Map<string, Map<string, number>>(); // group -> choice -> units that fell inside the free allowance
+  const freeLeft = new Map<string, number>();
   for (const sel of input) {
     const group = groups?.find((g) => g.id === sel.groupId);
     const choice = group?.choices.find((c) => c.id === sel.choiceId);
@@ -72,6 +87,17 @@ export function resolveOptions(groups: readonly OptionGroup[] | undefined, input
     const m = byGroup.get(group.id) ?? new Map<string, number>();
     m.set(choice.id, (m.get(choice.id) ?? 0) + qty);
     byGroup.set(group.id, m);
+    // The free allowance is used up in the order the units were picked, one unit at a time.
+    if (group.kind !== "single" && (group.free ?? 0) > 0) {
+      const left = freeLeft.get(group.id) ?? group.free!;
+      const used = Math.min(left, qty);
+      freeLeft.set(group.id, left - used);
+      if (used > 0) {
+        const f = freeBy.get(group.id) ?? new Map<string, number>();
+        f.set(choice.id, (f.get(choice.id) ?? 0) + used);
+        freeBy.set(group.id, f);
+      }
+    }
   }
 
   const options: ChosenOption[] = [];
@@ -86,6 +112,7 @@ export function resolveOptions(groups: readonly OptionGroup[] | undefined, input
     } else {
       const max = g.max ?? (g.kind === "multi" ? g.choices.length : QTY_MAX_DEFAULT);
       if (total > max) return { ok: false, error: "too_many_options", groupId: g.id };
+      if (total < (g.min ?? 0)) return { ok: false, error: "too_few_options", groupId: g.id };
       for (const q of picked?.values() ?? []) {
         if (g.kind === "multi" && q > 1) return { ok: false, error: "bad_option_quantity", groupId: g.id };
         if (g.kind === "qty" && q > (g.maxEach ?? MAX_EACH_DEFAULT)) return { ok: false, error: "bad_option_quantity", groupId: g.id };
@@ -94,8 +121,9 @@ export function resolveOptions(groups: readonly OptionGroup[] | undefined, input
     for (const c of g.choices) {
       const q = picked?.get(c.id);
       if (!q) continue;
-      options.push({ group: g.name, name: c.name, qty: q, priceCents: c.priceCents, ...(c.productId ? { productId: c.productId } : {}) });
-      extra += c.priceCents * q;
+      const free = freeBy.get(g.id)?.get(c.id) ?? 0;
+      options.push({ group: g.name, name: c.name, qty: q, priceCents: c.priceCents, ...(c.productId ? { productId: c.productId } : {}), ...(free ? { freeQty: free } : {}), ...(c.prefix ? { prefix: c.prefix } : {}) });
+      extra += c.priceCents * (q - free);
       keyParts.push(`${g.id}:${c.id}:${q}`);
     }
   }
@@ -129,7 +157,10 @@ export function priceRange(baseCents: Cents, groups: readonly OptionGroup[] | un
 
 /** Short lines describing a line's options, for tickets and receipts: "Cold", "Sunny Side Egg x2". */
 export function optionLines(options: readonly ChosenOption[] | undefined): string[] {
-  return (options ?? []).map((o) => (o.qty > 1 ? `${o.name} x${o.qty}` : o.name));
+  return (options ?? []).map((o) => {
+    const name = o.prefix ? `${PREFIX_LABEL[o.prefix]} ${o.name}` : o.name;
+    return o.qty > 1 ? `${name} x${o.qty}` : name;
+  });
 }
 
 /** A combo is an item whose choices stand for other menu items (a main, a side, a drink). */

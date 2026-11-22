@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { comboSaving, formatMoney, isCombo, validateOptions, type Catalog, type OptionChoice, type OptionGroup, type Product } from "@pos/core";
+import { OPTION_PREFIXES, PREFIX_LABEL, comboSaving, formatMoney, isCombo, validateOptions, type Catalog, type OptionChoice, type OptionGroup, type Product } from "@pos/core";
 
 const uid = (p: string) => `${p}${Math.random().toString(36).slice(2, 7)}`;
 const toCents = (t: string): number | null => {
@@ -104,6 +104,13 @@ export function OptionsEditor({ product, catalog, onSave, onClose }: Props) {
                   {g.kind === "single" && (
                     <label><input type="checkbox" checked={g.required} onChange={(e) => patch(gi, (x) => ({ ...x, required: e.target.checked, variant: e.target.checked ? x.variant : undefined }))} /> Must choose</label>
                   )}
+                  {g.kind !== "single" && (
+                    <>
+                      <label title="Fewest units the customer must pick (counting quantities). Leave empty for none.">Min <input style={{ width: 52 }} inputMode="numeric" aria-label="Minimum units" value={g.min ?? ""} onChange={(e) => patch(gi, (x) => ({ ...x, min: e.target.value === "" ? undefined : Math.max(0, Math.floor(Number(e.target.value.replace(/\D/g, "")) || 0)) }))} /></label>
+                      <label title="Most units in total. Leave empty for no limit.">Max <input style={{ width: 52 }} inputMode="numeric" aria-label="Maximum units" value={g.max ?? ""} onChange={(e) => patch(gi, (x) => ({ ...x, max: e.target.value === "" ? undefined : Math.max(1, Math.floor(Number(e.target.value.replace(/\D/g, "")) || 1)) }))} /></label>
+                      <label title="The first units picked, in the order they were picked, cost nothing; later ones pay their own price.">Free <input style={{ width: 52 }} inputMode="numeric" aria-label="Free units" value={g.free ?? ""} onChange={(e) => patch(gi, (x) => ({ ...x, free: e.target.value === "" ? undefined : Math.max(0, Math.floor(Number(e.target.value.replace(/\D/g, "")) || 0)) || undefined }))} /></label>
+                    </>
+                  )}
                   {g.kind === "single" && g.required && (
                     <label title="Each choice is its own line in the bag, e.g. Hot and Iced coffee."><input type="checkbox" checked={!!g.variant} onChange={(e) => patch(gi, (x) => ({ ...x, variant: e.target.checked || undefined }))} /> Variant</label>
                   )}
@@ -123,6 +130,12 @@ export function OptionsEditor({ product, catalog, onSave, onClose }: Props) {
                   )}
                   <span className="oe-plus">+<input inputMode="decimal" placeholder="0.00" aria-label="Top-up price" value={prices[`${g.id}/${c.id}`] ?? (c.priceCents ? (c.priceCents / 100).toFixed(2) : "")}
                     onChange={(e) => { setPrices((p) => ({ ...p, [`${g.id}/${c.id}`]: e.target.value })); const v = toCents(e.target.value); if (v !== null) patchChoice(gi, ci, (x) => ({ ...x, priceCents: v })); }} /></span>
+                  {!slot && g.kind !== "single" && (
+                    <select aria-label="Kitchen instruction" title="An instruction about the item's usual ingredients: No onion, Side sauce, Only, Lite. It changes the ticket, not the price or stock." value={c.prefix ?? ""} onChange={(e) => patchChoice(gi, ci, (x) => ({ ...x, prefix: (e.target.value || undefined) as OptionChoice["prefix"] }))}>
+                      <option value="">No instruction</option>
+                      {OPTION_PREFIXES.map((k) => <option key={k} value={k}>{PREFIX_LABEL[k]}</option>)}
+                    </select>
+                  )}
                   {!slot && <label className="oe-so"><input type="checkbox" checked={!!c.soldOut} onChange={(e) => patchChoice(gi, ci, (x) => ({ ...x, soldOut: e.target.checked || undefined }))} /> Sold out</label>}
                   <button className="secondary sm" aria-label={`Remove ${c.name || "choice"}`} onClick={() => patch(gi, (x) => ({ ...x, choices: x.choices.filter((_, i) => i !== ci) }))}>✕</button>
                 </div>

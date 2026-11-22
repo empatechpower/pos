@@ -1,6 +1,6 @@
 import { useMemo, useState } from "react";
 import { tx } from "../shopI18n";
-import { MAX_NOTE, defaultSelection, formatMoney, resolveOptions, type ChosenOptionInput, type OptionGroup } from "@pos/core";
+import { MAX_NOTE, PREFIX_LABEL, defaultSelection, formatMoney, resolveOptions, type ChosenOptionInput, type OptionGroup } from "@pos/core";
 
 interface Props {
   name: string;
@@ -36,7 +36,7 @@ export function OptionSheet({ name, description, photoUrl, baseCents, groups, in
   const [qty, setQty] = useState(1);
   const r = useMemo(() => resolveOptions(groups, sel), [groups, sel]);
   const total = baseCents + (r.ok ? r.extraCents : 0);
-  const missing = !r.ok && r.error === "missing_required" ? groups.find((g) => g.id === r.groupId)?.name : null;
+  const missing = !r.ok && (r.error === "missing_required" || r.error === "too_few_options") ? groups.find((g) => g.id === r.groupId)?.name : null;
 
   /** What the item costs with this variant picked (other choices kept), so the tile, the total and the bag all say the same number. */
   const variantPrice = (g: OptionGroup, choiceId: string) => {
@@ -49,8 +49,14 @@ export function OptionSheet({ name, description, photoUrl, baseCents, groups, in
   const step = (g: OptionGroup, choiceId: string, d: number) =>
     setSel((cur) => {
       const n = Math.max(0, Math.min(g.maxEach ?? MAX_EACH, countOf(cur, g.id, choiceId) + d));
+      const at = cur.findIndex((s) => s.groupId === g.id && s.choiceId === choiceId);
       const rest = cur.filter((s) => !(s.groupId === g.id && s.choiceId === choiceId));
-      return n ? [...rest, { groupId: g.id, choiceId, qty: n }] : rest;
+      if (!n) return rest;
+      const next = { groupId: g.id, choiceId, qty: n };
+      if (at < 0) return [...rest, next];
+      const out = [...rest];
+      out.splice(at, 0, next); // its first-pick position stays, because the free allowance follows the order things were picked
+      return out;
     });
   const used = (g: OptionGroup) => sel.filter((s) => s.groupId === g.id).reduce((n, s) => n + (s.qty ?? 1), 0);
 
@@ -73,7 +79,7 @@ export function OptionSheet({ name, description, photoUrl, baseCents, groups, in
               <section key={g.id} className="opt-group">
                 <div className="opt-gh">
                   <b>{g.name}</b>
-                  <span className="muted">{g.kind === "single" ? (g.required ? tx("Choose 1") : tx("Choose up to 1")) : g.kind === "multi" ? tx("Choose any") : tx("Up to {n}", { n: max })}</span>
+                  <span className="muted">{g.kind === "single" ? (g.required ? tx("Choose 1") : tx("Choose up to 1")) : (g.min ?? 0) > 0 ? tx("Choose {a} to {b}", { a: g.min!, b: max }) : g.kind === "multi" ? tx("Choose any") : tx("Up to {n}", { n: max })}{(g.free ?? 0) > 0 ? ` · ${tx("first {n} free", { n: g.free! })}` : ""}</span>
                 </div>
                 {g.kind === "single" || g.kind === "multi" ? (
                   <div className="opt-pills">
@@ -87,7 +93,7 @@ export function OptionSheet({ name, description, photoUrl, baseCents, groups, in
                           aria-pressed={on}
                           onClick={() => (g.kind === "single" && (g.required || !on) ? pickOne(g, c.id) : toggle(g, c.id))} // an optional choose-one can be tapped again to clear it
                         >
-                          <span>{c.name}</span>
+                          <span>{c.prefix ? `${PREFIX_LABEL[c.prefix]} ${c.name}` : c.name}</span>
                           {c.soldOut ? <small>{tx("Sold out")}</small> : g.variant && g.kind === "single" ? <small>{formatMoney(variantPrice(g, c.id))}</small> : c.priceCents > 0 ? <small>+{formatMoney(c.priceCents)}</small> : null}
                         </button>
                       );
@@ -97,7 +103,7 @@ export function OptionSheet({ name, description, photoUrl, baseCents, groups, in
                   g.choices.map((c) => (
                     <div className="opt-row" key={c.id}>
                       <div>
-                        <b>{c.name}</b>
+                        <b>{c.prefix ? `${PREFIX_LABEL[c.prefix]} ${c.name}` : c.name}</b>
                         <div className="muted">{c.soldOut ? tx("Sold out") : tx("+ {amt} each", { amt: formatMoney(c.priceCents) })}</div>
                       </div>
                       <span className="opt-step">
