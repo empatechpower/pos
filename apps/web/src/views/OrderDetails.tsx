@@ -69,6 +69,7 @@ export function OrderDetails({ order: o, config }: { order: OrderState; config: 
         {row("Storefront", o.source === "online" ? "Scan-to-Order" : "Counter")}
         {row("Channel", o.channelName)}
         {row("Table No.", o.spot)}
+        {row("Order note", o.note)}
         {row("Customer", [o.customerName, o.customerPhone].filter(Boolean).join(" · ") || undefined)}
       </div>
       {comm && (
@@ -89,7 +90,7 @@ export function OrderDetails({ order: o, config }: { order: OrderState; config: 
           {lines.map((l) => (
             <tr key={l.lineId}>
               <td>{l.qty}</td>
-              <td>{l.name}{optionLines(l.options).map((x) => <div key={x} className="muted">- {x}</div>)}</td>
+              <td>{l.name}{l.override && <div className="muted">price changed from {formatMoney(l.listUnitCents ?? 0)} · {l.override.reason}{l.override.approvedByName ? ` · ${l.override.approvedByName}` : ""}</div>}{optionLines(l.options).map((x) => <div key={x} className="muted">- {x}</div>)}</td>
               <td>{(l.unitCents / 100).toFixed(2)}</td>
               <td>{((l.unitCents * l.qty) / 100).toFixed(2)}</td>
             </tr>
@@ -102,6 +103,7 @@ export function OrderDetails({ order: o, config }: { order: OrderState; config: 
         {t.gst > 0 && <div className="od-row"><span>GST</span><span>{formatMoney(t.gst)}</span></div>}
         {t.bcrs > 0 && <div className="od-row"><span>BCRS deposit</span><span>{formatMoney(t.bcrs)}</span></div>}
         {t.couponDiscount > 0 && <div className="od-row"><span>Coupon</span><span>-{formatMoney(t.couponDiscount)}</span></div>}
+        {t.discountCents > 0 && <div className="od-row"><span>Discount{(o.discounts ?? []).length ? ` · ${(o.discounts ?? []).map((x) => x.reason).join(", ")}` : ""}</span><span>-{formatMoney(t.discountCents)}</span></div>}
         {t.pointsDiscount > 0 && <div className="od-row"><span>Points</span><span>-{formatMoney(t.pointsDiscount)}</span></div>}
         <div className="od-row od-grand"><span>Total</span><span>{formatMoney(t.total)}</span></div>
         {o.payments.filter((p) => p.confirmed && !p.paymentId.startsWith("refund:")).map((p, i) => <div className="od-row" key={i}><span>Paid by {METHOD[p.method] ?? p.method}</span><span>{formatMoney(p.amountCents)}</span></div>)}

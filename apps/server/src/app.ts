@@ -19,6 +19,7 @@ import { registerTabRoutes } from "./tabRoutes.js";
 import { AmountNotAllowed, issueQr, loadPaynow, savePaynow } from "./paynow.js";
 import { applyOption, loadKiosk, OPTION_KEYS, optionsOf, saveKiosk, saveSetting } from "./settings.js";
 import { openShiftOf, registerShifts } from "./shifts.js";
+import { registerDiscountPolicy } from "./discountPolicy.js";
 import { refundYeahpay, sendMail, type Integrations } from "./integrations.js";
 import { registerTelegram } from "./telegram.js";
 import { MemberStore } from "./members.js";
@@ -188,6 +189,11 @@ export async function buildApp({ config, store, db, catalog, catalogAdmin, print
     const touched = [...new Set(added.map((a) => a.event.orderId))];
     // A cancelled order gives its promo code use back.
     for (const a of added) if (db && a.event.type === "StageSet" && a.event.stage === "cancelled") await releasePromo(db, merchantId, a.event.orderId).catch(() => undefined);
+    // Every discount and hand-changed price is written to the audit log: who gave it, who approved it, why.
+    if (db) for (const a of added) {
+      const e = a.event as unknown as Record<string, unknown>;
+      if (e.type === "DiscountApplied" || e.type === "DiscountRemoved" || e.type === "LinePriceOverridden") await audit(db, merchantId, null, `order.${e.type === "DiscountApplied" ? "discount" : e.type === "DiscountRemoved" ? "discount_removed" : "price_override"}`, { orderId: e.orderId, scope: e.scope, kind: e.kind, value: e.value, unitCents: e.unitCents, reason: e.reason, by: e.byName, approvedBy: e.approvedByName, deviceId: e.deviceId }).catch(() => undefined);
+    }
     if (added.length && print) await queuePrints(touched);
     if (added.length && db) await reconcileStock(touched);
     if (added.length && members) await settleMemberOrders(touched);
@@ -403,7 +409,7 @@ export async function buildApp({ config, store, db, catalog, catalogAdmin, print
           channel: o.channelName ?? o.fulfilment, source: o.source, table: o.spot ?? null, stage: o.stage,
           customerName: o.customerName ?? null, customerPhone: o.customerPhone ?? null, memberId: o.memberId ?? null,
           lines: o.lines.filter((l) => l.qty > 0).map((l) => ({ productId: l.productId, name: l.name, qty: l.qty, unitCents: l.unitCents, options: (l.options ?? []).map((x) => x.name) })),
-          subtotalCents: t.subtotal, serviceCents: t.service, gstCents: t.gst, bcrsCents: t.bcrs, couponCents: t.couponDiscount, pointsCents: t.pointsDiscount, totalCents: t.total, paidCents: confirmedPaid(o),
+          subtotalCents: t.subtotal, serviceCents: t.service, gstCents: t.gst, bcrsCents: t.bcrs, couponCents: t.couponDiscount, discountCents: t.discountCents, pointsCents: t.pointsDiscount, totalCents: t.total, paidCents: confirmedPaid(o),
           closedAt: o.closedAt ? new Date(o.closedAt).toISOString() : null,
           payments: o.payments.filter((p) => p.confirmed).map((p) => ({ method: p.method, amountCents: p.amountCents })),
         };
@@ -821,6 +827,7 @@ export async function buildApp({ config, store, db, catalog, catalogAdmin, print
   registerTabRoutes(app, { db, merchantId, tabs, members, needs, outletIds: async () => (await listOutlets(db, merchantId)).map((o) => o.id) });
   registerStock(app, { db, merchantId, needs, outletIds: async () => (await listOutlets(db, merchantId)).map((o) => o.id), defaultOutlet: config.outletName });
   registerShifts(app, { db, merchantId, needs });
+  registerDiscountPolicy(app, { db, merchantId, needs });
   registerShop(app, { db, config, store, catalog, catalogAdmin, brand: new BrandStore(db, merchantId), ingest, members, needs, integrations, now, tabs, alertMailbox, alertWatchMs });
 
   // ---- the Telegram bot for managing prices ---------------------------------------------------

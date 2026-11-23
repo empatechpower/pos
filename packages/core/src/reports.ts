@@ -14,9 +14,11 @@ export interface SalesSummary {
   items: number;
   /** Items sold, before any discount. */
   grossCents: Cents;
-  /** Coupon / voucher plus points paid toward the bill. */
+  /** Coupon / voucher, staff discounts, and points paid toward the bill. */
   discountsCents: Cents;
   couponCents: Cents;
+  /** Discounts staff gave on lines or the bill. */
+  manualCents: Cents;
   pointsCents: Cents;
   /** Gross sales minus discounts. */
   netCents: Cents;
@@ -36,7 +38,7 @@ export interface SalesSummary {
 /** The Sales Summary: did we make money? Cancelled orders are counted apart as voided, never in the sales. */
 export function summarize(all: readonly OrderState[], config: BusinessConfig): SalesSummary {
   const s: SalesSummary = {
-    orders: 0, items: 0, grossCents: 0, discountsCents: 0, couponCents: 0, pointsCents: 0, netCents: 0, serviceCents: 0, gstCents: 0, liabilitiesCents: 0,
+    orders: 0, items: 0, grossCents: 0, discountsCents: 0, couponCents: 0, manualCents: 0, pointsCents: 0, netCents: 0, serviceCents: 0, gstCents: 0, liabilitiesCents: 0,
     netToAccountForCents: 0, averageCents: 0, payments: [], paidCents: 0, unpaidOrders: 0, voided: { orders: 0, cents: 0 },
   };
   const pay = new Map<string, { cents: number; count: number }>();
@@ -48,6 +50,7 @@ export function summarize(all: readonly OrderState[], config: BusinessConfig): S
     s.items += o.lines.reduce((n, l) => n + Math.max(0, l.qty), 0);
     s.grossCents += t.subtotal;
     s.couponCents += t.couponDiscount;
+    s.manualCents += t.discountCents;
     s.pointsCents += t.pointsDiscount;
     s.serviceCents += t.service;
     s.gstCents += t.gst;
@@ -62,7 +65,7 @@ export function summarize(all: readonly OrderState[], config: BusinessConfig): S
       x.cents += p.amountCents; x.count++; pay.set(p.method, x);
     }
   }
-  s.discountsCents = s.couponCents + s.pointsCents;
+  s.discountsCents = s.couponCents + s.manualCents + s.pointsCents;
   s.netCents = s.grossCents - s.discountsCents;
   s.averageCents = s.orders ? Math.round(s.netToAccountForCents / s.orders) : 0;
   s.payments = [...pay].map(([method, v]) => ({ method, cents: v.cents, count: v.count })).sort((a, b) => b.cents - a.cents);

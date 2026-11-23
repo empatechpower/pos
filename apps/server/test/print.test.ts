@@ -199,6 +199,28 @@ describe("restaurant tabs", () => {
     expect(texts.some((t) => t.includes("Nasi Lemak") && !t.includes("ADD-ON"))).toBe(true);
   });
 
+  it("the order's note is on the kitchen ticket, and a note changed after sending gets one 'note updated' slip", async () => {
+    const o = orderEvents([{ id: "nasi-lemak", name: "Nasi Lemak", qty: 1 }], { queue: "A210" });
+    await push([...o.events, o.mk({ type: "OrderNoted", note: "Allergy: nuts" })], baseR);
+    const kitchen = async () => (await jobsFor(o.orderId)).filter((j) => j.doc_type === "kitchen");
+    expect(await kitchen()).toHaveLength(1);
+    // the same note again changes nothing; a different one sends a slip; the same different one again sends none
+    await push([o.mk({ type: "OrderNoted", note: "Allergy: nuts" })], baseR);
+    expect(await kitchen()).toHaveLength(1);
+    await push([o.mk({ type: "OrderNoted", note: "Allergy: nuts and sesame" })], baseR);
+    expect(await kitchen()).toHaveLength(2);
+    await push([o.mk({ type: "ItemAdded", lineId: "late-n", productId: "teh", name: "Milk Tea", unitCents: 240, qty: 1 })], baseR);
+    expect(await kitchen()).toHaveLength(3); // the add-on ticket carries the note, so no extra slip
+    await push([o.mk({ type: "OrderNoted", note: "" })], baseR);
+    expect(await kitchen()).toHaveLength(4);
+    const { got, send } = capture();
+    await agent(send);
+    const texts = got.map((g) => g.text);
+    expect(texts.filter((t) => t.includes("NOTE UPDATED"))).toHaveLength(2);
+    expect(texts.some((t) => t.includes("NOTE REMOVED"))).toBe(true);
+    expect(texts.some((t) => t.includes("Allergy: nuts") && t.includes("Nasi Lemak") && !t.includes("NOTE UPDATED"))).toBe(true);
+  });
+
   it("prints the receipt only once the tab is settled", async () => {
     const o = orderEvents([{ id: "kopi", name: "Coffee", qty: 1 }], { queue: "A202" });
     await push(o.events, baseR);

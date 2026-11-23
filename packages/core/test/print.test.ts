@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
-  PRESETS, columns, encodeEpl, encodeEscPos, encodeZpl, itemLabel, kitchenTicket, newId, plainText, printedAt, receipt, reduceOrder, toAscii, withDrawer, wrap,
+  PRESETS, columns, encodeEpl, encodeEscPos, encodeZpl, itemLabel, kitchenTicket, newId, noteSlip, plainText, printedAt, receipt, reduceOrder, toAscii, withDrawer, wrap,
   type Doc, type Label, type OrderEvent, type OrderState,
 } from "../src/index.js";
 
@@ -269,3 +269,19 @@ describe("Printed at, at the bottom", () => {
   });
 });
 
+
+describe("order notes", () => {
+  const ctx = { merchantName: "B", outletName: "O", now: NOW };
+  const withNote = (note: string): OrderState => ({ ...order({ pay: "all" }), note });
+  it("the kitchen ticket carries the order note, big and bold, and the guest check shows it", () => {
+    const o = withNote("Allergy: nuts");
+    expect(plainText(kitchenTicket(o, ctx), 42).join("\n")).toContain("NOTE: Allergy: nuts");
+    expect(plainText(receipt(o, config, ctx), 42).join("\n")).toContain("Note: Allergy: nuts");
+    expect(plainText(kitchenTicket(order({}), ctx), 42).join("\n")).not.toContain("NOTE:");
+  });
+  it("a note added after the order was sent prints its own slip, and says when it was removed", () => {
+    expect(plainText(noteSlip(withNote("Birthday"), ctx), 42).join("\n")).toContain("NOTE UPDATED");
+    expect(plainText(noteSlip(withNote("Birthday"), ctx), 42).join("\n")).toContain("NOTE: Birthday");
+    expect(plainText(noteSlip(order({}), ctx), 42).join("\n")).toContain("NOTE REMOVED");
+  });
+});

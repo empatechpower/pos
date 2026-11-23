@@ -140,6 +140,7 @@ export function Reports({ config, catalog }: { config: BusinessConfig; catalog?:
               <tr><td>Subtotal</td><td className="r">{formatMoney(r.subtotal)}</td></tr>
               {(() => { const t = orderTotals(r.o, config); return (<>
                 {t.couponDiscount > 0 && <tr><td>Coupon{r.o.coupon ? ` · ${r.o.coupon.title}` : ""}</td><td className="r">−{formatMoney(t.couponDiscount)}</td></tr>}
+                {t.discountCents > 0 && <tr><td>Discount{(r.o.discounts ?? []).length ? ` · ${(r.o.discounts ?? []).map((x) => x.reason).join(", ")}` : ""}</td><td className="r">−{formatMoney(t.discountCents)}</td></tr>}
                 {t.pointsDiscount > 0 && <tr><td>Points ({t.pointsUsed})</td><td className="r">−{formatMoney(t.pointsDiscount)}</td></tr>}
                 {t.service > 0 && <tr><td>Service charge</td><td className="r">{formatMoney(t.service)}</td></tr>}
                 {t.gst > 0 && <tr><td>GST</td><td className="r">{formatMoney(t.gst)}</td></tr>}

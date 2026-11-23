@@ -74,6 +74,8 @@ export interface PriceInput {
   /** Overrides the default (service charge on dine-in only) when the channel says otherwise. */
   serviceCharge?: boolean;
   coupon?: CouponInput | null;
+  /** Discounts staff gave on lines or the bill, already worked out in cents. They come off the items before service charge and tax, like a coupon. */
+  discountCents?: Cents;
   points?: PointsInput | null;
   config?: PricingConfig;
 }
@@ -84,6 +86,8 @@ export interface PriceResult {
   gst: Cents;
   bcrs: Cents;
   couponDiscount: Cents;
+  /** What staff discounts took off (line and bill). */
+  discountCents: Cents;
   pointsUsed: number;
   pointsDiscount: Cents;
   total: Cents;
@@ -154,7 +158,7 @@ function taxOf(lines: PricedLine[], subtotal: Cents, service: Cents, discount: C
 
 /** What a receipt or the checkout shows, in order, with the basis said plainly: "Taxes (included)" is inside the total, "GST" is added to it. */
 export interface TotalsLine {
-  key: "subtotal" | "coupon" | "service" | "tax_added" | "tax_included" | "deposit" | "points" | "total";
+  key: "subtotal" | "coupon" | "discount" | "service" | "tax_added" | "tax_included" | "deposit" | "points" | "total";
   label: string;
   cents: Cents;
   /** Money taken off (a coupon or points). */
@@ -169,6 +173,7 @@ export interface TotalsLine {
 export function totalsLines(r: PriceResult): TotalsLine[] {
   const out: TotalsLine[] = [{ key: "subtotal", label: "Subtotal", cents: r.subtotal }];
   if (r.couponDiscount > 0) out.push({ key: "coupon", label: "Coupon", cents: r.couponDiscount, negative: true });
+  if (r.discountCents > 0) out.push({ key: "discount", label: "Discount", cents: r.discountCents, negative: true });
   if (r.service > 0) out.push({ key: "service", label: "Service charge", cents: r.service });
   for (const t of r.taxes) out.push({ key: t.basis === "added" ? "tax_added" : "tax_included", label: t.basis === "added" ? t.name : `${t.name} (included)`, cents: t.cents, group: t.group, rate: t.rate });
   if (r.bcrs > 0) out.push({ key: "deposit", label: "Deposit", cents: r.bcrs, taxable: false });
@@ -196,12 +201,16 @@ export function priceOrder(input: PriceInput): PriceResult {
   const couponEligible = !!coupon && subtotal >= coupon.minSpendCents;
   const couponDiscount = coupon && couponEligible ? Math.min(coupon.amountCents, subtotal) : 0;
 
+  // What staff took off comes off after the coupon, and never more than is left.
+  const discountCents = Math.min(Math.max(0, Math.round(input.discountCents ?? 0)), Math.max(0, subtotal - couponDiscount));
+  const allDiscount = couponDiscount + discountCents;
+
   // Service charge: dine-in only, on the items AFTER the bill discount, never on the deposit (owner rule, 16 Nov 2026).
   // Points are paid like money at the end, so they do not lower it.
-  const service = cfg.serviceOn !== false && (input.serviceCharge ?? input.fulfilment === "dine_in") ? percentOf(Math.max(0, subtotal - couponDiscount), cfg.serviceRate) : 0;
+  const service = cfg.serviceOn !== false && (input.serviceCharge ?? input.fulfilment === "dine_in") ? percentOf(Math.max(0, subtotal - allDiscount), cfg.serviceRate) : 0;
 
   // GST is never charged on the deposit. For points, it is fixed on the full items + service.
-  const taxDiscount = points ? 0 : couponDiscount;
+  const taxDiscount = points ? 0 : allDiscount;
   const { added: gst, taxes, included: taxIncluded } = taxOf(lines, subtotal, service, taxDiscount, cfg);
 
   let pointsUsed = 0;
@@ -213,7 +222,7 @@ export function priceOrder(input: PriceInput): PriceResult {
       (cfg.pointsDeduct.service ? service : 0) +
       (cfg.pointsDeduct.tax ? taxPart : 0) +
       (cfg.pointsDeduct.deposit ? bcrs : 0);
-    const room = Math.max(0, deductibleBase - couponDiscount);
+    const room = Math.max(0, deductibleBase - allDiscount);
     const max = Math.max(0, Math.min(points.balance, room));
     if (max > 0) {
       pointsUsed =
@@ -224,13 +233,14 @@ export function priceOrder(input: PriceInput): PriceResult {
     }
   }
 
-  const total = Math.max(0, subtotal + service + gst + bcrs - couponDiscount - pointsDiscount);
+  const total = Math.max(0, subtotal + service + gst + bcrs - allDiscount - pointsDiscount);
   return {
     subtotal,
     service,
     gst,
     bcrs,
     couponDiscount,
+    discountCents,
     pointsUsed,
     pointsDiscount,
     total,

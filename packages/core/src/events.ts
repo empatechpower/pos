@@ -1,3 +1,4 @@
+import { staffDiscountCents, type StaffDiscount } from "./discounts.js";
 import type { BusinessConfig } from "./config.js";
 import type { StoredBuild } from "./builder.js";
 import type { Fulfilment } from "./catalog.js";
@@ -58,7 +59,14 @@ export type OrderEventBody =
    */
   | { type: "RefundRecorded"; refundId: string; /** the payment it gives back */ paymentId: string; method: PaymentMethod; amountCents: Cents; reason: string; approvedBy: string; approvedByName: string; /** part of voiding the whole order */ voided?: boolean; /** The shift whose drawer the money came out of. */ shiftId?: string }
   /** The whole order called off after it was sent or paid: every payment is refunded alongside and the order is closed as cancelled. */
-  | { type: "OrderVoided"; reason: string; approvedBy: string; approvedByName: string };
+  | { type: "OrderVoided"; reason: string; approvedBy: string; approvedByName: string }
+  /** A discount a staff member gave, on one line or the whole bill. `approvedByName` is the manager who OK'd it when it was beyond what a cashier may give alone. */
+  | { type: "DiscountApplied"; discountId: string; scope: "line" | "bill"; lineId?: string; kind: "percent" | "amount"; value: number; reason: string; byName?: string; approvedBy?: string; approvedByName?: string }
+  | { type: "DiscountRemoved"; discountId: string; byName?: string }
+  /** A note on the whole order for the kitchen and the guest check ("allergy: nuts", "birthday"). The latest one wins; empty clears it. */
+  | { type: "OrderNoted"; note: string; byName?: string }
+  /** The price of one line changed by hand (the list price is kept). Always manager-approved. */
+  | { type: "LinePriceOverridden"; lineId: string; unitCents: Cents; reason: string; byName?: string; approvedBy?: string; approvedByName?: string };
 
 export type OrderEvent = OrderEventBody & {
   /** Globally unique, generated on the device that created the event. */
@@ -73,6 +81,9 @@ export type OrderEvent = OrderEventBody & {
 
 export interface OrderLine extends PricedLine {
   lineId: string;
+  /** The price before it was changed by hand, and who changed it and why. */
+  listUnitCents?: Cents;
+  override?: { reason: string; byName?: string; approvedByName?: string; at: number };
   productId: string;
   options?: ChosenOption[];
   build?: StoredBuild;
@@ -105,6 +116,10 @@ export interface OrderState {
   commission?: { cents: Cents; note?: string; at: number };
   /** Money given back, oldest first. */
   refunds?: Array<{ refundId: string; paymentId: string; method: PaymentMethod; amountCents: Cents; reason: string; approvedBy: string; approvedByName: string; at: number; voided?: boolean }>;
+  /** The note on the whole order (for the kitchen and the guest check). */
+  note?: string;
+  /** Discounts staff gave, oldest first. */
+  discounts?: StaffDiscount[];
   /** Set when the whole order was voided. */
   voided?: { reason: string; approvedBy: string; approvedByName: string; at: number };
   /** Every table move after the order was placed, oldest first. */
@@ -193,6 +208,26 @@ export function reduceOrder(orderId: string, events: readonly OrderEvent[]): Ord
         state.stage = "cancelled";
         state.closedAt ??= e.ts;
         break;
+      case "DiscountApplied":
+        if (state.discounts?.some((d) => d.id === e.discountId)) break;
+        (state.discounts ??= []).push({ id: e.discountId, scope: e.scope, ...(e.lineId ? { lineId: e.lineId } : {}), kind: e.kind, value: e.value, reason: e.reason.slice(0, 120), ...(e.byName ? { byName: e.byName } : {}), ...(e.approvedByName ? { approvedByName: e.approvedByName } : {}), at: e.ts });
+        break;
+      case "OrderNoted": {
+        const note = e.note.replace(/[\u0000-\u001f\u007f\u2028\u2029]+/g, " ").replace(/\s+/g, " ").trim().slice(0, 200);
+        if (note) state.note = note; else delete state.note;
+        break;
+      }
+      case "DiscountRemoved":
+        if (state.discounts) state.discounts = state.discounts.filter((d) => d.id !== e.discountId);
+        break;
+      case "LinePriceOverridden": {
+        const l = state.lines.find((x) => x.lineId === e.lineId);
+        if (!l || e.unitCents < 0) break;
+        l.listUnitCents ??= l.unitCents;
+        l.unitCents = Math.round(e.unitCents);
+        l.override = { reason: e.reason.slice(0, 120), ...(e.byName ? { byName: e.byName } : {}), ...(e.approvedByName ? { approvedByName: e.approvedByName } : {}), at: e.ts };
+        break;
+      }
       case "CommissionRecorded":
         state.commission = { cents: Math.max(0, Math.round(e.cents)), ...(e.note ? { note: e.note.slice(0, 120) } : {}), at: e.ts };
         break;
@@ -223,7 +258,7 @@ export function reduceAll(events: readonly OrderEvent[]): OrderState[] {
 
 export function orderTotals(state: OrderState, config: BusinessConfig): PriceResult {
   const points = state.pointsRedeemed ? { balance: state.pointsRedeemed, requested: state.pointsRedeemed } : null;
-  return priceOrder({ lines: state.lines, fulfilment: state.fulfilment, serviceCharge: state.serviceCharge, points, coupon: state.coupon ?? null, config: config.pricing });
+  return priceOrder({ lines: state.lines, fulfilment: state.fulfilment, serviceCharge: state.serviceCharge, points, coupon: state.coupon ?? null, discountCents: staffDiscountCents(state.lines, state.discounts ?? []).totalCents, config: config.pricing });
 }
 
 export const confirmedPaid = (state: OrderState): Cents =>

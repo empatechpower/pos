@@ -16,6 +16,8 @@ import {
   isCombo,
   priceRange,
   resolveOptions,
+  staffDiscountCents,
+  type StaffDiscount,
   type BusinessConfig,
   type ChosenOption,
   type ChosenOptionInput,
@@ -32,6 +34,8 @@ import { getBalance, spend } from "../wallet";
 import { syncNow } from "../sync";
 import { useShift, useShiftRequired } from "../shift";
 import { ShiftBar } from "./ShiftBar";
+import { DiscountSheet, type DiscountChoice } from "./DiscountSheet";
+import { NoteSheet } from "./NoteSheet";
 
 interface BagLine {
   /** The item and its chosen options: the same item with different options is a different line. */
@@ -42,7 +46,14 @@ interface BagLine {
   options: ChosenOption[];
   /** One unit, options included. */
   unitCents: number;
+  /** A price set by hand for this line (the list price stays in `unitCents`), and discounts given on it. */
+  override?: { unitCents: number; reason: string; approver?: { id: string; name: string } };
+  discounts?: Array<{ id: string; kind: "percent" | "amount"; value: number; reason: string; approver?: { id: string; name: string } }>;
+  /** A note for the kitchen on this item ("no ice"). */
+  note?: string;
 }
+type BillDiscount = { id: string; kind: "percent" | "amount"; value: number; reason: string; approver?: { id: string; name: string } };
+const effUnit = (b: BagLine) => b.override?.unitCents ?? b.unitCents;
 
 const TABLES = ["Table 5", "Table 12", "Table 18", "Bar Tab 2", "Bar Tab 4"];
 const startOfDay = () => new Date().setHours(0, 0, 0, 0);
@@ -58,6 +69,10 @@ interface PosProps {
 export function Pos({ config, catalog, online, customerId, setCustomerId }: PosProps) {
   const orders = useOrders();
   const [bag, setBag] = useState<BagLine[]>([]);
+  const [billDiscounts, setBillDiscounts] = useState<BillDiscount[]>([]);
+  const [sheet, setSheet] = useState<null | { scope: "line"; key: string } | { scope: "bill" }>(null);
+  const [orderNote, setOrderNote] = useState("");
+  const [noteFor, setNoteFor] = useState<null | { scope: "line"; key: string } | { scope: "order" }>(null);
   const [category, setCategory] = useState("All");
   const channels = catalog.channels.filter((c) => c.active);
   const [chosenChannel, setChosenChannel] = useState<string>(channels[0]?.id ?? "");
@@ -158,12 +173,33 @@ export function Pos({ config, catalog, online, customerId, setCustomerId }: PosP
   const categories = useMemo(() => ["All", ...new Set(menu.map((m) => m.category))], [menu]);
   const shown = menu.filter((m) => category === "All" || m.category === category);
 
+  // Discounts staff gave: on a line (tied to its bag key) or on the whole bill.
+  const staffDiscounts: StaffDiscount[] = [
+    ...bag.flatMap((b) => (b.discounts ?? []).map((d): StaffDiscount => ({ id: d.id, scope: "line", lineId: b.key, kind: d.kind, value: d.value, reason: d.reason, at: 0 }))),
+    ...billDiscounts.map((d): StaffDiscount => ({ id: d.id, scope: "bill", kind: d.kind, value: d.value, reason: d.reason, at: 0 })),
+  ];
   const priced = priceOrder({
-    lines: bag.map((b) => ({ name: b.item.name, unitCents: b.unitCents, qty: b.qty, pointsExempt: b.item.pointsExempt, bcrs: !!b.item.bcrs, taxInclusive: b.item.taxInclusive, taxGroup: b.item.taxGroup })),
+    lines: bag.map((b) => ({ name: b.item.name, unitCents: effUnit(b), qty: b.qty, pointsExempt: b.item.pointsExempt, bcrs: !!b.item.bcrs, taxInclusive: b.item.taxInclusive, taxGroup: b.item.taxGroup })),
     fulfilment,
     serviceCharge: channel.serviceCharge,
+    discountCents: staffDiscountCents(bag.map((b) => ({ lineId: b.key, unitCents: effUnit(b), qty: b.qty })), staffDiscounts).totalCents,
     config: config.pricing,
   });
+
+  /** A discount or price change the staff member chose (and a manager approved when needed). */
+  function applyChoice(c: DiscountChoice) {
+    const target = sheet;
+    setSheet(null);
+    if (!target) return;
+    const mk = { id: newId(), reason: c.reason, ...(c.approver ? { approver: c.approver } : {}) };
+    if (c.kind === "price") {
+      if (target.scope === "line") { const o = { unitCents: c.value, reason: c.reason, ...(c.approver ? { approver: c.approver } : {}) }; setBag((cur) => cur.map((l) => (l.key === target.key ? { ...l, override: o } : l))); }
+      return;
+    }
+    const d = { ...mk, kind: c.kind, value: c.value };
+    if (target.scope === "bill") setBillDiscounts((cur) => [...cur, d]);
+    else setBag((cur) => cur.map((l) => (l.key === target.key ? { ...l, discounts: [...(l.discounts ?? []), d] } : l)));
+  }
 
   const [picking, setPicking] = useState<MenuEntry | null>(null);
 
@@ -198,10 +234,11 @@ export function Pos({ config, catalog, online, customerId, setCustomerId }: PosP
       spot: channel.kind === "dine_in" ? spot : undefined,
       queueNumber,
     });
+    const lineIds = new Map(bag.map((l) => [l.key, newId()]));
     for (const l of bag) {
       await record(orderId, {
         type: "ItemAdded",
-        lineId: newId(),
+        lineId: lineIds.get(l.key)!,
         productId: l.item.id,
         name: l.item.name,
         unitCents: l.unitCents,
@@ -210,9 +247,17 @@ export function Pos({ config, catalog, online, customerId, setCustomerId }: PosP
         bcrs: !!l.item.bcrs,
         ...(l.item.taxInclusive !== undefined ? { taxInclusive: l.item.taxInclusive } : {}),
         ...(l.item.taxGroup ? { taxGroup: l.item.taxGroup } : {}),
-        options: l.options.length ? l.options : undefined,
+        options: l.options.length || l.note ? [...l.options, ...(l.note ? [{ group: "Special request", name: `Note: ${l.note}`, qty: 1, priceCents: 0 }] : [])] : undefined,
       });
     }
+    if (orderNote.trim()) await record(orderId, { type: "OrderNoted", note: orderNote.trim(), ...(staff ? { byName: staff.name } : {}) });
+    // Prices changed by hand and discounts given, each with who gave it and who approved it.
+    const who = (a?: { id: string; name: string }) => ({ ...(staff ? { byName: staff.name } : {}), ...(a ? { approvedBy: a.id, approvedByName: a.name } : {}) });
+    for (const l of bag) {
+      if (l.override) await record(orderId, { type: "LinePriceOverridden", lineId: lineIds.get(l.key)!, unitCents: l.override.unitCents, reason: l.override.reason, ...who(l.override.approver) });
+      for (const d of l.discounts ?? []) await record(orderId, { type: "DiscountApplied", discountId: d.id, scope: "line", lineId: lineIds.get(l.key)!, kind: d.kind, value: d.value, reason: d.reason, ...who(d.approver) });
+    }
+    for (const d of billDiscounts) await record(orderId, { type: "DiscountApplied", discountId: d.id, scope: "bill", kind: d.kind, value: d.value, reason: d.reason, ...who(d.approver) });
     if (payment) {
       const paymentId = newId();
       await record(orderId, { type: "PaymentRecorded", paymentId, method: payment.method, amountCents: priced.total, confirmed: payment.confirmed });
@@ -222,6 +267,8 @@ export function Pos({ config, catalog, online, customerId, setCustomerId }: PosP
       }
     }
     setBag([]);
+    setBillDiscounts([]);
+    setOrderNote("");
     notify(queueNumber ? `Order placed · queue number ${queueNumber}` : "Order placed");
   }
 
@@ -310,6 +357,16 @@ export function Pos({ config, catalog, online, customerId, setCustomerId }: PosP
         </div>
       </section>
 
+      {noteFor && (() => {
+        const line = noteFor.scope === "line" ? bag.find((b) => b.key === noteFor.key) : undefined;
+        if (noteFor.scope === "line" && !line) return null;
+        return <NoteSheet title={line ? `Note · ${line.item.name}` : "Note for the whole order"} initial={line ? line.note ?? "" : orderNote} max={line ? 140 : 200} onClose={() => setNoteFor(null)} onSave={(t) => { if (line) setBag((cur) => cur.map((x) => (x.key === line.key ? { ...x, note: t || undefined } : x))); else setOrderNote(t); setNoteFor(null); }} />;
+      })()}
+      {sheet && (() => {
+        const line = sheet.scope === "line" ? bag.find((b) => b.key === sheet.key) : undefined;
+        if (sheet.scope === "line" && !line) return null;
+        return <DiscountSheet target={line ? { scope: "line", name: line.item.name, unitCents: effUnit(line), qty: line.qty } : { scope: "bill", name: "bill", subtotalCents: priced.subtotal - priced.discountCents }} onApply={applyChoice} onClose={() => setSheet(null)} />;
+      })()}
       {qrPay && (() => {
         const left = Math.max(0, Math.ceil((qrPay.expiresAt - clock) / 1000));
         return (
@@ -371,19 +428,30 @@ export function Pos({ config, catalog, online, customerId, setCustomerId }: PosP
           {bag.length === 0 && <p className="muted">Tap items to start an order.</p>}
           {bag.map((l) => (
             <div className="line" key={l.key}>
-              <span className="nm">{l.item.name}{l.options.length > 0 && <small className="optline">{optionLines(l.options).join(" · ")}</small>}</span>
+              <span className="nm">{l.item.name}{l.options.length > 0 && <small className="optline">{optionLines(l.options).join(" · ")}</small>}
+                {l.override && <small className="optline">Price {formatMoney(l.unitCents)} → {formatMoney(l.override.unitCents)} · {l.override.reason} <button className="link" onClick={() => setBag((cur) => cur.map((x) => (x.key === l.key ? { ...x, override: undefined } : x)))}>undo</button></small>}
+                {(l.discounts ?? []).map((d) => <small className="optline" key={d.id}>{d.kind === "percent" ? `${d.value}% off` : `${formatMoney(d.value)} off`} · {d.reason} <button className="link" onClick={() => setBag((cur) => cur.map((x) => (x.key === l.key ? { ...x, discounts: (x.discounts ?? []).filter((y) => y.id !== d.id) } : x)))}>remove</button></small>)}
+                {l.note && <small className="optline"><b>Note: {l.note}</b></small>}
+                <button className="link" onClick={() => setNoteFor({ scope: "line", key: l.key })}>{l.note ? "Edit note" : "Note"}</button>
+                {staff && <button className="link" onClick={() => setSheet({ scope: "line", key: l.key })}>Discount / price</button>}
+              </span>
               <span className="step">
                 <button onClick={() => change(l.key, -1)}>−</button>
                 <b>{l.qty}</b>
                 <button onClick={() => change(l.key, +1)}>+</button>
               </span>
-              <span className="amt">{formatMoney(l.unitCents * l.qty)}</span>
+              <span className="amt">{formatMoney(effUnit(l) * l.qty)}</span>
             </div>
           ))}
         </div>
 
+        {bag.length > 0 && <button className="secondary sm" type="button" onClick={() => setNoteFor({ scope: "order" })}>{orderNote ? "Edit order note" : "Order note"}</button>}
+        {orderNote && <p className="muted" style={{ margin: "4px 0" }}><b>Order note:</b> {orderNote}</p>}
+        {staff && bag.length > 0 && <button className="secondary sm" type="button" onClick={() => setSheet({ scope: "bill" })}>Discount whole bill</button>}
         <dl className="totals">
           <div><dt>Subtotal</dt><dd>{formatMoney(priced.subtotal)}</dd></div>
+          {priced.discountCents > 0 && <div><dt>Discount</dt><dd>-{formatMoney(priced.discountCents)}</dd></div>}
+          {billDiscounts.map((d) => <div key={d.id}><dt><small>{d.kind === "percent" ? `${d.value}% off bill` : `${formatMoney(d.value)} off bill`} · {d.reason}</small></dt><dd><button className="link" onClick={() => setBillDiscounts((cur) => cur.filter((x) => x.id !== d.id))}>remove</button></dd></div>)}
           {priced.service > 0 && <div><dt>Service charge ({Math.round(config.pricing.serviceRate * 100)}%)</dt><dd>{formatMoney(priced.service)}</dd></div>}
           {priced.gst > 0 && <div><dt>GST</dt><dd>{formatMoney(priced.gst)}</dd></div>}
           {priced.bcrs > 0 && <div><dt>BCRS deposit</dt><dd>{formatMoney(priced.bcrs)}</dd></div>}

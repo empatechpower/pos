@@ -3,6 +3,8 @@ import { formatMoney, orderTotals, type BusinessConfig } from "@pos/core";
 import { staffFetch, useStaff } from "../auth";
 import { useOrders } from "../hooks";
 import { RefundPanel } from "./RefundPanel";
+import { NoteSheet } from "./NoteSheet";
+import { record } from "../db";
 
 const timeOf = (ms: number) => new Date(ms).toLocaleTimeString("en-GB", { hour: "2-digit", minute: "2-digit", timeZone: "Asia/Singapore" });
 
@@ -11,6 +13,7 @@ export function Orders({ config }: { config: BusinessConfig }) {
   const staff = useStaff();
   const orders = useOrders();
   const [msg, setMsg] = useState<string | null>(null);
+  const [noting, setNoting] = useState<string | null>(null);
   const recent = orders.filter((o) => o.lines.length).sort((a, b) => b.openedAt - a.openedAt).slice(0, 25);
 
   async function reprint(orderId: string, docType: "receipt" | "kitchen") {
@@ -30,6 +33,11 @@ export function Orders({ config }: { config: BusinessConfig }) {
       {!staff && <div className="flash">Sign in to reprint. <a href="/login">Sign in</a></div>}
       {msg && <div className="flash">{msg}</div>}
       {recent.length === 0 && <p className="muted">No orders yet.</p>}
+      {noting && (() => {
+        const o = recent.find((x) => x.orderId === noting);
+        if (!o) return null;
+        return <NoteSheet title={`Note · order ${o.queueNumber ?? ""}`} initial={o.note ?? ""} max={200} onClose={() => setNoting(null)} onSave={(t) => { void record(o.orderId, { type: "OrderNoted", note: t, ...(staff ? { byName: staff.name } : {}) }).then(() => setMsg(t ? "Note saved. If the order was already sent, the kitchen gets a short slip." : "Note removed.")); setNoting(null); }} />;
+      })()}
       {recent.map((o) => {
         const t = orderTotals(o, config);
         return (
@@ -41,8 +49,10 @@ export function Orders({ config }: { config: BusinessConfig }) {
             <div className="tabr">
               <button className="secondary sm" disabled={!staff} onClick={() => void reprint(o.orderId, "receipt")}>Receipt</button>
               <button className="secondary sm" disabled={!staff} onClick={() => void reprint(o.orderId, "kitchen")}>Kitchen ticket</button>
+              <button className="secondary sm" onClick={() => setNoting(o.orderId)}>{o.note ? "Edit note" : "Note"}</button>
             </div>
           </div>
+          {o.note && <div className="muted" style={{ padding: "0 12px" }}><b>Note:</b> {o.note}</div>}
           {staff && <RefundPanel order={o} />}
           </div>
         );

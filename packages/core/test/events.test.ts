@@ -157,3 +157,14 @@ describe("refunds and voids", () => {
     expect(o.closedAt).toBeDefined();
   });
 });
+
+describe("order notes (events)", () => {
+  it("the latest note wins, it is tidied, and an empty one clears it", () => {
+    const o1 = reduceOrder("o1", [...baseEvents(), ev("tabA", "o1", 3, { type: "OrderNoted", note: "  Allergy:\n nuts  " })])!;
+    expect(o1.note).toBe("Allergy: nuts");
+    const o2 = reduceOrder("o1", [...baseEvents(), ev("tabA", "o1", 3, { type: "OrderNoted", note: "First" }), ev("tabA", "o1", 4, { type: "OrderNoted", note: "Second" })])!;
+    expect(o2.note).toBe("Second");
+    const o3 = reduceOrder("o1", [...baseEvents(), ev("tabA", "o1", 3, { type: "OrderNoted", note: "First" }), ev("tabA", "o1", 4, { type: "OrderNoted", note: "   " })])!;
+    expect(o3.note).toBeUndefined();
+  });
+});

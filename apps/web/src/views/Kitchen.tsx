@@ -60,6 +60,7 @@ function Ticket({ order, now, done, children }: { order: OrderState; now: number
         <span>{order.fulfilment === "dine_in" ? (order.spot ?? order.channelName) : (order.channelName ?? (order.fulfilment === "takeaway" ? "Take away" : "Delivery"))}</span>
         <span className="muted">{ago(order.openedAt, now)}</span>
       </div>
+      {order.note && <p style={{ margin: "6px 0", fontWeight: 700, color: "#b00020" }}>NOTE: {order.note}</p>}
       <ul>
         {order.lines.filter((l) => l.qty > 0).map((l) => (
           <li key={l.lineId}>

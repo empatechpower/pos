@@ -1,5 +1,6 @@
 export * from "./money.js";
 export * from "./pricing.js";
+export * from "./discounts.js";
 export * from "./config.js";
 export * from "./events.js";
 export * from "./queue.js";

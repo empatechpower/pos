@@ -56,11 +56,13 @@ export function receipt(order: OrderState, config: BusinessConfig, ctx: PrintCon
       for (const o of optionLines(l.options).filter((x) => x.startsWith("Note: "))) b.push({ t: "text", text: `- ${o}` });
     } else for (const o of optionLines(l.options)) b.push({ t: "text", text: `- ${o}` });
   }
+  if (order.note) b.push({ t: "text", text: `Note: ${order.note}` });
   b.push({ t: "rule" }, { t: "cols", left: "Subtotal", right: formatMoney(t.subtotal) });
   if (t.service) b.push({ t: "cols", left: "Service charge", right: formatMoney(t.service) });
   if (t.gst) b.push({ t: "cols", left: "GST", right: formatMoney(t.gst) });
   if (t.bcrs) b.push({ t: "cols", left: "BCRS deposit", right: formatMoney(t.bcrs) });
   if (t.couponDiscount) b.push({ t: "cols", left: "Coupon", right: "-" + formatMoney(t.couponDiscount) });
+  if (t.discountCents) b.push({ t: "cols", left: "Discount", right: "-" + formatMoney(t.discountCents) });
   if (t.pointsDiscount) b.push({ t: "cols", left: "Points", right: "-" + formatMoney(t.pointsDiscount) });
   b.push({ t: "rule", ch: "=" }, { t: "cols", left: "TOTAL", right: formatMoney(t.total), bold: true });
   for (const p of order.payments.filter((x) => x.confirmed && !x.paymentId.startsWith("refund:"))) b.push({ t: "cols", left: METHOD[p.method] ?? p.method, right: formatMoney(p.amountCents) });
@@ -157,6 +159,8 @@ export function kitchenTicket(order: OrderState, ctx: PrintContext, opts: Kitche
   // Who the order is for (by name), so the runner can find that person even if they have moved tables.
   // The phone number is never printed. The name is printed only when there is one, otherwise the line is left out.
   if (order.customerName) b.push({ t: "text", text: order.customerName, align: "center", bold: true });
+  // A note on the whole order stays big and bold so it is not missed.
+  if (order.note) b.push({ t: "rule" }, { t: "text", text: `NOTE: ${order.note}`, bold: true, size: 2 });
   b.push({ t: "rule" });
   for (const l of lines) {
     // The item is big and bold. Its choices (Hot, Iced, Big) are plain and smaller. A customer's special request stays big and bold so it is not missed.
@@ -168,6 +172,16 @@ export function kitchenTicket(order: OrderState, ctx: PrintContext, opts: Kitche
     }
     for (const o of optionLines(l.options)) b.push(o.startsWith("Note: ") ? { t: "text", text: `- ${o}`, bold: true, size: 2 } : { t: "text", text: `- ${o}`, size: 1.4 });
   }
+  b.push({ t: "rule" }, { t: "text", text: printedAt(ctx.now, ctx.timeZone) }, { t: "feed", n: 3 }, { t: "cut" });
+  return { blocks: b };
+}
+
+/** A small slip for the kitchen when the order's note was added or changed after the order was already sent. */
+export function noteSlip(order: OrderState, ctx: PrintContext, opts: { showQueue?: boolean } = {}): Doc {
+  const b: Block[] = [{ t: "text", text: "*** NOTE UPDATED ***", align: "center", bold: true }];
+  if (opts.showQueue !== false) b.push({ t: "text", text: order.queueNumber ?? "-", align: "center", bold: true, size: 3 });
+  b.push({ t: "text", text: where(order), align: "center", bold: true, size: 2 }, { t: "rule" });
+  b.push({ t: "text", text: order.note ? `NOTE: ${order.note}` : "NOTE REMOVED", bold: true, size: 2 });
   b.push({ t: "rule" }, { t: "text", text: printedAt(ctx.now, ctx.timeZone) }, { t: "feed", n: 3 }, { t: "cut" });
   return { blocks: b };
 }
