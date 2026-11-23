@@ -170,3 +170,15 @@ describe("issuing a PayNow QR for a kiosk order", () => {
     expect((await call("/api/payments/paynow/status/nope")).status).toBe(404);
   });
 });
+
+describe("the owner's PayNow test QR", () => {
+  it("is refused until the shop has saved its PayNow settings", async () => {
+    const { db, stop } = await startTestDb();
+    try {
+      const app = await buildApp({ config: PRESETS.fastServe("bp", "Bailey & Patch", "EV"), db, logger: false, store: new PgEventStore(db, "bp", "EV"), trustProxy: true });
+      const r = await app.inject({ method: "POST", url: "/api/settings/paynow/test" });
+      expect(r.statusCode).toBe(401);
+      await app.close();
+    } finally { await stop(); }
+  }, 120_000);
+});

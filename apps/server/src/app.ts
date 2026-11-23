@@ -16,7 +16,7 @@ import { registerPromoAdmin, releasePromo } from "./promo.js";
 import { reconcileOrderStock, registerStock } from "./stock.js";
 import { TabError, TabService } from "./tabs.js";
 import { registerTabRoutes } from "./tabRoutes.js";
-import { loadPaynow, savePaynow } from "./paynow.js";
+import { issueQr, loadPaynow, savePaynow } from "./paynow.js";
 import { applyOption, loadKiosk, OPTION_KEYS, optionsOf, saveKiosk, saveSetting } from "./settings.js";
 import { sendMail, type Integrations } from "./integrations.js";
 import { registerTelegram } from "./telegram.js";
@@ -657,6 +657,15 @@ export async function buildApp({ config, store, db, catalog, catalogAdmin, print
     if (!r.ok) return reply.code(400).send({ error: r.error });
     await audit(db, merchantId, req.staff!.id, "settings.paynow", { proxyType: r.config.proxyType, displayName: r.config.displayName, outletCode: r.config.outletCode, ttlMinutes: r.config.ttlMinutes });
     return { config: r.config };
+  });
+
+  // A S$0.01 QR from the saved settings, so the owner can scan it with their own banking app and see the ID and name are right.
+  // It is stored like any QR; if paid, the money lands in the unassigned pool (there is no order for it).
+  app.post("/api/settings/paynow/test", { preHandler: needs("staff.manage") }, async (req, reply) => {
+    const cfg = await loadPaynow(db, merchantId);
+    if (!cfg) return reply.code(409).send({ error: "paynow_not_set_up" });
+    const q = await issueQr(db, cfg, { merchantId, orderId: "paynow-test", amountCents: 1, channel: "P", now: (now ?? Date.now)() });
+    return { payload: q.payload, reference: q.reference, expiresAt: q.expiresAt, displayName: cfg.displayName };
   });
 
   // ---- agents: limited API access for an AI helper or script (owner only) ---------------------
