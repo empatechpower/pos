@@ -13,6 +13,8 @@ export interface Integrations {
   /** Reverse-SMS sign-in: the number customers text, and the secret the SMS provider's webhook must present (empty when only the Rezein app on a tablet receives the texts). */
   sms?: { number: string; webhookSecret: string };
   stripe?: { secretKey: string; webhookSecret: string };
+  /** YeahPay (Singapore acquirer): PayNow QR and hosted card checkout. Preferred over Stripe when both are set. */
+  yeahpay?: { appId: string; apiKey: string; merchantId: string; baseUrl: string };
   /** The Telegram bot staff use to manage prices. The webhook secret proves a message really came from Telegram. */
   telegram?: { token: string; webhookSecret: string; adminIds?: string[]; managerIds?: string[] };
   /** Email through Resend's web API (HTTPS, so it works where SMTP ports are blocked). */
@@ -20,6 +22,9 @@ export interface Integrations {
   /** Replaceable in tests. */
   fetch?: typeof fetch;
 }
+
+export const YEAHPAY_LIVE = "https://open-api.yeahpay.sg/acceptance/acceptance-open-api";
+export const YEAHPAY_TEST = "https://t-acquire-business.lepass.cn/gw/abroad-business-acceptance-open-api";
 
 export function loadIntegrations(env: NodeJS.ProcessEnv): Integrations {
   const pair = (id?: string, secret?: string) => (id && secret ? { clientId: id, clientSecret: secret } : undefined);
@@ -31,6 +36,9 @@ export function loadIntegrations(env: NodeJS.ProcessEnv): Integrations {
     sms: env.SMS_RECEIVE_NUMBER?.trim() ? { number: env.SMS_RECEIVE_NUMBER.trim(), webhookSecret: env.SMS_WEBHOOK_SECRET?.trim() ?? "" } : undefined,
     telegram: env.TELEGRAM_BOT_TOKEN?.trim() && env.TELEGRAM_WEBHOOK_SECRET?.trim() ? { token: env.TELEGRAM_BOT_TOKEN.trim().replace(/^bot/i, ""), webhookSecret: env.TELEGRAM_WEBHOOK_SECRET.trim(), adminIds: (env.TELEGRAM_ADMIN_IDS ?? "").split(",").map((x) => x.trim()).filter((x) => /^\d+$/.test(x)), managerIds: (env.TELEGRAM_MANAGER_IDS ?? "").split(",").map((x) => x.trim()).filter((x) => /^\d+$/.test(x)) } : undefined,
     mail: env.RESEND_API_KEY && env.MAIL_FROM ? { apiKey: env.RESEND_API_KEY, from: env.MAIL_FROM } : undefined,
+    yeahpay: env.YEAHPAY_APP_ID?.trim() && env.YEAHPAY_API_KEY?.trim() && env.YEAHPAY_MERCHANT_ID?.trim()
+      ? { appId: env.YEAHPAY_APP_ID.trim(), apiKey: env.YEAHPAY_API_KEY.trim(), merchantId: env.YEAHPAY_MERCHANT_ID.trim(), baseUrl: (env.YEAHPAY_BASE_URL?.trim() || (env.YEAHPAY_ENV === "test" ? YEAHPAY_TEST : YEAHPAY_LIVE)).replace(/\/+$/, "") }
+      : undefined,
     stripe: env.STRIPE_SECRET_KEY && env.STRIPE_WEBHOOK_SECRET ? { secretKey: env.STRIPE_SECRET_KEY, webhookSecret: env.STRIPE_WEBHOOK_SECRET } : undefined,
   };
 }
@@ -187,3 +195,103 @@ export const sameSecret = (a: string, b: string) => {
   const y = Buffer.from(b);
   return x.length === y.length && timingSafeEqual(x, y);
 };
+
+// ---- YeahPay (plain HTTPS; signing happens here, on the server, never in the browser) -----------------
+
+/**
+ * The signature YeahPay wants: Base64(SHA-512(url \n appId \n timestamp \n version \n nonce \n body \n apiKey)).
+ * `url` is "/acceptance-open-api" + the API path for calls we make, or the full callback address for callbacks to us.
+ * The body must be exactly the text that is sent.
+ */
+export function yeahpaySignature(o: { url: string; appId: string; timestamp: string; version?: string; nonce: string; body: string; apiKey: string }): string {
+  const text = [o.url, o.appId, o.timestamp, o.version ?? "1.0", o.nonce, o.body, o.apiKey].join("\n");
+  return createHash("sha512").update(text, "utf8").digest("base64");
+}
+
+/** One signed call. Returns YeahPay's `data` when its code is 0, otherwise null (nothing about a failure is shown to customers). */
+export async function yeahpayCall<T = Record<string, unknown>>(i: Integrations, path: string, payload: Record<string, unknown>): Promise<T | null> {
+  const y = i.yeahpay;
+  if (!y) return null;
+  const f = i.fetch ?? fetch;
+  const body = JSON.stringify(payload);
+  const timestamp = String(Date.now());
+  const nonce = randomBytes(12).toString("hex");
+  const signature = yeahpaySignature({ url: `/acceptance-open-api${path}`, appId: y.appId, timestamp, nonce, body, apiKey: y.apiKey });
+  try {
+    const res = await f(`${y.baseUrl}${path}`, {
+      method: "POST",
+      headers: { "content-type": "application/json", "accept-language": "en-US", version: "1.0", appId: y.appId, timestamp, nonce, algorithm: "SHA-512", signature },
+      body,
+    });
+    const j = (await res.json()) as { code?: number | string; message?: string; data?: T };
+    if (!res.ok || String(j.code) !== "0") {
+      console.error(`[yeahpay] ${path} refused: HTTP ${res.status} code ${j.code} ${j.message ?? ""}`);
+      return null;
+    }
+    return (j.data ?? {}) as T;
+  } catch (e) {
+    console.error(`[yeahpay] ${path} failed: ${(e as Error).message}`);
+    return null;
+  }
+}
+
+/**
+ * A unique, letters-and-digits reference for one payment attempt (YeahPay wants each order number unique under the merchant).
+ * It begins with the order's id without dashes, so a callback that does not carry our own note can still be matched to its order.
+ */
+export const yeahpayRef = (orderId: string) => `${orderId.replace(/-/g, "")}${Date.now().toString(36)}${randomBytes(2).toString("hex")}`;
+/** The order id inside a reference made by yeahpayRef (a 32-digit hex id gets its dashes back). */
+export const orderIdFromRef = (ref: string): string => (/^[0-9a-f]{32}/i.test(ref) ? ref.slice(0, 32).replace(/^(.{8})(.{4})(.{4})(.{4})(.{12})$/, "$1-$2-$3-$4-$5") : "");
+
+/**
+ * Ask YeahPay for a payment for an order.
+ *  - "qr": a PayNow QR. `url` is the text to turn into a QR code (the customer scans it with their banking app).
+ *  - "page": YeahPay's hosted checkout (card, Apple/Google Pay, wallets). `url` is where to send the customer.
+ * The order number travels in `attach` (QR) or `merchantReferenceNumber` (page) so the callback can find the order again.
+ */
+export async function createYeahpayPayment(
+  i: Integrations,
+  o: { orderId: string; amountCents: number; display: "qr" | "page"; returnUrl: string; description: string },
+): Promise<{ url: string; ref: string } | null> {
+  const y = i.yeahpay;
+  if (!y) return null;
+  const ref = yeahpayRef(o.orderId);
+  const notifyUrl = `${i.publicUrl}/api/shop/yeahpay/notify`;
+  if (o.display === "qr") {
+    const d = await yeahpayCall<{ tdCode?: string }>(i, "/order/unifiedOrder", {
+      payWay: "PayNowPay", merchantId: y.merchantId, thirdOrderId: ref, amount: String(o.amountCents), currency: "SGD", jspayFlag: "NATIVE",
+      body: o.description.slice(0, 100), attach: o.orderId, orderExpiration: "600", notifyUrl,
+    });
+    return d?.tdCode ? { url: d.tdCode, ref } : null;
+  }
+  const d = await yeahpayCall<{ url?: string }>(i, "/cardOrder/getRedirectUrl", {
+    merchantId: y.merchantId, orderId: ref, merchantReferenceNumber: o.orderId, currency: "SGD", amount: String(o.amountCents),
+    goodsList: JSON.stringify([{ name: o.description.slice(0, 60), number: 1, currency: "SGD", amount: o.amountCents }]),
+    timestamp: String(Date.now()), callback: o.returnUrl, lang: "en", notifyUrl,
+  });
+  return d?.url ? { url: d.url, ref } : null;
+}
+
+/** Give a YeahPay payment back in full (a refund of the whole amount; asking twice with the same key is refused by YeahPay as a duplicate). */
+export async function refundYeahpay(i: Integrations, o: { leshuaOrderId: string; key: string }): Promise<boolean> {
+  const y = i.yeahpay;
+  if (!y) return false;
+  const d = await yeahpayCall(i, "/unified/reversalOperation", { sceneType: 1, merchantId: y.merchantId, leshuaOrderId: o.leshuaOrderId, merchantRefundId: o.key, thirdOrderId: o.key });
+  return !!d;
+}
+
+/**
+ * Is this callback really from YeahPay? Same signature rule as a call, with the full address of our callback as the URL
+ * and the raw body exactly as received. `now` and a ten-minute window stop an old message being replayed.
+ */
+export function verifyYeahpayCallback(i: Integrations, o: { url: string; rawBody: string; headers: Record<string, string | string[] | undefined>; now?: number }): boolean {
+  const y = i.yeahpay;
+  if (!y) return false;
+  const h = (k: string) => { const v = o.headers[k.toLowerCase()]; return Array.isArray(v) ? v[0] : v; };
+  const timestamp = h("timestamp"), nonce = h("nonce"), got = h("signature");
+  if (!timestamp || !nonce || !got || (h("appId") && h("appId") !== y.appId)) return false;
+  const ts = Number(timestamp);
+  if (Number.isFinite(ts) && Math.abs((o.now ?? Date.now()) - ts) > 10 * 60_000) return false;
+  const want = yeahpaySignature({ url: o.url, appId: y.appId, timestamp, version: h("version") ?? "1.0", nonce, body: o.rawBody, apiKey: y.apiKey });
+  return sameSecret(want, got);
+}

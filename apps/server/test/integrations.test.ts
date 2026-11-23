@@ -111,11 +111,11 @@ describe("what the shop says it can do", () => {
   it("lists only the features that are set up", async () => {
     const on = (await call("/api/shop/info")).json;
     expect(on.auth).toMatchObject({ google: true, microsoft: true, phone: { number: "+65 8799 6394" } });
-    expect(on.payments).toEqual({ online: true, methods: ["card", "paynow"] });
+    expect(on.payments).toEqual({ online: true, methods: ["card", "paynow"], paynowQr: false });
     const off = (await call("/api/shop/info", { root: baseBare })).json;
     expect(off.auth.google).toBe(false);
     expect(off.auth.microsoft).toBe(false);
-    expect(off.payments).toEqual({ online: false, methods: [] });
+    expect(off.payments).toEqual({ online: false, methods: [], paynowQr: false });
   });
 
   it("refuses a provider that is not set up", async () => {

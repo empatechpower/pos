@@ -143,7 +143,8 @@ function KioskSession({ info, catalog, config }: { info: Info; catalog: Catalog;
     const id = window.setTimeout(() => setSoon(null), 3500);
     return () => window.clearTimeout(id);
   }, [soon]);
-  const [order, setOrder] = useState<{ id: string; qr: string | null; view: OrderView | null; earn: number } | null>(null);
+  const [order, setOrder] = useState<{ id: string; qr: string | null; /** When the QR stops being valid (epoch ms); null when it does not expire. */ exp?: number | null; payId?: string | null; view: OrderView | null; earn: number } | null>(null);
+  const [clock, setClock] = useState(Date.now());
   const [busy, setBusy] = useState(false);
   const [problem, setProblem] = useState<string | null>(null);
   const [idle, setIdle] = useState(0);
@@ -359,16 +360,11 @@ function KioskSession({ info, catalog, config }: { info: Info; catalog: Catalog;
         );
         return;
       }
-      // PayNow: the shop's payment page, shown as a QR the customer scans with their own phone. Otherwise they pay at the counter.
-      let qr: string | null = null;
-      if (info.payments.online && info.payments.methods.includes("paynow")) {
-        const pr = await fetch(`/api/shop/orders/${j.orderId}/pay`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ method: "paynow" }) })
-          .then((r) => r.json() as Promise<{ url?: string }>)
-          .catch(() => ({}) as { url?: string });
-        if (pr.url) qr = await QRCode.toDataURL(pr.url, { margin: 1, width: 560 }).catch(() => null);
-      }
+      // PayNow: a QR the customer scans with their own banking app. Otherwise they pay at the counter.
+      const made = info.payments.paynowQr || (info.payments.online && info.payments.methods.includes("paynow")) ? await makeQr(j.orderId) : null;
+      const qr = made?.qr ?? null;
       placed.current = { bag, pts, couponId };
-      setOrder({ id: j.orderId, qr, view: null, earn: earnPts });
+      setOrder({ id: j.orderId, qr, exp: made?.exp ?? null, payId: made?.payId ?? null, view: null, earn: earnPts });
       setBag([]);
       go(qr ? "pay" : "done");
     } catch {
@@ -377,6 +373,30 @@ function KioskSession({ info, catalog, config }: { info: Info; catalog: Catalog;
       setBusy(false);
     }
   };
+
+  // Ask the server for a PayNow QR for what is owed on this order and turn its text into a picture. A new call replaces any earlier QR.
+  const makeQr = async (orderId: string): Promise<{ qr: string; exp: number | null; payId: string | null } | null> => {
+    const pr = await fetch(`/api/shop/orders/${orderId}/pay`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ method: "paynow", display: "qr" }) })
+      .then((r) => r.json() as Promise<{ url?: string; expiresAt?: number; paymentId?: string }>)
+      .catch(() => ({}) as { url?: string; expiresAt?: number; paymentId?: string });
+    if (!pr.url) return null;
+    const qr = await QRCode.toDataURL(pr.url, { margin: 4, width: 560 }).catch(() => null);
+    return qr ? { qr, exp: pr.expiresAt ?? null, payId: pr.paymentId ?? null } : null;
+  };
+  const renewQr = async () => {
+    if (!order || busy) return;
+    setBusy(true);
+    const made = await makeQr(order.id);
+    setBusy(false);
+    if (!made) return setSoon(tx("Something went wrong. Please try again."));
+    setOrder((o) => (o ? { ...o, qr: made.qr, exp: made.exp, payId: made.payId } : o));
+  };
+  // A QR with a time limit counts down on screen; the picture is removed when it runs out (never just greyed).
+  useEffect(() => {
+    if (screen !== "pay" || !order?.exp) return;
+    const id = window.setInterval(() => setClock(Date.now()), 1000);
+    return () => window.clearInterval(id);
+  }, [screen, order?.exp]);
 
   // Back from Payment: until it is paid the customer can still change the order (handover 3.1). The unpaid order is cancelled (a member's
   // points and coupon go back to them), and the bag, points and coupon return to Review & pay exactly as they were.
@@ -575,7 +595,11 @@ function KioskSession({ info, catalog, config }: { info: Info; catalog: Catalog;
           <p className="k-sub">{tx("Total to pay")}</p>
           <div className="k-big"><RollMoney cents={order?.view?.totalCents ?? 0} /></div>
           <div className="k-methods"><div className="k-method on"><b>PayNow</b><small>{tx("Scan the QR with your banking app")}</small></div></div>
-          {order?.qr && <img className="k-qr" src={order.qr} alt="PayNow" />}
+          {(() => {
+            const left = order?.exp ? Math.max(0, Math.ceil((order.exp - clock) / 1000)) : null;
+            if (order?.exp && left === 0) return <div className="k-qrgone"><p className="k-sub">{tx("This QR has expired.")}</p><button className="k-cta-sm" disabled={busy} onClick={() => void renewQr()}>{tx("Generate new QR")}</button></div>;
+            return order?.qr ? <><img className="k-qr" src={order.qr} alt="PayNow" />{left !== null && <p className="k-sub" aria-live="off">{tx("QR valid for {t}", { t: `${Math.floor(left / 60)}:${String(left % 60).padStart(2, "0")}` })}</p>}</> : null;
+          })()}
           <h3>{tx("Scan to pay")} {formatMoney(order?.view?.totalCents ?? 0)}</h3>
           <p className="k-sub">{tx("Open your banking app, scan this PayNow QR, and confirm the amount. This screen updates on its own once your payment lands.")}</p>
           <p className="k-wait"><i className="k-spin" /> {tx("Waiting for your payment…")}</p>

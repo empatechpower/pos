@@ -11,7 +11,9 @@ import { itemNames, onHandAt, stockVersion } from "./stock.js";
 import { TabError, type TabService } from "./tabs.js";
 import { PROMO_BASIS, claimPromo, judgePromo, promoStacksWithCoupons, releasePromo, type PromoVerdict } from "./promo.js";
 import { normaliseEmail, type MemberStore } from "./members.js";
-import { authorizeUrl, createStripeCheckout, createStripeRefund, fetchProfile, sendMail, newState, newVerifier, sameSecret, verifyStripeSignature, type Integrations, type OAuthProvider } from "./integrations.js";
+import { assignUnassigned, dismissUnassigned, GmailMailbox, listUnassigned, startAlertWatch, type AlertMailbox, type ApplyPayment } from "./paynowMatcher.js";
+import { loadPaynow, issueQr, expectationStatus } from "./paynow.js";
+import { authorizeUrl, createStripeCheckout, createStripeRefund, createYeahpayPayment, refundYeahpay, verifyYeahpayCallback, orderIdFromRef, fetchProfile, sendMail, newState, newVerifier, sameSecret, verifyStripeSignature, type Integrations, type OAuthProvider } from "./integrations.js";
 import type { EventStore } from "./store.js";
 import { loadOutletMenu, loadOutletScheduling, loadOutletWindows } from "./outletMenu.js";
 import { loadKiosk } from "./settings.js";
@@ -40,6 +42,9 @@ interface ShopDeps {
   now?: () => number;
   /** Tabs for table service: a round is an order that joins a table's shared tab. */
   tabs?: TabService;
+  /** Where the bank's PayNow alerts are read from; when absent, Gmail is used if its settings are in the environment. */
+  alertMailbox?: AlertMailbox;
+  alertWatchMs?: number;
 }
 
 /** Only ids and counts are read from a client's build; names, prices and rules come from the menu. */
@@ -247,7 +252,7 @@ export function registerShop(app: FastifyInstance, d: ShopDeps) {
       // What this deployment can do beyond email sign-in and paying at the counter. The page enables only these.
       // Email sign-in is off: phone SMS is the identity channel (kiosk handover 4.3 and open decision 3). EMAIL_SIGNIN=on brings the email option back, for a demo.
       auth: { email: /^(1|true|yes|on)$/i.test(process.env.EMAIL_SIGNIN ?? ""), google: !!integ.google && !!d.members, microsoft: !!integ.microsoft && !!d.members, phone: !!d.members && (openSignin ? { number: "", open: true } : smsTo ? { number: smsTo } : membersOnly ? { number: "", manual: true } : showCodes ? { number: "+65 8000 0000", simulated: true } : null) },
-      payments: { online: !!integ.stripe, methods: integ.stripe ? ["card", "paynow"] : [] },
+      payments: { online: !!(integ.yeahpay || integ.stripe), methods: integ.yeahpay || integ.stripe ? ["card", "paynow"] : [], paynowQr: !!(await loadPaynow(d.db, merchantId)) },
       // The kiosk's operator settings, as the owner set them in Manager.
       kiosk: await loadKiosk(d.db, merchantId),
     };
@@ -1136,7 +1141,7 @@ export function registerShop(app: FastifyInstance, d: ShopDeps) {
       canCancel: cancellable(order),
       // Where this order is in line and about how long: only while it is waiting for or being made by the kitchen.
       queue: ["queued", "preparing"].includes(shopStatus(order, d.config)) ? queueView(await everyOrder(await outletOfOrder(order.orderId)), order, d.config, Date.now(), Number(process.env.QUEUE_FALLBACK_MINUTES) || undefined) : null,
-      canPayOnline: !!integ.stripe && order.stage !== "cancelled" && order.stage !== "completed" && total - paid > 0,
+      canPayOnline: !!(integ.yeahpay || integ.stripe) && order.stage !== "cancelled" && order.stage !== "completed" && total - paid > 0,
     };
   });
 
@@ -1174,9 +1179,11 @@ export function registerShop(app: FastifyInstance, d: ShopDeps) {
   // ---- online payment (Stripe: card and PayNow) -----------------------------------------------------
 
   /** Start a payment for what is still owed on an order. The customer is sent to the hosted payment page. */
-  app.post<{ Params: { id: string }; Body: { method?: string } }>("/api/shop/orders/:id/pay", async (req, reply) => {
+  app.post<{ Params: { id: string }; Body: { method?: string; display?: string } }>("/api/shop/orders/:id/pay", async (req, reply) => {
     if ((await orderGate(req, reply)).blocked) return;
-    if (!integ.stripe) return reply.code(404).send({ error: "online_payment_not_available" });
+    const pn = d.db ? await loadPaynow(d.db, merchantId) : null;
+    const wantsQr = req.body?.display === "qr" && req.body?.method === "paynow";
+    if (!integ.yeahpay && !integ.stripe && !(pn && wantsQr)) return reply.code(404).send({ error: "online_payment_not_available" });
     const method = req.body?.method;
     if (method !== "card" && method !== "paynow") return reply.code(400).send({ error: "method must be card or paynow" });
     const order = reduceOrder(req.params.id, await d.store.eventsForOrder(req.params.id));
@@ -1184,9 +1191,100 @@ export function registerShop(app: FastifyInstance, d: ShopDeps) {
     if (order.stage === "cancelled" || order.stage === "completed") return reply.code(409).send({ error: "order_closed" });
     const due = orderTotals(order, d.config).total - confirmedPaid(order);
     if (due <= 0) return reply.code(409).send({ error: "already_paid" });
+    if (pn && wantsQr && d.db) {
+      // The shop's own PayNow: a dynamic QR for exactly what is owed, valid for a few minutes. The kiosk turns `url` (the QR text) into the picture.
+      const q = await issueQr(d.db, pn, { merchantId, orderId: order.orderId, amountCents: due, channel: "K", now: (d.now ?? Date.now)() });
+      return { url: q.payload, paymentId: q.paymentId, reference: q.reference, expiresAt: q.expiresAt };
+    }
+    if (integ.yeahpay) {
+      // YeahPay: the kiosk asks for a PayNow QR (display "qr"); the phone shop is sent to YeahPay's own checkout page, where the customer picks PayNow or a card.
+      const display = req.body?.display === "qr" && method === "paynow" ? "qr" : "page";
+      const y = await createYeahpayPayment(integ, { orderId: order.orderId, amountCents: due, display, returnUrl: `${integ.publicUrl}/shop/order/${order.orderId}`, description: `${d.config.name} order ${order.queueNumber ?? ""}`.trim() });
+      if (!y) return reply.code(502).send({ error: "payment_provider_unavailable" });
+      return { url: y.url };
+    }
     const s = await createStripeCheckout(integ, { orderId: order.orderId, queueNumber: order.queueNumber ?? "", amountCents: due, method, returnUrl: `${integ.publicUrl}/shop/order/${order.orderId}`, description: `${d.config.name} order ${order.queueNumber ?? ""}`.trim() });
     if (!s) return reply.code(502).send({ error: "payment_provider_unavailable" });
     return { url: s.url };
+  });
+
+  /** Puts a bank-confirmed PayNow payment on an order, only when the order is open and exactly that much is owed. */
+  const applyPaynow: ApplyPayment = async ({ orderId, amountCents, paymentId }) => {
+    const events = await d.store.eventsForOrder(orderId);
+    const order = events.length ? reduceOrder(orderId, events) : null;
+    if (!order || order.stage === "cancelled") return false;
+    if (order.payments.some((p) => p.paymentId === paymentId)) return true;
+    if (orderTotals(order, d.config).total - confirmedPaid(order) !== amountCents) return false;
+    await d.ingest([{ id: `paynow-${paymentId}`, orderId, deviceId: SHOP_DEVICE, ts: (d.now ?? Date.now)(), seq: Date.now(), type: "PaymentRecorded", paymentId, method: "paynow", amountCents, confirmed: true } as unknown as OrderEvent], await outletOfOrder(orderId));
+    return true;
+  };
+  {
+    const g = process.env;
+    const mailbox = d.alertMailbox ?? (g.GMAIL_CLIENT_ID && g.GMAIL_CLIENT_SECRET && g.GMAIL_REFRESH_TOKEN ? new GmailMailbox({ clientId: g.GMAIL_CLIENT_ID, clientSecret: g.GMAIL_CLIENT_SECRET, refreshToken: g.GMAIL_REFRESH_TOKEN }) : null);
+    if (mailbox) {
+      const stop = startAlertWatch({ db: d.db, merchantId, mailbox, load: () => loadPaynow(d.db, merchantId), apply: applyPaynow, now: d.now ?? Date.now, liveMs: d.alertWatchMs, idleMs: d.alertWatchMs ? d.alertWatchMs * 4 : undefined });
+      app.addHook("onClose", async () => stop());
+    }
+  }
+
+  /** Bank payments that arrived with no live QR to match. Staff put them on an order or settle them another way; nothing is ever applied by guesswork. */
+  app.get("/api/payments/paynow/unassigned", { preHandler: d.needs("staff.manage") }, async () => ({ payments: await listUnassigned(d.db, merchantId) }));
+  app.post<{ Params: { ref: string }; Body: { orderId?: string } }>("/api/payments/paynow/unassigned/:ref/assign", { preHandler: d.needs("staff.manage") }, async (req, reply) => {
+    if (!req.body?.orderId) return reply.code(400).send({ error: "orderId_required" });
+    const r = await assignUnassigned(d.db, merchantId, req.params.ref, req.body.orderId, applyPaynow);
+    if (r === "not_found") return reply.code(404).send({ error: "not_found" });
+    if (r === "not_applicable") return reply.code(409).send({ error: "order_cannot_take_this_payment" });
+    return { ok: true };
+  });
+  app.post<{ Params: { ref: string }; Body: { note?: string } }>("/api/payments/paynow/unassigned/:ref/dismiss", { preHandler: d.needs("staff.manage") }, async (req, reply) => {
+    if (!(await dismissUnassigned(d.db, merchantId, req.params.ref, String(req.body?.note ?? "")))) return reply.code(404).send({ error: "not_found" });
+    return { ok: true };
+  });
+
+  /** Where a PayNow QR stands: WAITING, PAID, NOT_FOUND (the minutes are up) or EXPIRED (a newer QR replaced it). The screen asks this; it never reads email. */
+  app.get<{ Params: { id: string } }>("/api/payments/paynow/status/:id", async (req, reply) => {
+    if (!d.db) return reply.code(404).send({ error: "not_found" });
+    const st = await expectationStatus(d.db, merchantId, req.params.id, async (oid) => {
+      const o = reduceOrder(oid, await d.store.eventsForOrder(oid));
+      return !!o && orderTotals(o, d.config).total > 0 && confirmedPaid(o) >= orderTotals(o, d.config).total;
+    }, (d.now ?? Date.now)());
+    if (!st) return reply.code(404).send({ error: "not_found" });
+    return { state: st.state, expiresAt: st.expiresAt, ...(st.paidAt ? { paidAt: st.paidAt } : {}) };
+  });
+
+  /**
+   * YeahPay tells us a payment went through (the signature is checked against our own copy of the key). Only a correctly
+   * signed message for the right amount on an open order is recorded; anything else is refunded. We answer "success" so
+   * YeahPay stops repeating itself, and a repeat of one we already recorded changes nothing.
+   */
+  app.register(async (scope) => {
+    scope.addContentTypeParser("application/json", { parseAs: "buffer" }, (_r, body, done) => done(null, body));
+    scope.post("/api/shop/yeahpay/notify", async (req, reply) => {
+      if (!integ.yeahpay) return reply.code(404).send({ error: "online_payment_not_available" });
+      const raw = req.body as Buffer;
+      if (!Buffer.isBuffer(raw)) return reply.code(400).send({ error: "bad_body" });
+      const rawText = raw.toString("utf8");
+      if (!verifyYeahpayCallback(integ, { url: `${integ.publicUrl}/api/shop/yeahpay/notify`, rawBody: rawText, headers: req.headers })) return reply.code(400).send({ error: "bad_signature" });
+      let n: { status?: string | number; amount?: string | number; currency?: string; leshuaOrderId?: string; attach?: string; thirdOrderId?: string; payWay?: string };
+      try { n = JSON.parse(rawText); } catch { return reply.code(400).send({ error: "bad_body" }); }
+      // Only a successful payment is pushed (status 2). Anything else is acknowledged and ignored.
+      if (String(n.status) === "2" && n.leshuaOrderId) {
+        const orderId = n.attach || orderIdFromRef(n.thirdOrderId ?? "");
+        const events = orderId ? await d.store.eventsForOrder(orderId) : [];
+        const order = events.length ? reduceOrder(orderId, events) : null;
+        const due = order ? orderTotals(order, d.config).total - confirmedPaid(order) : 0;
+        const paid = Number(n.amount);
+        const method = /paynow/i.test(n.payWay ?? "") ? "paynow" : "card";
+        if (order?.payments.some((p) => p.paymentId === `yeahpay:${n.leshuaOrderId}`)) return reply.type("text/plain").send("success");
+        if (!order || order.source !== "online" || order.stage === "cancelled" || (n.currency && n.currency !== "SGD") || paid !== due) {
+          const back = await refundYeahpay(integ, { leshuaOrderId: n.leshuaOrderId, key: `refund${n.leshuaOrderId}` });
+          console.error(`[yeahpay] payment ${n.leshuaOrderId} for order ${orderId} not applied (amount ${n.amount} ${n.currency}, due ${due}); ${back ? "refunded" : "REFUND FAILED - refund it by hand in the YeahPay console"}`);
+        } else {
+          await d.ingest([{ id: `yeahpay-${n.leshuaOrderId}`, orderId: order.orderId, deviceId: SHOP_DEVICE, ts: Date.now(), seq: Date.now(), type: "PaymentRecorded", paymentId: `yeahpay:${n.leshuaOrderId}`, method, amountCents: paid, confirmed: true } as unknown as OrderEvent], await outletOfOrder(order.orderId));
+        }
+      }
+      return reply.type("text/plain").send("success");
+    });
   });
 
   /** Stripe tells us a payment went through. Only a correctly signed message for the right amount is believed. */

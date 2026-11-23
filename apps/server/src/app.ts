@@ -16,6 +16,7 @@ import { registerPromoAdmin, releasePromo } from "./promo.js";
 import { reconcileOrderStock, registerStock } from "./stock.js";
 import { TabError, TabService } from "./tabs.js";
 import { registerTabRoutes } from "./tabRoutes.js";
+import { loadPaynow, savePaynow } from "./paynow.js";
 import { applyOption, loadKiosk, OPTION_KEYS, optionsOf, saveKiosk, saveSetting } from "./settings.js";
 import { sendMail, type Integrations } from "./integrations.js";
 import { registerTelegram } from "./telegram.js";
@@ -51,6 +52,10 @@ interface Deps {
   integrations?: Integrations;
   /** The clock (epoch ms). Tests set it to prove what happens at a window's edge; production leaves it. */
   now?: () => number;
+  /** Where the bank's PayNow alerts are read from (tests use a memory mailbox; production reads Gmail). */
+  alertMailbox?: import("./paynowMatcher.js").AlertMailbox;
+  /** How often the mailbox is looked at while a QR is live (ms). Tests make it short. */
+  alertWatchMs?: number;
 }
 
 const bearer = (req: FastifyRequest) => req.headers.authorization?.replace(/^Bearer\s+/i, "");
@@ -59,7 +64,7 @@ const deviceToken = (req: FastifyRequest) => {
   return Array.isArray(h) ? h[0] : h;
 };
 
-export async function buildApp({ config, store, db, catalog, catalogAdmin, print, logger = true, trustProxy = false, integrations, now }: Deps) {
+export async function buildApp({ config, store, db, catalog, catalogAdmin, print, logger = true, trustProxy = false, integrations, now, alertMailbox, alertWatchMs }: Deps) {
   const app = Fastify({ logger, trustProxy });
   // Logo uploads arrive as raw image bytes.
   app.addContentTypeParser(["image/png", "image/jpeg", "image/webp"], { parseAs: "buffer", bodyLimit: 300 * 1024 + 1 }, (_req, body, done) => done(null, body));
@@ -645,6 +650,15 @@ export async function buildApp({ config, store, db, catalog, catalogAdmin, print
     return next;
   });
 
+  app.get("/api/settings/paynow", { preHandler: needs("wallet.read") }, async () => ({ config: await loadPaynow(db, merchantId) }));
+  app.put<{ Body: unknown }>("/api/settings/paynow", { preHandler: needs("staff.manage") }, async (req, reply) => {
+    if ((await visibleOutletIds(db, merchantId, req.staff!)) !== null) return reply.code(403).send({ error: "brand_only" });
+    const r = await savePaynow(db, merchantId, req.body);
+    if (!r.ok) return reply.code(400).send({ error: r.error });
+    await audit(db, merchantId, req.staff!.id, "settings.paynow", { proxyType: r.config.proxyType, displayName: r.config.displayName, outletCode: r.config.outletCode, ttlMinutes: r.config.ttlMinutes });
+    return { config: r.config };
+  });
+
   // ---- agents: limited API access for an AI helper or script (owner only) ---------------------
 
   app.get("/api/agents", { preHandler: needs("staff.manage") }, async () => ({ agents: await listAgents(db, merchantId) }));
@@ -674,7 +688,7 @@ export async function buildApp({ config, store, db, catalog, catalogAdmin, print
   }
   registerTabRoutes(app, { db, merchantId, tabs, members, needs, outletIds: async () => (await listOutlets(db, merchantId)).map((o) => o.id) });
   registerStock(app, { db, merchantId, needs, outletIds: async () => (await listOutlets(db, merchantId)).map((o) => o.id), defaultOutlet: config.outletName });
-  registerShop(app, { db, config, store, catalog, catalogAdmin, brand: new BrandStore(db, merchantId), ingest, members, needs, integrations, now, tabs });
+  registerShop(app, { db, config, store, catalog, catalogAdmin, brand: new BrandStore(db, merchantId), ingest, members, needs, integrations, now, tabs, alertMailbox, alertWatchMs });
 
   // ---- the Telegram bot for managing prices ---------------------------------------------------
 

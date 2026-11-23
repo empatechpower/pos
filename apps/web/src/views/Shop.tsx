@@ -33,7 +33,7 @@ export interface Info {
   /** The kiosk's operator settings from Manager (the kiosk lets a tablet override them locally). */
   kiosk?: { idleMinutes: number; signinBlock: boolean; chips: { earn: boolean; rate: boolean; stamps: boolean } };
   auth: { /** Email sign-in is off unless the server turns it on. */ email?: boolean; google: boolean; microsoft: boolean; phone: { number: string; simulated?: boolean; manual?: boolean; open?: boolean } | null };
-  payments: { online: boolean; methods: string[] };
+  payments: { online: boolean; methods: string[]; /** The shop's own PayNow QR (kiosk) is set up. */ paynowQr?: boolean };
 }
 export interface OrderView {
   orderId: string;
