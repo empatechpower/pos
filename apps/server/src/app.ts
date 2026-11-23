@@ -659,6 +659,29 @@ export async function buildApp({ config, store, db, catalog, catalogAdmin, print
     return { config: r.config };
   });
 
+  // The till asks for a PayNow QR for an order it has already sent to the server. The amount is what the server says is still owed.
+  app.post<{ Body: { orderId?: string } }>("/api/payments/paynow/qr", { preHandler: needs("wallet.spend") }, async (req, reply) => {
+    const cfg = await loadPaynow(db, merchantId);
+    if (!cfg) return reply.code(409).send({ error: "paynow_not_set_up" });
+    const orderId = String(req.body?.orderId ?? "");
+    const events = orderId ? await store.eventsForOrder(orderId) : [];
+    const order = events.length ? reduceOrder(orderId, events) : null;
+    if (!order) return reply.code(404).send({ error: "order_not_found" });
+    const due = orderTotals(order, config).total - confirmedPaid(order);
+    if (order.stage === "cancelled" || due <= 0) return reply.code(409).send({ error: "nothing_to_pay" });
+    const q = await issueQr(db, cfg, { merchantId, orderId, amountCents: due, channel: "P", now: (now ?? Date.now)() });
+    return { paymentId: q.paymentId, reference: q.reference, payload: q.payload, expiresAt: q.expiresAt, amountCents: due, displayName: cfg.displayName };
+  });
+
+  // Open orders (today and yesterday) that are owed exactly this much: the choices when staff put an unassigned bank payment on an order.
+  app.get<{ Querystring: { amount?: string } }>("/api/payments/paynow/candidates", { preHandler: needs("wallet.refund") }, async (req) => {
+    const cents = Number(req.query.amount);
+    const scope = await visibleOutletIds(db, merchantId, req.staff!);
+    const t = (now ?? Date.now)();
+    const r = await ordersReport(dayOf(t - 86_400_000), dayOf(t), false, scope);
+    return { orders: r.orders.filter((o) => o.stage !== "cancelled" && o.totalCents - o.paidCents === cents && cents > 0).slice(0, 20).map((o) => ({ orderId: o.orderId, queueNumber: o.queueNumber, channel: o.channel, table: o.table, customerName: o.customerName, openedAt: o.openedAt, items: o.lines.reduce((n, l) => n + l.qty, 0) })) };
+  });
+
   // A S$0.01 QR from the saved settings, so the owner can scan it with their own banking app and see the ID and name are right.
   // It is stored like any QR; if paid, the money lands in the unassigned pool (there is no order for it).
   app.post("/api/settings/paynow/test", { preHandler: needs("staff.manage") }, async (req, reply) => {

@@ -1228,15 +1228,15 @@ export function registerShop(app: FastifyInstance, d: ShopDeps) {
   }
 
   /** Bank payments that arrived with no live QR to match. Staff put them on an order or settle them another way; nothing is ever applied by guesswork. */
-  app.get("/api/payments/paynow/unassigned", { preHandler: d.needs("staff.manage") }, async () => ({ payments: await listUnassigned(d.db, merchantId) }));
-  app.post<{ Params: { ref: string }; Body: { orderId?: string } }>("/api/payments/paynow/unassigned/:ref/assign", { preHandler: d.needs("staff.manage") }, async (req, reply) => {
+  app.get("/api/payments/paynow/unassigned", { preHandler: d.needs("wallet.refund") }, async () => ({ payments: await listUnassigned(d.db, merchantId) }));
+  app.post<{ Params: { ref: string }; Body: { orderId?: string } }>("/api/payments/paynow/unassigned/:ref/assign", { preHandler: d.needs("wallet.refund") }, async (req, reply) => {
     if (!req.body?.orderId) return reply.code(400).send({ error: "orderId_required" });
     const r = await assignUnassigned(d.db, merchantId, req.params.ref, req.body.orderId, applyPaynow);
     if (r === "not_found") return reply.code(404).send({ error: "not_found" });
     if (r === "not_applicable") return reply.code(409).send({ error: "order_cannot_take_this_payment" });
     return { ok: true };
   });
-  app.post<{ Params: { ref: string }; Body: { note?: string } }>("/api/payments/paynow/unassigned/:ref/dismiss", { preHandler: d.needs("staff.manage") }, async (req, reply) => {
+  app.post<{ Params: { ref: string }; Body: { note?: string } }>("/api/payments/paynow/unassigned/:ref/dismiss", { preHandler: d.needs("wallet.refund") }, async (req, reply) => {
     if (!(await dismissUnassigned(d.db, merchantId, req.params.ref, String(req.body?.note ?? "")))) return reply.code(404).send({ error: "not_found" });
     return { ok: true };
   });

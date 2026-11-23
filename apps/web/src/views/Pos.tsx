@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react";
+import QRCode from "qrcode";
 import {
   confirmedPaid,
   formatMoney,
@@ -28,6 +29,7 @@ import { deviceId, getDeviceCode, record } from "../db";
 import { useOrders } from "../hooks";
 import { OptionSheet } from "./OptionSheet";
 import { getBalance, spend } from "../wallet";
+import { syncNow } from "../sync";
 
 interface BagLine {
   /** The item and its chosen options: the same item with different options is a different line. */
@@ -67,6 +69,54 @@ export function Pos({ config, catalog, online, customerId, setCustomerId }: PosP
   const [balance, setBalance] = useState<number | null>(null);
   const [paying, setPaying] = useState(false);
   const payLock = useRef(false); // set synchronously, so a fast double-tap cannot start two charges
+
+  // Direct PayNow QR: the order goes to the server first, then the server issues a QR for what is owed and confirms it from the bank's alert.
+  const [qrReady, setQrReady] = useState(false);
+  const [qrPay, setQrPay] = useState<null | { orderId: string; paymentId: string; img: string; expiresAt: number; amountCents: number; name: string; paid: boolean }>(null);
+  const [qrBusy, setQrBusy] = useState(false);
+  const [clock, setClock] = useState(Date.now());
+  useEffect(() => {
+    if (!staff || !online) { setQrReady(false); return; }
+    let alive = true;
+    void staffFetch("/api/settings/paynow").then(async (r) => { if (alive && "res" in r && r.res.ok) setQrReady(!!((await r.res.json()) as { config: unknown }).config); });
+    return () => { alive = false; };
+  }, [staff, online]);
+  useEffect(() => {
+    if (!qrPay || qrPay.paid) return;
+    const tick = window.setInterval(() => setClock(Date.now()), 1000);
+    const poll = window.setInterval(async () => {
+      const res = await fetch(`/api/payments/paynow/status/${qrPay.paymentId}`).catch(() => null);
+      if (res?.ok && ((await res.json()) as { state: string }).state === "PAID") { setQrPay((q) => (q ? { ...q, paid: true } : q)); void syncNow(); }
+    }, 2000);
+    return () => { window.clearInterval(tick); window.clearInterval(poll); };
+  }, [qrPay?.paymentId, qrPay?.paid]);
+
+  async function askQr(orderId: string): Promise<boolean> {
+    let r = await staffFetch("/api/payments/paynow/qr", { method: "POST", body: { orderId } });
+    // The order may still be on its way to the server: send it again and retry once.
+    if ("res" in r && r.res.status === 404) { await syncNow(); r = await staffFetch("/api/payments/paynow/qr", { method: "POST", body: { orderId } }); }
+    if (!("res" in r) || !r.res.ok) { notify("Could not get a PayNow QR. Check the connection and the PayNow settings."); return false; }
+    const j = (await r.res.json()) as { paymentId: string; payload: string; expiresAt: number; amountCents: number; displayName: string };
+    setQrPay({ orderId, paymentId: j.paymentId, img: await QRCode.toDataURL(j.payload, { margin: 4, width: 520 }), expiresAt: j.expiresAt, amountCents: j.amountCents, name: j.displayName, paid: false });
+    return true;
+  }
+  async function payWithQr() {
+    if (!bag.length || qrBusy || payLock.current) return;
+    payLock.current = true; setQrBusy(true);
+    const orderId = newId();
+    await place(null, orderId);
+    await syncNow();
+    await askQr(orderId);
+    payLock.current = false; setQrBusy(false);
+  }
+  /** The customer is not paying by QR after all: cancel the order, or take cash instead. */
+  async function closeQr(how: "cancel" | "cash" | "done") {
+    if (!qrPay) return;
+    if (how === "cancel") await record(qrPay.orderId, { type: "StageSet", stage: "cancelled" });
+    if (how === "cash") await record(qrPay.orderId, { type: "PaymentRecorded", paymentId: newId(), method: "cash", amountCents: qrPay.amountCents, confirmed: true });
+    setQrPay(null);
+    if (how !== "done") void syncNow();
+  }
 
   useEffect(() => {
     let alive = true;
@@ -253,6 +303,34 @@ export function Pos({ config, catalog, online, customerId, setCustomerId }: PosP
         </div>
       </section>
 
+      {qrPay && (() => {
+        const left = Math.max(0, Math.ceil((qrPay.expiresAt - clock) / 1000));
+        return (
+          <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,.55)", display: "grid", placeItems: "center", zIndex: 50 }}>
+            <div style={{ background: "var(--bg, #fff)", color: "var(--fg, #111)", borderRadius: 14, padding: 20, width: "min(92vw, 420px)", textAlign: "center" }}>
+              {qrPay.paid ? (
+                <>
+                  <h2>Paid {formatMoney(qrPay.amountCents)}</h2>
+                  <p className="muted">The bank has confirmed it.</p>
+                  <button className="primary" onClick={() => void closeQr("done")}>Done</button>
+                </>
+              ) : (
+                <>
+                  <h3>Scan to pay {formatMoney(qrPay.amountCents)}</h3>
+                  <p className="muted">{qrPay.name}</p>
+                  {left > 0 ? <img src={qrPay.img} alt="PayNow QR" width={260} height={260} /> : <p style={{ margin: "60px 0" }}><b>This QR has expired.</b></p>}
+                  <p className="muted">{left > 0 ? `Waiting for the bank · valid ${Math.floor(left / 60)}:${String(left % 60).padStart(2, "0")}` : "Make a new one if the customer still wants to pay."}</p>
+                  <div className="row" style={{ justifyContent: "center" }}>
+                    {left === 0 && <button className="primary sm" onClick={() => void askQr(qrPay.orderId)}>New QR</button>}
+                    <button className="secondary sm" onClick={() => void closeQr("cash")}>Paid in cash</button>
+                    <button className="secondary sm" onClick={() => void closeQr("cancel")}>Cancel order</button>
+                  </div>
+                </>
+              )}
+            </div>
+          </div>
+        );
+      })()}
       <aside className="bag">
         {flash && <div className="flash">{flash}</div>}
         <div className="seg">
@@ -311,6 +389,11 @@ export function Pos({ config, catalog, online, customerId, setCustomerId }: PosP
             <button className="primary" disabled={!bag.length || !!creditBlocked || paying} title={creditBlocked} onClick={() => void payWithCredit()}>
               {paying ? "Charging…" : `Pay with credit · ${formatMoney(priced.total)}`}
             </button>
+            {qrReady && (
+            <button className="secondary" disabled={!bag.length || !online || qrBusy} onClick={() => void payWithQr()}>
+              PayNow QR · {formatMoney(priced.total)}
+            </button>
+            )}
             <button
               className="secondary"
               disabled={!bag.length || !online}

@@ -172,11 +172,33 @@ describe("matching alerts to QRs", () => {
     const list = await call("/api/payments/paynow/unassigned", { bearer: tok });
     expect(list.status).toBe(200);
     expect(list.json.payments.find((p: any) => p.bankRef === r)).toMatchObject({ amountCents: lost.json.totalCents, payerName: "TAY BOON" });
+    const cand = await call(`/api/payments/paynow/candidates?amount=${lost.json.totalCents}`, { bearer: tok });
+    expect(cand.status).toBe(200);
+    expect(cand.json.orders.map((o: any) => o.orderId)).toContain(lost.json.orderId);
+    expect((await call("/api/payments/paynow/candidates?amount=1", { bearer: tok })).json.orders).toEqual([]);
     expect((await call(`/api/payments/paynow/unassigned/${r}/assign`, { bearer: tok, body: { orderId: (await place(1)).json.orderId } })).status).toBe(409);
     expect((await call(`/api/payments/paynow/unassigned/${r}/assign`, { bearer: tok, body: { orderId: lost.json.orderId } })).status).toBe(200);
     expect(await orderPaid(lost.json.orderId)).toBe(true);
     expect((await call("/api/payments/paynow/unassigned", { bearer: tok })).json.payments.some((p: any) => p.bankRef === r)).toBe(false);
     expect((await call(`/api/payments/paynow/unassigned/${r}/assign`, { bearer: tok, body: { orderId: lost.json.orderId } })).status).toBe(404);
+  });
+
+  it("the till gets a P-channel QR for what the server says is owed, and a cashier cannot touch the pool", async () => {
+    await createStaff(db, { merchantId: "bp", code: "C1", name: "Cat Cashier", role: "cashier", pin: "3333" });
+    const cash = (await call("/api/auth/login", { body: { code: "C1", pin: "3333" } })).json.token;
+    const o = await place(9);
+    const r = await call("/api/payments/paynow/qr", { bearer: cash, body: { orderId: o.json.orderId } });
+    expect(r.status).toBe(200);
+    expect(r.json.amountCents).toBe(o.json.totalCents);
+    expect(r.json.reference).toMatch(/^RZPB1/);
+    expect(r.json.payload).toContain((o.json.totalCents / 100).toFixed(2));
+    expect(await status(r.json.paymentId)).toBe("WAITING");
+    expect((await call("/api/payments/paynow/qr", { bearer: cash, body: { orderId: "nope" } })).status).toBe(404);
+    expect((await call("/api/payments/paynow/qr", { body: { orderId: o.json.orderId } })).status).toBe(401);
+    expect((await call("/api/payments/paynow/unassigned", { bearer: cash })).status).toBe(403);
+    await createStaff(db, { merchantId: "bp", code: "M1", name: "Max Manager", role: "manager", pin: "222222" });
+    const mgr = (await call("/api/auth/login", { body: { code: "M1", pin: "222222" } })).json.token;
+    expect((await call("/api/payments/paynow/unassigned", { bearer: mgr })).status).toBe(200);
   });
 
   it("the pool is closed to anyone not signed in", async () => {
