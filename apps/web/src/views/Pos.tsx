@@ -30,6 +30,8 @@ import { useOrders } from "../hooks";
 import { OptionSheet } from "./OptionSheet";
 import { getBalance, spend } from "../wallet";
 import { syncNow } from "../sync";
+import { useShift, useShiftRequired } from "../shift";
+import { ShiftBar } from "./ShiftBar";
 
 interface BagLine {
   /** The item and its chosen options: the same item with different options is a different line. */
@@ -68,6 +70,9 @@ export function Pos({ config, catalog, online, customerId, setCustomerId }: PosP
   const staff = useStaff();
   const [balance, setBalance] = useState<number | null>(null);
   const [paying, setPaying] = useState(false);
+  const shift = useShift();
+  const shiftRequired = useShiftRequired();
+  const mustOpenShift = shiftRequired && !shift; // the shop wants a shift open before any payment
   const payLock = useRef(false); // set synchronously, so a fast double-tap cannot start two charges
 
   // Direct PayNow QR: the order goes to the server first, then the server issues a QR for what is owed and confirms it from the bank's alert.
@@ -110,9 +115,11 @@ export function Pos({ config, catalog, online, customerId, setCustomerId }: PosP
     payLock.current = false; setQrBusy(false);
   }
   /** The customer is not paying by QR after all: cancel the order, or take cash instead. */
-  async function closeQr(how: "cancel" | "cash" | "done") {
+  async function closeQr(how: "cancel" | "cash" | "paynow" | "done") {
     if (!qrPay) return;
+    if (how === "paynow" && !window.confirm(`Have you seen ${formatMoney(qrPay.amountCents)} arrive in the bank account?`)) return;
     if (how === "cancel") await record(qrPay.orderId, { type: "StageSet", stage: "cancelled" });
+    if (how === "paynow") await record(qrPay.orderId, { type: "PaymentRecorded", paymentId: newId(), method: "paynow", amountCents: qrPay.amountCents, confirmed: true });
     if (how === "cash") await record(qrPay.orderId, { type: "PaymentRecorded", paymentId: newId(), method: "cash", amountCents: qrPay.amountCents, confirmed: true });
     setQrPay(null);
     if (how !== "done") void syncNow();
@@ -320,8 +327,9 @@ export function Pos({ config, catalog, online, customerId, setCustomerId }: PosP
                   <p className="muted">{qrPay.name}</p>
                   {left > 0 ? <img src={qrPay.img} alt="PayNow QR" width={260} height={260} /> : <p style={{ margin: "60px 0" }}><b>This QR has expired.</b></p>}
                   <p className="muted">{left > 0 ? `Waiting for the bank · valid ${Math.floor(left / 60)}:${String(left % 60).padStart(2, "0")}` : "Make a new one if the customer still wants to pay."}</p>
-                  <div className="row" style={{ justifyContent: "center" }}>
+                  <div className="row" style={{ justifyContent: "center", gap: 8, flexWrap: "wrap" }}>
                     {left === 0 && <button className="primary sm" onClick={() => void askQr(qrPay.orderId)}>New QR</button>}
+                    <button className="primary sm" onClick={() => void closeQr("paynow")}>Confirm PayNow received</button>
                     <button className="secondary sm" onClick={() => void closeQr("cash")}>Paid in cash</button>
                     <button className="secondary sm" onClick={() => void closeQr("cancel")}>Cancel order</button>
                   </div>
@@ -332,6 +340,7 @@ export function Pos({ config, catalog, online, customerId, setCustomerId }: PosP
         );
       })()}
       <aside className="bag">
+        <ShiftBar />
         {flash && <div className="flash">{flash}</div>}
         <div className="seg">
           {channels.map((c) => (
@@ -383,20 +392,20 @@ export function Pos({ config, catalog, online, customerId, setCustomerId }: PosP
 
         {prepay ? (
           <div className="pay">
-            <button className="primary" disabled={!bag.length} onClick={() => void place({ method: "cash", confirmed: true })}>
+            <button className="primary" disabled={!bag.length || mustOpenShift} title={mustOpenShift ? "Open your shift first" : undefined} onClick={() => void place({ method: "cash", confirmed: true })}>
               Cash · {formatMoney(priced.total)}
             </button>
-            <button className="primary" disabled={!bag.length || !!creditBlocked || paying} title={creditBlocked} onClick={() => void payWithCredit()}>
+            <button className="primary" disabled={!bag.length || !!creditBlocked || paying || mustOpenShift} title={mustOpenShift ? "Open your shift first" : creditBlocked} onClick={() => void payWithCredit()}>
               {paying ? "Charging…" : `Pay with credit · ${formatMoney(priced.total)}`}
             </button>
             {qrReady && (
-            <button className="secondary" disabled={!bag.length || !online || qrBusy} onClick={() => void payWithQr()}>
+            <button className="secondary" disabled={!bag.length || !online || qrBusy || mustOpenShift} onClick={() => void payWithQr()}>
               PayNow QR · {formatMoney(priced.total)}
             </button>
             )}
             <button
               className="secondary"
-              disabled={!bag.length || !online}
+              disabled={!bag.length || !online || mustOpenShift}
               title={online ? "Mock gateway – confirms after 1.5s" : "Online payments need a connection"}
               onClick={() => void place({ method: "paynow", confirmed: false })}
             >

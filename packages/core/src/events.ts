@@ -45,13 +45,20 @@ export type OrderEventBody =
   | { type: "PointsRedeemed"; points: number }
   | { type: "ItemAdded"; lineId: string; productId: string; name: string; /** includes the price of any options */ unitCents: Cents; qty: number; bcrs?: boolean; pointsExempt?: boolean; taxInclusive?: boolean; taxGroup?: string; options?: ChosenOption[]; /** Build-your-own: the frozen structured build. */ build?: StoredBuild }
   | { type: "ItemQtySet"; lineId: string; qty: number }
-  | { type: "PaymentRecorded"; paymentId: string; method: PaymentMethod; amountCents: Cents; /** false = awaiting gateway confirmation */ confirmed: boolean }
+  | { type: "PaymentRecorded"; paymentId: string; method: PaymentMethod; amountCents: Cents; /** false = awaiting gateway confirmation */ confirmed: boolean; /** The cashier's shift this was taken in (the drawer it belongs to). */ shiftId?: string }
   | { type: "PaymentConfirmed"; paymentId: string }
   | { type: "StageSet"; stage: Exclude<OrderStage, "open"> }
   /** The customer moved to another table after ordering: the same order, same status, now at `to`. The old table and the time are kept. */
   | { type: "TableChanged"; from?: string; to: string }
   /** The commission the channel's platform actually took on this order (its own promotions can differ from the contract rate). The latest one wins. */
-  | { type: "CommissionRecorded"; cents: Cents; note?: string };
+  | { type: "CommissionRecorded"; cents: Cents; note?: string }
+  /**
+   * Money given back against one payment. Always approved by a manager (their own sign-in, or their PIN entered on the cashier's till).
+   * It is kept as a negative payment, so what the order has taken is always the net.
+   */
+  | { type: "RefundRecorded"; refundId: string; /** the payment it gives back */ paymentId: string; method: PaymentMethod; amountCents: Cents; reason: string; approvedBy: string; approvedByName: string; /** part of voiding the whole order */ voided?: boolean; /** The shift whose drawer the money came out of. */ shiftId?: string }
+  /** The whole order called off after it was sent or paid: every payment is refunded alongside and the order is closed as cancelled. */
+  | { type: "OrderVoided"; reason: string; approvedBy: string; approvedByName: string };
 
 export type OrderEvent = OrderEventBody & {
   /** Globally unique, generated on the device that created the event. */
@@ -96,12 +103,16 @@ export interface OrderState {
   spot?: string;
   /** The actual commission recorded for this order, when one was entered. */
   commission?: { cents: Cents; note?: string; at: number };
+  /** Money given back, oldest first. */
+  refunds?: Array<{ refundId: string; paymentId: string; method: PaymentMethod; amountCents: Cents; reason: string; approvedBy: string; approvedByName: string; at: number; voided?: boolean }>;
+  /** Set when the whole order was voided. */
+  voided?: { reason: string; approvedBy: string; approvedByName: string; at: number };
   /** Every table move after the order was placed, oldest first. */
   tableChanges?: Array<{ from?: string; to: string; at: number }>;
   queueNumber?: string;
   openedAt: number;
   lines: OrderLine[];
-  payments: Array<{ paymentId: string; method: PaymentMethod; amountCents: Cents; confirmed: boolean }>;
+  payments: Array<{ paymentId: string; method: PaymentMethod; amountCents: Cents; confirmed: boolean; shiftId?: string }>;
   stage: OrderStage;
   /** Time the order was first fully paid (confirmed). */
   paidAt?: number;
@@ -150,7 +161,7 @@ export function reduceOrder(orderId: string, events: readonly OrderEvent[]): Ord
       }
       case "PaymentRecorded": {
         if (state.payments.some((p) => p.paymentId === e.paymentId)) break;
-        state.payments.push({ paymentId: e.paymentId, method: e.method, amountCents: e.amountCents, confirmed: e.confirmed });
+        state.payments.push({ paymentId: e.paymentId, method: e.method, amountCents: e.amountCents, confirmed: e.confirmed, ...(e.shiftId ? { shiftId: e.shiftId } : {}) });
         break;
       }
       case "PaymentConfirmed": {
@@ -169,6 +180,18 @@ export function reduceOrder(orderId: string, events: readonly OrderEvent[]): Ord
         break;
       case "OrderFired":
         state.firedAt ??= e.ts;
+        break;
+      case "RefundRecorded": {
+        if (state.refunds?.some((r) => r.refundId === e.refundId)) break;
+        const amountCents = Math.max(0, Math.round(e.amountCents));
+        (state.refunds ??= []).push({ refundId: e.refundId, paymentId: e.paymentId, method: e.method, amountCents, reason: e.reason.slice(0, 200), approvedBy: e.approvedBy, approvedByName: e.approvedByName, at: e.ts, ...(e.voided ? { voided: true } : {}) });
+        state.payments.push({ paymentId: `refund:${e.refundId}`, method: e.method, amountCents: -amountCents, confirmed: true });
+        break;
+      }
+      case "OrderVoided":
+        state.voided ??= { reason: e.reason.slice(0, 200), approvedBy: e.approvedBy, approvedByName: e.approvedByName, at: e.ts };
+        state.stage = "cancelled";
+        state.closedAt ??= e.ts;
         break;
       case "CommissionRecorded":
         state.commission = { cents: Math.max(0, Math.round(e.cents)), ...(e.note ? { note: e.note.slice(0, 120) } : {}), at: e.ts };

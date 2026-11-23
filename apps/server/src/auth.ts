@@ -89,6 +89,20 @@ export type LoginResult =
  * response never reveals which staff codes exist. Five wrong PINs lock the account for a few minutes.
  */
 export async function login(db: Db, merchantId: string, code: string, pin: string): Promise<LoginResult> {
+  const v = await checkStaffPin(db, merchantId, code, pin);
+  if (!v.ok) return v;
+  const token = randomBytes(32).toString("base64url");
+  const expiresAt = new Date(Date.now() + SESSION_HOURS * 3_600_000);
+  await db.query("INSERT INTO sessions (token_hash, staff_id, expires_at) VALUES ($1,$2,$3)", [sha256(token), v.row.id, expiresAt]);
+  await audit(db, merchantId, v.row.id, "auth.login", {});
+  return { ok: true, token, staff: toStaff(v.row), expiresAt };
+}
+
+/**
+ * Is this the right PIN for this staff code? Same rules as signing in (one generic failure, five wrong PINs lock the account),
+ * but no session is opened: used to let a manager approve something on someone else's till.
+ */
+export async function checkStaffPin(db: Db, merchantId: string, code: string, pin: string): Promise<{ ok: true; row: any } | { ok: false; reason: "invalid" | "locked" }> {
   const r = await db.query("SELECT * FROM staff WHERE merchant_id=$1 AND code=$2", [merchantId, code]);
   const row = r.rows[0];
   if (!row || !row.active) {
@@ -109,11 +123,7 @@ export async function login(db: Db, merchantId: string, code: string, pin: strin
   }
 
   await db.query("UPDATE staff SET failed_attempts=0, locked_until=NULL WHERE id=$1", [row.id]);
-  const token = randomBytes(32).toString("base64url");
-  const expiresAt = new Date(Date.now() + SESSION_HOURS * 3_600_000);
-  await db.query("INSERT INTO sessions (token_hash, staff_id, expires_at) VALUES ($1,$2,$3)", [sha256(token), row.id, expiresAt]);
-  await audit(db, merchantId, row.id, "auth.login", {});
-  return { ok: true, token, staff: toStaff(row), expiresAt };
+  return { ok: true, row };
 }
 
 /** Open a staff session without a PIN, for a sign-in that has already been proven another way (a one-time code from Telegram). */

@@ -132,3 +132,28 @@ describe("a table change after ordering", () => {
   });
 });
 
+
+describe("refunds and voids", () => {
+  const paid = (): OrderEvent[] => [...baseEvents(), ev("tabA", "o1", 3, { type: "PaymentRecorded", paymentId: "p-cash", method: "cash", amountCents: 400, confirmed: true })];
+  const refund = (id: string, cents: number, extra: object = {}) => ev("srv", "o1", 10, { type: "RefundRecorded", refundId: id, paymentId: "p-cash", method: "cash", amountCents: cents, reason: "Wrong item", approvedBy: "m1", approvedByName: "Max Manager", ...extra } as OrderEventBody);
+
+  it("a refund is a negative payment, so what the order has taken is the net", () => {
+    const o = reduceOrder("o1", [...paid(), refund("r1", 150)])!;
+    expect(o.payments.reduce((n, p) => n + p.amountCents, 0)).toBe(250);
+    expect(o.refunds).toEqual([expect.objectContaining({ refundId: "r1", amountCents: 150, reason: "Wrong item", approvedByName: "Max Manager" })]);
+  });
+
+  it("the same refund twice counts once", () => {
+    const o = reduceOrder("o1", [...paid(), refund("r1", 150), refund("r1", 150)])!;
+    expect(o.refunds).toHaveLength(1);
+    expect(o.payments.reduce((n, p) => n + p.amountCents, 0)).toBe(250);
+  });
+
+  it("voiding closes the order as cancelled and keeps who approved it and why", () => {
+    const o = reduceOrder("o1", [...paid(), refund("r1", 400, { voided: true }), ev("srv", "o1", 11, { type: "OrderVoided", reason: "Customer left", approvedBy: "m1", approvedByName: "Max Manager" })])!;
+    expect(o.stage).toBe("cancelled");
+    expect(o.voided).toMatchObject({ reason: "Customer left", approvedByName: "Max Manager" });
+    expect(o.payments.reduce((n, p) => n + p.amountCents, 0)).toBe(0);
+    expect(o.closedAt).toBeDefined();
+  });
+});

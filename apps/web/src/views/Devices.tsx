@@ -1,6 +1,7 @@
 import { DisplayLink } from "./DisplayLink";
 import { PaynowPanel } from "./PaynowPanel";
 import { UnassignedPanel } from "./UnassignedPanel";
+import { ShiftsPanel } from "./ShiftsPanel";
 import { useEffect, useState } from "react";
 import { authHeader, useStaff } from "../auth";
 
@@ -103,6 +104,7 @@ export function Devices() {
         </div>
       ))}
       <PaynowPanel />
+      <ShiftsPanel />
       <UnassignedPanel />
     </div>
   );

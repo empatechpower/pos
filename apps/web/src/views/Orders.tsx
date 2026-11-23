@@ -2,6 +2,7 @@ import { useState } from "react";
 import { formatMoney, orderTotals, type BusinessConfig } from "@pos/core";
 import { staffFetch, useStaff } from "../auth";
 import { useOrders } from "../hooks";
+import { RefundPanel } from "./RefundPanel";
 
 const timeOf = (ms: number) => new Date(ms).toLocaleTimeString("en-GB", { hour: "2-digit", minute: "2-digit", timeZone: "Asia/Singapore" });
 
@@ -32,14 +33,17 @@ export function Orders({ config }: { config: BusinessConfig }) {
       {recent.map((o) => {
         const t = orderTotals(o, config);
         return (
-          <div className="tab" key={o.orderId}>
+          <div key={o.orderId}>
+          <div className="tab">
             <div>
-              <b>{o.queueNumber ?? "—"}</b> <span className="muted">· {o.channelName ?? o.fulfilment} · {timeOf(o.openedAt)} · {formatMoney(t.total)}</span>
+              <b>{o.queueNumber ?? "—"}</b>{o.voided ? <b style={{ color: "#b00020" }}> VOID</b> : null} <span className="muted">· {o.channelName ?? o.fulfilment} · {timeOf(o.openedAt)} · {formatMoney(t.total)}</span>
             </div>
             <div className="tabr">
               <button className="secondary sm" disabled={!staff} onClick={() => void reprint(o.orderId, "receipt")}>Receipt</button>
               <button className="secondary sm" disabled={!staff} onClick={() => void reprint(o.orderId, "kitchen")}>Kitchen ticket</button>
             </div>
+          </div>
+          {staff && <RefundPanel order={o} />}
           </div>
         );
       })}

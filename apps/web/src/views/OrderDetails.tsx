@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { commissionOf, confirmedPaid, formatMoney, optionLines, orderTotals, type BusinessConfig, type Catalog, type OrderState } from "@pos/core";
 import { staffFetch } from "../auth";
+import { RefundPanel } from "./RefundPanel";
 
 interface ShopInfo {
   name: string;
@@ -103,9 +104,10 @@ export function OrderDetails({ order: o, config }: { order: OrderState; config: 
         {t.couponDiscount > 0 && <div className="od-row"><span>Coupon</span><span>-{formatMoney(t.couponDiscount)}</span></div>}
         {t.pointsDiscount > 0 && <div className="od-row"><span>Points</span><span>-{formatMoney(t.pointsDiscount)}</span></div>}
         <div className="od-row od-grand"><span>Total</span><span>{formatMoney(t.total)}</span></div>
-        {o.payments.filter((p) => p.confirmed).map((p, i) => <div className="od-row" key={i}><span>Paid by {METHOD[p.method] ?? p.method}</span><span>{formatMoney(p.amountCents)}</span></div>)}
-        {owing > 0 ? <div className="od-row od-due"><span>Balance due</span><span>{formatMoney(owing)}</span></div> : <div className="od-row"><span>Status</span><span>Paid</span></div>}
+        {o.payments.filter((p) => p.confirmed && !p.paymentId.startsWith("refund:")).map((p, i) => <div className="od-row" key={i}><span>Paid by {METHOD[p.method] ?? p.method}</span><span>{formatMoney(p.amountCents)}</span></div>)}
+        {o.voided ? <div className="od-row"><span>Status</span><span>Voided</span></div> : owing > 0 ? <div className="od-row od-due"><span>Balance due</span><span>{formatMoney(owing)}</span></div> : <div className="od-row"><span>Status</span><span>Paid</span></div>}
       </div>
+      <RefundPanel order={o} />
     </div>
   );
 }

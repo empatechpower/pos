@@ -600,9 +600,13 @@ function KioskSession({ info, catalog, config }: { info: Info; catalog: Catalog;
             if (order?.exp && left === 0) return <div className="k-qrgone"><p className="k-sub">{tx("This QR has expired.")}</p><button className="k-cta-sm" disabled={busy} onClick={() => void renewQr()}>{tx("Generate new QR")}</button></div>;
             return order?.qr ? <><img className="k-qr" src={order.qr} alt="PayNow" />{left !== null && <p className="k-sub" aria-live="off">{tx("QR valid for {t}", { t: `${Math.floor(left / 60)}:${String(left % 60).padStart(2, "0")}` })}</p>}</> : null;
           })()}
-          <h3>{tx("Scan to pay")} {formatMoney(order?.view?.totalCents ?? 0)}</h3>
-          <p className="k-sub">{tx("Open your banking app, scan this PayNow QR, and confirm the amount. This screen updates on its own once your payment lands.")}</p>
-          <p className="k-wait"><i className="k-spin" /> {tx("Waiting for your payment…")}</p>
+          {!(order?.exp && clock >= order.exp) && (
+            <>
+              <h3>{tx("Scan to pay")} {formatMoney(order?.view?.totalCents ?? 0)}</h3>
+              <p className="k-sub">{tx("Open your banking app, scan this PayNow QR, and confirm the amount. This screen updates on its own once your payment lands.")}</p>
+              <p className="k-wait"><i className="k-spin" /> {tx("Waiting for your payment…")}</p>
+            </>
+          )}
           <button className="k-ghost" onClick={() => go("done")}>{tx("Pay at the counter instead")}</button>
         </div>
         <div className={`k-corner ${scrolling ? "fade" : ""}`}>{langOnly}</div>

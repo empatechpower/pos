@@ -16,6 +16,8 @@ export function UnassignedPanel() {
   const [open, setOpen] = useState<string | null>(null);
   const [cands, setCands] = useState<Cand[] | null>(null);
   const [msg, setMsg] = useState("");
+  const [refText, setRefText] = useState("");
+  const [refAnswer, setRefAnswer] = useState("");
 
   const load = useCallback(async () => {
     const r = await staffFetch("/api/payments/paynow/unassigned");
@@ -40,11 +42,25 @@ export function UnassignedPanel() {
     if ("res" in r && r.res.ok) { setMsg("Marked as settled."); void load(); }
   }
 
+  /** A reference read from a customer's screenshot: is it typed right (check character), and which order was it? */
+  async function lookup() {
+    const r = await staffFetch(`/api/payments/paynow/lookup?ref=${encodeURIComponent(refText.trim())}`);
+    if (!("res" in r)) return setRefAnswer(r.problem);
+    if (!r.res.ok) return setRefAnswer("A reference is 20 letters and digits, like RZPB1000000020005KI.");
+    const j = (await r.res.json()) as { checkOk: boolean; found: boolean; amountCents?: number; state?: string; orderId?: string; bankRef?: string | null };
+    setRefAnswer(!j.checkOk ? "That reference does not pass its check letter, so a character was probably copied wrong. Check it again." : !j.found ? "The reference is typed correctly, but this shop did not issue it." : `Issued for ${formatMoney(j.amountCents ?? 0)}, order ${j.orderId}. ${j.state === "PAID" ? `Paid (bank ref ${j.bankRef ?? "n/a"}).` : j.state === "EXPIRED" ? "A newer QR replaced it." : "Not paid yet."}`);
+  }
+
   return (
     <div style={{ marginTop: 24 }}>
       <h3>Unassigned PayNow payments{rows.length ? ` (${rows.length})` : ""}</h3>
       <p className="muted">Money that arrived with no matching QR. Put it on the order it was for, or mark it settled once you have refunded it.</p>
       {msg && <div className="flash">{msg}</div>}
+      <div className="row" style={{ alignItems: "center", gap: 8 }}>
+        <input value={refText} onChange={(e) => setRefText(e.target.value.toUpperCase())} placeholder="Check a reference from a screenshot" style={{ flex: 1 }} />
+        <button className="secondary sm" disabled={!refText.trim()} onClick={() => void lookup()}>Check</button>
+      </div>
+      {refAnswer && <p className="muted">{refAnswer}</p>}
       {rows.length === 0 && <p className="muted">Nothing waiting.</p>}
       {rows.map((p) => (
         <div key={p.bankRef} style={{ borderBottom: "1px solid var(--line, #ddd)", padding: "8px 0" }}>

@@ -1,6 +1,9 @@
 import { randomUUID } from "node:crypto";
 import type { Db } from "./db/pool.js";
-import { buildPayload, buildReference, cleanPaynowConfig, issueDate, type PaynowChannel, type PaynowConfig } from "./paynowQr.js";
+import { base36, buildPayload, buildReference, cleanPaynowConfig, issueDate, type PaynowChannel, type PaynowConfig } from "./paynowQr.js";
+
+/** The amount asked for is outside what the shop allows for a PayNow QR. */
+export class AmountNotAllowed extends Error { constructor(public readonly minCents?: number, public readonly maxCents?: number) { super("amount_not_allowed"); } }
 
 /** The shop's PayNow settings: the owner's saved ones, else the environment (PAYNOW_PROXY_TYPE, PAYNOW_PROXY_VALUE, PAYNOW_NAME, PAYNOW_OUTLET_CODE). Null when direct PayNow is not set up. */
 export async function loadPaynow(db: Db | null, merchantId: string, env: NodeJS.ProcessEnv = process.env): Promise<PaynowConfig | null> {
@@ -24,7 +27,8 @@ export interface IssuedQr { paymentId: string; reference: string; payload: strin
  * Issue a new QR for an order: a fresh reference, a stored expectation that lives for the configured minutes, and the payload.
  * Any earlier live QR for the same order is superseded (a payment against it will later land in the unassigned pool, never auto-claim).
  */
-export async function issueQr(db: Db, cfg: PaynowConfig, o: { merchantId: string; orderId: string; amountCents: number; channel: PaynowChannel; now: number }): Promise<IssuedQr> {
+export async function issueQr(db: Db, cfg: PaynowConfig, o: { merchantId: string; orderId: string; amountCents: number; channel: PaynowChannel; now: number; skipLimits?: boolean }): Promise<IssuedQr> {
+  if (!o.skipLimits && ((cfg.minCents && o.amountCents < cfg.minCents) || (cfg.maxCents && o.amountCents > cfg.maxCents))) throw new AmountNotAllowed(cfg.minCents, cfg.maxCents);
   const paymentId = randomUUID();
   const issuedAt = o.now;
   const expiresAt = issuedAt + cfg.ttlMinutes * 60_000;
@@ -32,10 +36,12 @@ export async function issueQr(db: Db, cfg: PaynowConfig, o: { merchantId: string
   // The sequence number comes from the table itself, so two QRs issued together never share a reference.
   const seq = Number((await db.query("SELECT nextval(pg_get_serial_sequence('payment_expectations','seq')) AS n")).rows[0].n);
   const reference = buildReference({ channel: o.channel, outletCode: cfg.outletCode, seq, amountCents: o.amountCents });
+  // The amount inside the reference must be the amount in the QR; if not, the QR was mis-generated, so never hand it out.
+  if (reference.slice(14, 19) !== base36(o.amountCents, 5)) throw new Error("reference amount does not match the QR amount");
   const payload = buildPayload({ config: cfg, amountCents: o.amountCents, reference, expiryDate: issueDate(issuedAt) });
   await db.query(
-    "INSERT INTO payment_expectations (payment_id, seq, merchant_id, order_id, reference, outlet_code, channel, amount_cents, proxy_value, issued_at, expires_at) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,to_timestamp($10/1000.0),to_timestamp($11/1000.0))",
-    [paymentId, seq, o.merchantId, o.orderId, reference, cfg.outletCode, o.channel, o.amountCents, cfg.proxyValue, issuedAt, expiresAt],
+    "INSERT INTO payment_expectations (payment_id, seq, merchant_id, order_id, reference, outlet_code, channel, amount_cents, proxy_value, issued_at, expires_at, receiving_account_ending) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,to_timestamp($10/1000.0),to_timestamp($11/1000.0),$12)",
+    [paymentId, seq, o.merchantId, o.orderId, reference, cfg.outletCode, o.channel, o.amountCents, cfg.proxyValue, issuedAt, expiresAt, cfg.receivingAccountEnding ?? null],
   );
   return { paymentId, reference, payload, issuedAt, expiresAt };
 }

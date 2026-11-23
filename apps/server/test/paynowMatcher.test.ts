@@ -201,6 +201,32 @@ describe("matching alerts to QRs", () => {
     expect((await call("/api/payments/paynow/unassigned", { bearer: mgr })).status).toBe(200);
   });
 
+  it("the phone shop's QR is on the O channel, and the shop's smallest and largest amounts are enforced", async () => {
+    const o = await place(3);
+    const r = await call(`/api/shop/orders/${o.json.orderId}/pay`, { body: { method: "paynow", display: "qr", surface: "online" } });
+    expect(r.status).toBe(200);
+    expect(r.json.reference).toMatch(/^RZOB1/);
+    expect((await call(`/api/shop/orders/${o.json.orderId}`)).json.canPayPaynow).toBe(true);
+    const tight = { ...cfg, maxCents: o.json.totalCents - 1 };
+    await db.query("UPDATE merchant_settings SET value=$1::jsonb WHERE merchant_id='bp' AND key='paynow'", [JSON.stringify(tight)]);
+    const big = await call(`/api/shop/orders/${o.json.orderId}/pay`, { body: { method: "paynow", display: "qr" } });
+    expect(big.status).toBe(409);
+    expect(big.json).toMatchObject({ error: "amount_not_allowed", maxCents: o.json.totalCents - 1 });
+    const till = (await call("/api/auth/login", { body: { code: "C1", pin: "3333" } })).json.token;
+    expect((await call("/api/payments/paynow/qr", { bearer: till, body: { orderId: o.json.orderId } })).status).toBe(409);
+    await db.query("UPDATE merchant_settings SET value=$1::jsonb WHERE merchant_id='bp' AND key='paynow'", [JSON.stringify(cfg)]);
+  });
+
+  it("a reference from a screenshot is checked and traced back to its QR", async () => {
+    const o = await place(2); const q = await qr(o.json.orderId);
+    const mgr = (await call("/api/auth/login", { body: { code: "M1", pin: "222222" } })).json.token;
+    const ok = await call(`/api/payments/paynow/lookup?ref=${q.json.reference}`, { bearer: mgr });
+    expect(ok.json).toMatchObject({ checkOk: true, found: true, orderId: o.json.orderId, amountCents: o.json.totalCents, state: "WAITING" });
+    const slip = q.json.reference.slice(0, 7) + (q.json.reference[7] === "7" ? "8" : "7") + q.json.reference.slice(8);
+    expect((await call(`/api/payments/paynow/lookup?ref=${slip}`, { bearer: mgr })).json).toMatchObject({ checkOk: false, found: false });
+    expect((await call("/api/payments/paynow/lookup?ref=SHORT", { bearer: mgr })).status).toBe(400);
+  });
+
   it("the pool is closed to anyone not signed in", async () => {
     expect((await call("/api/payments/paynow/unassigned")).status).toBe(401);
   });

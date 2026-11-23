@@ -49,6 +49,25 @@ describe("PayNow QR payload (the spec's test vectors)", () => {
   });
 });
 
+const decode = (s: string): Array<[string, string]> => { const out: Array<[string, string]> = []; for (let i = 0; i < s.length;) { const len = Number(s.slice(i + 2, i + 4)); out.push([s.slice(i, i + 2), s.slice(i + 4, i + 4 + len)]); i += 4 + len; } return out; };
+
+describe("the test vectors decode back to the same fields", () => {
+  it("Vector A", () => {
+    const f = decode("00020101021226490009SG.PAYNOW010120210201912345K03010040820261123520400005303702540524.505802SG5916BAILEY AND PATCH6009Singapore62240120RZOB1000002N9C001W2Z630479D7");
+    expect(f.map(([k]) => k)).toEqual(["00", "01", "26", "52", "53", "54", "58", "59", "60", "62", "63"]);
+    const get = (k: string) => f.find(([x]) => x === k)![1];
+    expect([get("00"), get("01"), get("52"), get("53"), get("54"), get("58"), get("59"), get("60"), get("63")]).toEqual(["01", "12", "0000", "702", "24.50", "SG", "BAILEY AND PATCH", "Singapore", "79D7"]);
+    expect(decode(get("26"))).toEqual([["00", "SG.PAYNOW"], ["01", "2"], ["02", "201912345K"], ["03", "0"], ["04", "20261123"]]);
+    expect(decode(get("62"))).toEqual([["01", "RZOB1000002N9C001W2Z"]]);
+  });
+  it("Vector B", () => {
+    const f = decode("00020101021226380009SG.PAYNOW010100211+65880071980301052040000530370254040.015802SG5902NA6009Singapore62170113POC2026111804630424B7");
+    expect(decode(f.find(([x]) => x === "26")![1])).toEqual([["00", "SG.PAYNOW"], ["01", "0"], ["02", "+6588007198"], ["03", "0"]]);
+    expect(f.find(([x]) => x === "54")![1]).toBe("0.01");
+    expect(f.find(([x]) => x === "59")![1]).toBe("NA");
+  });
+});
+
 describe("PayNow proxies and settings", () => {
   it("checks mobile, UEN and NRIC formats", () => {
     expect(proxyProblem("mobile", "+6588007198")).toBeNull();

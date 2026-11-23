@@ -12,7 +12,8 @@ import { TabError, type TabService } from "./tabs.js";
 import { PROMO_BASIS, claimPromo, judgePromo, promoStacksWithCoupons, releasePromo, type PromoVerdict } from "./promo.js";
 import { normaliseEmail, type MemberStore } from "./members.js";
 import { assignUnassigned, dismissUnassigned, GmailMailbox, listUnassigned, startAlertWatch, type AlertMailbox, type ApplyPayment } from "./paynowMatcher.js";
-import { loadPaynow, issueQr, expectationStatus } from "./paynow.js";
+import { AmountNotAllowed, loadPaynow, issueQr, expectationStatus } from "./paynow.js";
+import { referenceLooksRight } from "./paynowQr.js";
 import { authorizeUrl, createStripeCheckout, createStripeRefund, createYeahpayPayment, refundYeahpay, verifyYeahpayCallback, orderIdFromRef, fetchProfile, sendMail, newState, newVerifier, sameSecret, verifyStripeSignature, type Integrations, type OAuthProvider } from "./integrations.js";
 import type { EventStore } from "./store.js";
 import { loadOutletMenu, loadOutletScheduling, loadOutletWindows } from "./outletMenu.js";
@@ -1142,6 +1143,8 @@ export function registerShop(app: FastifyInstance, d: ShopDeps) {
       // Where this order is in line and about how long: only while it is waiting for or being made by the kitchen.
       queue: ["queued", "preparing"].includes(shopStatus(order, d.config)) ? queueView(await everyOrder(await outletOfOrder(order.orderId)), order, d.config, Date.now(), Number(process.env.QUEUE_FALLBACK_MINUTES) || undefined) : null,
       canPayOnline: !!(integ.yeahpay || integ.stripe) && order.stage !== "cancelled" && order.stage !== "completed" && total - paid > 0,
+      // The shop's own PayNow QR (no card provider needed).
+      canPayPaynow: !!(d.db && (await loadPaynow(d.db, merchantId))) && order.stage !== "cancelled" && order.stage !== "completed" && total - paid > 0,
     };
   });
 
@@ -1179,7 +1182,7 @@ export function registerShop(app: FastifyInstance, d: ShopDeps) {
   // ---- online payment (Stripe: card and PayNow) -----------------------------------------------------
 
   /** Start a payment for what is still owed on an order. The customer is sent to the hosted payment page. */
-  app.post<{ Params: { id: string }; Body: { method?: string; display?: string } }>("/api/shop/orders/:id/pay", async (req, reply) => {
+  app.post<{ Params: { id: string }; Body: { method?: string; display?: string; surface?: string } }>("/api/shop/orders/:id/pay", async (req, reply) => {
     if ((await orderGate(req, reply)).blocked) return;
     const pn = d.db ? await loadPaynow(d.db, merchantId) : null;
     const wantsQr = req.body?.display === "qr" && req.body?.method === "paynow";
@@ -1193,7 +1196,8 @@ export function registerShop(app: FastifyInstance, d: ShopDeps) {
     if (due <= 0) return reply.code(409).send({ error: "already_paid" });
     if (pn && wantsQr && d.db) {
       // The shop's own PayNow: a dynamic QR for exactly what is owed, valid for a few minutes. The kiosk turns `url` (the QR text) into the picture.
-      const q = await issueQr(d.db, pn, { merchantId, orderId: order.orderId, amountCents: due, channel: "K", now: (d.now ?? Date.now)() });
+      const q = await issueQr(d.db, pn, { merchantId, orderId: order.orderId, amountCents: due, channel: req.body?.surface === "online" ? "O" : "K", now: (d.now ?? Date.now)() }).catch((e) => (e instanceof AmountNotAllowed ? e : Promise.reject(e)));
+      if (q instanceof AmountNotAllowed) return reply.code(409).send({ error: "amount_not_allowed", minCents: q.minCents, maxCents: q.maxCents });
       return { url: q.payload, paymentId: q.paymentId, reference: q.reference, expiresAt: q.expiresAt };
     }
     if (integ.yeahpay) {
@@ -1229,6 +1233,14 @@ export function registerShop(app: FastifyInstance, d: ShopDeps) {
 
   /** Bank payments that arrived with no live QR to match. Staff put them on an order or settle them another way; nothing is ever applied by guesswork. */
   app.get("/api/payments/paynow/unassigned", { preHandler: d.needs("wallet.refund") }, async () => ({ payments: await listUnassigned(d.db, merchantId) }));
+  /** A reference read off a customer's payment screenshot: does it pass its check character, and which QR and order was it? A failed check means the transcription is not to be trusted, not that the payment is invalid. */
+  app.get<{ Querystring: { ref?: string } }>("/api/payments/paynow/lookup", { preHandler: d.needs("wallet.refund") }, async (req, reply) => {
+    const ref = String(req.query.ref ?? "").toUpperCase().replace(/[^A-Z0-9]/g, "");
+    if (ref.length !== 20) return reply.code(400).send({ error: "a reference is 20 letters and digits" });
+    const checkOk = referenceLooksRight(ref);
+    const row = (await d.db.query("SELECT payment_id, order_id, amount_cents, state, claimed_by_bank_ref FROM payment_expectations WHERE merchant_id=$1 AND reference=$2", [merchantId, ref])).rows[0];
+    return { checkOk, found: !!row, ...(row ? { paymentId: row.payment_id, orderId: row.order_id, amountCents: row.amount_cents, state: row.state, bankRef: row.claimed_by_bank_ref ?? null } : {}) };
+  });
   app.post<{ Params: { ref: string }; Body: { orderId?: string } }>("/api/payments/paynow/unassigned/:ref/assign", { preHandler: d.needs("wallet.refund") }, async (req, reply) => {
     if (!req.body?.orderId) return reply.code(400).send({ error: "orderId_required" });
     const r = await assignUnassigned(d.db, merchantId, req.params.ref, req.body.orderId, applyPaynow);

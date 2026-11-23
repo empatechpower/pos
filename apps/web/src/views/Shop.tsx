@@ -9,6 +9,7 @@ import { StoresSheet, useStores } from "./StoresSheet";
 import { JoinTabSheet, PageBell, TabScreen, leaveOtherTabs, otherTabSessions, useTab } from "./TabView";
 import "../shopProto.css";
 import { go, onRouteChange, queryParams } from "../nav";
+import { ShopPaynowQr } from "./ShopPaynowQr";
 import { LANGS, detectedLang, greeting, lang, langMode, setLangMode, shortLabel, t, tx, useLang, spotLabel } from "../shopI18n";
 
 export interface Info {
@@ -49,6 +50,8 @@ export interface OrderView {
   paidCents: number;
   canCancel?: boolean;
   canPayOnline?: boolean;
+  /** The shop's own PayNow QR can be shown for this order. */
+  canPayPaynow?: boolean;
   /** Where the order is in line, while the kitchen has it. The time is a guess, and null when there is too little history to make one. */
   queue?: { ahead: number; etaMinutes: number | null } | null;
 }
@@ -873,7 +876,10 @@ function Menu({ info, catalog, config, loginError, recheck }: { info: Info; cata
         clearPurchaseKey();
         saveBag(bagKey, [], spot); // the order is placed: do not bring this bag back, but remember the table for the next order
         if (payMethod === "credit") void loadMember(); // the balance has gone down
-        if (payMethod === "card" || payMethod === "paynow") {
+        if (payMethod === "paynow" && info.payments.paynowQr) {
+          // The shop's own PayNow: the order page opens the QR straight away.
+          try { sessionStorage.setItem("shop.autoQr", j.orderId); } catch { /* the page still offers the button */ }
+        } else if (payMethod === "card" || payMethod === "paynow") {
           // The order exists; now send the customer to the card / PayNow page. If that is unavailable they land on the
           // order's page, which offers to pay again or to pay at the counter.
           const pr = await fetch(`/api/shop/orders/${j.orderId}/pay`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ method: payMethod }) })
@@ -1853,7 +1859,7 @@ function Menu({ info, catalog, config, loginError, recheck }: { info: Info; cata
             })()}
             {info.membersOnly && member && credit < shownTotal && <p className="e2e-note" role="alert">{tx("Your credit is not enough for this order. Please top up at the counter.")}</p>}
             {!info.membersOnly && ([["card", "Card", "Debit or credit card.", "card"], ["paynow", "PayNow", "Pay with PayNow QR.", "stack"]] as const).map(([m, title, desc, ic]) => {
-              const on = info.payments.online;
+              const on = info.payments.online || (m === "paynow" && !!info.payments.paynowQr);
               return (
                 <button key={m} className="pay-opt" aria-pressed={on && payMethod === m} disabled={!on} style={on ? undefined : { opacity: 0.5 }} onClick={() => setPayMethod(m)}>
                   <span style={{ display: "flex", color: "var(--orange-dark)" }}><Icon name={ic} size={24} /></span>
@@ -2231,6 +2237,8 @@ function Status({ orderId, info }: { orderId: string; info: Info }) {
   }
   const [confirmCancel, setConfirmCancel] = useState(false);
   const [working, setWorking] = useState(false);
+  // Right after placing an order with PayNow, the QR opens by itself.
+  const [showQr, setShowQr] = useState(() => { try { return sessionStorage.getItem("shop.autoQr") === orderId; } catch { return false; } });
   const [refreshing, setRefreshing] = useState(false);
   const [tableOpen, setTableOpen] = useState(false);
   const [tableErr, setTableErr] = useState("");
@@ -2390,12 +2398,15 @@ function Status({ orderId, info }: { orderId: string; info: Info }) {
             <p className="e2e-note" style={{ marginTop: 2 }}>{tx("Status updates automatically.")}</p>
           </div>
         )}
-        {!cancelled && o.canPayOnline && info.payments.online && (
+        {!cancelled && showQr && o.canPayPaynow && !paid && (
+          <ShopPaynowQr orderId={orderId} amountCents={o.totalCents - o.paidCents} tx={tx} onPaid={() => { try { sessionStorage.removeItem("shop.autoQr"); } catch { /* fine */ } void load(); }} onClose={() => { try { sessionStorage.removeItem("shop.autoQr"); } catch { /* fine */ } setShowQr(false); }} />
+        )}
+        {!cancelled && !showQr && ((o.canPayOnline && info.payments.online) || o.canPayPaynow) && (
           <div className="e2e-card">
             <h3>{tx("Pay now")}</h3>
             <p className="e2e-sub" style={{ textAlign: "left", margin: 0 }}>{formatMoney(o.totalCents - o.paidCents)} to pay. Or pay at the counter.</p>
-            <button className="e2e-cta" disabled={working} onClick={() => void pay("card")}><span>{tx("Pay by card")}</span><Icon name="card" size={19} /></button>
-            <button className="e2e-cta queue-btn" disabled={working} onClick={() => void pay("paynow")}><span>{tx("Pay with PayNow")}</span><Icon name="stack" size={19} /></button>
+            {o.canPayOnline && info.payments.online && <button className="e2e-cta" disabled={working} onClick={() => void pay("card")}><span>{tx("Pay by card")}</span><Icon name="card" size={19} /></button>}
+            <button className="e2e-cta queue-btn" disabled={working} onClick={() => (o.canPayPaynow ? setShowQr(true) : void pay("paynow"))}><span>{tx("Pay with PayNow")}</span><Icon name="stack" size={19} /></button>
           </div>
         )}
         <div className="e2e-card">

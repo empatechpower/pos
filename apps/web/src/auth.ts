@@ -17,6 +17,8 @@ let staff: StaffInfo | null = JSON.parse(localStorage.getItem(LS_STAFF) ?? "null
 const listeners = new Set<() => void>();
 const emit = () => listeners.forEach((l) => l());
 
+/** Who is signed in on this device right now (read without React). */
+export const currentStaff = (): StaffInfo | null => staff;
 export const getToken = () => localStorage.getItem(LS_TOKEN);
 /** Staff token plus this device's token: the server wants both for anything that touches money. */
 export const authHeader = (): Record<string, string> => {

@@ -3,7 +3,7 @@ import Fastify, { type FastifyReply, type FastifyRequest } from "fastify";
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { type BuilderSpec, commissionOf, tabPaymentReceipt, type ProductStock, validateProductStock, isTimeZone, validCoordinates, validateOutletOverride, validateWindows, type MenuWindows, confirmedPaid, hourly, isFullyPaid, productMix, summarize, menuFor, newId, orderTotals, reduceAll, reduceOrder, shopStatus, type BusinessConfig, type ChannelKind, type OptionGroup, type OrderEvent } from "@pos/core";
-import { CASHIER_TOPUP_LIMIT_CENTS, audit, authenticate, authenticateAgent, can, createAgent, createConnectCode, redeemConnectCode, createStaff, listAgents, login, logout, recentAudit, revokeAgent, type Permission, type Role, type Staff } from "./auth.js";
+import { CASHIER_TOPUP_LIMIT_CENTS, audit, checkStaffPin, authenticate, authenticateAgent, can, createAgent, createConnectCode, redeemConnectCode, createStaff, listAgents, login, logout, recentAudit, revokeAgent, type Permission, type Role, type Staff } from "./auth.js";
 import type { CatalogStore, ChangeResult, PgCatalogStore } from "./catalog.js";
 import type { Db } from "./db/pool.js";
 import { adjustTo, balanceOf, creditBlockedFor, creditExemptIds, creditFrozen, refund, setCreditExempt, setCreditFrozen, spend, topUp } from "./ledger.js";
@@ -16,9 +16,10 @@ import { registerPromoAdmin, releasePromo } from "./promo.js";
 import { reconcileOrderStock, registerStock } from "./stock.js";
 import { TabError, TabService } from "./tabs.js";
 import { registerTabRoutes } from "./tabRoutes.js";
-import { issueQr, loadPaynow, savePaynow } from "./paynow.js";
+import { AmountNotAllowed, issueQr, loadPaynow, savePaynow } from "./paynow.js";
 import { applyOption, loadKiosk, OPTION_KEYS, optionsOf, saveKiosk, saveSetting } from "./settings.js";
-import { sendMail, type Integrations } from "./integrations.js";
+import { openShiftOf, registerShifts } from "./shifts.js";
+import { refundYeahpay, sendMail, type Integrations } from "./integrations.js";
 import { registerTelegram } from "./telegram.js";
 import { MemberStore } from "./members.js";
 import { FailureLimiter } from "./rateLimit.js";
@@ -444,6 +445,104 @@ export async function buildApp({ config, store, db, catalog, catalogAdmin, print
     return { ok: true, cents };
   });
 
+  // ---- giving money back: refund one payment, or void the whole order -------------------------------------------------------
+  // Every one needs a manager: a signed-in manager or owner, or the manager's staff code and PIN typed on the cashier's till. A reason is required.
+
+  type Approval = { ok: true; id: string; name: string } | { ok: false; status: number; error: string };
+  const approvalFor = async (staff: Staff, body: { approverCode?: string; approverPin?: string }): Promise<Approval> => {
+    if (can(staff.role, "wallet.refund")) return { ok: true, id: staff.id, name: staff.name };
+    if (!body.approverCode || !body.approverPin) return { ok: false, status: 428, error: "manager_approval_needed" };
+    if (!db) return { ok: false, status: 503, error: "needs_a_database" };
+    const v = await checkStaffPin(db, merchantId, String(body.approverCode).trim(), String(body.approverPin));
+    if (!v.ok) return { ok: false, status: v.reason === "locked" ? 423 : 422, error: v.reason === "locked" ? "approver_locked" : "approval_refused" };
+    if (!can(v.row.role, "wallet.refund")) return { ok: false, status: 422, error: "approver_cannot_approve" };
+    return { ok: true, id: v.row.id, name: v.row.name };
+  };
+  const reasonOf = (b: { reason?: unknown }) => (typeof b.reason === "string" ? b.reason.trim().slice(0, 200) : "");
+  const remainingOn = (o: NonNullable<ReturnType<typeof reduceOrder>>, paymentId: string, amount: number) => amount - (o.refunds ?? []).filter((r) => r.paymentId === paymentId).reduce((n, r) => n + r.amountCents, 0);
+
+  /**
+   * Gives one payment's money back where the system can: member credit goes back to the wallet, a YeahPay payment is reversed with YeahPay.
+   * Cash, a card machine, a direct PayNow transfer and Stripe cannot be pushed from here, so `manual` tells staff to hand it back themselves.
+   */
+  async function giveBack(o: NonNullable<ReturnType<typeof reduceOrder>>, p: { paymentId: string; method: string; amountCents: number }, cents: number, refundId: string, viaCancel: boolean): Promise<{ ok: true; manual: boolean } | { ok: false; error: string }> {
+    if (p.method === "credit") {
+      // The shop's own credit payment is returned by the cancel handling when the whole order is voided; anything else, or a part-refund, is returned here.
+      if (viaCancel && p.paymentId === `credit:${o.orderId}`) return { ok: true, manual: false };
+      if (!o.memberId || !db) return { ok: false, error: "no_member_to_return_credit_to" };
+      const r = await refund(db, { merchantId, customerId: o.memberId, amountCents: cents, idempotencyKey: `order-refund:${refundId}`, orderId: o.orderId, deviceId: "server", outletId: config.outletName, note: "Order refund" });
+      return r.ok ? { ok: true, manual: false } : { ok: false, error: "credit_could_not_be_returned" };
+    }
+    if (p.paymentId.startsWith("yeahpay:")) {
+      if (cents !== p.amountCents) return { ok: false, error: "card_payments_are_refunded_in_full_only" };
+      if (!integrations?.yeahpay || !(await refundYeahpay(integrations, { leshuaOrderId: p.paymentId.slice("yeahpay:".length), key: `refund${refundId}`.replace(/[^A-Za-z0-9]/g, "").slice(0, 48) }))) return { ok: false, error: "payment_provider_refused_the_refund" };
+      return { ok: true, manual: false };
+    }
+    return { ok: true, manual: true };
+  }
+
+  async function orderForMoney(req: FastifyRequest, reply: FastifyReply, id: string) {
+    const order = reduceOrder(id, await store.eventsForOrder(id));
+    if (!order) { await reply.code(404).send({ error: "order_not_found" }); return null; }
+    const outlet = (await store.outletOfOrder?.(id)) ?? undefined;
+    if (outlet && db && !outletAllowed(await visibleOutletIds(db, merchantId, req.staff!), outlet)) { await reply.code(403).send({ error: "outside_your_scope" }); return null; }
+    return { order, outlet };
+  }
+
+  app.post<{ Params: { id: string }; Body: { paymentId?: string; amountCents?: number; reason?: string; refundId?: string; approverCode?: string; approverPin?: string } }>("/api/orders/:id/refund", { preHandler: needs("wallet.spend") }, async (req, reply) => {
+    const b = req.body ?? {};
+    const found = await orderForMoney(req, reply, req.params.id);
+    if (!found) return;
+    const { order, outlet } = found;
+    const reason = reasonOf(b);
+    if (reason.length < 3) return reply.code(400).send({ error: "reason_required" });
+    const pay = order.payments.find((p) => p.paymentId === b.paymentId && p.confirmed && p.amountCents > 0);
+    if (!pay) return reply.code(404).send({ error: "payment_not_found" });
+    const refundId = typeof b.refundId === "string" && /^[A-Za-z0-9-]{8,64}$/.test(b.refundId) ? b.refundId : newId();
+    if (order.refunds?.some((r) => r.refundId === refundId)) return { ok: true, replayed: true, refundId };
+    const cents = Number(b.amountCents);
+    const left = remainingOn(order, pay.paymentId, pay.amountCents);
+    if (!Number.isSafeInteger(cents) || cents <= 0 || cents > left) return reply.code(400).send({ error: "amount_not_allowed", remainingCents: left });
+    const ap = await approvalFor(req.staff!, b);
+    if (!ap.ok) return reply.code(ap.status).send({ error: ap.error });
+    const back = await giveBack(order, pay, cents, refundId, false);
+    if (!back.ok) return reply.code(409).send({ error: back.error });
+    // Cash handed back comes out of the drawer of whoever is serving: their open shift, else the shift the payment was taken in.
+    const shiftId = (db ? (await openShiftOf(db, merchantId, req.staff!.id))?.id : undefined) ?? pay.shiftId;
+    await ingest([{ id: `refund-${refundId}`, orderId: order.orderId, deviceId: "server", ts: Date.now(), seq: Date.now(), type: "RefundRecorded", refundId, paymentId: pay.paymentId, method: pay.method, amountCents: cents, reason, approvedBy: ap.id, approvedByName: ap.name, ...(shiftId ? { shiftId } : {}) } as unknown as OrderEvent], outlet);
+    await audit(db, merchantId, req.staff!.id, "order.refund", { orderId: order.orderId, paymentId: pay.paymentId, method: pay.method, amountCents: cents, reason, approvedBy: ap.id });
+    return { ok: true, refundId, method: pay.method, amountCents: cents, manual: back.manual };
+  });
+
+  app.post<{ Params: { id: string }; Body: { reason?: string; voidId?: string; approverCode?: string; approverPin?: string } }>("/api/orders/:id/void", { preHandler: needs("wallet.spend") }, async (req, reply) => {
+    const b = req.body ?? {};
+    const found = await orderForMoney(req, reply, req.params.id);
+    if (!found) return;
+    const { order, outlet } = found;
+    if (order.voided) return reply.code(409).send({ error: "already_voided" });
+    const reason = reasonOf(b);
+    if (reason.length < 3) return reply.code(400).send({ error: "reason_required" });
+    const ap = await approvalFor(req.staff!, b);
+    if (!ap.ok) return reply.code(ap.status).send({ error: ap.error });
+    const key = typeof b.voidId === "string" && /^[A-Za-z0-9-]{8,64}$/.test(b.voidId) ? b.voidId : newId();
+    const events: OrderEvent[] = [];
+    const manual: Array<{ method: string; amountCents: number }> = [];
+    const servingShift = db ? (await openShiftOf(db, merchantId, req.staff!.id))?.id : undefined;
+    for (const p of order.payments.filter((x) => x.confirmed && x.amountCents > 0)) {
+      const left = remainingOn(order, p.paymentId, p.amountCents);
+      if (left <= 0) continue;
+      const refundId = `${key}-${p.paymentId}`.replace(/[^A-Za-z0-9-]/g, "").slice(0, 64);
+      const back = await giveBack(order, p, left, refundId, true);
+      if (!back.ok) return reply.code(409).send({ error: back.error, paymentId: p.paymentId });
+      if (back.manual) manual.push({ method: p.method, amountCents: left });
+      events.push({ id: `refund-${refundId}`, orderId: order.orderId, deviceId: "server", ts: Date.now(), seq: Date.now() + events.length, type: "RefundRecorded", refundId, paymentId: p.paymentId, method: p.method, amountCents: left, reason, approvedBy: ap.id, approvedByName: ap.name, voided: true, ...((servingShift ?? p.shiftId) ? { shiftId: (servingShift ?? p.shiftId) as string } : {}) } as unknown as OrderEvent);
+    }
+    events.push({ id: `void-${key}`, orderId: order.orderId, deviceId: "server", ts: Date.now(), seq: Date.now() + events.length, type: "OrderVoided", reason, approvedBy: ap.id, approvedByName: ap.name } as unknown as OrderEvent);
+    await ingest(events, outlet);
+    await audit(db, merchantId, req.staff!.id, "order.void", { orderId: order.orderId, reason, approvedBy: ap.id, refundedCents: events.length - 1 > 0 ? order.payments.filter((x) => x.confirmed && x.amountCents > 0).reduce((n, x) => n + x.amountCents, 0) : 0, manual });
+    return { ok: true, manual };
+  });
+
   /** Sales summary for a date range: totals, by day, by hour, by channel, and products ranked. */
   const salesReport = async (fromDate?: string, toDate?: string, outlets: string[] | null = null) => {
     const { from, to, orders } = await ordersBetween(fromDate, toDate, false, outlets);
@@ -669,7 +768,8 @@ export async function buildApp({ config, store, db, catalog, catalogAdmin, print
     if (!order) return reply.code(404).send({ error: "order_not_found" });
     const due = orderTotals(order, config).total - confirmedPaid(order);
     if (order.stage === "cancelled" || due <= 0) return reply.code(409).send({ error: "nothing_to_pay" });
-    const q = await issueQr(db, cfg, { merchantId, orderId, amountCents: due, channel: "P", now: (now ?? Date.now)() });
+    const q = await issueQr(db, cfg, { merchantId, orderId, amountCents: due, channel: "P", now: (now ?? Date.now)() }).catch((e) => (e instanceof AmountNotAllowed ? e : Promise.reject(e)));
+    if (q instanceof AmountNotAllowed) return reply.code(409).send({ error: "amount_not_allowed", minCents: q.minCents, maxCents: q.maxCents });
     return { paymentId: q.paymentId, reference: q.reference, payload: q.payload, expiresAt: q.expiresAt, amountCents: due, displayName: cfg.displayName };
   });
 
@@ -687,7 +787,7 @@ export async function buildApp({ config, store, db, catalog, catalogAdmin, print
   app.post("/api/settings/paynow/test", { preHandler: needs("staff.manage") }, async (req, reply) => {
     const cfg = await loadPaynow(db, merchantId);
     if (!cfg) return reply.code(409).send({ error: "paynow_not_set_up" });
-    const q = await issueQr(db, cfg, { merchantId, orderId: "paynow-test", amountCents: 1, channel: "P", now: (now ?? Date.now)() });
+    const q = await issueQr(db, cfg, { merchantId, orderId: "paynow-test", amountCents: 1, channel: "P", now: (now ?? Date.now)(), skipLimits: true });
     return { payload: q.payload, reference: q.reference, expiresAt: q.expiresAt, displayName: cfg.displayName };
   });
 
@@ -720,6 +820,7 @@ export async function buildApp({ config, store, db, catalog, catalogAdmin, print
   }
   registerTabRoutes(app, { db, merchantId, tabs, members, needs, outletIds: async () => (await listOutlets(db, merchantId)).map((o) => o.id) });
   registerStock(app, { db, merchantId, needs, outletIds: async () => (await listOutlets(db, merchantId)).map((o) => o.id), defaultOutlet: config.outletName });
+  registerShifts(app, { db, merchantId, needs });
   registerShop(app, { db, config, store, catalog, catalogAdmin, brand: new BrandStore(db, merchantId), ingest, members, needs, integrations, now, tabs, alertMailbox, alertWatchMs });
 
   // ---- the Telegram bot for managing prices ---------------------------------------------------

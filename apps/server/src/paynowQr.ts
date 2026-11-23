@@ -20,6 +20,9 @@ export interface PaynowConfig {
   receivingAccountEnding?: string;
   /** The bank's alert sender address, e.g. ibanking.alert@dbs.com. Only mail from here is read. */
   alertSender?: string;
+  /** The least and most a QR may ask for, in cents. Left out = no limit. */
+  minCents?: number;
+  maxCents?: number;
 }
 
 const tlv = (id: string, value: string) => `${id}${String(value.length).padStart(2, "0")}${value}`;
@@ -73,7 +76,11 @@ export function cleanPaynowConfig(raw: unknown): { ok: true; config: PaynowConfi
   if (ending && (ending.length < 3 || ending.length > 6)) return { ok: false, error: "receivingAccountEnding is the last 3 to 6 digits of the account" };
   const sender = String(r.alertSender ?? "").trim().toLowerCase();
   if (sender && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(sender)) return { ok: false, error: "alertSender must be an email address" };
-  return { ok: true, config: { proxyType, proxyValue: proxyType === "vpa" ? String(r.proxyValue).trim() : proxyValue, displayName, outletCode, ttlMinutes: ttl, ...(ending ? { receivingAccountEnding: ending } : {}), ...(sender ? { alertSender: sender } : {}) } };
+  const lim = (v: unknown) => (v === undefined || v === null || v === "" ? undefined : Number(v));
+  const minCents = lim(r.minCents), maxCents = lim(r.maxCents);
+  if ((minCents !== undefined && (!Number.isInteger(minCents) || minCents < 1)) || (maxCents !== undefined && (!Number.isInteger(maxCents) || maxCents < 1))) return { ok: false, error: "minCents and maxCents are whole cents of 1 or more" };
+  if (minCents !== undefined && maxCents !== undefined && minCents > maxCents) return { ok: false, error: "The smallest amount cannot be more than the largest" };
+  return { ok: true, config: { proxyType, proxyValue: proxyType === "vpa" ? String(r.proxyValue).trim() : proxyValue, displayName, outletCode, ttlMinutes: ttl, ...(ending ? { receivingAccountEnding: ending } : {}), ...(sender ? { alertSender: sender } : {}), ...(minCents !== undefined ? { minCents } : {}), ...(maxCents !== undefined ? { maxCents } : {}) } };
 }
 
 const B36 = "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ";

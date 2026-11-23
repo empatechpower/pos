@@ -1,3 +1,4 @@
+import { currentShiftId } from "./shift";
 import { openDB, type DBSchema, type IDBPDatabase } from "idb";
 import { newId, type OrderEvent, type OrderEventBody } from "@pos/core";
 
@@ -78,7 +79,9 @@ async function nextSeq(): Promise<number> {
 /** Record something that happened on this device. Works with no network. */
 export async function record(orderId: string, body: OrderEventBody, asDevice?: string): Promise<OrderEvent> {
   const seq = await nextSeq();
-  const event = { ...body, id: newId(), orderId, deviceId: asDevice ?? deviceId(), ts: Date.now(), seq } as OrderEvent;
+  // A payment taken while a shift is open belongs to that shift's drawer.
+  const sid = body.type === "PaymentRecorded" && !body.shiftId ? currentShiftId() : undefined;
+  const event = { ...body, ...(sid ? { shiftId: sid } : {}), id: newId(), orderId, deviceId: asDevice ?? deviceId(), ts: Date.now(), seq } as OrderEvent;
   await (await db()).put("events", { ...event, synced: 0 });
   notify();
   return event;

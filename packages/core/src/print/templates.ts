@@ -63,8 +63,10 @@ export function receipt(order: OrderState, config: BusinessConfig, ctx: PrintCon
   if (t.couponDiscount) b.push({ t: "cols", left: "Coupon", right: "-" + formatMoney(t.couponDiscount) });
   if (t.pointsDiscount) b.push({ t: "cols", left: "Points", right: "-" + formatMoney(t.pointsDiscount) });
   b.push({ t: "rule", ch: "=" }, { t: "cols", left: "TOTAL", right: formatMoney(t.total), bold: true });
-  for (const p of order.payments.filter((x) => x.confirmed)) b.push({ t: "cols", left: METHOD[p.method] ?? p.method, right: formatMoney(p.amountCents) });
-  const owing = t.total - confirmedPaid(order);
+  for (const p of order.payments.filter((x) => x.confirmed && !x.paymentId.startsWith("refund:"))) b.push({ t: "cols", left: METHOD[p.method] ?? p.method, right: formatMoney(p.amountCents) });
+  for (const r of order.refunds ?? []) b.push({ t: "cols", left: `Refund ${METHOD[r.method] ?? r.method}`, right: "-" + formatMoney(r.amountCents) });
+  if (order.voided) b.push({ t: "text", text: "*** VOIDED ***", align: "center", bold: true });
+  const owing = order.voided ? 0 : t.total - confirmedPaid(order);
   if (owing > 0) b.push({ t: "cols", left: "Balance due", right: formatMoney(owing), bold: true });
   if (order.queueNumber && opts.showQueue !== false) b.push({ t: "text", text: order.queueNumber, align: "center", bold: true, size: 3 });
   for (const f of ctx.footer ?? ["Thank you"]) b.push({ t: "text", text: f, align: "center" });

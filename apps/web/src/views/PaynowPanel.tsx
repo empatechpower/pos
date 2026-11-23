@@ -4,7 +4,7 @@ import { staffFetch } from "../auth";
 
 type Proxy = "uen" | "mobile" | "nric" | "vpa";
 const hint: Record<Proxy, string> = { uen: "e.g. 201912345K", mobile: "e.g. +6591234567", nric: "e.g. S1234567D", vpa: "the PayNow address" };
-const blank = { proxyType: "uen" as Proxy, proxyValue: "", displayName: "", outletCode: "", ttlMinutes: "3", alertSender: "", receivingAccountEnding: "" };
+const blank = { proxyType: "uen" as Proxy, proxyValue: "", displayName: "", outletCode: "", ttlMinutes: "3", alertSender: "", receivingAccountEnding: "", minAmount: "", maxAmount: "" };
 
 /**
  * The shop's own PayNow: who the QR pays, the name the customer sees in their banking app, and (optionally) the bank's alert
@@ -19,14 +19,14 @@ export function PaynowPanel() {
   const load = useCallback(async () => {
     const r = await staffFetch("/api/settings/paynow");
     if (!("res" in r) || !r.res.ok) return;
-    const c = ((await r.res.json()) as { config: null | { proxyType: Proxy; proxyValue: string; displayName: string; outletCode: string; ttlMinutes: number; alertSender?: string; receivingAccountEnding?: string } }).config;
-    if (c) { setF({ proxyType: c.proxyType, proxyValue: c.proxyValue, displayName: c.displayName, outletCode: c.outletCode, ttlMinutes: String(c.ttlMinutes), alertSender: c.alertSender ?? "", receivingAccountEnding: c.receivingAccountEnding ?? "" }); setSaved(true); }
+    const c = ((await r.res.json()) as { config: null | { proxyType: Proxy; proxyValue: string; displayName: string; outletCode: string; ttlMinutes: number; alertSender?: string; receivingAccountEnding?: string; minCents?: number; maxCents?: number } }).config;
+    if (c) { setF({ proxyType: c.proxyType, proxyValue: c.proxyValue, displayName: c.displayName, outletCode: c.outletCode, ttlMinutes: String(c.ttlMinutes), alertSender: c.alertSender ?? "", receivingAccountEnding: c.receivingAccountEnding ?? "", minAmount: c.minCents ? (c.minCents / 100).toFixed(2) : "", maxAmount: c.maxCents ? (c.maxCents / 100).toFixed(2) : "" }); setSaved(true); }
   }, []);
   useEffect(() => { void load(); }, [load]);
 
   async function save() {
     setMsg(""); setTest(null);
-    const r = await staffFetch("/api/settings/paynow", { method: "PUT", body: { ...f, ttlMinutes: Number(f.ttlMinutes) } });
+    const r = await staffFetch("/api/settings/paynow", { method: "PUT", body: { proxyType: f.proxyType, proxyValue: f.proxyValue, displayName: f.displayName, outletCode: f.outletCode, ttlMinutes: Number(f.ttlMinutes), alertSender: f.alertSender, receivingAccountEnding: f.receivingAccountEnding, minCents: f.minAmount ? Math.round(Number(f.minAmount) * 100) : undefined, maxCents: f.maxAmount ? Math.round(Number(f.maxAmount) * 100) : undefined } });
     if (!("res" in r)) return setMsg(r.problem);
     if (r.res.ok) { setSaved(true); setMsg("Saved. Press “Show test QR” and scan it with your banking app to check."); void load(); }
     else setMsg(((await r.res.json().catch(() => ({}))) as { error?: string }).error ?? "Could not save.");
@@ -54,6 +54,10 @@ export function PaynowPanel() {
         <label className="field">Name customers see (25 letters at most)<input value={f.displayName} maxLength={25} onChange={(e) => setF({ ...f, displayName: e.target.value.toUpperCase() })} placeholder="e.g. BAILEY & PATCH" /></label>
         <label className="field">Shop code (2 letters or digits)<input value={f.outletCode} maxLength={2} onChange={(e) => setF({ ...f, outletCode: e.target.value.toUpperCase().replace(/[^A-Z0-9]/g, "") })} placeholder="e.g. B1" /></label>
         <label className="field">QR stays valid (minutes)<select value={f.ttlMinutes} onChange={(e) => setF({ ...f, ttlMinutes: e.target.value })}><option>3</option><option>4</option><option>5</option></select></label>
+      </div>
+      <div className="row">
+        <label className="field">Smallest PayNow amount (S$, optional)<input inputMode="decimal" value={f.minAmount} onChange={(e) => setF({ ...f, minAmount: e.target.value.replace(/[^\d.]/g, "") })} placeholder="no limit" /></label>
+        <label className="field">Largest PayNow amount (S$, optional)<input inputMode="decimal" value={f.maxAmount} onChange={(e) => setF({ ...f, maxAmount: e.target.value.replace(/[^\d.]/g, "") })} placeholder="no limit" /></label>
       </div>
       <details>
         <summary className="muted">Confirm payments automatically (optional)</summary>

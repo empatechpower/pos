@@ -1,6 +1,7 @@
 import { go } from "../nav";
 import { useState } from "react";
 import { signIn, signOut, useStaff } from "../auth";
+import { useShift } from "../shift";
 
 export function Login({ online, problem }: { online: boolean; problem?: string | null }) {
   const staff = useStaff();
@@ -8,13 +9,15 @@ export function Login({ online, problem }: { online: boolean; problem?: string |
   const [pin, setPin] = useState("");
   const [msg, setMsg] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  const shift = useShift();
+  const [blocked, setBlocked] = useState(false);
 
   if (staff) {
     return (
       <div className="credit">
         <h2>Signed in</h2>
         <p className="bal"><b>{staff.name}</b> <span className="muted">· {staff.role}</span></p>
-        <button className="secondary" onClick={() => void signOut()}>Sign out</button>
+        <button className="secondary" onClick={() => { if (shift) setBlocked(true); else void signOut(); }}>Sign out</button>{blocked && <p className="flash" role="alert">Close your shift first (Drawer {shift?.drawer}), then sign out.</p>}
       </div>
     );
   }
