@@ -202,6 +202,8 @@ export function Pos({ config, catalog, online, customerId, setCustomerId }: PosP
   }
 
   const [picking, setPicking] = useState<MenuEntry | null>(null);
+  /** The bag line whose choices are being changed (hot to iced, an extra added). */
+  const [editing, setEditing] = useState<BagLine | null>(null);
 
   /** Put an item in the bag with its chosen options (none for a plain item). */
   const addWith = (item: MenuEntry, selection: ChosenOptionInput[]) => {
@@ -212,6 +214,23 @@ export function Pos({ config, catalog, online, customerId, setCustomerId }: PosP
       const found = cur.find((l) => l.key === key);
       return found ? cur.map((l) => (l === found ? { ...l, qty: l.qty + 1 } : l)) : [...cur, { key, item, qty: 1, selection, options: r.options, unitCents: item.priceCents + r.extraCents }];
     });
+  };
+  /**
+   * Change the choices on a line already in the bag. It keeps its quantity, note and discounts, takes the new price, and joins another line
+   * if it now matches one. A price set by hand is dropped (the extras changed, so the manager's price no longer fits).
+   */
+  const changeChoices = (old: BagLine, selection: ChosenOptionInput[]) => {
+    const r = resolveOptions(old.item.options, selection);
+    if (!r.ok) return;
+    const key = `${old.item.id}#${r.key}`;
+    const dropped = !!old.override && r.key !== old.key.split("#").slice(1).join("#");
+    setBag((cur) => {
+      const rest = cur.filter((x) => x.key !== old.key);
+      const same = rest.find((x) => x.key === key);
+      if (same) return rest.map((x) => (x.key === key ? { ...x, qty: x.qty + old.qty } : x));
+      return cur.map((x) => (x.key === old.key ? { ...x, key, selection, options: r.options, unitCents: x.item.priceCents + r.extraCents, ...(dropped ? { override: undefined } : {}) } : x));
+    });
+    if (dropped) notify("The price you set no longer fits the new choices, so it was taken off.");
   };
   // An item with options (hot or cold, extras...) asks first; a plain one goes straight in.
   const add = (item: MenuEntry) => (item.options?.length ? setPicking(item) : addWith(item, []));
@@ -432,6 +451,7 @@ export function Pos({ config, catalog, online, customerId, setCustomerId }: PosP
                 {l.override && <small className="optline">Price {formatMoney(l.unitCents)} → {formatMoney(l.override.unitCents)} · {l.override.reason} <button className="link" onClick={() => setBag((cur) => cur.map((x) => (x.key === l.key ? { ...x, override: undefined } : x)))}>undo</button></small>}
                 {(l.discounts ?? []).map((d) => <small className="optline" key={d.id}>{d.kind === "percent" ? `${d.value}% off` : `${formatMoney(d.value)} off`} · {d.reason} <button className="link" onClick={() => setBag((cur) => cur.map((x) => (x.key === l.key ? { ...x, discounts: (x.discounts ?? []).filter((y) => y.id !== d.id) } : x)))}>remove</button></small>)}
                 {l.note && <small className="optline"><b>Note: {l.note}</b></small>}
+                {l.item.options?.length ? <button className="link" onClick={() => setEditing(l)}>Edit choices</button> : null}
                 <button className="link" onClick={() => setNoteFor({ scope: "line", key: l.key })}>{l.note ? "Edit note" : "Note"}</button>
                 {staff && <button className="link" onClick={() => setSheet({ scope: "line", key: l.key })}>Discount / price</button>}
               </span>
@@ -558,6 +578,21 @@ export function Pos({ config, catalog, online, customerId, setCustomerId }: PosP
             );
           })}
         </section>
+      )}
+      {editing && (
+        <OptionSheet
+          name={editing.item.name}
+          description={editing.item.description}
+          baseCents={editing.item.priceCents}
+          groups={editing.item.options!}
+          initial={editing.selection}
+          cta="Save changes"
+          onClose={() => setEditing(null)}
+          onAdd={(sel) => {
+            changeChoices(editing, sel);
+            setEditing(null);
+          }}
+        />
       )}
       {picking && (
         <OptionSheet
