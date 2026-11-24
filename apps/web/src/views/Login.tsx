@@ -7,12 +7,13 @@ import { takeLockNote } from "../lock";
 import { loadTillSettings, tillSettings } from "../till/tillSettings";
 import { appVersion } from "../pwaUpdate";
 import "../till/till.css";
+import "../proto/proto.css";
 
 /** Country codes for the phone sign-in: Singapore first, then the neighbours. */
-const COUNTRIES: Array<[string, string]> = [["+65", "Singapore"], ["+60", "Malaysia"], ["+62", "Indonesia"], ["+66", "Thailand"], ["+63", "Philippines"], ["+84", "Vietnam"], ["+852", "Hong Kong"], ["+86", "China"], ["+91", "India"], ["+61", "Australia"], ["+44", "United Kingdom"], ["+1", "United States"]];
+const COUNTRIES: Array<[string, string]> = [["+65", "Singapore"], ["+60", "Malaysia"], ["+62", "Indonesia"], ["+66", "Thailand"], ["+86", "China"], ["+852", "Hong Kong"], ["+886", "Taiwan"], ["+63", "Philippines"], ["+84", "Vietnam"], ["+91", "India"], ["+81", "Japan"], ["+82", "South Korea"], ["+61", "Australia"], ["+64", "New Zealand"], ["+971", "UAE"], ["+44", "United Kingdom"], ["+1", "United States"]];
 
 /** Staff who have signed in on this device, newest first. Kept so they can tap their name and only type a PIN. */
-interface Recent { code: string; name: string; role: string }
+interface Recent { code: string; name: string; role: string; hint?: string | null }
 const LS_RECENT = "pos.recentStaff";
 const recents = (): Recent[] => { try { return (JSON.parse(localStorage.getItem(LS_RECENT) ?? "[]") as Recent[]).filter((r) => r?.code); } catch { return []; } };
 const remember = (r: Recent) => localStorage.setItem(LS_RECENT, JSON.stringify([r, ...recents().filter((x) => x.code !== r.code)].slice(0, 200)));
@@ -69,7 +70,7 @@ export function Login({ online, problem }: { online: boolean; problem?: string |
     setPin("");
     if (r.ok) {
       const me = currentStaff();
-      if (me) remember({ code: me.code, name: me.name, role: me.role });
+      if (me) remember({ code: me.code, name: me.name, role: me.role, hint: me.phoneHint ?? null });
       // Home (the Dashboard) after practice, and after every sign-in unless the shop switched it off.
       const afterTraining = takeAfterTraining();
       await loadTillSettings();
@@ -81,67 +82,73 @@ export function Login({ online, problem }: { online: boolean; problem?: string |
   const top = list.slice(0, 5);
   const rest = list.slice(5);
   const pick = (r: Recent) => { setPicked(r); setMode("list"); setTarget("pin"); setMsg(null); };
-  const label = showPhone ? "Enter your PIN" : showCode ? "Staff code, then PIN" : picked ? `Enter your PIN · ${picked.name}` : list.length ? "Tap your name, then enter your PIN" : "Use your staff code, then enter your PIN";
+  const label = picked ? `${picked.name} · ${picked.hint || picked.role}` : showPhone ? "Enter your PIN" : showCode ? "Staff code, then PIN" : "Choose your name, then enter your PIN";
+  const key = (k: string) => (k === "" ? <span key="sp" className="padspacer" /> : <button type="button" key={k} onClick={() => press(k)}>{k}</button>);
 
+  // The markup and class names are the prototype's own (proto-reference/index.html, showLogin), styled by its stylesheet.
   return (
-    <form className="signin" onSubmit={(e) => void submit(e)}>
-      <h2>Sign in to your counter</h2>
-      {lockNote && <div className="t-flash" role="status">{lockNote}</div>}
-      {!online && <div className="t-flash">The app is not in sync with the shop server right now{problem ? ` (${problem})` : ""}. You can still try to sign in.</div>}
-      <div className="signin-cols">
-        <div className="signin-who">
-          {mode === "list" && (
-            <>
-              <div className="signin-label">Recent staff · tap your name</div>
-              <div className="signin-names">
-                {top.map((r) => <button type="button" key={r.code} className={picked?.code === r.code ? "on" : ""} onClick={() => pick(r)}>{r.name}<small>{r.role}</small></button>)}
+    <div className="proto">
+      <section className="login">
+        <div className="loginheader"><img className="brandlogo loginlogo" src="/assets/rezein-logo.png" alt="Rezein" /></div>
+        <div className="loginbox">
+          <h2>Sign in to your counter</h2>
+          <form onSubmit={(e) => void submit(e)}>
+            {lockNote && <div className="error" role="status">{lockNote}</div>}
+            <div className="logincols">
+              <div className="loginmain">
+                {mode === "list" && (
+                  <>
+                    <div className="pickerlabel">Recent staff · tap your name</div>
+                    <div className="remembered">
+                      {top.map((r) => <button type="button" key={r.code} className={picked?.code === r.code ? "selected" : ""} onClick={() => pick(r)}>{r.name}<small>{r.hint || r.role}</small></button>)}
+                    </div>
+                    {rest.length > 0 && (
+                      <select className="morestaff" aria-label="More staff" value="" onChange={(e) => { const r = list.find((x) => x.code === e.target.value); if (r) pick(r); }}>
+                        <option value="">More staff…</option>
+                        {rest.map((r) => <option key={r.code} value={r.code}>{r.name}</option>)}
+                      </select>
+                    )}
+                    <button type="button" className="phonepath" onClick={() => { setMode("phone"); setPicked(null); setTarget("phone"); }}>Use phone number</button>
+                  </>
+                )}
+                {showPhone && (
+                  <>
+                    {list.length > 0 && <button type="button" className="phonepath" onClick={() => { setMode("list"); setTarget("pin"); }}>← Back to staff list</button>}
+                    <label className="field">Phone number</label>
+                    <div className="phonerow">
+                      <select aria-label="Country code" value={cc} onChange={(e) => setCc(e.target.value)}>{COUNTRIES.map(([c, n]) => <option key={c} value={c}>{c} {n}</option>)}</select>
+                      <input type="tel" inputMode={kbd ? "numeric" : "none"} readOnly={!kbd} autoComplete="tel-national" placeholder="8111 1111" aria-label="Phone number" className={target === "phone" ? "padactive" : ""} value={phone} onFocus={() => setTarget("phone")} onClick={() => setTarget("phone")} onChange={(e) => setPhone(e.target.value.replace(/[^\d ]/g, ""))} />
+                    </div>
+                  </>
+                )}
+                {showCode && (
+                  <>
+                    <button type="button" className="phonepath" onClick={() => { setMode("phone"); setTarget("phone"); }}>← Use phone number</button>
+                    {list.length > 0 && <button type="button" className="phonepath" onClick={() => { setMode("list"); setTarget("pin"); }}>← Back to staff list</button>}
+                    <label className="field">Staff code</label>
+                    <input className={target === "code" ? "padactive" : ""} value={code} autoCapitalize="characters" autoComplete="username" aria-label="Staff code" readOnly={!kbd} onFocus={() => setTarget("code")} onClick={() => setTarget("code")} onChange={(e) => setCode(e.target.value)} />
+                  </>
+                )}
+                <button type="button" className="telegrammini" onClick={() => setMsg("Telegram sign-in is not set up for this shop yet. Use your phone number or staff code.")}>Scan QR with Telegram</button>
               </div>
-              {rest.length > 0 && (
-                <select className="signin-more" aria-label="More staff" value="" onChange={(e) => { const r = list.find((x) => x.code === e.target.value); if (r) pick(r); }}>
-                  <option value="">More staff…</option>
-                  {rest.map((r) => <option key={r.code} value={r.code}>{r.name}</option>)}
-                </select>
-              )}
-              <button type="button" className="t-ghost" onClick={() => { setMode("phone"); setPicked(null); setTarget("phone"); }}>Use phone number</button>
-              <button type="button" className="t-ghost" onClick={() => { setMode("code"); setPicked(null); setTarget("code"); }}>Use staff code</button>
-            </>
-          )}
-          {showPhone && (
-            <>
-              <div className="signin-label">Phone number</div>
-              <div className="signin-phone">
-                <select aria-label="Country code" value={cc} onChange={(e) => setCc(e.target.value)}>
-                  {COUNTRIES.map(([c, n]) => <option key={c} value={c}>{c} {n}</option>)}
-                </select>
-                <input type="tel" inputMode="numeric" placeholder="8111 1111" aria-label="Phone number" autoComplete="tel-national" readOnly={!kbd} value={phone} onFocus={() => setTarget("phone")} onClick={() => setTarget("phone")} onChange={(e) => setPhone(e.target.value.replace(/[^\d ]/g, ""))} />
+              <div className="loginpad">
+                <label className="pinlabel" htmlFor="pin">{label}</label>
+                <div className="pinrow">
+                  <button type="button" className="wordkey pinrowbtn" onClick={() => (target === "phone" && showPhone ? setPhone("") : target === "code" && showCode ? setCode("") : setPin(""))}>Clear</button>
+                  <input id="pin" className={`pin ${target === "pin" ? "padactive" : ""}`} type="password" inputMode={kbd ? "numeric" : "none"} readOnly={!kbd} maxLength={8} autoComplete="current-password" aria-label="PIN" placeholder="••••" value={pin} onFocus={() => setTarget("pin")} onClick={() => setTarget("pin")} onChange={(e) => setPin(e.target.value.replace(/\D/g, ""))} />
+                  <button type="submit" className="primary pinrowbtn" disabled={busy}>Login</button>
+                </div>
+                <div className="error" role="alert">{msg ?? ""}</div>
+                <div className="pad">{["1", "2", "3", "4", "5", "6", "7", "8", "9", "⌫", "0", ""].map(key)}</div>
+                <button type="button" className="kbdbtn" onClick={() => { const n = !kbd; setKbd(n); localStorage.setItem("pos.kbd", n ? "1" : "0"); }}>{kbd ? "⌨ Hide device keyboard" : "⌨ Use device keyboard"}</button>
               </div>
-              {list.length > 0 && <button type="button" className="t-ghost" onClick={() => { setMode("list"); setTarget("pin"); }}>← Back to staff list</button>}
-              <button type="button" className="t-ghost" onClick={() => { setMode("code"); setTarget("code"); }}>Use staff code</button>
-            </>
-          )}
-          {showCode && (
-            <>
-              <button type="button" className="t-ghost" onClick={() => { setMode("phone"); setTarget("phone"); }}>← Use phone number</button>
-              {list.length > 0 && <button type="button" className="t-ghost" onClick={() => { setMode("list"); setTarget("pin"); }}>← Back to staff list</button>}
-              <label className="t-field">Staff code<input value={code} autoCapitalize="characters" autoComplete="username" readOnly={!kbd} onFocus={() => setTarget("code")} onClick={() => setTarget("code")} onChange={(e) => setCode(e.target.value)} /></label>
-            </>
-          )}
+            </div>
+          </form>
+          <p className="sync">Local storage ready · This device is {online ? "connected" : "not connected"} to the shop server{!online && problem ? ` (${problem})` : ""}.</p>
+          <details className="testaccounts"><summary>Other ways to sign in</summary><p>{!showCode ? <button type="button" className="phonepath" onClick={() => { setMode("code"); setPicked(null); setTarget("code"); }}>Use staff code</button> : "You are using a staff code."}</p></details>
+          <p className="sync verline">Rezein {appVersion()}</p>
         </div>
-        <div className="signin-pad">
-          <div className="signin-label">{label}</div>
-          <div className="signin-pinrow">
-            <button type="button" className="t-ghost" onClick={() => (target === "phone" && showPhone ? setPhone("") : target === "code" && showCode ? setCode("") : setPin(""))}>Clear</button>
-            <input className="signin-pin" type="password" inputMode="numeric" autoComplete="current-password" maxLength={8} aria-label="PIN" placeholder="••••" readOnly={!kbd} value={pin} onFocus={() => setTarget("pin")} onClick={() => setTarget("pin")} onChange={(e) => setPin(e.target.value.replace(/\D/g, ""))} />
-            <button type="submit" className="t-primary" disabled={busy}>Login</button>
-          </div>
-          {msg && <div className="t-err" role="alert">{msg}</div>}
-          <div className="signin-keys">
-            {["1", "2", "3", "4", "5", "6", "7", "8", "9", "⌫", "0", ""].map((k, i) => (k === "" ? <span key={i} /> : <button type="button" key={i} onClick={() => press(k)}>{k}</button>))}
-          </div>
-          <button type="button" className="t-ghost" onClick={() => { const n = !kbd; setKbd(n); localStorage.setItem("pos.kbd", n ? "1" : "0"); }}>{kbd ? "⌨ Hide device keyboard" : "⌨ Use device keyboard"}</button>
-        </div>
-      </div>
-      <p className="t-muted signin-version">Version {appVersion()}</p>
-    </form>
+      </section>
+    </div>
   );
 }

@@ -315,7 +315,7 @@ export async function buildApp({ config, store, db, catalog, catalogAdmin, print
       if (r.reason === "invalid") loginFailures.fail(who);
       return reply.code(r.reason === "locked" ? 429 : 401).send({ error: r.reason });
     }
-    return { token: r.token, expiresAt: r.expiresAt, staff: { name: r.staff.name, code: r.staff.code, role: r.staff.role, franchiseId: r.staff.franchiseId ?? null, outletId: r.staff.outletId ?? null } };
+    return { token: r.token, expiresAt: r.expiresAt, staff: { name: r.staff.name, code: r.staff.code, role: r.staff.role, franchiseId: r.staff.franchiseId ?? null, outletId: r.staff.outletId ?? null, phoneHint: r.staff.phoneHint ?? null } };
   });
 
   // ---- a person's own colour for the staff screens (Q&A F-2); anyone who has not chosen follows the merchant's theme ------------------

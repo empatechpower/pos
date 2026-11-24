@@ -50,6 +50,8 @@ describe("signing in with a phone number", () => {
     const ok = await login({ phone: "+65-8111-1111", pin: "3333" });
     expect(ok.status).toBe(200);
     expect(ok.json.staff.code).toBe("C1");
+    expect(ok.json.staff.phoneHint).toBe("+65 •••• 1111"); // enough to recognise the number, not to read it
+    expect((await login({ code: "M1", pin: "222222" })).json.staff.phoneHint).toBeNull();
     expect((await login({ phone: "+6581111111", pin: "1234" })).status).toBe(401);
     expect((await login({ phone: "+6590000000", pin: "3333" })).status).toBe(401); // an unknown number looks just like a wrong PIN
     expect((await login({ pin: "3333" })).status).toBe(400);

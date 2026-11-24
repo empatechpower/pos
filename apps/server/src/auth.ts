@@ -33,6 +33,8 @@ export interface Staff {
   /** Scope. Neither set = the whole brand; a franchise = that franchise's outlets; an outlet = that outlet only. */
   franchiseId?: string | null;
   outletId?: string | null;
+  /** The sign-in phone number with the middle hidden, like "+65 •••• 1111", for the staff buttons on the sign-in screen. */
+  phoneHint?: string | null;
 }
 
 // ---- PIN hashing ------------------------------------------------------------------------------
@@ -52,6 +54,16 @@ async function verifyPin(pin: string, stored: string): Promise<boolean> {
 }
 
 const sha256 = (s: string) => createHash("sha256").update(s).digest("hex");
+
+const COUNTRY_CODES = ["852", "65", "60", "62", "66", "63", "84", "86", "91", "61", "44", "1"];
+/** "+6581111111" becomes "+65 •••• 1111": the country code and the last four digits only. */
+export function phoneHint(phone: unknown): string | null {
+  const n = normalisePhone(phone);
+  if (!n) return null;
+  const d = n.slice(1);
+  const cc = COUNTRY_CODES.find((c) => d.startsWith(c)) ?? d.slice(0, 2);
+  return `+${cc} •••• ${d.slice(-4)}`;
+}
 
 /** A phone number as "+" and digits (8 to 15 of them), or null when it is not one. Spaces, dashes and brackets are ignored. */
 export function normalisePhone(raw: unknown): string | null {
@@ -104,6 +116,7 @@ const toStaff = (r: Record<string, unknown>): Staff => ({
   role: r.role as Role,
   franchiseId: (r.franchise_id as string | null) ?? null,
   outletId: (r.outlet_id as string | null) ?? null,
+  phoneHint: phoneHint(r.phone),
 });
 
 // ---- login / sessions -------------------------------------------------------------------------

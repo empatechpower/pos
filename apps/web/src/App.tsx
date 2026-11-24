@@ -115,7 +115,7 @@ export function App() {
   const shellStyle = { ...(staff ? theme.style : {}), ...(tillStyle ? { "--t-scale": TEXT_SCALE[prefs.textSize] } : {}) } as React.CSSProperties;
   return (
     <div className={`shell ${route === "pos" ? "till-route" : ""} ${tillStyle ? "tillshell" : ""}`} style={shellStyle}>
-      {tillStyle && <TillHeader route={route} config={config ?? null} connected={connected} pending={pending} newOnline={newOnline} hasTables={hasTables} onSync={() => void syncNow()} syncError={status.error} />}
+      {tillStyle && !(route === "login" && !staff) && <TillHeader route={route} config={config ?? null} connected={connected} pending={pending} newOnline={newOnline} hasTables={hasTables} onSync={() => void syncNow()} syncError={status.error} />}
       {!tillStyle && <header className="top">
         <div className="brand">
           <b>{config?.name ?? "POS"}</b>

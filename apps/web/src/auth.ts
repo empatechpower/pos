@@ -10,6 +10,8 @@ export interface StaffInfo {
   /** Which franchise or outlet this login is limited to. Both empty = the whole brand. */
   franchiseId?: string | null;
   outletId?: string | null;
+  /** The phone number with its middle hidden, for the staff buttons on the sign-in screen. */
+  phoneHint?: string | null;
 }
 
 const LS_TOKEN = "pos.token";

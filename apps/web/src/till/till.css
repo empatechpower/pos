@@ -465,3 +465,13 @@
 .signin-phone { display: flex; gap: .6em; margin-bottom: .7em; }
 .signin-phone select { flex: 0 0 11em; min-height: 3em; border: 1px solid #cfe0e8; border-radius: .75em; padding: 0 .6em; background: #fff; color: #33677c; font-size: 1em; }
 .signin-phone input { flex: 1; min-width: 0; min-height: 3em; border: 2px solid #8ac9e2; border-radius: .75em; padding: 0 .9em; font-size: 1.15em; color: #33677c; }
+
+/* Sign-in as in the prototype: centred captions, a row with "Use phone number" and the Telegram button */
+.signin-label { text-align: center; }
+.signin-who .signin-label, .signin-names { justify-content: center; }
+.signin-alt { display: flex; align-items: center; justify-content: center; gap: 1.2em; margin: .6em 0; }
+.signin-alt .t-link { color: #33677c; font-size: 1em; }
+.signin-alt .t-ghost { color: #0b8fbf; border-color: #b9dbea; border-width: 2px; font-size: 1.1em; }
+.signin-who > .t-link { display: block; margin: .3em auto; }
+.signin-names button small { color: #7a878c; }
+.signin-alt .t-link, .signin-who > .t-link { text-decoration: none; font-weight: 600; }

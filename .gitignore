@@ -9,3 +9,7 @@ apps/server/data/pg
 Credit.xlsx
 members-upload.csv
 members-to-check.csv
+
+# The prototype HTML the till styles are generated from stays on the developer machine (it carries test sign-in details)
+apps/web/proto-reference/index.html
+apps/web/proto-reference/assets/
