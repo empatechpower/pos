@@ -8,6 +8,7 @@ import { NoteSheet } from "./NoteSheet";
 import { record } from "../db";
 import { go, queryParams } from "../nav";
 import { logView } from "../orderViews";
+import { Modal } from "../till/Modal";
 
 const timeOf = (ms: number) => new Date(ms).toLocaleString("en-GB", { day: "numeric", month: "short", hour: "2-digit", minute: "2-digit", timeZone: "Asia/Singapore" });
 const DAY = 86_400_000;
@@ -50,6 +51,15 @@ export function Orders({ config }: { config: BusinessConfig }) {
   const [noting, setNoting] = useState<string | null>(null);
   const [shown, setShown] = useState<string | null>(null);
   const [limit, setLimit] = useState(40);
+  /** "Print modifiers" is off every time (TengSern, Q46): a receipt shows the item and its price; the choices print only when asked for. */
+  const [mods, setMods] = useState(false);
+  const [preview, setPreview] = useState<null | { id: string; text: string }>(null);
+  async function showReceipt(id: string, withMods = mods) {
+    logView(id, "Orders");
+    const r = await staffFetch(`/api/orders/${id}/receipt${withMods ? "?modifiers=1" : ""}`);
+    if ("res" in r && r.res.ok) setPreview({ id, text: ((await r.res.json()) as { text: string }).text });
+    else setMsg("The server does not have that order yet. Wait for it to sync, then try again.");
+  }
   const now = Date.now();
   const range = { from: new Date(`${from}T00:00:00+08:00`).getTime() || 0, to: new Date(`${to}T00:00:00+08:00`).getTime() || now };
 
@@ -67,7 +77,7 @@ export function Orders({ config }: { config: BusinessConfig }) {
   async function reprint(orderId: string, docType: "receipt" | "kitchen") {
     setMsg(null);
     logView(orderId, "Orders");
-    const r = await staffFetch("/api/print/reprint", { body: { orderId, docType } });
+    const r = await staffFetch("/api/print/reprint", { body: { orderId, docType, ...(docType === "receipt" && mods ? { modifiers: true } : {}) } });
     if ("problem" in r) return setMsg(r.problem);
     if (r.res.ok) return setMsg(docType === "receipt" ? "Receipt sent to the printer." : "Kitchen ticket sent again.");
     const code = ((await r.res.json().catch(() => ({}))) as { error?: string }).error;
@@ -86,6 +96,10 @@ export function Orders({ config }: { config: BusinessConfig }) {
       <h2>Orders</h2>
       {!staff && <div className="flash">Sign in to reprint. <a href="/login">Sign in</a></div>}
       {msg && <div className="flash">{msg}</div>}
+      <div className="row" style={{ alignItems: "center" }}>
+        <button className={mods ? "primary sm" : "secondary sm"} aria-pressed={mods} onClick={() => setMods((m) => !m)} title="Whether a receipt lists each item's choices (extras, size, spice). Off unless you turn it on.">Print modifiers: {mods ? "On" : "Off"}</button>
+        <span className="muted">Applies to the receipt you print or preview below.</span>
+      </div>
       <input className="orders-search" aria-label="Search orders" placeholder="Search by number, table, item, customer or note" value={q} onChange={(e) => { setQ(e.target.value); setLimit(40); }} />
       <div className="orders-tabs" role="tablist">
         {TABS.map(([t, l]) => <button key={t} role="tab" aria-selected={tab === t} className={tab === t ? "on" : ""} onClick={() => { setTab(t); setLimit(40); }}>{l} <b>{counts[t]}</b></button>)}
@@ -113,6 +127,7 @@ export function Orders({ config }: { config: BusinessConfig }) {
               <div className="tabr">
                 {st === "open" && <button className="primary sm" onClick={() => openOnTill(o)}>Open on till</button>}
                 <button className="secondary sm" onClick={() => { const next = shown === o.orderId ? null : o.orderId; setShown(next); if (next) logView(o.orderId, "Orders"); }}>{shown === o.orderId ? "Hide" : "Details"}</button>
+                <button className="secondary sm" disabled={!staff} onClick={() => void showReceipt(o.orderId)}>Preview</button>
                 <button className="secondary sm" disabled={!staff} onClick={() => void reprint(o.orderId, "receipt")}>Receipt</button>
                 <button className="secondary sm" disabled={!staff} onClick={() => void reprint(o.orderId, "kitchen")}>Kitchen ticket</button>
                 <button className="secondary sm" onClick={() => { logView(o.orderId, "Orders"); setNoting(o.orderId); }}>{o.note ? "Edit note" : "Note"}</button>
@@ -124,6 +139,16 @@ export function Orders({ config }: { config: BusinessConfig }) {
           </div>
         );
       })}
+      {preview && (
+        <Modal title="Receipt" onClose={() => setPreview(null)}>
+          <pre className="t-receipt">{preview.text}</pre>
+          <div className="t-dact">
+            <button className="t-ghost" onClick={() => { setMods((m) => !m); void showReceipt(preview.id, !mods); }}>Print modifiers: {mods ? "On" : "Off"}</button>
+            <button className="t-ghost" onClick={() => void reprint(preview.id, "receipt").then(() => setPreview(null))}>Print</button>
+            <button className="t-primary" onClick={() => setPreview(null)}>Close</button>
+          </div>
+        </Modal>
+      )}
       {list.length > limit && <button className="secondary" onClick={() => setLimit((n) => n + 40)}>Show more ({list.length - limit} more)</button>}
     </div>
   );

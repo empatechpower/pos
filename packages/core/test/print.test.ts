@@ -118,9 +118,9 @@ describe("receipt and kitchen ticket", () => {
 
   it("prints the frozen prices, a correct total, and the date in Singapore time", () => {
     const text = plainText(receipt(order({ pay: "all" }), config, ctx), 42).join("\n");
-    expect(text).toContain("2 x Kaya Toast");
+    expect(text).toContain("2 x KAYA TOAST");
     expect(text).toContain("S$4.00");
-    expect(text).toMatch(/TOTAL\s+S\$10\.90/);
+    expect(text).toMatch(/Total \(SGD\)\s+S\$10\.90/);
     expect(text).toContain("Printed at: 07/11/2026, 12:05:00 PM");
     expect(text).toContain("Cash");
     expect(text).not.toContain("Balance due");
@@ -128,7 +128,7 @@ describe("receipt and kitchen ticket", () => {
 
   it("shows the service charge only when the channel charges it", () => {
     const dine = { id: "dine", name: "Dine in", service: true, kind: "dine_in" as const };
-    expect(plainText(receipt(order({ channel: dine, spot: "Table 5" }), config, ctx), 42).join("\n")).toMatch(/Service charge\s+S\$0\.87/);
+    expect(plainText(receipt(order({ channel: dine, spot: "Table 5" }), config, ctx), 42).join("\n")).toMatch(/Service charge \(\d+%\)\s+S\$0\.87/);
     expect(plainText(receipt(order(), config, ctx), 42).join("\n")).not.toContain("Service charge");
   });
 
@@ -283,5 +283,49 @@ describe("order notes", () => {
     expect(plainText(noteSlip(withNote("Birthday"), ctx), 42).join("\n")).toContain("NOTE UPDATED");
     expect(plainText(noteSlip(withNote("Birthday"), ctx), 42).join("\n")).toContain("NOTE: Birthday");
     expect(plainText(noteSlip(order({}), ctx), 42).join("\n")).toContain("NOTE REMOVED");
+  });
+});
+
+
+describe("the 7-Eleven style receipt", () => {
+  const base = { merchantName: "Bailey & Patch", outletName: "Enabling Village", now: NOW };
+  const o = order({ pay: "all" });
+  const text = (ctx: object, opts = {}, ord = o) => plainText(receipt(ord, config, { ...base, ...ctx }, opts), 42).join("\n");
+
+  it("is a plain receipt, not a tax invoice, until the shop has a GST number", () => {
+    const t = text({});
+    expect(t).not.toContain("TAX Invoice");
+    expect(t).not.toContain("GST AMT");
+    expect(t).toMatch(/Total \(SGD\)\s+S\$10\.90/);
+  });
+  it("becomes a tax invoice with GST lines, and works the GST out of the total less deposits", () => {
+    const t = text({ gstRegNo: "M90012345X", uen: "202612345X", address: "1 Village Road" });
+    expect(t).toContain("TAX Invoice");
+    expect(t).toContain("GST M90012345X BIZ 202612345X");
+    expect(t).toContain("1 Village Road");
+    expect(t).toMatch(/Total \(SGD\) INCL\. GST\s+S\$10\.90/);
+    expect(t).toMatch(/GST AMT\s+S\$0\.\d\d/);
+  });
+  it("shows cash handed over and the change, the member, the POSID line and a barcode of the transaction", () => {
+    const paid = { ...o, payments: o.payments.map((p) => ({ ...p, tenderedCents: 2000 })) };
+    const t = text({ memberLast4: "4821", cashier: "Cat", posId: "002" }, {}, paid);
+    expect(t).toMatch(/Cash tendered\s+S\$20\.00/);
+    expect(t).toMatch(/Change\s+S\$9\.10/);
+    expect(t).toContain("Member ID: ***4821");
+    expect(t).toMatch(/POSID:002 C:Cat TR\d{6}/);
+    expect(t).toContain("Terms and Conditions apply.");
+    const doc = receipt(paid, config, { ...base, now: NOW });
+    const bar = doc.blocks.find((x) => x.t === "barcode") as { data: string } | undefined;
+    expect(bar?.data).toMatch(/^\d{14}$/);
+  });
+  it("lists each check of a split bill with its payments", () => {
+    const split = { ...o, split: { method: "even" as const, at: 1, checks: [{ id: "c1", no: 1, totalCents: 545 }, { id: "c2", no: 2, totalCents: 545 }] }, payments: [{ paymentId: "p1", method: "cash" as const, amountCents: 545, confirmed: true, checkId: "c1" }, { paymentId: "p2", method: "card" as const, amountCents: 545, confirmed: true, checkId: "c2" }] };
+    const t = text({}, {}, split);
+    expect(t).toMatch(/Check 01 Cash\s+S\$5\.45/);
+    expect(t).toMatch(/Check 02 Card\s+S\$5\.45/);
+  });
+  it("a discount reads as a trailing minus", () => {
+    const d = { ...o, discounts: [{ id: "d1", scope: "bill" as const, kind: "amount" as const, value: 100, reason: "x", at: 1 }] };
+    expect(text({}, {}, d)).toMatch(/Discount\s+S\$1\.00-/);
   });
 });

@@ -12,8 +12,17 @@ export interface PrintContext {
   /** Print time, ms since epoch. Passed in so output is reproducible. */
   now: number;
   timeZone?: string;
-  /** Shown at the foot of a receipt, e.g. a GST registration number or "Thank you". */
+  /** Shown at the foot of a receipt, e.g. "Thank you". */
   footer?: string[];
+  /** The outlet's address, and (when the shop is GST registered) its GST and business registration numbers. Without a GST number the receipt is not a tax invoice. */
+  address?: string;
+  gstRegNo?: string;
+  uen?: string;
+  customerService?: string;
+  /** Which till, who took the payment, and the member's last four digits, for the POSID line and the Member ID line. */
+  posId?: string;
+  cashier?: string;
+  memberLast4?: string;
 }
 
 const METHOD: Record<string, string> = { cash: "Cash", card: "Card", paynow: "PayNow", credit: "Store credit", other: "Other" };
@@ -37,44 +46,79 @@ export const printedAt = (ms: number, timeZone = "Asia/Singapore"): string => {
 const where = (o: OrderState) => (o.fulfilment === "dine_in" ? o.spot ?? o.channelName : o.channelName) ?? (o.fulfilment === "takeaway" ? "Take away" : "Delivery");
 const liveLines = (o: OrderState) => o.lines.filter((l) => l.qty > 0);
 
-/** Customer receipt. Prices come from the order itself (frozen when it was placed), never today's catalog. */
-export function receipt(order: OrderState, config: BusinessConfig, ctx: PrintContext, opts: { showQueue?: boolean } = {}): Doc {
+/**
+ * Customer receipt, laid out like the 7-Eleven Singapore receipt (TengSern, Q44): outlet name and address, TAX Invoice and GST lines when the
+ * shop is GST registered, a line per item in capitals, a BCRS deposit line under each deposit item, the total (and GST amount), what was paid
+ * and any change, a BCRS summary, the member, a barcode of the transaction, and the POSID line. Prices come from the order itself (frozen when
+ * it was placed), never today's catalog. Modifiers print only when asked for (`printModifiers`): priced ones with their amount, free ones by name.
+ */
+export function receipt(order: OrderState, config: BusinessConfig, ctx: PrintContext, opts: { showQueue?: boolean; printModifiers?: boolean } = {}): Doc {
   const t = orderTotals(order, config);
-  const b: Block[] = [
-    { t: "text", text: ctx.merchantName, align: "center", bold: true, size: 2 },
-    { t: "text", text: ctx.outletName, align: "center" },
-    { t: "rule" },
-    { t: "cols", left: order.queueNumber && opts.showQueue !== false ? `Order ${order.queueNumber}` : "Order", right: where(order) },
-    { t: "rule" },
-  ];
+  const gstOn = !!ctx.gstRegNo;
+  const money = (c: number) => formatMoney(c);
+  const b: Block[] = [{ t: "text", text: ctx.merchantName.toUpperCase(), align: "center", bold: true, size: 2 }, { t: "text", text: ctx.outletName, align: "center" }];
+  if (ctx.address) b.push({ t: "text", text: ctx.address, align: "center" });
+  if (gstOn) b.push({ t: "text", text: "TAX Invoice", align: "center", bold: true }, { t: "text", text: `GST ${ctx.gstRegNo}${ctx.uen ? ` BIZ ${ctx.uen}` : ""}`, align: "center" });
+  b.push({ t: "rule" }, { t: "cols", left: order.queueNumber && opts.showQueue !== false ? `Order ${order.queueNumber}` : "Order", right: where(order) }, { t: "rule" });
+  let depositUnits = 0;
   for (const l of liveLines(order)) {
-    b.push({ t: "cols", left: `${l.qty} x ${l.name}`, right: formatMoney(l.unitCents * l.qty) });
-    // Options sit under the item, marked with a dash (leading spaces would be collapsed when wrapping).
-    // A build-your-own item reads grouped by its builder group, with what each selection was charged.
-    if (l.build) {
-      for (const o of buildTicketLines(l.build, true, formatMoney)) b.push({ t: "text", text: o.startsWith("  ") ? `- ${o.trim()}` : o });
+    b.push({ t: "cols", left: `${l.qty} x ${l.name.toUpperCase()}`, right: money(l.unitCents * l.qty) });
+    if (opts.printModifiers) {
+      // Options sit under the item, marked with a dash (leading spaces would be collapsed when wrapping). Free ones print by name, never as S$0.00.
+      if (l.build) {
+        for (const o of buildTicketLines(l.build, true, formatMoney)) b.push({ t: "text", text: o.startsWith("  ") ? `- ${o.trim()}` : o });
+      } else for (const o of l.options ?? []) b.push(o.priceCents ? { t: "cols", left: `- ${optionLines([o])[0]}`, right: `+${money(o.priceCents * (o.qty || 1))}` } : { t: "text", text: `- ${optionLines([o])[0]}` });
+    } else if (l.build) {
       for (const o of optionLines(l.options).filter((x) => x.startsWith("Note: "))) b.push({ t: "text", text: `- ${o}` });
-    } else for (const o of optionLines(l.options)) b.push({ t: "text", text: `- ${o}` });
+    } else for (const o of optionLines(l.options).filter((x) => x.startsWith("Note: "))) b.push({ t: "text", text: `- ${o}` });
+    if (l.bcrs) { depositUnits += l.qty; b.push({ t: "cols", left: `  BCRS Deposit Charge x${l.qty}`, right: `${money(l.qty * config.pricing.bcrsDepositCents)} Z` }); }
   }
   if (order.note) b.push({ t: "text", text: `Note: ${order.note}` });
-  b.push({ t: "rule" }, { t: "cols", left: "Subtotal", right: formatMoney(t.subtotal) });
-  if (t.service) b.push({ t: "cols", left: "Service charge", right: formatMoney(t.service) });
-  if (t.gst) b.push({ t: "cols", left: "GST", right: formatMoney(t.gst) });
-  if (t.bcrs) b.push({ t: "cols", left: "BCRS deposit", right: formatMoney(t.bcrs) });
-  if (t.couponDiscount) b.push({ t: "cols", left: "Coupon", right: "-" + formatMoney(t.couponDiscount) });
-  if (t.discountCents) b.push({ t: "cols", left: "Discount", right: "-" + formatMoney(t.discountCents) });
-  if (t.pointsDiscount) b.push({ t: "cols", left: "Points", right: "-" + formatMoney(t.pointsDiscount) });
-  b.push({ t: "rule", ch: "=" }, { t: "cols", left: "TOTAL", right: formatMoney(t.total), bold: true });
-  for (const p of order.payments.filter((x) => x.confirmed && !x.paymentId.startsWith("refund:"))) b.push({ t: "cols", left: METHOD[p.method] ?? p.method, right: formatMoney(p.amountCents) });
-  for (const r of order.refunds ?? []) b.push({ t: "cols", left: `Refund ${METHOD[r.method] ?? r.method}`, right: "-" + formatMoney(r.amountCents) });
+  b.push({ t: "rule" }, { t: "cols", left: "Subtotal", right: money(t.subtotal) });
+  // Money taken off reads as a trailing minus, as on the 7-Eleven receipt.
+  if (t.couponDiscount) b.push({ t: "cols", left: "Coupon", right: `${money(t.couponDiscount)}-` });
+  if (t.discountCents) b.push({ t: "cols", left: "Discount", right: `${money(t.discountCents)}-` });
+  if (t.pointsDiscount) b.push({ t: "cols", left: "Points", right: `${money(t.pointsDiscount)}-` });
+  if (t.service) b.push({ t: "cols", left: `Service charge (${Math.round(config.pricing.serviceRate * 100)}%)`, right: money(t.service) });
+  if (t.gst) b.push({ t: "cols", left: "GST", right: money(t.gst) });
+  b.push({ t: "rule", ch: "=" }, { t: "cols", left: gstOn ? "Total (SGD) INCL. GST" : "Total (SGD)", right: money(t.total), bold: true });
+  if (gstOn) {
+    const rate = Math.round(config.pricing.gstRate * 100);
+    b.push({ t: "cols", left: "GST AMT", right: money(Math.round(((t.total - t.bcrs) * rate) / (100 + rate))) });
+  }
+  // What was paid: a split bill lists each check with its payments; cash shows what was handed over and the change.
+  const paid = order.payments.filter((x) => x.confirmed && !x.paymentId.startsWith("refund:"));
+  const checkNo = new Map((order.split?.checks ?? []).map((c) => [c.id, c.no]));
+  for (const p of paid) {
+    const label = METHOD[p.method] ?? p.method;
+    b.push({ t: "cols", left: p.checkId && checkNo.has(p.checkId) ? `Check ${String(checkNo.get(p.checkId)).padStart(2, "0")} ${label}` : label, right: money(p.amountCents) });
+    if (p.tenderedCents) b.push({ t: "cols", left: "  Cash tendered", right: money(p.tenderedCents) }, { t: "cols", left: "  Change", right: money(p.tenderedCents - p.amountCents) });
+  }
+  for (const r of order.refunds ?? []) b.push({ t: "cols", left: `Refund ${METHOD[r.method] ?? r.method}`, right: `${money(r.amountCents)}-` });
   if (order.voided) b.push({ t: "text", text: "*** VOIDED ***", align: "center", bold: true });
   const owing = order.voided ? 0 : t.total - confirmedPaid(order);
-  if (owing > 0) b.push({ t: "cols", left: "Balance due", right: formatMoney(owing), bold: true });
+  if (owing > 0) b.push({ t: "cols", left: "Balance due", right: money(owing), bold: true });
+  if (t.bcrs) b.push({ t: "rule" }, { t: "cols", left: `Total BCRS Deposit x${depositUnits}`, right: `${money(t.bcrs)} Z` });
+  if (ctx.memberLast4) b.push({ t: "text", text: `Member ID: ***${ctx.memberLast4}` });
   if (order.queueNumber && opts.showQueue !== false) b.push({ t: "text", text: order.queueNumber, align: "center", bold: true, size: 3 });
   for (const f of ctx.footer ?? ["Thank you"]) b.push({ t: "text", text: f, align: "center" });
-  b.push({ t: "rule" }, { t: "text", text: printedAt(ctx.now, ctx.timeZone) });
+  if (ctx.customerService) b.push({ t: "text", text: `Customer Service: ${ctx.customerService}`, align: "center" });
+  // The transaction code: the date (DDMMYYYY) and the order's number, as a barcode and in words.
+  const code = transactionCode(order, ctx);
+  b.push({ t: "rule" }, { t: "barcode", data: code }, { t: "text", text: code, align: "center" });
+  b.push({ t: "text", text: "Please retain and present this receipt for any exchange or return.", align: "center" });
+  b.push({ t: "text", text: `POSID:${ctx.posId ?? "001"}${ctx.cashier ? ` C:${ctx.cashier}` : ""} TR${code.slice(8)}` });
+  b.push({ t: "text", text: "Terms and Conditions apply." }, { t: "rule" }, { t: "text", text: printedAt(ctx.now, ctx.timeZone) });
   b.push({ t: "feed", n: 3 }, { t: "cut" });
   return { blocks: b };
+}
+
+/** DDMMYYYY then the order's number (the digits of its queue number, six places; or a short code from its id). */
+export function transactionCode(order: OrderState, ctx: Pick<PrintContext, "now" | "timeZone">): string {
+  const p = Object.fromEntries(new Intl.DateTimeFormat("en-GB", { timeZone: ctx.timeZone ?? "Asia/Singapore", day: "2-digit", month: "2-digit", year: "numeric" }).formatToParts(new Date(order.openedAt)).map((x) => [x.type, x.value])) as Record<string, string>;
+  const digits = (order.queueNumber ?? "").replace(/\D/g, "");
+  const n = digits || String(parseInt(order.orderId.replace(/[^0-9a-f]/gi, "").slice(0, 6) || "0", 16) % 1_000_000);
+  return `${p.day}${p.month}${p.year}${n.slice(-6).padStart(6, "0")}`;
 }
 
 /** What a tab payment's receipt shows. It reproduces the quote the payment was taken against, so quote, payment and receipt reconcile exactly. */

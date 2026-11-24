@@ -41,11 +41,14 @@ export function PayPanel({ totalCents, title, tenders, busy, onBack, onDone, onS
       ) : (
         <div className="t-tendercard">{tender === "credit" ? "Member credit" : tender === "qr" ? "PayNow QR" : "Card / PayNow (practice)"}<small>{cur?.why ?? (tender === "qr" ? "A QR for the exact amount is shown next." : tender === "credit" ? "The member's credit is charged when you press Done." : "")}</small></div>
       )}
-      <div className="t-paybottom">
-        <div className="t-tenders">{tenders.map((t) => <button key={t.id} className={t.id === tender ? "on" : ""} disabled={t.disabled} title={t.why} onClick={() => setTender(t.id)}>{t.label}</button>)}</div>
-        <button className="t-done" disabled={busy || (tender === "cash" ? !cashOk : !!cur?.disabled)} onClick={() => onDone(tender, tender === "cash" ? received : totalCents)} aria-label="Complete payment">Done</button>
+      <div className="t-payfixed">
+        <div className="t-paybottom">
+          <div className="t-tenders">{tenders.map((t) => <button key={t.id} className={t.id === tender ? "on" : ""} disabled={t.disabled} title={t.why} onClick={() => setTender(t.id)}>{t.label}</button>)}</div>
+          <button className="t-done" disabled={busy || (tender === "cash" ? !cashOk : !!cur?.disabled)} onClick={() => onDone(tender, tender === "cash" ? received : totalCents)} aria-label="Complete payment">Done</button>
+        </div>
+        <div className="t-payfoot"><button className="t-ghost" onClick={onBack}>← Back / Cancel</button>{onSplit && <button className="t-ghost" onClick={onSplit}>Split Bill</button>}</div>
+
       </div>
-      <div className="t-payfoot"><button className="t-ghost" onClick={onBack}>← Back / Cancel</button>{onSplit && <button className="t-ghost" onClick={onSplit}>Split Bill</button>}</div>
     </section>
   );
 }

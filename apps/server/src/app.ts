@@ -2,7 +2,7 @@ import cors from "@fastify/cors";
 import Fastify, { type FastifyReply, type FastifyRequest } from "fastify";
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
-import { type BuilderSpec, commissionOf, tabPaymentReceipt, type ProductStock, validateProductStock, isTimeZone, validCoordinates, validateOutletOverride, validateWindows, type MenuWindows, confirmedPaid, hourly, isFullyPaid, productMix, summarize, menuFor, newId, orderTotals, reduceAll, reduceOrder, shopStatus, type BusinessConfig, type ChannelKind, type OptionGroup, type OrderEvent } from "@pos/core";
+import { type BuilderSpec, plainText, receipt, type OrderState, type PrintContext, commissionOf, tabPaymentReceipt, type ProductStock, validateProductStock, isTimeZone, validCoordinates, validateOutletOverride, validateWindows, type MenuWindows, confirmedPaid, hourly, isFullyPaid, productMix, summarize, menuFor, newId, orderTotals, reduceAll, reduceOrder, shopStatus, type BusinessConfig, type ChannelKind, type OptionGroup, type OrderEvent } from "@pos/core";
 import { CASHIER_TOPUP_LIMIT_CENTS, audit, checkStaffPin, authenticate, authenticateAgent, can, createAgent, createConnectCode, redeemConnectCode, createStaff, listAgents, login, logout, recentAudit, revokeAgent, type Permission, type Role, type Staff } from "./auth.js";
 import type { CatalogStore, ChangeResult, PgCatalogStore } from "./catalog.js";
 import type { Db } from "./db/pool.js";
@@ -127,13 +127,35 @@ export async function buildApp({ config, store, db, catalog, catalogAdmin, print
    * allowed to fail the push: the events are already safely stored, and the next change to the order
    * (or a manual reprint) will pick up anything missed.
    */
+  /**
+   * What a receipt says about the shop and the sale: the outlet's address, the GST and business numbers (set GST_REG_NO and BUSINESS_UEN on the
+   * server; without a GST number the receipt is not a tax invoice), a customer service line, who took the payment, and the member's last digits.
+   */
+  async function printCtxFor(order: OrderState, outletId?: string): Promise<PrintContext> {
+    const ctx: PrintContext = { merchantName: config.name, outletName: config.outletName, now: Date.now() };
+    const gst = process.env.GST_REG_NO?.trim();
+    if (gst) ctx.gstRegNo = gst;
+    if (process.env.BUSINESS_UEN?.trim()) ctx.uen = process.env.BUSINESS_UEN.trim();
+    if (process.env.CUSTOMER_SERVICE?.trim()) ctx.customerService = process.env.CUSTOMER_SERVICE.trim();
+    if (!db) return ctx;
+    try {
+      const outlet = outletId ? (await listOutlets(db, merchantId)).find((o) => o.id === outletId) : undefined;
+      const address = outlet?.address ?? process.env.OUTLET_ADDRESS?.trim();
+      if (address) ctx.address = address;
+      const sid = [...order.payments].reverse().find((p) => p.shiftId)?.shiftId;
+      if (sid) { const r = await db.query("SELECT staff_name FROM shifts WHERE id=$1", [sid]); if (r.rows[0]?.staff_name) ctx.cashier = String(r.rows[0].staff_name).split(" ")[0]!; }
+      if (order.memberId) { const m = await db.query("SELECT phone FROM members WHERE id=$1 AND merchant_id=$2", [order.memberId, merchantId]); const d = String(m.rows[0]?.phone ?? "").replace(/\D/g, ""); if (d.length >= 4) ctx.memberLast4 = d.slice(-4); }
+    } catch { /* a receipt prints without these rather than not at all */ }
+    return ctx;
+  }
+
   async function queuePrints(orderIds: string[]) {
     try {
       const cat = await catalog.load();
       for (const id of orderIds) {
         const order = reduceOrder(id, await store.eventsForOrder(id));
         const outletId = (await store.outletOfOrder?.(id)) ?? undefined;
-        if (order) await print!.enqueueForOrder(order, { catalog: cat, config, print: { merchantName: config.name, outletName: config.outletName, now: Date.now() }, outletId });
+        if (order) await print!.enqueueForOrder(order, { catalog: cat, config, print: await printCtxFor(order, outletId), outletId });
       }
     } catch (err) {
       app.log.error({ err }, "could not queue prints");
@@ -1232,16 +1254,26 @@ export async function buildApp({ config, store, db, catalog, catalogAdmin, print
     });
 
     /** Any staff member can ask for a receipt (or a kitchen ticket) again. */
-    app.post<{ Body: { orderId?: string; docType?: "receipt" | "kitchen"; printerId?: string } }>("/api/print/reprint", { preHandler: needs("print.reprint") }, async (req, reply) => {
+    app.post<{ Body: { orderId?: string; docType?: "receipt" | "kitchen"; printerId?: string; modifiers?: boolean } }>("/api/print/reprint", { preHandler: needs("print.reprint") }, async (req, reply) => {
       const { orderId, docType, printerId } = req.body ?? {};
       if (!orderId || (docType !== "receipt" && docType !== "kitchen")) return reply.code(400).send({ error: "orderId and docType (receipt or kitchen) required" });
       const order = reduceOrder(orderId, await store.eventsForOrder(orderId));
       if (!order) return reply.code(404).send({ error: "order_not_found" });
       const orderOutlet = (await store.outletOfOrder?.(orderId)) ?? undefined;
       if (orderOutlet && !outletAllowed(await visibleOutletIds(db, merchantId, req.staff!), orderOutlet)) return reply.code(403).send({ error: "outside_your_scope" });
-      const queued = await queue.reprint(order, docType, { catalog: await catalog.load(), config, print: { merchantName: config.name, outletName: config.outletName, now: Date.now() }, outletId: orderOutlet }, printerId);
+      const queued = await queue.reprint(order, docType, { catalog: await catalog.load(), config, print: await printCtxFor(order, orderOutlet), outletId: orderOutlet, printModifiers: req.body?.modifiers === true }, printerId);
       await audit(db, merchantId, req.staff!.id, "print.reprint", { orderId, docType, queued });
       return queued ? { queued } : reply.code(409).send({ error: "no_printer_for_this" });
+    });
+
+    /** The receipt as text, for a screen preview: modifiers only when asked for (?modifiers=1). Nothing is printed. */
+    app.get<{ Params: { id: string }; Querystring: { modifiers?: string } }>("/api/orders/:id/receipt", { preHandler: needs("print.reprint") }, async (req, reply) => {
+      const order = reduceOrder(req.params.id, await store.eventsForOrder(req.params.id));
+      if (!order) return reply.code(404).send({ error: "order_not_found" });
+      const outletId = (await store.outletOfOrder?.(req.params.id)) ?? undefined;
+      if (outletId && !outletAllowed(await visibleOutletIds(db, merchantId, req.staff!), outletId)) return reply.code(403).send({ error: "outside_your_scope" });
+      const doc = receipt(order, config, await printCtxFor(order, outletId), { printModifiers: req.query.modifiers === "1" });
+      return { text: plainText(doc, 42).join("\n") };
     });
 
     /** No-sale / change: opens the till without printing anything. Cashiers and up; every use is audited. */

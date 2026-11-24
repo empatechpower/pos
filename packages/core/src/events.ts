@@ -59,7 +59,7 @@ export type OrderEventBody =
   /** The bill was split into checks. Each check has a fixed total (they add up to the order total) and, by item or seat, the units it carries. */
   | { type: "SplitCreated"; method: "even" | "manual" | "item" | "seat"; checks: Array<{ id: string; totalCents: Cents; seat?: number; shares?: Array<{ lineId: string; qty: number }> }>; byName?: string }
   | { type: "SplitCleared"; byName?: string }
-  | { type: "PaymentRecorded"; paymentId: string; method: PaymentMethod; amountCents: Cents; /** false = awaiting gateway confirmation */ confirmed: boolean; /** The cashier's shift this was taken in (the drawer it belongs to). */ shiftId?: string; /** The check of a split bill this payment settles. */ checkId?: string }
+  | { type: "PaymentRecorded"; paymentId: string; method: PaymentMethod; amountCents: Cents; /** false = awaiting gateway confirmation */ confirmed: boolean; /** The cashier's shift this was taken in (the drawer it belongs to). */ shiftId?: string; /** The check of a split bill this payment settles. */ checkId?: string; /** Cash handed over, when it was more than the payment (so the receipt can show the change). */ tenderedCents?: Cents }
   | { type: "PaymentConfirmed"; paymentId: string }
   | { type: "StageSet"; stage: Exclude<OrderStage, "open"> }
   /** The customer moved to another table after ordering: the same order, same status, now at `to`. The old table and the time are kept. */
@@ -155,7 +155,7 @@ export interface OrderState {
   queueNumber?: string;
   openedAt: number;
   lines: OrderLine[];
-  payments: Array<{ paymentId: string; method: PaymentMethod; amountCents: Cents; confirmed: boolean; shiftId?: string; checkId?: string }>;
+  payments: Array<{ paymentId: string; method: PaymentMethod; amountCents: Cents; confirmed: boolean; shiftId?: string; checkId?: string; tenderedCents?: Cents }>;
   stage: OrderStage;
   /** Time the order was first fully paid (confirmed). */
   paidAt?: number;
@@ -205,7 +205,7 @@ export function reduceOrder(orderId: string, events: readonly OrderEvent[]): Ord
       }
       case "PaymentRecorded": {
         if (state.payments.some((p) => p.paymentId === e.paymentId)) break;
-        state.payments.push({ paymentId: e.paymentId, method: e.method, amountCents: e.amountCents, confirmed: e.confirmed, ...(e.shiftId ? { shiftId: e.shiftId } : {}), ...(e.checkId ? { checkId: e.checkId } : {}) });
+        state.payments.push({ paymentId: e.paymentId, method: e.method, amountCents: e.amountCents, confirmed: e.confirmed, ...(e.shiftId ? { shiftId: e.shiftId } : {}), ...(e.checkId ? { checkId: e.checkId } : {}), ...(e.tenderedCents && e.tenderedCents > e.amountCents ? { tenderedCents: Math.round(e.tenderedCents) } : {}) });
         break;
       }
       case "PaymentConfirmed": {

@@ -673,3 +673,5 @@ html.training-on body { box-shadow: inset 0 0 0 5px #c62828; }
 .settings-body { min-width: 0; }
 .settings-body .e2e-card, .settings-body .row { max-width: 100%; }
 @media (max-width: 1180px) { .top .colourpick { display: none; } }
+@media (max-width: 720px) { .right { flex-wrap: wrap; max-width: 100%; min-width: 0; } .top { min-width: 0; } }
+@media (max-width: 720px) { .top nav { flex-wrap: nowrap; overflow-x: auto; scrollbar-width: none; } .top nav::-webkit-scrollbar { display: none; } }

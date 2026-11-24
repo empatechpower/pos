@@ -90,6 +90,8 @@ interface EnqueueCtx {
   print: PrintContext;
   /** The outlet that took the order: only its printers are used. Left out, every active printer is (a single-outlet server). */
   outletId?: string;
+  /** Print the items' modifiers on the receipt (off unless someone asks for it). */
+  printModifiers?: boolean;
 }
 
 /** Printable dots across: 58 mm paper is 384 at 203 dpi, 80 mm is 576. */
@@ -193,7 +195,7 @@ export class PrintStore {
       if (!order.onTab && isFullyPaid(order, ctx.config)) {
         const cash = order.payments.some((x) => x.confirmed && x.method === "cash");
         for (const p of printers.filter((x) => x.roles.includes("receipt"))) {
-          const doc = receipt(order, ctx.config, ctx.print, { showQueue: p.showQueue });
+          const doc = receipt(order, ctx.config, ctx.print, { showQueue: p.showQueue, printModifiers: ctx.printModifiers });
           if (await this.insertJob(client, p, "receipt", order.orderId, `receipt:${order.orderId}:${p.id}`, enc(p, cash ? withDrawer(doc) : doc), title(order))) made++;
         }
       }
@@ -274,7 +276,7 @@ export class PrintStore {
     const category = new Map(ctx.catalog.products.map((x) => [x.id, x.category]));
     for (const p of printers) {
       const docs = docType === "receipt"
-        ? [receipt(order, ctx.config, ctx.print, { showQueue: p.showQueue })]
+        ? [receipt(order, ctx.config, ctx.print, { showQueue: p.showQueue, printModifiers: ctx.printModifiers })]
         : kitchenCuts(order.lines.flatMap(splitComboLine), p.cutMode, (id) => category.get(id) ?? "").map((c) => kitchenTicket(order, ctx.print, { lines: c.lines, showQueue: p.showQueue }));
       for (const [n, doc] of docs.entries()) {
         if (await this.insertJob(this.db, p, docType, order.orderId, `reprint:${docType}:${order.orderId}:${p.id}:${Date.now()}:${n}:${Math.random()}`, enc(p, doc), title(order) + " (reprint)")) made++;

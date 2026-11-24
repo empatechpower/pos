@@ -132,12 +132,32 @@ describe("what gets queued, and when", () => {
     expect(kitchen.text).toContain("A101");
     expect(kitchen.text).toContain("2 x Kaya Toast");
     expect(kitchen.text).not.toContain("S$");
-    expect(receipt.text).toContain("TOTAL");
+    expect(receipt.text).toContain("Total (SGD)");
     expect(receipt.text).toContain("S$4.00");
     expect([...receipt.bytes.subarray(0, 5)]).toEqual([0x1b, 0x40, 0x1b, 0x74, 0]); // starts with ESC @
     expect(receipt.bytes.includes(Buffer.from([0x1b, 0x70, 0]))).toBe(true); // cash drawer
     expect(kitchen.bytes.includes(Buffer.from([0x1d, 0x56, 0x42, 3]))).toBe(true); // cut
     expect((await jobs("done")).length).toBeGreaterThanOrEqual(2);
+  });
+
+  it("the receipt can be previewed as text, with the shop's GST number making it a tax invoice, and modifiers only on request", async () => {
+    const o = orderEvents([{ id: "kopi", name: "Coffee", qty: 1 }], { queue: "A140", pay: "cash" });
+    await push([...o.events, o.mk({ type: "ItemAdded", lineId: "mod1", productId: "teh", name: "Milk Tea", unitCents: 240, qty: 1, options: [{ group: "Extras", name: "Pearls", qty: 1, priceCents: 80 }, { group: "Ice", name: "Less ice", qty: 1, priceCents: 0 }] })]);
+    const plain = (await call(`/api/orders/${o.orderId}/receipt`, { staff: mgr, device: till.token })).json.text as string;
+    expect(plain).toContain("COFFEE");
+    expect(plain).toContain("Total (SGD)");
+    expect(plain).not.toContain("TAX Invoice");
+    expect(plain).not.toContain("Pearls");
+    process.env.GST_REG_NO = "M90012345X";
+    try {
+      const withMods = (await call(`/api/orders/${o.orderId}/receipt?modifiers=1`, { staff: mgr, device: till.token })).json.text as string;
+      expect(withMods).toContain("TAX Invoice");
+      expect(withMods).toContain("GST M90012345X");
+      expect(withMods).toContain("Pearls");
+      expect(withMods).toMatch(/Less ice/);
+      expect(withMods).not.toMatch(/Less ice\s+S\$0\.00/);
+    } finally { delete process.env.GST_REG_NO; }
+    expect((await call("/api/orders/nope/receipt", { staff: mgr, device: till.token })).status).toBe(404);
   });
 
   it("a card/credit sale does not open the drawer", async () => {

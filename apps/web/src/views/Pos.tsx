@@ -274,7 +274,7 @@ export function Pos({ config, catalog, online, customerId, setCustomerId }: PosP
    * Put what is on screen into the local log. A new order is opened; a table's open order gets only the lines not yet sent (the sent ones are
    * already there), plus any change to guests, the note, or discounts. Nothing here needs the network.
    */
-  async function place(payment: { method: PaymentMethod; confirmed: boolean; amountCents?: number; checkId?: string } | null, existingOrderId?: string): Promise<{ queue?: string; orderId: string } | undefined> {
+  async function place(payment: { method: PaymentMethod; confirmed: boolean; amountCents?: number; checkId?: string; tenderedCents?: number } | null, existingOrderId?: string): Promise<{ queue?: string; orderId: string } | undefined> {
     if (!bag.length) return undefined;
     const id = orderId ?? existingOrderId ?? newId();
     let queueNumber = linked?.queueNumber;
@@ -335,7 +335,7 @@ export function Pos({ config, catalog, online, customerId, setCustomerId }: PosP
     }
     if (payment) {
       const paymentId = newId();
-      await record(id, { type: "PaymentRecorded", paymentId, method: payment.method, amountCents: payment.amountCents ?? due, confirmed: payment.confirmed, ...(payment.checkId ? { checkId: payment.checkId } : {}) });
+      await record(id, { type: "PaymentRecorded", paymentId, method: payment.method, amountCents: payment.amountCents ?? due, confirmed: payment.confirmed, ...(payment.checkId ? { checkId: payment.checkId } : {}), ...(payment.tenderedCents ? { tenderedCents: payment.tenderedCents } : {}) });
       if (!payment.confirmed) {
         // MOCK gateway: stands in for the YeahPay callback until real credentials exist.
         window.setTimeout(() => void record(id, { type: "PaymentConfirmed", paymentId }), 1500);
@@ -542,7 +542,7 @@ export function Pos({ config, catalog, online, customerId, setCustomerId }: PosP
         await record(linked.orderId, { type: "PaymentRecorded", paymentId, method: "credit", amountCents: owed, confirmed: true, checkId: payCheckId });
       } else {
         const method: PaymentMethod = t === "cash" ? "cash" : "paynow";
-        await record(linked.orderId, { type: "PaymentRecorded", paymentId, method, amountCents: applied, confirmed: t === "cash", checkId: payCheckId });
+        await record(linked.orderId, { type: "PaymentRecorded", paymentId, method, amountCents: applied, confirmed: t === "cash", checkId: payCheckId, ...(t === "cash" && received > applied ? { tenderedCents: received } : {}) });
         if (t !== "cash") window.setTimeout(() => void record(linked.orderId, { type: "PaymentConfirmed", paymentId }), 1500);
       }
       const total = orderTotals(linked, config).total;
@@ -573,7 +573,7 @@ export function Pos({ config, catalog, online, customerId, setCustomerId }: PosP
     if (payCheckId) return void payCheck(t, received);
     if (mustOpenShift) return notify("Open your shift first.");
     const owed = due;
-    if (t === "cash") { const p = await place({ method: "cash", confirmed: true }); setPayView(false); setDone({ queue: p?.queue, change: Math.max(0, received - owed), total: owed }); }
+    if (t === "cash") { const p = await place({ method: "cash", confirmed: true, tenderedCents: received }); setPayView(false); setDone({ queue: p?.queue, change: Math.max(0, received - owed), total: owed }); }
     else if (t === "credit") await payWithCredit();
     else if (t === "qr") await payWithQr();
     else { const p = await place({ method: "paynow", confirmed: false }); setPayView(false); setDone({ queue: p?.queue, change: 0, total: owed }); }
