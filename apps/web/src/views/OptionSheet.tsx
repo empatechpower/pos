@@ -18,6 +18,8 @@ interface Props {
   notes?: boolean;
   /** The kiosk's version: the price under the name, a Quantity stepper, and Cancel beside "Add to order · total". */
   kiosk?: boolean;
+  /** The till's version: a blue dialog titled "Select options · name", with Cancel and "Add · total" at the foot. */
+  till?: boolean;
   onAdd: (selection: ChosenOptionInput[], note: string, qty: number) => void;
   onClose: () => void;
 }
@@ -30,7 +32,7 @@ const countOf = (sel: ChosenOptionInput[], g: string, c: string) => sel.filter((
  * The customise screen: choose-one groups as pills, "pick any" as toggles, extras as steppers. The total and
  * the Add button follow the same rules the server applies, so what is shown is what is charged.
  */
-export function OptionSheet({ name, description, photoUrl, baseCents, groups, initial, initialNote, cta = "Add to bag", notes, kiosk, onAdd, onClose }: Props) {
+export function OptionSheet({ name, description, photoUrl, baseCents, groups, initial, initialNote, cta = "Add to bag", notes, kiosk, till, onAdd, onClose }: Props) {
   const [sel, setSel] = useState<ChosenOptionInput[]>(initial ?? defaultSelection(groups));
   const [note, setNote] = useState(initialNote ?? "");
   const [qty, setQty] = useState(1);
@@ -61,14 +63,15 @@ export function OptionSheet({ name, description, photoUrl, baseCents, groups, in
   const used = (g: OptionGroup) => sel.filter((s) => s.groupId === g.id).reduce((n, s) => n + (s.qty ?? 1), 0);
 
   return (
-    <div className="opt-back" role="dialog" aria-label={`${tx("Customise")} ${name}`}>
+    <div className={`opt-back ${till ? "opt-till" : ""}`} role="dialog" aria-label={`${tx("Customise")} ${name}`}>
       <div className="opt-sheet">
         <div className="opt-head">
-          <button className="opt-x" onClick={onClose} aria-label={tx("Back")}><span aria-hidden>‹</span> {tx("Back")}</button>
+          {till ? <><h2>Select options · {name}</h2><button className="opt-x" onClick={onClose} aria-label="Close">✕</button></>
+            : <button className="opt-x" onClick={onClose} aria-label={tx("Back")}><span aria-hidden>‹</span> {tx("Back")}</button>}
         </div>
         <div className="opt-body">
-          {photoUrl && <img className="opt-photo" src={photoUrl} alt="" />}
-          <h2>{name}</h2>
+          {photoUrl && !till && <img className="opt-photo" src={photoUrl} alt="" />}
+          {!till && <h2>{name}</h2>}
           {kiosk && <div className="opt-price">{formatMoney(total)}</div>}
           {description && <p className="muted">{description}</p>}
           {kiosk && groups.length > 0 && <p className="muted">{tx("Choose your options below — the price updates as you go.")}</p>}
@@ -132,7 +135,13 @@ export function OptionSheet({ name, description, photoUrl, baseCents, groups, in
             </section>
           )}
         </div>
-        {kiosk ? (
+        {till ? (
+          <div className="opt-foot kq">
+            <div className="opt-tillprice"><b>{formatMoney(total)}</b>{missing && <small>Select {missing}</small>}</div>
+            <button className="opt-cancel" onClick={onClose}>Cancel</button>
+            <button className="opt-cta" disabled={!r.ok} onClick={() => r.ok && onAdd(sel, note, 1)}>Add · {formatMoney(total)}</button>
+          </div>
+        ) : kiosk ? (
           <div className="opt-foot kq">
             <button className="opt-cancel" onClick={onClose}>{tx("Cancel")}</button>
             <button className="opt-cta" disabled={!r.ok} title={missing ? tx("Choose {x}", { x: missing }) : ""} onClick={() => r.ok && onAdd(sel, note, qty)}>

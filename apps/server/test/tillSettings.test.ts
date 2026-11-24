@@ -42,6 +42,14 @@ describe("till settings and menu layouts", () => {
   afterAll(async () => { await app?.close(); await stop?.(); });
 
   const page = (name: string, cells: any[] = []) => ({ name, cells: [...cells, ...Array(25 - cells.length).fill(null)] });
+  it("a manager chooses whether sliding a line removes it at once; the default is a bin button, and nonsense is refused", async () => {
+    const m = (await call("/api/auth/login", { body: { code: "M1", pin: "222222" } })).json.token;
+    expect((await call("/api/settings/till", { bearer: m })).json.lineRemove).toBe("bin");
+    expect((await call("/api/settings/till", { bearer: m, method: "PUT", body: { lineRemove: "swipe" } })).json.lineRemove).toBe("swipe");
+    expect((await call("/api/settings/till", { bearer: m })).json.lineRemove).toBe("swipe");
+    expect((await call("/api/settings/till", { bearer: m, method: "PUT", body: { lineRemove: "explode" } })).status).toBe(400);
+    await call("/api/settings/till", { bearer: m, method: "PUT", body: { lineRemove: "bin" } });
+  });
   it("a manager sets the shop's actions, payment options, dashboard and standard layout; anyone reads them", async () => {
     const c = (await call("/api/auth/login", { body: { code: "C1", pin: "3333" } })).json.token;
     const m = (await call("/api/auth/login", { body: { code: "M1", pin: "222222" } })).json.token;

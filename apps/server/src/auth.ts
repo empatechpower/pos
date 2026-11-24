@@ -53,6 +53,34 @@ async function verifyPin(pin: string, stored: string): Promise<boolean> {
 
 const sha256 = (s: string) => createHash("sha256").update(s).digest("hex");
 
+/** A phone number as "+" and digits (8 to 15 of them), or null when it is not one. Spaces, dashes and brackets are ignored. */
+export function normalisePhone(raw: unknown): string | null {
+  if (typeof raw !== "string") return null;
+  const t = raw.replace(/[\s\-().]/g, "");
+  return /^\+[1-9]\d{7,14}$/.test(t) ? t : null;
+}
+
+/** Sign in with a phone number and PIN: the number finds the person, then it is exactly a code sign-in (same lockout, same one generic failure). */
+export async function loginByPhone(db: Db, merchantId: string, phone: string, pin: string): Promise<LoginResult> {
+  const n = normalisePhone(phone);
+  const r = n ? await db.query("SELECT code FROM staff WHERE merchant_id=$1 AND phone=$2 AND active", [merchantId, n]) : { rows: [] as Array<{ code: string }> };
+  if (!r.rows[0]) { await hashPin(pin).catch(() => {}); return { ok: false, reason: "invalid" }; }
+  return login(db, merchantId, r.rows[0].code as string, pin);
+}
+
+/** Set or clear a staff member's sign-in phone number. False when the number is taken by someone else or not a number. */
+export async function setStaffPhone(db: Db, merchantId: string, code: string, phone: string | null): Promise<"ok" | "invalid" | "taken" | "unknown"> {
+  const n = phone === null ? null : normalisePhone(phone);
+  if (phone !== null && !n) return "invalid";
+  try {
+    const r = await db.query("UPDATE staff SET phone=$3 WHERE merchant_id=$1 AND code=$2", [merchantId, code, n]);
+    return r.rowCount ? "ok" : "unknown";
+  } catch (e) {
+    if ((e as { code?: string }).code === "23505") return "taken";
+    throw e;
+  }
+}
+
 // ---- accounts ---------------------------------------------------------------------------------
 
 export async function createStaff(

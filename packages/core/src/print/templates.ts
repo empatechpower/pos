@@ -107,7 +107,7 @@ export function receipt(order: OrderState, config: BusinessConfig, ctx: PrintCon
   // The transaction code: the date (DDMMYYYY) and the order's number, as a barcode and in words.
   const code = transactionCode(order, ctx);
   b.push({ t: "rule" }, { t: "barcode", data: code }, { t: "text", text: code, align: "center" });
-  b.push({ t: "text", text: "Please retain and present this receipt for any exchange or return.", align: "center" });
+  b.push({ t: "text", text: "Please retain and present this Receipt for any refund or replacement of Products", align: "center" });
   b.push({ t: "text", text: `POSID:${ctx.posId ?? "001"}${ctx.cashier ? ` C:${ctx.cashier}` : ""} TR${code.slice(8)}` });
   b.push({ t: "text", text: "Terms and Conditions apply." }, { t: "rule" }, { t: "text", text: printedAt(ctx.now, ctx.timeZone) });
   b.push({ t: "feed", n: 3 }, { t: "cut" });

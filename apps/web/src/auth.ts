@@ -43,9 +43,9 @@ export function clearSession() {
   emit();
 }
 
-export async function signIn(code: string, pin: string): Promise<{ ok: true } | { ok: false; reason: "invalid" | "locked" | "unavailable" }> {
+export async function signIn(who: string | { phone: string }, pin: string): Promise<{ ok: true } | { ok: false; reason: "invalid" | "locked" | "unavailable" }> {
   try {
-    const res = await fetch("/api/auth/login", { method: "POST", headers: { "content-type": "application/json", ...deviceHeader() }, body: JSON.stringify({ code, pin }) });
+    const res = await fetch("/api/auth/login", { method: "POST", headers: { "content-type": "application/json", ...deviceHeader() }, body: JSON.stringify(typeof who === "string" ? { code: who, pin } : { phone: who.phone, pin }) });
     if (res.status === 401 && (await res.clone().json().catch(() => ({}))).error === "device_not_enrolled") {
       markDeviceRejected();
       return { ok: false, reason: "unavailable" };

@@ -18,16 +18,16 @@ export function CountEntry({ value, onChange }: { value: CountValue; onChange: (
   return (
     <div>
       <p className="muted">Count by note and coin, or just type the total below.</p>
-      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "4px 16px" }}>
+      <div className="ce-grid">
         {DENOMS.map((d) => (
-          <label key={d} className="row" style={{ alignItems: "center", gap: 8 }}>
-            <span style={{ width: 52 }}>{formatMoney(d)}</span>
-            <input style={{ width: 64, textAlign: "right" }} inputMode="numeric" placeholder="0" aria-label={`Count of ${formatMoney(d)}`} value={value.counts[String(d)] ?? ""} onChange={(e) => onChange({ ...value, counts: { ...value.counts, [String(d)]: e.target.value.replace(/\D/g, "").slice(0, 5) } })} />
-            <small className="muted" style={{ marginLeft: "auto" }}>{formatMoney((parseInt(value.counts[String(d)] || "0", 10) || 0) * d)}</small>
+          <label key={d} className="ce-row">
+            <span className="ce-d">{formatMoney(d)}</span>
+            <input inputMode="numeric" placeholder="0" aria-label={`Count of ${formatMoney(d)}`} value={value.counts[String(d)] ?? ""} onChange={(e) => onChange({ ...value, counts: { ...value.counts, [String(d)]: e.target.value.replace(/\D/g, "").slice(0, 5) } })} />
+            <small className="muted ce-sub">{formatMoney((parseInt(value.counts[String(d)] || "0", 10) || 0) * d)}</small>
           </label>
         ))}
       </div>
-      <label className="field">Total $<input inputMode="decimal" readOnly={filled} placeholder="0.00" value={filled ? (sum / 100).toFixed(2) : value.total} onChange={(e) => onChange({ ...value, total: e.target.value.replace(/[^\d.]/g, "") })} /></label>
+      <label className="field ce-total">Total $<input inputMode="decimal" readOnly={filled} placeholder="0.00" value={filled ? (sum / 100).toFixed(2) : value.total} onChange={(e) => onChange({ ...value, total: e.target.value.replace(/[^\d.]/g, "") })} /></label>
     </div>
   );
 }

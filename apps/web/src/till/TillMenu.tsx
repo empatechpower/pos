@@ -145,8 +145,8 @@ export function TillMenu({ menu, qtyOf, onAdd, onDiscount, editing }: { menu: Me
             return <button key={i} className={`t-tile ${c ? "" : "t-blank"} ${sel === i ? "t-sel" : ""} ${c?.kind === "category" ? "t-cat" : c?.kind === "discount" ? "t-fn" : ""}`} aria-label={c ? `Move ${label}` : "Empty cell"} onClick={() => tapCell(i)}>{c ? <strong className="t-name">{label}</strong> : <span className="t-plus">{sel !== null ? "↓" : ""}</span>}</button>;
           }
           if (!c) return <div key={i} className="t-tile t-blank" aria-hidden />;
-          if (c.kind === "category") return <button key={i} className="t-tile t-cat" onClick={unlessHeld(() => { setCategory(c.name); setPage(0); })}><strong>{c.name}</strong><span>▦</span></button>;
-          if (c.kind === "discount") return <button key={i} className="t-tile t-fn" onClick={unlessHeld(onDiscount)}><strong>Discount</strong><span>%</span></button>;
+          if (c.kind === "category") return <button key={i} className="t-tile t-cat" onClick={unlessHeld(() => { setCategory(c.name); setPage(0); })}><strong>{c.name}</strong><span>▦</span><small>Category</small></button>;
+          if (c.kind === "discount") return <button key={i} className="t-tile t-fn" onClick={unlessHeld(onDiscount)}><strong>Discount</strong><span>%</span><small>Discount an order</small></button>;
           const m = c.item;
           const q = qtyOf(m.id);
           const photo = m.imageVersion ? `/api/products/${m.id}/image?v=${m.imageVersion}` : null;

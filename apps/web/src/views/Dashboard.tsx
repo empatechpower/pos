@@ -29,7 +29,7 @@ export function Dashboard({ config }: { config: BusinessConfig }) {
 
   return (
     <div className="dash">
-      <h2>{isTraining() ? "Practice mode · " : ""}Hello, {staff.name.split(" ")[0]}</h2>
+      {isTraining() && <h2>Practice mode</h2>}
       <div className="dash-stats">
         <div><small>Sales today</small><strong>{formatMoney(sales)}</strong></div>
         <div><small>Orders paid today</small><strong>{paidToday.length}</strong></div>

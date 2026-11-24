@@ -59,6 +59,8 @@ export type OrderEventBody =
   | { type: "GuestsChanged"; pax: number; byName?: string }
   /** The guest check was printed or the bill was asked for. */
   | { type: "BillRequested"; byName?: string }
+  /** A paid table was wiped down and is free for the next guests. */
+  | { type: "TableCleared"; byName?: string }
   /** This table was merged into another order: its lines now live there and it is closed. */
   | { type: "OrderMerged"; into: string; intoSpot?: string; byName?: string }
   /** The bill was split into checks. Each check has a fixed total (they add up to the order total) and, by item or seat, the units it carries. */
@@ -157,6 +159,8 @@ export interface OrderState {
   lastSentAt?: number;
   /** When the guest check was printed / the bill asked for. */
   billAskedAt?: number;
+  /** When staff marked the paid table as cleared. */
+  clearedAt?: number;
   /** Set when this table was merged into another order. */
   mergedInto?: { orderId: string; spot?: string; at: number };
   /** The bill split into checks, when it is. */
@@ -289,6 +293,9 @@ export function reduceOrder(orderId: string, events: readonly OrderEvent[]): Ord
         break;
       case "BillRequested":
         state.billAskedAt = e.ts;
+        break;
+      case "TableCleared":
+        state.clearedAt = e.ts;
         break;
       case "OrderMerged":
         if (state.mergedInto) break;

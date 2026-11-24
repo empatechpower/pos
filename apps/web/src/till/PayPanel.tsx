@@ -8,7 +8,7 @@ export interface TenderOption { id: Tender; label: string; disabled?: boolean; w
  * Payment replaces the menu area while the ticket stays in view. Cash has a keypad and shows the change; the other ways of paying ask for
  * their own steps when Done is pressed.
  */
-export function PayPanel({ totalCents, title, tenders, busy, onBack, onDone, onSplit, partial }: { totalCents: number; title: string; tenders: TenderOption[]; busy: boolean; onBack: () => void; onDone: (tender: Tender, receivedCents: number) => void; /** Shows Split Bill beside Back. */ onSplit?: () => void; /** Cash may pay part of what is due (a check of a split bill). */ partial?: boolean }) {
+export function PayPanel({ totalCents, title, venue, tenders, busy, onBack, onDone, onSplit, partial }: { totalCents: number; title: string; /** The shop and table, shown at the right of the heading. */ venue?: string; tenders: TenderOption[]; busy: boolean; onBack: () => void; onDone: (tender: Tender, receivedCents: number) => void; /** Shows Split Bill beside Back. */ onSplit?: () => void; /** Cash may pay part of what is due (a check of a split bill). */ partial?: boolean }) {
   const [tender, setTender] = useState<Tender>("cash");
   const [value, setValue] = useState("");
   const received = Math.round(Number(value || 0) * 100);
@@ -24,7 +24,7 @@ export function PayPanel({ totalCents, title, tenders, busy, onBack, onDone, onS
   const cur = tenders.find((t) => t.id === tender);
   return (
     <section className="t-pay-panel" aria-label="Payment">
-      <div className="t-payhead"><strong>Payment · {title}</strong></div>
+      <div className="t-payhead"><strong>Payment · {title}</strong>{venue && <span>{venue}</span>}</div>
       <div className="t-figures">
         <div>Balance Due<strong>{formatMoney(totalCents)}</strong></div>
         <div>Amount Tendered<strong>{tender === "cash" ? formatMoney(valid ? received : 0) : formatMoney(totalCents)}</strong></div>

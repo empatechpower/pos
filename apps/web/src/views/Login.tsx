@@ -8,6 +8,9 @@ import { loadTillSettings, tillSettings } from "../till/tillSettings";
 import { appVersion } from "../pwaUpdate";
 import "../till/till.css";
 
+/** Country codes for the phone sign-in: Singapore first, then the neighbours. */
+const COUNTRIES: Array<[string, string]> = [["+65", "Singapore"], ["+60", "Malaysia"], ["+62", "Indonesia"], ["+66", "Thailand"], ["+63", "Philippines"], ["+84", "Vietnam"], ["+852", "Hong Kong"], ["+86", "China"], ["+91", "India"], ["+61", "Australia"], ["+44", "United Kingdom"], ["+1", "United States"]];
+
 /** Staff who have signed in on this device, newest first. Kept so they can tap their name and only type a PIN. */
 interface Recent { code: string; name: string; role: string }
 const LS_RECENT = "pos.recentStaff";
@@ -22,13 +25,15 @@ export function Login({ online, problem }: { online: boolean; problem?: string |
   const staff = useStaff();
   const [list] = useState(recents);
   const [picked, setPicked] = useState<Recent | null>(null);
-  const [byCode, setByCode] = useState(false);
+  const [mode, setMode] = useState<"list" | "phone" | "code">(() => (recents().length ? "list" : "phone"));
+  const [cc, setCc] = useState(() => localStorage.getItem("pos.cc") ?? "+65");
+  const [phone, setPhone] = useState("");
   const [code, setCode] = useState("");
   const [pin, setPin] = useState("");
   const [msg, setMsg] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [kbd, setKbd] = useState(() => localStorage.getItem("pos.kbd") === "1");
-  const [target, setTarget] = useState<"pin" | "code">("pin");
+  const [target, setTarget] = useState<"pin" | "code" | "phone">(() => (recents().length ? "pin" : "phone"));
   const [lockNote] = useState(() => takeLockNote());
   const shift = useShift();
   const [blocked, setBlocked] = useState(false);
@@ -43,16 +48,20 @@ export function Login({ online, problem }: { online: boolean; problem?: string |
     );
   }
 
-  const showCode = byCode || !list.length;
+  const showCode = mode === "code";
+  const showPhone = mode === "phone";
   const press = (k: string) => {
+    if (target === "phone" && showPhone) return setPhone((c) => (k === "⌫" ? c.slice(0, -1) : (c + k).slice(0, 12)));
     if (target === "code" && showCode) return setCode((c) => (k === "⌫" ? c.slice(0, -1) : (c + k).slice(0, 12)));
     setPin((p) => (k === "⌫" ? p.slice(0, -1) : p.length < 8 ? p + k : p));
   };
   async function submit(e?: React.FormEvent) {
     e?.preventDefault();
     if (busy) return;
-    const who = showCode ? code.trim() : picked?.code;
-    if (!who) { setMsg("Tap your name first, then enter your PIN."); return; }
+    const digits = phone.replace(/\D/g, "");
+    const who: string | { phone: string } | undefined = showPhone ? (digits ? { phone: `${cc}${digits}` } : undefined) : showCode ? code.trim() || undefined : picked?.code;
+    if (!who) { setMsg(showPhone ? "Enter your phone number, then your PIN." : showCode ? "Enter your staff code, then your PIN." : "Tap your name first, then enter your PIN."); return; }
+    if (showPhone) localStorage.setItem("pos.cc", cc);
     setBusy(true);
     setMsg(null);
     const r = await signIn(who, pin);
@@ -71,8 +80,8 @@ export function Login({ online, problem }: { online: boolean; problem?: string |
   }
   const top = list.slice(0, 5);
   const rest = list.slice(5);
-  const pick = (r: Recent) => { setPicked(r); setByCode(false); setTarget("pin"); setMsg(null); };
-  const label = showCode ? "Staff code, then PIN" : picked ? `${picked.name} · ${picked.role}` : list.length ? "Tap your name, then enter your PIN" : "Use your staff code, then enter your PIN";
+  const pick = (r: Recent) => { setPicked(r); setMode("list"); setTarget("pin"); setMsg(null); };
+  const label = showPhone ? "Enter your PIN" : showCode ? "Staff code, then PIN" : picked ? `Enter your PIN · ${picked.name}` : list.length ? "Tap your name, then enter your PIN" : "Use your staff code, then enter your PIN";
 
   return (
     <form className="signin" onSubmit={(e) => void submit(e)}>
@@ -81,7 +90,7 @@ export function Login({ online, problem }: { online: boolean; problem?: string |
       {!online && <div className="t-flash">The app is not in sync with the shop server right now{problem ? ` (${problem})` : ""}. You can still try to sign in.</div>}
       <div className="signin-cols">
         <div className="signin-who">
-          {!showCode && (
+          {mode === "list" && (
             <>
               <div className="signin-label">Recent staff · tap your name</div>
               <div className="signin-names">
@@ -93,12 +102,27 @@ export function Login({ online, problem }: { online: boolean; problem?: string |
                   {rest.map((r) => <option key={r.code} value={r.code}>{r.name}</option>)}
                 </select>
               )}
-              <button type="button" className="t-ghost" onClick={() => { setByCode(true); setPicked(null); setTarget("code"); }}>Use staff code</button>
+              <button type="button" className="t-ghost" onClick={() => { setMode("phone"); setPicked(null); setTarget("phone"); }}>Use phone number</button>
+              <button type="button" className="t-ghost" onClick={() => { setMode("code"); setPicked(null); setTarget("code"); }}>Use staff code</button>
+            </>
+          )}
+          {showPhone && (
+            <>
+              <div className="signin-label">Phone number</div>
+              <div className="signin-phone">
+                <select aria-label="Country code" value={cc} onChange={(e) => setCc(e.target.value)}>
+                  {COUNTRIES.map(([c, n]) => <option key={c} value={c}>{c} {n}</option>)}
+                </select>
+                <input type="tel" inputMode="numeric" placeholder="8111 1111" aria-label="Phone number" autoComplete="tel-national" readOnly={!kbd} value={phone} onFocus={() => setTarget("phone")} onClick={() => setTarget("phone")} onChange={(e) => setPhone(e.target.value.replace(/[^\d ]/g, ""))} />
+              </div>
+              {list.length > 0 && <button type="button" className="t-ghost" onClick={() => { setMode("list"); setTarget("pin"); }}>← Back to staff list</button>}
+              <button type="button" className="t-ghost" onClick={() => { setMode("code"); setTarget("code"); }}>Use staff code</button>
             </>
           )}
           {showCode && (
             <>
-              {list.length > 0 && <button type="button" className="t-ghost" onClick={() => { setByCode(false); setTarget("pin"); }}>← Back to staff list</button>}
+              <button type="button" className="t-ghost" onClick={() => { setMode("phone"); setTarget("phone"); }}>← Use phone number</button>
+              {list.length > 0 && <button type="button" className="t-ghost" onClick={() => { setMode("list"); setTarget("pin"); }}>← Back to staff list</button>}
               <label className="t-field">Staff code<input value={code} autoCapitalize="characters" autoComplete="username" readOnly={!kbd} onFocus={() => setTarget("code")} onClick={() => setTarget("code")} onChange={(e) => setCode(e.target.value)} /></label>
             </>
           )}
@@ -106,13 +130,13 @@ export function Login({ online, problem }: { online: boolean; problem?: string |
         <div className="signin-pad">
           <div className="signin-label">{label}</div>
           <div className="signin-pinrow">
-            <button type="button" className="t-ghost" onClick={() => (target === "code" && showCode ? setCode("") : setPin(""))}>Clear</button>
+            <button type="button" className="t-ghost" onClick={() => (target === "phone" && showPhone ? setPhone("") : target === "code" && showCode ? setCode("") : setPin(""))}>Clear</button>
             <input className="signin-pin" type="password" inputMode="numeric" autoComplete="current-password" maxLength={8} aria-label="PIN" placeholder="••••" readOnly={!kbd} value={pin} onFocus={() => setTarget("pin")} onClick={() => setTarget("pin")} onChange={(e) => setPin(e.target.value.replace(/\D/g, ""))} />
             <button type="submit" className="t-primary" disabled={busy}>Login</button>
           </div>
           {msg && <div className="t-err" role="alert">{msg}</div>}
           <div className="signin-keys">
-            {["1", "2", "3", "4", "5", "6", "7", "8", "9", "", "0", "⌫"].map((k, i) => (k === "" ? <span key={i} /> : <button type="button" key={i} onClick={() => press(k)}>{k}</button>))}
+            {["1", "2", "3", "4", "5", "6", "7", "8", "9", "⌫", "0", ""].map((k, i) => (k === "" ? <span key={i} /> : <button type="button" key={i} onClick={() => press(k)}>{k}</button>))}
           </div>
           <button type="button" className="t-ghost" onClick={() => { const n = !kbd; setKbd(n); localStorage.setItem("pos.kbd", n ? "1" : "0"); }}>{kbd ? "⌨ Hide device keyboard" : "⌨ Use device keyboard"}</button>
         </div>

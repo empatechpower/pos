@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { confirmedPaid, formatMoney, isFullyPaid, orderTotals, type BusinessConfig, type Catalog, type OrderState } from "@pos/core";
+import { queryParams } from "../nav";
 import { staffFetch, useStaff } from "../auth";
 import { useOrders } from "../hooks";
 import { PrintBadge, usePrintStatus } from "./PrintBadge";
@@ -19,7 +20,7 @@ const newKey = () => (globalThis.crypto?.randomUUID ? globalThis.crypto.randomUU
 /** Staff page for the shop: every order and payment, and the members' points and prepaid credit. No till. */
 export function Manager({ config, catalog }: { config: BusinessConfig; catalog?: Catalog | null }) {
   const staff = useStaff();
-  const [tab, setTab] = useState<"orders" | "members" | "telegram" | "books" | "reports" | "agents" | "outlets">("orders");
+  const [tab, setTab] = useState<"orders" | "members" | "telegram" | "books" | "reports" | "agents" | "outlets">(() => { const t = queryParams().get("tab"); return t === "reports" || t === "members" || t === "outlets" ? t : "orders"; });
   return (
     <div className="credit prices">
       <h2>Manager</h2>

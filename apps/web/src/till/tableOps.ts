@@ -14,7 +14,17 @@ export function isSeatedOrder(o: OrderState, config: BusinessConfig): boolean {
   return confirmedPaid(o) < orderTotals(o, config).total;
 }
 
-export type TableState = "available" | "seated" | "ordered" | "bill" | "overdue";
+export type TableState = "available" | "seated" | "ordered" | "bill" | "paid" | "overdue";
+
+/** How long a paid table is shown as "Paid · to clear" before it is taken to be free anyway. */
+export const PAID_HOLD_MS = 3 * 3_600_000;
+/** A table whose guests have paid and left it uncleared: its last order is fully paid and nobody has marked the table cleared. */
+export function paidAwaitingClear(name: string, orders: OrderState[], config: BusinessConfig, now: number): OrderState | undefined {
+  return orders
+    .filter((o) => o.spot === name && o.fulfilment === "dine_in" && !o.clearedAt && !o.mergedInto && !o.voided && !o.onTab && o.stage !== "cancelled" && o.lines.some((l) => l.qty > 0) && (o.paidAt ?? 0) > now - PAID_HOLD_MS && confirmedPaid(o) >= orderTotals(o, config).total)
+    .sort((a, b) => (b.paidAt ?? 0) - (a.paidAt ?? 0))[0];
+}
+export const clearTable = (o: OrderState, byName?: string) => record(o.orderId, { type: "TableCleared", ...(byName ? { byName } : {}) });
 export interface TableInfo {
   name: string;
   state: TableState;
@@ -27,6 +37,8 @@ export interface TableInfo {
   /** 0 on time; 1-3 the longer it has been stale (the ring gets louder). */
   level: 0 | 1 | 2 | 3;
   guests?: number;
+  /** For a "paid" table: the order that was paid, so it can be marked cleared. */
+  paidOrder?: OrderState;
 }
 
 /** What is going on at one table or tab, from the open orders and the drafts held for it. */
@@ -44,6 +56,8 @@ export function tableInfo(name: string, orders: OrderState[], held: HeldOrder[],
     const level = stale(draft.savedAt);
     return { name, draft, state: level ? "overdue" : "seated", seatedAt: draft.savedAt, level, guests: draft.pax };
   }
+  const paid = paidAwaitingClear(name, orders, config, now);
+  if (paid) return { name, state: "paid", level: 0, paidOrder: paid, seatedAt: paid.openedAt };
   return { name, state: "available", level: 0 };
 }
 

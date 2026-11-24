@@ -37,6 +37,7 @@ export function eventTrail(events: readonly OrderEvent[], deviceName: (id: strin
       case "LineFired": add("stage", "An item was sent to the kitchen", x.byName ?? dev); break;
       case "GuestsChanged": add("note", `Guests changed to ${x.pax}`, x.byName ?? dev); break;
       case "BillRequested": add("stage", "Guest check printed", x.byName ?? dev); break;
+      case "TableCleared": add("table", "Table cleared", x.byName ?? dev); break;
       case "OrderMerged": add("table", `Merged into ${x.intoSpot ?? "another table"}`, x.byName ?? dev); break;
       case "SplitCreated": add("payment", `Bill split into ${x.checks?.length ?? 0} checks (${x.method})`, x.byName ?? dev); break;
       case "SplitCleared": add("payment", "Split bill cleared", x.byName ?? dev); break;

@@ -13,10 +13,12 @@ export interface TillSettings {
   actions: { order: string[]; hidden: string[] };
   tenders: { order: string[]; hidden: string[] };
   dashboard: boolean;
+  /** How a ticket line is removed by sliding it: show a bin button to tap, or remove it at once. */
+  lineRemove: "bin" | "swipe";
   layout: MenuLayout | null;
 }
 export const PAGE_CELLS = 25;
-export const DEFAULT_TILL: TillSettings = { actions: { order: [], hidden: [] }, tenders: { order: [], hidden: [] }, dashboard: true, layout: null };
+export const DEFAULT_TILL: TillSettings = { actions: { order: [], hidden: [] }, tenders: { order: [], hidden: [] }, dashboard: true, lineRemove: "bin", layout: null };
 
 const ids = (v: unknown, max = 40): string[] | null => (Array.isArray(v) && v.length <= max && v.every((x) => typeof x === "string" && /^[a-z0-9_-]{1,30}$/i.test(x)) ? [...new Set(v as string[])] : null);
 
@@ -48,6 +50,7 @@ export async function loadTill(db: Db, merchantId: string): Promise<TillSettings
     actions: { order: ids(v.actions?.order) ?? [], hidden: ids(v.actions?.hidden) ?? [] },
     tenders: { order: ids(v.tenders?.order, 12) ?? [], hidden: ids(v.tenders?.hidden, 12) ?? [] },
     dashboard: v.dashboard !== false,
+    lineRemove: v.lineRemove === "swipe" ? "swipe" : "bin",
     layout: v.layout ? cleanLayout(v.layout) : null,
   };
 }
@@ -59,6 +62,7 @@ export function mergeTill(cur: TillSettings, b: Partial<Record<keyof TillSetting
   if (b.actions !== undefined) { const a = part(b.actions, 40); if (!a) return null; next.actions = a; }
   if (b.tenders !== undefined) { const t = part(b.tenders, 12); if (!t) return null; next.tenders = t; }
   if (b.dashboard !== undefined) next.dashboard = !!b.dashboard;
+  if (b.lineRemove !== undefined) { if (b.lineRemove !== "bin" && b.lineRemove !== "swipe") return null; next.lineRemove = b.lineRemove; }
   if (b.layout !== undefined) { if (b.layout === null) next.layout = null; else { const l = cleanLayout(b.layout); if (!l) return null; next.layout = l; } }
   return next;
 }

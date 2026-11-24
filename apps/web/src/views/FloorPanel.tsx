@@ -1,9 +1,10 @@
 import { useEffect, useState } from "react";
-import { loadFloor, saveFloor, useFloor, type FloorSettings } from "../floor";
+import { loadFloor, saveFloor, useFloor, type FloorSettings, type FloorTable } from "../floor";
 
 /** One table to a line: "Table 5" or "Table 5, 4" (the number after the comma is how many seats). */
 const toText = (s: FloorSettings["sections"][number]) => s.tables.map((t) => (t.seats ? `${t.name}, ${t.seats}` : t.name)).join("\n");
-const fromText = (text: string, sid: string) => text.split("\n").map((l) => l.trim()).filter(Boolean).map((l, i) => { const [name, seats] = l.split(",").map((x) => x.trim()); const n = Number(seats); return { id: `${sid}-${i}`, name: name!, ...(Number.isInteger(n) && n > 0 ? { seats: n } : {}) }; });
+/** Editing the text keeps where a table sits and its shape, matched by name. */
+const fromText = (text: string, sid: string, old: FloorTable[] = []) => text.split("\n").map((l) => l.trim()).filter(Boolean).map((l, i) => { const [name, seats] = l.split(",").map((x) => x.trim()); const n = Number(seats); const was = old.find((t) => t.name === name); return { id: was?.id ?? `${sid}-${i}`, name: name!, ...(Number.isInteger(n) && n > 0 ? { seats: n } : {}), ...(was?.shape ? { shape: was.shape } : {}), ...(was?.x !== undefined && was?.y !== undefined ? { x: was.x, y: was.y } : {}) }; });
 
 /** For managers: the sections and tables of the floor, and the table-service switches (split bill, courses, how long before a table is flagged overdue). */
 export function FloorPanel() {
@@ -26,7 +27,7 @@ export function FloorPanel() {
       ))}
       <div className="row">
         <button className="secondary sm" onClick={() => setSections((c) => [...c, { id: `s${Date.now().toString(36)}`, name: "New section", text: "" }])}>Add a section</button>
-        <button className="primary sm" onClick={() => void save({ sections: sections.map((s) => ({ id: s.id, name: s.name, tables: fromText(s.text, s.id) })) })}>Save the floor</button>
+        <button className="primary sm" onClick={() => void save({ sections: sections.map((s) => ({ id: s.id, name: s.name, tables: fromText(s.text, s.id, floor.sections.find((x) => x.id === s.id)?.tables) })) })}>Save the floor</button>
       </div>
       <label className="row"><input type="checkbox" checked={floor.splitBill} onChange={(e) => void save({ splitBill: e.target.checked })} /> Allow split bill</label>
       <label className="row"><input type="checkbox" checked={floor.courses} onChange={(e) => void save({ courses: e.target.checked })} /> Serve in courses (Starter, Main, Dessert; Send fires the first, Fire Course sends the next)</label>

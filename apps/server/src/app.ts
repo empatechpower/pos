@@ -3,7 +3,7 @@ import Fastify, { type FastifyReply, type FastifyRequest } from "fastify";
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { type BuilderSpec, guestCheck, plainText, receipt, type OrderState, type PrintContext, commissionOf, tabPaymentReceipt, type ProductStock, validateProductStock, isTimeZone, validCoordinates, validateOutletOverride, validateWindows, type MenuWindows, confirmedPaid, hourly, isFullyPaid, productMix, summarize, menuFor, newId, orderTotals, reduceAll, reduceOrder, shopStatus, type BusinessConfig, type ChannelKind, type OptionGroup, type OrderEvent } from "@pos/core";
-import { CASHIER_TOPUP_LIMIT_CENTS, audit, checkStaffPin, authenticate, authenticateAgent, can, createAgent, createConnectCode, redeemConnectCode, createStaff, listAgents, login, logout, recentAudit, revokeAgent, type Permission, type Role, type Staff } from "./auth.js";
+import { CASHIER_TOPUP_LIMIT_CENTS, audit, checkStaffPin, authenticate, authenticateAgent, can, createAgent, createConnectCode, redeemConnectCode, createStaff, listAgents, login, loginByPhone, logout, normalisePhone, setStaffPhone, recentAudit, revokeAgent, type Permission, type Role, type Staff } from "./auth.js";
 import type { CatalogStore, ChangeResult, PgCatalogStore } from "./catalog.js";
 import type { Db } from "./db/pool.js";
 import { adjustTo, balanceOf, creditBlockedFor, creditExemptIds, creditFrozen, refund, setCreditExempt, setCreditFrozen, spend, topUp } from "./ledger.js";
@@ -305,12 +305,12 @@ export async function buildApp({ config, store, db, catalog, catalogAdmin, print
   const loginFailures = new FailureLimiter(20, 15 * 60_000);
   const enrollFailures = new FailureLimiter(10, 15 * 60_000);
 
-  app.post<{ Body: { code?: string; pin?: string } }>("/api/auth/login", { preHandler: needsDevice }, async (req, reply) => {
-    const { code, pin } = req.body ?? {};
-    if (!code || !pin) return reply.code(400).send({ error: "code and pin required" });
+  app.post<{ Body: { code?: string; phone?: string; pin?: string } }>("/api/auth/login", { preHandler: needsDevice }, async (req, reply) => {
+    const { code, phone, pin } = req.body ?? {};
+    if ((!code && !phone) || !pin) return reply.code(400).send({ error: "a staff code or phone number, and a pin, are required" });
     const who = req.device!.id;
     if (loginFailures.blocked(who)) return reply.code(429).send({ error: "locked" });
-    const r = await login(db, merchantId, code, pin);
+    const r = code ? await login(db, merchantId, code, pin) : await loginByPhone(db, merchantId, String(phone), pin);
     if (!r.ok) {
       if (r.reason === "invalid") loginFailures.fail(who);
       return reply.code(r.reason === "locked" ? 429 : 401).send({ error: r.reason });
@@ -363,13 +363,28 @@ export async function buildApp({ config, store, db, catalog, catalogAdmin, print
 
   app.get("/api/auth/me", { preHandler: needs("wallet.read") }, async (req) => ({ name: req.staff!.name, code: req.staff!.code, role: req.staff!.role, franchiseId: req.staff!.franchiseId ?? null, outletId: req.staff!.outletId ?? null }));
 
+  /** Your own sign-in phone number. Needs your PIN, because it opens the account. Send phone: null to remove it. */
+  app.put<{ Body: { phone?: string | null; pin?: string } }>("/api/auth/phone", { preHandler: needs("wallet.read") }, async (req, reply) => {
+    const b = req.body ?? {};
+    if (!b.pin || b.phone === undefined) return reply.code(400).send({ error: "send your pin and a phone number (or null)" });
+    const me = req.staff!;
+    const ok = await checkStaffPin(db, merchantId, me.code, b.pin);
+    if (!ok.ok) return reply.code(ok.reason === "locked" ? 429 : 401).send({ error: ok.reason });
+    const r = await setStaffPhone(db, merchantId, me.code, b.phone);
+    if (r === "invalid") return reply.code(400).send({ error: "not_a_phone_number", message: "Use the country code and number, like +65 8111 1111." });
+    if (r === "taken") return reply.code(409).send({ error: "phone_in_use" });
+    if (r !== "ok") return reply.code(404).send({ error: "unknown_staff" });
+    await audit(db, merchantId, me.id, "staff.phone", { set: b.phone !== null });
+    return { phone: b.phone === null ? null : normalisePhone(b.phone) };
+  });
+
   app.post("/api/auth/logout", async (req) => {
     const t = bearer(req);
     if (t) await logout(db, t);
     return { ok: true };
   });
 
-  app.post<{ Body: { code?: string; name?: string; role?: Role; pin?: string; franchiseId?: string | null; outletId?: string | null } }>("/api/staff", { preHandler: needs("staff.manage") }, async (req, reply) => {
+  app.post<{ Body: { code?: string; name?: string; role?: Role; pin?: string; phone?: string; franchiseId?: string | null; outletId?: string | null } }>("/api/staff", { preHandler: needs("staff.manage") }, async (req, reply) => {
     const b = req.body ?? {};
     if (!b.code || !b.name || !b.pin || !b.role || !["cashier", "manager", "owner"].includes(b.role)) {
       return reply.code(400).send({ error: "code, name, pin and a valid role are required" });
@@ -387,7 +402,9 @@ export async function buildApp({ config, store, db, catalog, catalogAdmin, print
       if (granted === null || !granted.every((id) => mine.includes(id)) || (franchiseId && req.staff!.franchiseId !== franchiseId)) return reply.code(403).send({ error: "outside_your_scope" });
     }
     try {
+      if (b.phone !== undefined && !normalisePhone(b.phone)) return reply.code(400).send({ error: "not_a_phone_number" });
       const s = await createStaff(db, { merchantId, code: b.code, name: b.name, role: b.role, pin: b.pin, franchiseId, outletId });
+      if (b.phone !== undefined && (await setStaffPhone(db, merchantId, s.code, b.phone)) === "taken") return reply.code(409).send({ error: "phone_in_use", message: "The account was made, but that phone number belongs to someone else." });
       await audit(db, merchantId, req.staff!.id, "staff.create", { code: s.code, role: s.role, franchiseId, outletId });
       return { code: s.code, name: s.name, role: s.role, franchiseId, outletId };
     } catch (e) {

@@ -107,7 +107,7 @@ describe("a fee on the whole order", () => {
 
 describe("sales by person", () => {
   const cfg = PRESETS.fastServe("b", "B", "O");
-  const base = (id: string, items: number, extra: object[] = []) => [
+  const base = (id: string, items: number, extra: OrderEvent[] = []) => [
     ev(id, 1, { type: "OrderOpened", fulfilment: "takeaway", serviceCharge: false }),
     ev(id, 2, { type: "ItemAdded", lineId: `${id}a`, productId: "p", name: "Cake", unitCents: items, qty: 1 }),
     ...extra,
@@ -138,5 +138,12 @@ describe("sales by person", () => {
   it("adds up: what was taken in total equals what the orders were paid", () => {
     const total = staffSales(orders, cfg).reduce((n, x) => n + x.takenCents, 0);
     expect(total).toBe(1000 + 2000 + 500 + 700 + 3000 + 900);
+  });
+});
+
+describe("a paid table waits to be cleared", () => {
+  it("records when staff cleared the table", () => {
+    const o = reduceOrder("o", [ev("o", 1, { type: "OrderOpened", fulfilment: "dine_in", serviceCharge: false, spot: "T1" }), ev("o", 2, { type: "TableCleared", byName: "Cat" })])!;
+    expect(o.clearedAt).toBe(2);
   });
 });

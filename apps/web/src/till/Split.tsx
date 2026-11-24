@@ -6,7 +6,7 @@ type Method = "even" | "manual" | "item" | "seat";
 export interface SplitLineIn { lineId: string; name: string; qty: number; unitCents: number; seat?: number }
 
 /**
- * Split Bill, in the shape Revel uses (Q41, Q43): a radio list of four methods with Cancel / OK, then the step for that method.
+ * Split Bill, as the prototype has it after TengSern reverted the radio list (Q43): four buttons, each with its name and a line saying what it does; tapping one goes straight to its step.
  * Check totals are fixed when the split is made and always add up to the order total.
  */
 export function SplitDialog({ totalCents, lines, onCreate, onClose }: { totalCents: number; lines: SplitLineIn[]; onCreate: (method: Method, plan: CheckPlan[]) => void; onClose: () => void }) {
@@ -32,12 +32,15 @@ export function SplitDialog({ totalCents, lines, onCreate, onClose }: { totalCen
     return { ...a, [id]: next };
   }));
 
+  /** A method was tapped: By Seat makes the checks at once; the others ask for what they need. */
+  function choose(m: Method) {
+    setErr("");
+    setMethod(m);
+    if (m === "seat") { const p = splitBySeat(lines.map((l) => ({ lineId: l.lineId, qty: l.qty, unitCents: l.unitCents, seat: l.seat })), totalCents); if (!p) return setErr("Give items to at least two different seats first (open an item and set its seat)."); return onCreate("seat", p); }
+    setStep(m);
+  }
   function ok() {
     setErr("");
-    if (step === "pick") {
-      if (method === "seat") { const p = splitBySeat(lines.map((l) => ({ lineId: l.lineId, qty: l.qty, unitCents: l.unitCents, seat: l.seat })), totalCents); if (!p) return setErr("Give items to at least two different seats first (open an item and set its seat)."); return onCreate("seat", p); }
-      return setStep(method);
-    }
     if (step === "even") return evenPlan ? onCreate("even", evenPlan) : setErr("Choose between 2 and 20 people.");
     if (step === "manual") return manualPlan ? onCreate("manual", manualPlan) : setErr("Enter amounts that add up to less than the bill. What is left becomes the last check.");
     if (step === "item") return itemPlan ? onCreate("item", itemPlan) : setErr("Give every unit to a check, and every check at least one item.");
@@ -47,11 +50,14 @@ export function SplitDialog({ totalCents, lines, onCreate, onClose }: { totalCen
     <Modal title="Split Bill" wide={step === "item"} onClose={onClose}>
       <p className="t-muted">Bill total {formatMoney(totalCents)}</p>
       {step === "pick" && (
-        <div role="radiogroup" aria-label="How to split">
-          {([["even", "Split Evenly"], ["manual", "Split Manually"], ["item", "Split By Item"], ["seat", "Split By Seat Number"]] as Array<[Method, string]>).map(([m, l]) => (
-            <button key={m} role="radio" aria-checked={method === m} className={`t-radio ${method === m ? "on" : ""}`} onClick={() => setMethod(m)} disabled={m === "seat" && seats < 2} title={m === "seat" && seats < 2 ? "Needs items at two or more seats" : undefined}><i>{method === m ? "◉" : "○"}</i> {l}</button>
-          ))}
-        </div>
+        <>
+          <p className="t-muted">Split this bill into separate checks. Each check is paid on its own; the order closes when every check is paid in full.</p>
+          <div className="t-splitmethods">
+            {([["even", "Split Evenly", "Divide the total equally between people"], ["manual", "Split Manually", "Key in an amount for each check"], ["item", "Split By Item", "Choose which items go on each check"], ["seat", "Split By Seat Number", "One check per seat"]] as Array<[Method, string, string]>).map(([m, l, d]) => (
+              <button key={m} onClick={() => choose(m)} title={m === "seat" && seats < 2 ? "Needs items at two or more seats" : undefined}><strong>{l}</strong><span>{d}</span></button>
+            ))}
+          </div>
+        </>
       )}
       {step === "even" && (
         <>
@@ -80,7 +86,7 @@ export function SplitDialog({ totalCents, lines, onCreate, onClose }: { totalCen
         </>
       )}
       {err && <p className="t-err" role="alert">{err}</p>}
-      <div className="t-dact"><button className="t-ghost" onClick={step === "pick" ? onClose : () => { setStep("pick"); setErr(""); }}>{step === "pick" ? "Cancel" : "Back"}</button><button className="t-primary" onClick={ok}>{step === "pick" ? "OK" : "Create checks"}</button></div>
+      <div className="t-dact"><button className="t-ghost" onClick={step === "pick" ? onClose : () => { setStep("pick"); setErr(""); }}>{step === "pick" ? "Cancel" : "Back"}</button>{step !== "pick" && <button className="t-primary" onClick={ok}>Create checks</button>}</div>
     </Modal>
   );
 }

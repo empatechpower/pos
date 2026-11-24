@@ -12,12 +12,13 @@ function details(l: BagLine): Array<{ text: string; amount?: string; strong?: bo
   return out;
 }
 
-function Line({ l, collapsed, onToggle, onEdit, onQty, onRemove, bin, setBin }: { l: BagLine; collapsed: boolean; onToggle: () => void; onEdit: () => void; onQty: (d: number) => void; onRemove: () => void; bin: boolean; setBin: (open: boolean) => void }) {
+function Line({ l, collapsed, onToggle, onEdit, onQty, onRemove, bin, setBin, swipeRemoves }: { l: BagLine; collapsed: boolean; onToggle: () => void; onEdit: () => void; onQty: (d: number) => void; onRemove: () => void; bin: boolean; setBin: (open: boolean) => void; swipeRemoves: boolean }) {
   const det = details(l);
   const more = det.length > 0;
   const open = more && !collapsed;
   const tap = useRef<{ at: number; timer: number | null }>({ at: 0, timer: null });
-  const drag = useRef<{ x: number; y: number; moved: boolean } | null>(null);
+  const drag = useRef<{ x: number; y: number; moved: boolean; dx: number } | null>(null);
+  const [slide, setSlide] = useState(0);
 
   function click() {
     if (drag.current?.moved) return;
@@ -30,7 +31,7 @@ function Line({ l, collapsed, onToggle, onEdit, onQty, onRemove, bin, setBin }: 
   }
   return (
     <div className="t-linewrap">
-      <button className="t-bin" aria-label={`Remove ${l.item.name}`} onClick={onRemove}>🗑</button>
+      {!swipeRemoves && <button className="t-bin" aria-label={`Remove ${l.item.name}`} onClick={onRemove}>🗑</button>}
       <div
         className={`t-line ${bin ? "binopen" : ""}`}
         role="button"
@@ -38,9 +39,10 @@ function Line({ l, collapsed, onToggle, onEdit, onQty, onRemove, bin, setBin }: 
         aria-label={`Edit ${l.item.name}`}
         onKeyDown={(e) => { if (e.key === "Enter") onEdit(); }}
         onClick={click}
-        onPointerDown={(e) => { if (l.sent || (e.target as HTMLElement).closest("button,.t-name")) return; drag.current = { x: e.clientX, y: e.clientY, moved: false }; }}
-        onPointerMove={(e) => { const d = drag.current; if (!d) return; const dx = e.clientX - d.x; if (Math.abs(dx) > 12 && Math.abs(dx) > Math.abs(e.clientY - d.y)) { d.moved = true; setBin(dx < -40); } }}
-        onPointerUp={() => { window.setTimeout(() => { drag.current = null; }, 0); }}
+        onPointerDown={(e) => { if (l.sent || (e.target as HTMLElement).closest("button,.t-name")) return; drag.current = { x: e.clientX, y: e.clientY, moved: false, dx: 0 }; }}
+        onPointerMove={(e) => { const d = drag.current; if (!d) return; const dx = e.clientX - d.x; if (Math.abs(dx) > 12 && Math.abs(dx) > Math.abs(e.clientY - d.y)) { d.moved = true; d.dx = dx; if (swipeRemoves) setSlide(Math.min(0, dx)); else setBin(dx < -40); } }}
+        onPointerUp={() => { const d = drag.current; if (swipeRemoves && d?.moved) { if (d.dx <= -72) onRemove(); setSlide(0); } window.setTimeout(() => { drag.current = null; }, 0); }}
+        style={swipeRemoves && slide ? { transform: `translateX(${slide}px)`, transition: "none" } : undefined}
       >
         <div className="t-row">
           <h3 className="t-namecell">
@@ -76,6 +78,7 @@ function Line({ l, collapsed, onToggle, onEdit, onQty, onRemove, bin, setBin }: 
 export function TicketPanel(p: {
   channelName: string; title: string; subline: string; shiftChip: ReactNode; bag: BagLine[]; flash: string | null;
   onDining: () => void; onNew: () => void; onQty: (key: string, d: number) => void; onEdit: (key: string) => void; onRemove: (key: string) => void;
+  lineRemove?: "bin" | "swipe";
   totals: ReactNode; strip: ReactNode; extra?: ReactNode; open: boolean; onCloseSheet: () => void;
 }) {
   const [folded, setFolded] = useState<Set<string>>(new Set());
@@ -97,13 +100,14 @@ export function TicketPanel(p: {
       <div className="t-cols"><span>Name</span><span>Qty</span><span>Each</span><span>Total</span></div>
       <div className="t-lines">
         {p.bag.length === 0 ? <div className="t-empty"><b>＋</b><strong>Your order starts here</strong><span>Tap an item to add it to the ticket</span></div> : p.bag.map((l) => (
-          <Line key={l.key} l={l} collapsed={folded.has(l.key)} onToggle={() => toggle(l.key)} onEdit={() => p.onEdit(l.key)} onQty={(d) => p.onQty(l.key, d)} onRemove={() => { setBin(null); p.onRemove(l.key); }} bin={bin === l.key} setBin={(o) => setBin(o ? l.key : null)} />
+          <Line key={l.key} l={l} collapsed={folded.has(l.key)} onToggle={() => toggle(l.key)} onEdit={() => p.onEdit(l.key)} onQty={(d) => p.onQty(l.key, d)} onRemove={() => { setBin(null); p.onRemove(l.key); }} swipeRemoves={p.lineRemove === "swipe"} bin={bin === l.key} setBin={(o) => setBin(o ? l.key : null)} />
         ))}
       </div>
       {p.extra}
       <div className="t-foot">
         {p.totals}
         {p.strip}
+        <p className="t-hint">Tap a line to edit it · Double-tap to fold its details</p>
       </div>
     </aside>
   );

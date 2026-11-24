@@ -51,10 +51,10 @@ import { Modal } from "../till/Modal";
 import { ManageItem } from "../till/ManageItem";
 import { CustomerDialog, DiningDialog, DoneDialog, ExtraItemDialog, FeeDialog, GuestsDialog, HeldDialog, QuantityDialog, TillSettings } from "../till/Dialogs";
 import { TEXT_SCALE, loadPrefs, setLayout, usePrefs } from "../prefs";
-import { arrange, loadTillSettings, saveTill, useTillSettings, ACTION_POOL } from "../till/tillSettings";
+import { arrange, arrangeAll, loadTillSettings, saveTill, useTillSettings, ACTION_POOL } from "../till/tillSettings";
 import { queryParams } from "../nav";
 import { isTraining } from "../training";
-import { loadFloor, tableNames, useFloor } from "../floor";
+import { loadFloor, saveFloor, tableNames, useFloor } from "../floor";
 import { TableMap } from "../till/TableMap";
 import { ChecksBoard, SplitDialog } from "../till/Split";
 import { askForBill, courseProgress, fireNextCourse, isSeatedOrder, mergeTables, tableInfo, transferTable } from "../till/tableOps";
@@ -675,16 +675,17 @@ export function Pos({ config, catalog, online, customerId, setCustomerId }: PosP
       </div>
     </div>
   );
+  /** The number this order will get when it is sent, shown in its title like the prototype's "Order #0001". */
+  const nextQueue = !orderId && config.modules.queue ? formatQueueNumber(getDeviceCode(), nextQueueCounter(getDeviceCode(), orders.filter((o) => o.openedAt >= startOfDay()).map((o) => o.queueNumber ?? ""))) : undefined;
   const chips = (
     <>
-      <button className={mustOpenShift ? "warn" : ""} onClick={() => setDialog("shift")}>{shift ? `Drawer ${shift.drawer}` : mustOpenShift ? "Open your shift" : "Shift"}</button>
-      {dineIn && <button onClick={() => (tableService ? setDialog("table") : setDialog("table"))}>{spot || "Choose table"}</button>}
+      {mustOpenShift && <button className="warn" onClick={() => setDialog("shift")}>Open your shift</button>}
+      {dineIn && <button onClick={() => setDialog("table")}>{spot || "Choose table"}</button>}
       {dineIn && <button onClick={() => setDialog("guests")}>{pax} guest{pax === 1 ? "" : "s"}</button>}
       <button onClick={() => setDialog("customer")}>{customerId ? `👤 ···· ${customerId.slice(-4)}${balance !== null ? ` · ${formatMoney(balance)}` : ""}` : "👤 Member"}</button>
-      <button onClick={() => setDialog("settings")} aria-label="My till settings">⚙</button>
     </>
   );
-  const strip = <ActionStrip actions={actions} payLabel={`Pay ${formatMoney(priced.total)}`} onPay={() => { setSheetOpen(false); if (linked?.split) setView("checks"); else setPayView(true); }} payDisabled={!bag.length} />;
+  const strip = <ActionStrip actions={actions} everything={arrangeAll([...allActions].sort((a, b) => poolRank(a.id) - poolRank(b.id)), till.actions)} pref={till.actions} canArrange={staff?.role === "manager" || staff?.role === "owner"} onArrange={(next) => void saveTill({ actions: next })} payLabel={`Pay ${formatMoney(priced.total)}`} onPay={() => { setSheetOpen(false); if (linked?.split) setView("checks"); else setPayView(true); }} payDisabled={!bag.length} />;
 
   return (
     <div className={`till ${prefs.menuSide === "left" ? "menu-left" : ""}`} style={{ "--t-scale": TEXT_SCALE[prefs.textSize] } as React.CSSProperties}>
@@ -698,6 +699,7 @@ export function Pos({ config, catalog, online, customerId, setCustomerId }: PosP
             onFire={async (o) => { if (await fireNextCourse(o, staff?.name)) notify("Course fired."); }}
             onBill={async (o) => { await askForBill(o, staff?.name); notify("Guest check requested."); }}
             onBack={() => setView("order")}
+            staffName={staff?.name} canArrange={staff?.role === "manager" || staff?.role === "owner"} onSaveFloor={saveFloor}
           />
         </div>
       ) : view === "checks" && linked?.split ? (
@@ -714,8 +716,9 @@ export function Pos({ config, catalog, online, customerId, setCustomerId }: PosP
       {view === "order" && (
       <>
       <TicketPanel
-        channelName={channel.name} title={linked ? (linked.spot ?? "Order") : spot && tableService ? spot : "New order"} open={sheetOpen} onCloseSheet={() => setSheetOpen(false)}
-        subline={[dineIn ? spot : "", dineIn && pax > 0 ? `${pax} guest${pax === 1 ? "" : "s"}` : "", staff?.name ?? ""].filter(Boolean).join(" · ")}
+        lineRemove={till.lineRemove}
+        channelName={channel.name} title={linked ? (linked.queueNumber ? `Order ${linked.queueNumber}` : linked.spot ?? "Order") : nextQueue ? `Order ${nextQueue}` : "New order"} open={sheetOpen} onCloseSheet={() => setSheetOpen(false)}
+        subline={[dineIn ? spot : "", staff?.name ?? ""].filter(Boolean).join(" · ")}
         shiftChip={chips} bag={bag} flash={flash}
         onDining={() => (orderId ? notify("This order was already sent. The dining option can no longer change.") : setDialog("dining"))} onNew={newOrder}
         onQty={(k, d) => change(k, d)} onEdit={(k) => { setLineKey(k); setDialog("line"); }} onRemove={(k) => { if (bag.find((l) => l.key === k)?.sent) return notify("Already sent to the kitchen. A manager voids it from Orders."); setBag((cur) => cur.filter((l) => l.key !== k)); }}
@@ -726,7 +729,8 @@ export function Pos({ config, catalog, online, customerId, setCustomerId }: PosP
         {payView && bag.length ? (
           <PayPanel
             totalCents={payCheckId && checkDue ? checkDue.dueCents : due}
-            title={payCheckId && linked?.split ? `Check #${String(linked.split.checks.find((c) => c.id === payCheckId)?.no ?? 0).padStart(2, "0")} · ${spot}` : `${channel.name}${dineIn ? ` · ${spot}` : ""}`}
+            title={payCheckId && linked?.split ? `Check #${String(linked.split.checks.find((c) => c.id === payCheckId)?.no ?? 0).padStart(2, "0")}` : linked?.queueNumber ? `Order ${linked.queueNumber}` : nextQueue ? `Order ${nextQueue}` : channel.name}
+            venue={`${config.name}${dineIn && spot ? ` · ${spot}` : ""}`}
             tenders={tenders} busy={paying || qrBusy} partial={!!payCheckId}
             onBack={() => { setPayView(false); if (payCheckId) { setPayCheckId(null); setView("checks"); } }}
             onDone={(t, r) => void payDone(t, r)}
@@ -763,32 +767,61 @@ export function Pos({ config, catalog, online, customerId, setCustomerId }: PosP
           {tableNames(floor).map((t) => { const i = tableInfo(t, orders, held, config, floor, Date.now()); return <button key={t} className={`t-radio ${spot === t ? "on" : ""}`} disabled={i.state !== "available" && spot !== t} onClick={() => (linked ? void changeTable(t) : (setSpot(t), setDialog(null)))}><i>{spot === t ? "◉" : "○"}</i> {t}{i.state !== "available" && spot !== t ? " · in use" : ""}</button>; })}
         </Modal>
       )}
-      {dialog === "line" && line && (
+      {dialog === "line" && line && (() => {
+        const patch = (fn: (x: BagLine) => BagLine) => setBag((cur) => cur.map((x) => (x.key === line.key ? fn(x) : x)));
+        const desc = (catalog.products.find((x) => x.id === line.item.id)?.description ?? "").trim();
+        return (
         <Modal title={line.item.name} onClose={() => setDialog(null)}>
-          <div className="t-sheetlist">
-            {line.sent && <p className="t-muted">Already sent to the kitchen. It can be discounted; to take it off, a manager voids it from Orders.</p>}
-            {!line.sent && <div className="t-chiprow"><span>Quantity</span><button aria-label="Fewer" onClick={() => change(line.key, -1)}>−</button><b>{line.qty}</b><button aria-label="More" onClick={() => change(line.key, 1)}>+</button></div>}
-            {!line.sent && channels.length > 1 && (
-              <div className="t-chiprow"><span>Channel</span>
+          {desc && <p className="t-muted">{desc}</p>}
+          {line.sent && <p className="t-muted">Already sent to the kitchen. It can be discounted; to take it off, a manager voids it from Orders.</p>}
+          {!line.sent && (
+            <div className="t-row2"><span>Quantity</span><div className="t-stepper2"><button aria-label="Fewer" disabled={line.qty <= 1} onClick={() => change(line.key, -1)}>−</button><strong>{line.qty}</strong><button aria-label="More" onClick={() => change(line.key, 1)}>+</button></div></div>
+          )}
+          {!line.sent && channels.length > 1 && (
+            <>
+              <h3 className="t-h3">Item channel</h3>
+              <div className="t-choices">
                 {channels.map((c) => {
                   const sold = menuFor(catalog, { outletId: config.outletName, channelId: c.id }).some((x) => x.id === line.item.id);
                   return <button key={c.id} className={(line.channelId ?? channelId) === c.id ? "on" : ""} disabled={!sold} title={sold ? undefined : `Not sold in ${c.name}`} onClick={() => setLineChannel(line, c.id)}>{c.name}</button>;
                 })}
               </div>
-            )}
-            {!line.sent && dineIn && <button onClick={() => setBag((cur) => cur.map((x) => (x.key === line.key ? { ...x, hold: x.hold ? undefined : true } : x)))}>{line.hold ? "Release the hold: send it with the order" : "Hold this item: send it later"}</button>}
-            {line.sent && line.hold && linked && <button onClick={() => void record(linked.orderId, { type: "LineFired", lineId: line.sent!.lineId, ...(staff ? { byName: staff.name } : {}) }).then(() => { setBag((cur) => cur.map((x) => (x.key === line.key ? { ...x, hold: undefined } : x))); notify(`${line.item.name} sent to the kitchen.`); setDialog(null); })}>Fire this item to the kitchen now</button>}
+            </>
+          )}
+          {!line.sent && dineIn && floor.courses && (
+            <>
+              <h3 className="t-h3">Course</h3>
+              <div className="t-choices">{[0, 1, 2, 3].map((c) => <button key={c} className={(line.course ?? 0) === c ? "on" : ""} onClick={() => patch((x) => ({ ...x, course: c || undefined }))}>{c ? COURSE_NAMES[c] : "None"}</button>)}</div>
+            </>
+          )}
+          {!line.sent && dineIn && (
+            <>
+              <h3 className="t-h3">Seat</h3>
+              <div className="t-choices">{[1, 2, 3, 4, 5, 6].map((c) => <button key={c} className={(line.seat ?? 1) === c ? "on" : ""} onClick={() => patch((x) => ({ ...x, seat: c === 1 ? undefined : c }))}>Seat {c}</button>)}</div>
+              <h3 className="t-h3">Kitchen status</h3>
+              <div className="t-choices">
+                <button className={!line.hold ? "on" : ""} onClick={() => patch((x) => ({ ...x, hold: undefined }))}>Fire</button>
+                <button className={line.hold ? "on" : ""} onClick={() => patch((x) => ({ ...x, hold: true }))}>Hold</button>
+              </div>
+            </>
+          )}
+          {line.sent && line.hold && linked && (
+            <div className="t-choices" style={{ marginTop: ".8em" }}><button onClick={() => void record(linked.orderId, { type: "LineFired", lineId: line.sent!.lineId, ...(staff ? { byName: staff.name } : {}) }).then(() => { patch((x) => ({ ...x, hold: undefined })); notify(`${line.item.name} sent to the kitchen.`); setDialog(null); })}>Fire this item to the kitchen now</button></div>
+          )}
+          <div className="t-sheetlist" style={{ marginTop: ".8em" }}>
             {!line.sent && line.item.options?.length ? <button onClick={() => { setDialog(null); setEditing(line); }}>Edit choices</button> : null}
             {!line.sent && <button onClick={() => { setDialog(null); setNoteFor({ scope: "line", key: line.key }); }}>{line.note ? "Edit note" : "Add a note for the kitchen"}</button>}
-            {!line.sent && dineIn && floor.courses && <div className="t-chiprow"><span>Course</span>{[0, 1, 2, 3].map((c) => <button key={c} className={(line.course ?? 0) === c ? "on" : ""} onClick={() => setBag((cur) => cur.map((x) => (x.key === line.key ? { ...x, course: c || undefined } : x)))}>{c ? COURSE_NAMES[c] : "None"}</button>)}</div>}
-            {!line.sent && dineIn && <div className="t-chiprow"><span>Seat</span>{[1, 2, 3, 4, 5, 6].map((c) => <button key={c} className={(line.seat ?? 1) === c ? "on" : ""} onClick={() => setBag((cur) => cur.map((x) => (x.key === line.key ? { ...x, seat: c === 1 ? undefined : c } : x)))}>{c}</button>)}</div>}
             {staff && <button onClick={() => { setDialog(null); setSheet({ scope: "line", key: line.key }); }}>Discount or change the price</button>}
-            {line.discounts?.map((d) => <button key={d.id} onClick={() => setBag((cur) => cur.map((x) => (x.key === line.key ? { ...x, discounts: (x.discounts ?? []).filter((y) => y.id !== d.id) } : x)))}>Remove discount · {d.kind === "percent" ? `${d.value}%` : formatMoney(d.value)} ({d.reason})</button>)}
-            {line.override && <button onClick={() => setBag((cur) => cur.map((x) => (x.key === line.key ? { ...x, override: undefined } : x)))}>Undo the price change</button>}
-            {!line.sent && <button className="danger" onClick={() => { setBag((cur) => cur.filter((x) => x.key !== line.key)); setDialog(null); }}>Remove item</button>}
+            {line.discounts?.map((d) => <button key={d.id} onClick={() => patch((x) => ({ ...x, discounts: (x.discounts ?? []).filter((y) => y.id !== d.id) }))}>Remove discount · {d.kind === "percent" ? `${d.value}%` : formatMoney(d.value)} ({d.reason})</button>)}
+            {line.override && <button onClick={() => patch((x) => ({ ...x, override: undefined }))}>Undo the price change</button>}
+          </div>
+          <div className="t-dact">
+            {!line.sent && <button className="t-ghost danger" onClick={() => { setBag((cur) => cur.filter((x) => x.key !== line.key)); setDialog(null); }}>Remove item</button>}
+            <button className="t-primary" onClick={() => setDialog(null)}>Done · {formatMoney(effUnit(line) * line.qty)}</button>
           </div>
         </Modal>
-      )}
+        );
+      })()}
       {dialog === "tabs" && !prepay && (
         <Modal title="Open tabs" wide onClose={() => setDialog(null)}>
         <section className="tabs">
@@ -918,7 +951,7 @@ export function Pos({ config, catalog, online, customerId, setCustomerId }: PosP
           baseCents={editing.item.priceCents}
           groups={editing.item.options!}
           initial={editing.selection}
-          cta="Save changes"
+          cta="Save changes" till
           onClose={() => setEditing(null)}
           onAdd={(sel) => {
             changeChoices(editing, sel);
@@ -933,7 +966,7 @@ export function Pos({ config, catalog, online, customerId, setCustomerId }: PosP
           photoUrl={picking.imageVersion ? `/api/products/${picking.id}/image?v=${picking.imageVersion}` : null}
           baseCents={picking.priceCents}
           groups={picking.options!}
-          cta="Add to order"
+          cta="Add to order" till
           onClose={() => setPicking(null)}
           onAdd={(sel) => {
             addWith(picking, sel);

@@ -2,8 +2,11 @@ import { useSyncExternalStore } from "react";
 import { staffFetch } from "./auth";
 
 /** The shop floor as the manager laid it out. Kept on the device so the table map still opens with no connection. */
+/** Where a table sits on the floor map: x and y are percentages of the canvas; the shape is how it is drawn. */
+export interface FloorTable { id: string; name: string; seats?: number; shape?: "rect" | "round" | "oval"; x?: number; y?: number }
+
 export interface FloorSettings {
-  sections: Array<{ id: string; name: string; tables: Array<{ id: string; name: string; seats?: number }> }>;
+  sections: Array<{ id: string; name: string; tables: Array<FloorTable> }>;
   splitBill: boolean;
   courses: boolean;
   overdueMinutes: number;

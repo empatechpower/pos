@@ -7,9 +7,11 @@ export interface TillSettings {
   actions: { order: string[]; hidden: string[] };
   tenders: { order: string[]; hidden: string[] };
   dashboard: boolean;
+  /** How a ticket line is removed by sliding it: show a bin button to tap, or remove it at once. */
+  lineRemove: "bin" | "swipe";
   layout: MenuLayout | null;
 }
-export const DEFAULT_TILL: TillSettings = { actions: { order: [], hidden: [] }, tenders: { order: [], hidden: [] }, dashboard: true, layout: null };
+export const DEFAULT_TILL: TillSettings = { actions: { order: [], hidden: [] }, tenders: { order: [], hidden: [] }, dashboard: true, lineRemove: "bin", layout: null };
 
 /** Every action button the till knows, in its natural order. The settings screen lists these; Pay is always pinned and not one of them. */
 export const ACTION_POOL: Array<{ id: string; label: string; note?: string }> = [

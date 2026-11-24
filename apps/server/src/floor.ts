@@ -6,8 +6,11 @@ import type { Db } from "./db/pool.js";
  * The shop floor: sections with their tables, and the switches for table service.
  * Tables are just names; whatever order is sitting at a name is that table's open bill.
  */
+/** Where a table sits on the floor map: x and y are percentages of the canvas; the shape is how it is drawn. */
+export interface FloorTable { id: string; name: string; seats?: number; shape?: "rect" | "round" | "oval"; x?: number; y?: number }
+
 export interface FloorSettings {
-  sections: Array<{ id: string; name: string; tables: Array<{ id: string; name: string; seats?: number }> }>;
+  sections: Array<{ id: string; name: string; tables: Array<FloorTable> }>;
   splitBill: boolean;
   courses: boolean;
   /** Minutes before a seated table, or one with nothing sent, is flagged as overdue. */
@@ -47,7 +50,9 @@ export function cleanFloor(b: Partial<FloorSettings>, cur: FloorSettings): Floor
         if (seen.has(tn.toLowerCase())) return null;
         seen.add(tn.toLowerCase());
         const seats = Number(t.seats);
-        tables.push({ id: String(t.id ?? `t${si}-${ti}`).slice(0, 24), name: tn, ...(Number.isInteger(seats) && seats > 0 && seats <= 40 ? { seats } : {}) });
+        const pct = (v: unknown) => (typeof v === "number" && Number.isFinite(v) ? Math.round(Math.min(92, Math.max(0, v)) * 10) / 10 : undefined);
+        const x = pct(t.x), y = pct(t.y);
+        tables.push({ id: String(t.id ?? `t${si}-${ti}`).slice(0, 24), name: tn, ...(Number.isInteger(seats) && seats > 0 && seats <= 40 ? { seats } : {}), ...(t.shape === "rect" || t.shape === "round" || t.shape === "oval" ? { shape: t.shape } : {}), ...(x !== undefined && y !== undefined ? { x, y } : {}) });
       }
       sections.push({ id: String(s.id ?? `s${si}`).slice(0, 24), name, tables });
     }

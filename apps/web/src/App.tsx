@@ -16,6 +16,8 @@ import { Shop } from "./views/Shop";
 import { Orders } from "./views/Orders";
 import { Dashboard } from "./views/Dashboard";
 import { Settings } from "./views/Settings";
+import { TillHeader } from "./views/TillHeader";
+import { TEXT_SCALE, usePrefs } from "./prefs";
 import { Tabs } from "./views/Tabs";
 import { Printers } from "./views/Printers";
 import { Prices } from "./views/Prices";
@@ -74,6 +76,7 @@ export function App() {
   const { config, catalog } = useReference();
   const status = useSyncStatus();
   const pending = usePending();
+  const prefs = usePrefs();
   useIdleLock();
 
   useEffect(() => {
@@ -106,9 +109,14 @@ export function App() {
   if (route === "queue") return <Queue config={config} />;
 
   const connected = status.online && status.reachable;
+  // The till screens share the prototype's header and its text scale; the back-office pages keep the wider navigation bar.
+  const tillStyle = route === "pos" || route === "dashboard" || route === "orders" || route === "settings" || route === "login";
+  const hasTables = !!config && config.paymentTiming === "postpay" && !!catalog?.channels.some((c) => c.active && c.kind === "dine_in");
+  const shellStyle = { ...(staff ? theme.style : {}), ...(tillStyle ? { "--t-scale": TEXT_SCALE[prefs.textSize] } : {}) } as React.CSSProperties;
   return (
-    <div className={`shell ${route === "pos" ? "till-route" : ""}`} style={staff ? theme.style : undefined}>
-      <header className="top">
+    <div className={`shell ${route === "pos" ? "till-route" : ""} ${tillStyle ? "tillshell" : ""}`} style={shellStyle}>
+      {tillStyle && <TillHeader route={route} config={config ?? null} connected={connected} pending={pending} newOnline={newOnline} hasTables={hasTables} onSync={() => void syncNow()} syncError={status.error} />}
+      {!tillStyle && <header className="top">
         <div className="brand">
           <b>{config?.name ?? "POS"}</b>
           <span>{config ? `${config.outletName} · ${modeLabel(config.paymentTiming)}` : "waiting for first sync"}</span>
@@ -116,14 +124,14 @@ export function App() {
         <nav>
           {/* This version is for running the shop: orders, printing, members, menu and devices. The till (POS), Kitchen, Credit,
               Orders and Queue screens still exist at /pos, /kitchen, /credit, /orders and /queue; they are just not in the bar. */}
-          {staff && <a href="/dashboard" className={route === "dashboard" ? "on" : ""}>Home</a>}
-          {staff && <a href="/pos" className={route === "pos" ? "on" : ""}>Till</a>}
-          {staff && <a href="/orders" className={route === "orders" ? "on" : ""}>Orders</a>}
+          {staff && <a href="/dashboard" className={(route as string) === "dashboard" ? "on" : ""}>Home</a>}
+          {staff && <a href="/pos" className={(route as string) === "pos" ? "on" : ""}>Till</a>}
+          {staff && <a href="/orders" className={(route as string) === "orders" ? "on" : ""}>Orders</a>}
           {device.required && staff && <a href="/manager" className={route === "manager" ? "on" : ""}>Manager</a>}
           <a href="/online" className={route === "online" ? "on" : ""}>Online{newOnline > 0 ? <b className="dot">{newOnline}</b> : null}</a>
           {/* Printers, Prices and Devices live under Settings > Menu & prices; Printers shows here only when a print job has failed. */}
           {staff && staff.role !== "cashier" && catalog && failedJobs > 0 && <a href="/printers" className={route === "printers" ? "on" : ""}>Printers<b className="dot">{failedJobs}</b></a>}
-          {staff && <a href="/settings" className={route === "settings" ? "on" : ""}>Settings</a>}
+          {staff && <a href="/settings" className={(route as string) === "settings" ? "on" : ""}>Settings</a>}
         </nav>
         <div className="right">
           {staff && (
@@ -157,7 +165,7 @@ export function App() {
             {pending > 0 ? ` · ${pending} to sync` : ""}
           </button>
         </div>
-      </header>
+      </header>}
       <main>
         {!config || !catalog ? (
           <div className="empty">
