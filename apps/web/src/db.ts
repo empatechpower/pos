@@ -1,3 +1,4 @@
+import { currentStaff } from "./auth";
 import { currentShiftId } from "./shift";
 import { deleteDB, openDB, type DBSchema, type IDBPDatabase } from "idb";
 import { isTraining, practiceResetRequested } from "./training";
@@ -87,7 +88,9 @@ export async function record(orderId: string, body: OrderEventBody, asDevice?: s
   const seq = await nextSeq();
   // A payment taken while a shift is open belongs to that shift's drawer.
   const sid = body.type === "PaymentRecorded" && !body.shiftId ? currentShiftId() : undefined;
-  const event = { ...body, ...(sid ? { shiftId: sid } : {}), id: newId(), orderId, deviceId: asDevice ?? deviceId(), ts: Date.now(), seq } as OrderEvent;
+  // ...and carries the name of the person who took it, so reports by staff need no lookup.
+  const who = body.type === "PaymentRecorded" && !body.byName ? currentStaff()?.name : undefined;
+  const event = { ...body, ...(sid ? { shiftId: sid } : {}), ...(who ? { byName: who } : {}), id: newId(), orderId, deviceId: asDevice ?? deviceId(), ts: Date.now(), seq } as OrderEvent;
   await (await db()).put("events", { ...event, synced: 0 });
   notify();
   return event;

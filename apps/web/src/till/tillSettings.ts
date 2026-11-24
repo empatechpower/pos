@@ -15,7 +15,7 @@ export const DEFAULT_TILL: TillSettings = { actions: { order: [], hidden: [] }, 
 export const ACTION_POOL: Array<{ id: string; label: string; note?: string }> = [
   { id: "cancel", label: "Cancel Order" }, { id: "hold", label: "Hold Order" }, { id: "send", label: "Send Order", note: "Shops that pay after ordering" },
   { id: "qty", label: "Quantity" }, { id: "tables", label: "Table Map", note: "Shops with table service" }, { id: "fire", label: "Fire Course", note: "Shows when a course is waiting" },
-  { id: "discount", label: "Discount Order" }, { id: "dining", label: "Dining Option" }, { id: "note", label: "Order Note" }, { id: "guests", label: "Guest Count" },
+  { id: "discount", label: "Discount Order" }, { id: "fee", label: "Service Fee" }, { id: "extra", label: "Add Extra Item", note: "Managers" }, { id: "dining", label: "Dining Option" }, { id: "note", label: "Order Note" }, { id: "guests", label: "Guest Count" },
   { id: "bill", label: "Guest Check", note: "Shows on an open table" }, { id: "held", label: "Held Orders" }, { id: "member", label: "Member" },
   { id: "drawer", label: "Open Cash Drawer" }, { id: "tabs", label: "Open Tabs", note: "Shops that pay after ordering" },
 ];

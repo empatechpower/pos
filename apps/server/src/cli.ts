@@ -3,6 +3,10 @@
  *   DATABASE_URL=... npx tsx src/cli.ts create-staff <code> <name> <cashier|manager|owner> <pin>
  *   DATABASE_URL=... npx tsx src/cli.ts enrollment-code [OUTLET-ID] [testing|reviewer]
  *   DATABASE_URL=... npx tsx src/cli.ts revoke-enrollment-codes OUTLET-ID
+ *   DATABASE_URL=... SECRETS_KEY=... MAILBOX_PASSWORD=... npx tsx src/cli.ts add-mailbox "<name>" <imap-server> <email-address> [port]
+ *   DATABASE_URL=... npx tsx src/cli.ts list-mailboxes
+ *   DATABASE_URL=... npx tsx src/cli.ts remove-mailbox <id>
+ * (A PayNow alert mailbox is one WE set up, or one a merchant gives us on their own domain for PayNow alerts only. Merchants never enter a mailbox password.)
  * (OUTLET-ID is the short code from Manager > Outlets; left out, the tablet joins the original outlet)
  * prints a one-time code for the very first device. Later codes come from a manager on an enrolled device.
  */
@@ -40,6 +44,17 @@ if (cmd === "create-staff" && code && name && role && pin) {
   const c = await createEnrollmentCode(db, { merchantId: config.businessId, outletId, createdBy: null, testing, reviewer });
   console.log(`for outlet: ${outletId}`);
   console.log(`enrollment code: ${c.code}  (${c.maxUses === 1 ? "one use" : `${c.maxUses} devices`}, expires ${c.expiresAt.toISOString()})`);
+} else if (cmd === "add-mailbox" && code && name && role) {
+  // code = name of the mailbox, name = the IMAP server, role = its email address, pin = port (default 993). The password comes from the environment, never from the command line.
+  const { addMailbox } = await import("./mailboxes.js");
+  const m = await addMailbox(db, config.businessId, { label: code, kind: "imap", host: name, port: pin ? Number(pin) : 993, username: role, password: process.env.MAILBOX_PASSWORD });
+  console.log(`added mailbox ${m.label} <${m.username}> (id ${m.id}). Merchants point their bank alerts at ${m.username} and choose it in Settings, PayNow.`);
+} else if (cmd === "list-mailboxes") {
+  const { listMailboxes } = await import("./mailboxes.js");
+  for (const m of await listMailboxes(db, config.businessId)) console.log(`${m.id}  ${m.label}  <${m.username}>  ${m.host ?? "gmail"}  ${m.lastError ? `problem: ${m.lastError}` : m.lastOkAt ? "working" : "not tested yet"}`);
+} else if (cmd === "remove-mailbox" && code) {
+  const { removeMailbox } = await import("./mailboxes.js");
+  console.log((await removeMailbox(db, config.businessId, code)) ? "removed" : "no such mailbox");
 } else if (cmd === "revoke-enrollment-codes" && code) {
   console.log(`ended ${await revokeEnrollmentCodes(db, config.businessId, code)} open code(s) for outlet ${code}`);
 } else usage();

@@ -160,6 +160,29 @@ describe("what gets queued, and when", () => {
     expect((await call("/api/orders/nope/receipt", { staff: mgr, device: till.token })).status).toBe(404);
   });
 
+  it("prints a guest check for the bill or one check of a split, says it is not a receipt, and refuses what it does not know", async () => {
+    const o = orderEvents([{ id: "kopi", name: "Coffee", qty: 2 }], { queue: "A150" });
+    await push([...o.events, o.mk({ type: "SplitCreated", method: "even", checks: [{ id: "chk1", totalCents: 200 }, { id: "chk2", totalCents: 200 }] })]);
+    expect((await call(`/api/orders/${o.orderId}/guest-check`, { body: {}, staff: mgr, device: till.token })).json.queued).toBeGreaterThan(0);
+    expect((await call(`/api/orders/${o.orderId}/guest-check`, { body: { checkId: "chk2" }, staff: mgr, device: till.token })).json.queued).toBeGreaterThan(0);
+    expect((await call(`/api/orders/${o.orderId}/guest-check`, { body: { checkId: "nope" }, staff: mgr, device: till.token })).status).toBe(404);
+    expect((await call("/api/orders/nope/guest-check", { body: {}, staff: mgr, device: till.token })).status).toBe(404);
+    const { got, send } = capture();
+    await agent(send);
+    const t = got.map((g) => g.text).find((x) => x.includes("GUEST CHECK") && x.includes("Check 02 of 02"));
+    expect(t).toBeTruthy();
+    expect(t).toContain("Not a receipt");
+  });
+
+  it("an extra item that is not on the menu syncs and prints like any other", async () => {
+    const o = orderEvents([{ id: "extra:abc-123", name: "Birthday Cake Slice", qty: 1 }], { queue: "A160", pay: "cash" });
+    const r = await push(o.events);
+    expect(r.status).toBe(200);
+    const { got, send } = capture();
+    await agent(send);
+    expect(got.map((g) => g.text.toLowerCase()).some((t) => t.includes("birthday cake slice"))).toBe(true);
+  });
+
   it("a card/credit sale does not open the drawer", async () => {
     const o = orderEvents([{ id: "kopi", name: "Coffee", qty: 1 }], { queue: "A102", pay: "credit" });
     await push(o.events);
@@ -235,6 +258,19 @@ describe("restaurant tabs", () => {
     const texts = got.map((g) => g.text);
     expect(texts.some((t) => t.includes("Pandan Cake"))).toBe(true);
     expect(texts.some((t) => t.includes("Moved Tea"))).toBe(false);
+  });
+
+  it("a held item is not printed until it is fired by hand", async () => {
+    const o = orderEvents([{ id: "nasi-lemak", name: "Nasi Lemak", qty: 1 }], { queue: "A231" });
+    await push(o.events, baseR);
+    const kitchen = async () => (await jobsFor(o.orderId)).filter((j) => j.doc_type === "kitchen");
+    await push([o.mk({ type: "ItemAdded", lineId: "held-1", productId: "teh", name: "Held Cake", unitCents: 400, qty: 1, hold: true })], baseR);
+    expect(await kitchen()).toHaveLength(1);
+    await push([o.mk({ type: "LineFired", lineId: "held-1" })], baseR);
+    expect(await kitchen()).toHaveLength(2);
+    const { got, send } = capture();
+    await agent(send);
+    expect(got.map((g) => g.text).some((t) => t.includes("Held Cake"))).toBe(true);
   });
 
   it("the order's note is on the kitchen ticket, and a note changed after sending gets one 'note updated' slip", async () => {

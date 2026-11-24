@@ -76,6 +76,8 @@ export interface PriceInput {
   coupon?: CouponInput | null;
   /** Discounts staff gave on lines or the bill, already worked out in cents. They come off the items before service charge and tax, like a coupon. */
   discountCents?: Cents;
+  /** A fee staff added to the whole order (already worked out in cents). It is charged like the service charge: after discounts, and taxed with it. */
+  feeCents?: Cents;
   points?: PointsInput | null;
   config?: PricingConfig;
 }
@@ -83,6 +85,8 @@ export interface PriceInput {
 export interface PriceResult {
   subtotal: Cents;
   service: Cents;
+  /** A fee staff added to the order. */
+  fee: Cents;
   gst: Cents;
   bcrs: Cents;
   couponDiscount: Cents;
@@ -158,7 +162,7 @@ function taxOf(lines: PricedLine[], subtotal: Cents, service: Cents, discount: C
 
 /** What a receipt or the checkout shows, in order, with the basis said plainly: "Taxes (included)" is inside the total, "GST" is added to it. */
 export interface TotalsLine {
-  key: "subtotal" | "coupon" | "discount" | "service" | "tax_added" | "tax_included" | "deposit" | "points" | "total";
+  key: "subtotal" | "coupon" | "discount" | "service" | "fee" | "tax_added" | "tax_included" | "deposit" | "points" | "total";
   label: string;
   cents: Cents;
   /** Money taken off (a coupon or points). */
@@ -175,6 +179,7 @@ export function totalsLines(r: PriceResult): TotalsLine[] {
   if (r.couponDiscount > 0) out.push({ key: "coupon", label: "Coupon", cents: r.couponDiscount, negative: true });
   if (r.discountCents > 0) out.push({ key: "discount", label: "Discount", cents: r.discountCents, negative: true });
   if (r.service > 0) out.push({ key: "service", label: "Service charge", cents: r.service });
+  if (r.fee > 0) out.push({ key: "fee", label: "Service fee", cents: r.fee });
   for (const t of r.taxes) out.push({ key: t.basis === "added" ? "tax_added" : "tax_included", label: t.basis === "added" ? t.name : `${t.name} (included)`, cents: t.cents, group: t.group, rate: t.rate });
   if (r.bcrs > 0) out.push({ key: "deposit", label: "Deposit", cents: r.bcrs, taxable: false });
   if (r.pointsDiscount > 0) out.push({ key: "points", label: "Points", cents: r.pointsDiscount, negative: true });
@@ -211,7 +216,8 @@ export function priceOrder(input: PriceInput): PriceResult {
 
   // GST is never charged on the deposit. For points, it is fixed on the full items + service.
   const taxDiscount = points ? 0 : allDiscount;
-  const { added: gst, taxes, included: taxIncluded } = taxOf(lines, subtotal, service, taxDiscount, cfg);
+  const fee = Math.max(0, Math.round(input.feeCents ?? 0));
+  const { added: gst, taxes, included: taxIncluded } = taxOf(lines, subtotal, service + fee, taxDiscount, cfg);
 
   let pointsUsed = 0;
   let pointsDiscount = 0;
@@ -233,10 +239,11 @@ export function priceOrder(input: PriceInput): PriceResult {
     }
   }
 
-  const total = Math.max(0, subtotal + service + gst + bcrs - allDiscount - pointsDiscount);
+  const total = Math.max(0, subtotal + service + fee + gst + bcrs - allDiscount - pointsDiscount);
   return {
     subtotal,
     service,
+    fee,
     gst,
     bcrs,
     couponDiscount,
@@ -250,3 +257,8 @@ export function priceOrder(input: PriceInput): PriceResult {
     taxes,
   };
 }
+
+/** A fee on the whole order, as staff chose it: a percentage of the items (after discounts) or a fixed amount. */
+export interface OrderFee { id: string; kind: "percent" | "amount"; value: number; label: string }
+export const feeCentsOf = (fees: readonly Pick<OrderFee, "kind" | "value">[], baseCents: Cents): Cents =>
+  fees.reduce((n, f) => n + (f.kind === "percent" ? Math.round((Math.max(0, baseCents) * f.value) / 100) : Math.round(f.value)), 0);

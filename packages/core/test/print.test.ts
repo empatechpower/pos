@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
-  PRESETS, columns, encodeEpl, encodeEscPos, encodeZpl, itemLabel, kitchenTicket, newId, noteSlip, plainText, printedAt, receipt, reduceOrder, toAscii, withDrawer, wrap,
+  PRESETS, columns, encodeEpl, encodeEscPos, encodeZpl, guestCheck, itemLabel, kitchenTicket, newId, noteSlip, plainText, printedAt, receipt, reduceOrder, toAscii, withDrawer, wrap,
   type Doc, type Label, type OrderEvent, type OrderState,
 } from "../src/index.js";
 
@@ -327,5 +327,28 @@ describe("the 7-Eleven style receipt", () => {
   it("a discount reads as a trailing minus", () => {
     const d = { ...o, discounts: [{ id: "d1", scope: "bill" as const, kind: "amount" as const, value: 100, reason: "x", at: 1 }] };
     expect(text({}, {}, d)).toMatch(/Discount\s+S\$1\.00-/);
+  });
+});
+
+describe("the guest check", () => {
+  const base = { merchantName: "Bailey & Patch", outletName: "Enabling Village", now: NOW };
+  const o = order({});
+  it("shows what is to be paid and says it is not a receipt, with no payment wording", () => {
+    const t = plainText(guestCheck(o, config, base), 42).join("\n");
+    expect(t).toContain("GUEST CHECK");
+    expect(t).toContain("Not a receipt");
+    expect(t).toContain("2 x KAYA TOAST");
+    expect(t).toMatch(/Total \(SGD\)\s+S\$10\.90/);
+    expect(t).not.toContain("Cash");
+    expect(t).not.toContain("TAX Invoice");
+  });
+  it("one check of a split bill lists only what it carries, its total and what is still due", () => {
+    const line = o.lines[0]!;
+    const split = { ...o, split: { method: "item" as const, at: 1, checks: [{ id: "c1", no: 1, totalCents: 545, shares: [{ lineId: line.lineId, qty: 1 }] }, { id: "c2", no: 2, totalCents: 545 }] }, payments: [{ paymentId: "p1", method: "cash" as const, amountCents: 200, confirmed: true, checkId: "c1" }] };
+    const t = plainText(guestCheck(split, config, base, { checkId: "c1" }), 42).join("\n");
+    expect(t).toContain("Check 01 of 02");
+    expect(t).toMatch(/1 x KAYA TOAST/);
+    expect(t).toMatch(/Check total\s+S\$5\.45/);
+    expect(t).toMatch(/Balance due\s+S\$3\.45/);
   });
 });

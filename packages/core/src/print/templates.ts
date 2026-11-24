@@ -80,6 +80,7 @@ export function receipt(order: OrderState, config: BusinessConfig, ctx: PrintCon
   if (t.discountCents) b.push({ t: "cols", left: "Discount", right: `${money(t.discountCents)}-` });
   if (t.pointsDiscount) b.push({ t: "cols", left: "Points", right: `${money(t.pointsDiscount)}-` });
   if (t.service) b.push({ t: "cols", left: `Service charge (${Math.round(config.pricing.serviceRate * 100)}%)`, right: money(t.service) });
+  if (t.fee) b.push({ t: "cols", left: "Service fee", right: money(t.fee) });
   if (t.gst) b.push({ t: "cols", left: "GST", right: money(t.gst) });
   b.push({ t: "rule", ch: "=" }, { t: "cols", left: gstOn ? "Total (SGD) INCL. GST" : "Total (SGD)", right: money(t.total), bold: true });
   if (gstOn) {
@@ -110,6 +111,49 @@ export function receipt(order: OrderState, config: BusinessConfig, ctx: PrintCon
   b.push({ t: "text", text: `POSID:${ctx.posId ?? "001"}${ctx.cashier ? ` C:${ctx.cashier}` : ""} TR${code.slice(8)}` });
   b.push({ t: "text", text: "Terms and Conditions apply." }, { t: "rule" }, { t: "text", text: printedAt(ctx.now, ctx.timeZone) });
   b.push({ t: "feed", n: 3 }, { t: "cut" });
+  return { blocks: b };
+}
+
+/**
+ * The guest check: what the table is asked to pay, printed before payment. It is not a receipt (no tender, no tax invoice wording).
+ * For a split bill it can be one check: its number, what it carries, its total, and what is still due on it.
+ */
+export function guestCheck(order: OrderState, config: BusinessConfig, ctx: PrintContext, opts: { checkId?: string } = {}): Doc {
+  const t = orderTotals(order, config);
+  const money = (c: number) => formatMoney(c);
+  const check = opts.checkId ? order.split?.checks.find((c) => c.id === opts.checkId) : undefined;
+  const b: Block[] = [{ t: "text", text: ctx.merchantName.toUpperCase(), align: "center", bold: true, size: 2 }, { t: "text", text: ctx.outletName, align: "center" }];
+  if (ctx.address) b.push({ t: "text", text: ctx.address, align: "center" });
+  b.push({ t: "rule" }, { t: "text", text: "GUEST CHECK", align: "center", bold: true, size: 2 }, { t: "text", text: "Not a receipt", align: "center" });
+  b.push({ t: "cols", left: order.queueNumber ? `Order ${order.queueNumber}` : "Order", right: where(order) });
+  if (order.pax) b.push({ t: "cols", left: "Guests", right: String(order.pax) });
+  if (check) b.push({ t: "cols", left: `Check ${String(check.no).padStart(2, "0")} of ${String(order.split!.checks.length).padStart(2, "0")}`, right: check.seat ? `Seat ${check.seat}` : "" });
+  b.push({ t: "rule" });
+  const byId = new Map(liveLines(order).map((l) => [l.lineId, l]));
+  if (check?.shares) for (const sh of check.shares) { const l = byId.get(sh.lineId); if (l) b.push({ t: "cols", left: `${sh.qty} x ${l.name.toUpperCase()}`, right: money(l.unitCents * sh.qty) }); }
+  else if (check) b.push({ t: "text", text: order.split!.method === "even" ? "An equal share of the bill" : "An amount of the bill" });
+  else for (const l of liveLines(order)) b.push({ t: "cols", left: `${l.qty} x ${l.name.toUpperCase()}`, right: money(l.unitCents * l.qty) });
+  if (!check && order.note) b.push({ t: "text", text: `Note: ${order.note}` });
+  b.push({ t: "rule" });
+  if (check) {
+    const paid = order.payments.filter((p) => p.checkId === check.id && p.confirmed).reduce((n, p) => n + p.amountCents, 0);
+    b.push({ t: "cols", left: "Check total", right: money(check.totalCents), bold: true });
+    if (paid) b.push({ t: "cols", left: "Paid", right: money(paid) });
+    b.push({ t: "cols", left: "Balance due", right: money(Math.max(0, check.totalCents - paid)), bold: true });
+  } else {
+    b.push({ t: "cols", left: "Subtotal", right: money(t.subtotal) });
+    if (t.couponDiscount) b.push({ t: "cols", left: "Coupon", right: `${money(t.couponDiscount)}-` });
+    if (t.discountCents) b.push({ t: "cols", left: "Discount", right: `${money(t.discountCents)}-` });
+    if (t.pointsDiscount) b.push({ t: "cols", left: "Points", right: `${money(t.pointsDiscount)}-` });
+    if (t.service) b.push({ t: "cols", left: `Service charge (${Math.round(config.pricing.serviceRate * 100)}%)`, right: money(t.service) });
+    if (t.fee) b.push({ t: "cols", left: "Service fee", right: money(t.fee) });
+    if (t.gst) b.push({ t: "cols", left: "GST", right: money(t.gst) });
+    if (t.bcrs) b.push({ t: "cols", left: "BCRS deposit", right: money(t.bcrs) });
+    b.push({ t: "rule", ch: "=" }, { t: "cols", left: "Total (SGD)", right: money(t.total), bold: true });
+    const paid = confirmedPaid(order);
+    if (paid > 0) b.push({ t: "cols", left: "Paid so far", right: money(paid) }, { t: "cols", left: "Balance due", right: money(Math.max(0, t.total - paid)), bold: true });
+  }
+  b.push({ t: "rule" }, { t: "text", text: "Please pay at the counter.", align: "center" }, { t: "text", text: printedAt(ctx.now, ctx.timeZone) }, { t: "feed", n: 3 }, { t: "cut" });
   return { blocks: b };
 }
 

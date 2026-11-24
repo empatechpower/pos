@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { splitBySeat, splitByItem, splitEvenly, splitManually, reduceOrder, nextCourse, lineFired, checkStanding, type OrderEvent } from "../src/index.js";
+import { PRESETS, orderTotals, reduceAll, staffSales, splitBySeat, splitByItem, splitEvenly, splitManually, reduceOrder, nextCourse, lineFired, checkStanding, type OrderEvent } from "../src/index.js";
 
 const sum = (p: Array<{ totalCents: number }> | null) => (p ?? []).reduce((n, c) => n + c.totalCents, 0);
 
@@ -61,5 +61,82 @@ describe("courses, checks and merge in the order record", () => {
     const t = reduceOrder("o", [...e.slice(0, 3), ev("o", 9, { type: "OrderMerged", into: "x", intoSpot: "Table 9" })])!;
     expect(t.stage).toBe("cancelled");
     expect(t.mergedInto).toMatchObject({ orderId: "x", spot: "Table 9" });
+  });
+});
+
+describe("one held item and one item sold through another channel", () => {
+  const e = [
+    ev("o", 1, { type: "OrderOpened", fulfilment: "dine_in", spot: "Table 5" }),
+    ev("o", 2, { type: "ItemAdded", lineId: "a", productId: "p", name: "Cake", unitCents: 500, qty: 1, hold: true }),
+    ev("o", 3, { type: "ItemAdded", lineId: "b", productId: "p", name: "Tea", unitCents: 300, qty: 1, channelId: "grab", channelName: "Grab" }),
+    ev("o", 4, { type: "CourseFired", course: 1 }),
+  ];
+  it("a held item stays held, even when its course is fired, until it is fired by itself", () => {
+    const s = reduceOrder("o", e)!;
+    expect(s.lines.map((l) => lineFired(s, l))).toEqual([false, true]);
+    const t = reduceOrder("o", [...e, ev("o", 5, { type: "LineFired", lineId: "a" })])!;
+    expect(t.lines.map((l) => lineFired(t, l))).toEqual([true, true]);
+    expect(t.lines[0]!.held).toBeUndefined();
+  });
+  it("remembers the channel an item was sold through", () => {
+    expect(reduceOrder("o", e)!.lines[1]).toMatchObject({ channelId: "grab", channelName: "Grab" });
+  });
+});
+
+describe("a fee on the whole order", () => {
+  const cfg = PRESETS.fastServe("b", "B", "O");
+  const e = [
+    ev("o", 1, { type: "OrderOpened", fulfilment: "takeaway", serviceCharge: false }),
+    ev("o", 2, { type: "ItemAdded", lineId: "a", productId: "p", name: "Cake", unitCents: 1000, qty: 1 }),
+  ];
+  it("adds a percentage of the items, or a fixed amount, to the total, and can be taken off again", () => {
+    const base = orderTotals(reduceOrder("o", e)!, cfg);
+    const pct = orderTotals(reduceOrder("o", [...e, ev("o", 3, { type: "FeeApplied", feeId: "f1", kind: "percent", value: 10, label: "Corkage" })])!, cfg);
+    expect(pct.fee).toBe(100);
+    expect(pct.total - base.total).toBeGreaterThanOrEqual(100);
+    const amt = orderTotals(reduceOrder("o", [...e, ev("o", 3, { type: "FeeApplied", feeId: "f2", kind: "amount", value: 250, label: "Cake cutting" })])!, cfg);
+    expect(amt.fee).toBe(250);
+    const off = orderTotals(reduceOrder("o", [...e, ev("o", 3, { type: "FeeApplied", feeId: "f1", kind: "percent", value: 10, label: "x" }), ev("o", 4, { type: "FeeRemoved", feeId: "f1" })])!, cfg);
+    expect(off.total).toBe(base.total);
+  });
+  it("ignores a fee that makes no sense", () => {
+    const s = reduceOrder("o", [...e, ev("o", 3, { type: "FeeApplied", feeId: "f", kind: "percent", value: 500, label: "x" }), ev("o", 4, { type: "FeeApplied", feeId: "g", kind: "amount", value: -5, label: "x" })])!;
+    expect(s.fees).toBeUndefined();
+  });
+});
+
+describe("sales by person", () => {
+  const cfg = PRESETS.fastServe("b", "B", "O");
+  const base = (id: string, items: number, extra: object[] = []) => [
+    ev(id, 1, { type: "OrderOpened", fulfilment: "takeaway", serviceCharge: false }),
+    ev(id, 2, { type: "ItemAdded", lineId: `${id}a`, productId: "p", name: "Cake", unitCents: items, qty: 1 }),
+    ...extra,
+  ];
+  const pay = (id: string, cents: number, by: string | undefined, method = "cash", shiftId?: string) => ev(id, 5, { type: "PaymentRecorded", paymentId: `${id}-p`, method, amountCents: cents, confirmed: true, ...(by ? { byName: by } : {}), ...(shiftId ? { shiftId } : {}) });
+  const orders = reduceAll([
+    ...base("o1", 1000, [pay("o1", 1000, "Cat")]),
+    ...base("o2", 2000, [pay("o2", 2000, "Cat", "paynow")]),
+    ...base("o3", 500, [pay("o3", 500, undefined, "cash", "shift-1")]),
+    ...base("o4", 700, [pay("o4", 700, undefined)]),
+    ...base("o5", 3000, [pay("o5", 3000, "Dan"), ev("o5", 6, { type: "RefundRecorded", refundId: "r1", paymentId: "o5-p", method: "cash", amountCents: 1000, reason: "x", approvedBy: "m", approvedByName: "Max" }), ev("o5", 7, { type: "DiscountApplied", discountId: "d1", scope: "bill", kind: "amount", value: 200, reason: "x", byName: "Dan" })]),
+    ...base("o6", 900, [pay("o6", 900, "Dan"), ev("o6", 6, { type: "OrderVoided", reason: "x", approvedBy: "m", approvedByName: "Max" })]),
+  ]);
+  it("gives each payment to whoever took it, by method, and works out net and average", () => {
+    const r = staffSales(orders, cfg, (sid) => (sid === "shift-1" ? "Eve" : undefined));
+    const by = Object.fromEntries(r.map((x) => [x.name, x]));
+    expect(by.Cat).toMatchObject({ payments: 2, takenCents: 3000, orders: 2, averageCents: 1500, byMethod: { cash: 1000, paynow: 2000 } });
+    expect(by.Eve).toMatchObject({ takenCents: 500 }); // an older payment, through its shift
+    expect(by["Not recorded"]).toMatchObject({ takenCents: 700 });
+    expect(by.Dan).toMatchObject({ takenCents: 3900, discounts: 1, discountCents: 200 });
+    expect(r.map((x) => x.name)[0]).toBe("Dan"); // biggest first
+  });
+  it("gives refunds and voids to the manager who approved them, and counts them against nobody else", () => {
+    const by = Object.fromEntries(staffSales(orders, cfg).map((x) => [x.name, x]));
+    expect(by.Max).toMatchObject({ refunds: 1, refundedCents: 1000, voids: 1, takenCents: 0, netCents: -1000 });
+    expect(by.Dan!.refunds).toBe(0);
+  });
+  it("adds up: what was taken in total equals what the orders were paid", () => {
+    const total = staffSales(orders, cfg).reduce((n, x) => n + x.takenCents, 0);
+    expect(total).toBe(1000 + 2000 + 500 + 700 + 3000 + 900);
   });
 });

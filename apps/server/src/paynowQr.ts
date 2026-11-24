@@ -14,12 +14,14 @@ export interface PaynowConfig {
   displayName: string;
   /** Two characters naming the outlet inside the reference. */
   outletCode: string;
-  /** How long a QR stays live on the server, in minutes (3 to 5). */
+  /** How long a QR stays live on the server, in minutes (2 to 5). */
   ttlMinutes: number;
   /** Last digits of the account the money lands in, as the bank's alert prints them. When set, an alert for another account never claims. */
   receivingAccountEnding?: string;
   /** The bank's alert sender address, e.g. ibanking.alert@dbs.com. Only mail from here is read. */
   alertSender?: string;
+  /** Which saved mailbox the bank's alerts for this setup arrive in. Left out = the server's own mailbox (the Gmail set in its environment), when there is one. */
+  mailboxId?: string;
   /** The least and most a QR may ask for, in cents. Left out = no limit. */
   minCents?: number;
   maxCents?: number;
@@ -70,17 +72,19 @@ export function cleanPaynowConfig(raw: unknown): { ok: true; config: PaynowConfi
   if (!displayName) return { ok: false, error: "displayName is required (at most 25 characters)" };
   const outletCode = String(r.outletCode ?? "").toUpperCase();
   if (!/^[A-Z0-9]{2}$/.test(outletCode)) return { ok: false, error: "outletCode must be 2 letters or digits" };
-  const ttl = Number(r.ttlMinutes ?? 3);
-  if (!Number.isInteger(ttl) || ttl < 3 || ttl > 5) return { ok: false, error: "ttlMinutes must be 3, 4 or 5" };
+  const ttl = Number(r.ttlMinutes ?? 2);
+  if (!Number.isInteger(ttl) || ttl < 2 || ttl > 5) return { ok: false, error: "ttlMinutes must be 2, 3, 4 or 5" };
   const ending = String(r.receivingAccountEnding ?? "").replace(/\D/g, "");
   if (ending && (ending.length < 3 || ending.length > 6)) return { ok: false, error: "receivingAccountEnding is the last 3 to 6 digits of the account" };
   const sender = String(r.alertSender ?? "").trim().toLowerCase();
   if (sender && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(sender)) return { ok: false, error: "alertSender must be an email address" };
+  const mailboxId = String(r.mailboxId ?? "").trim();
+  if (mailboxId && !/^[0-9a-f-]{36}$/i.test(mailboxId)) return { ok: false, error: "mailboxId is not a saved mailbox" };
   const lim = (v: unknown) => (v === undefined || v === null || v === "" ? undefined : Number(v));
   const minCents = lim(r.minCents), maxCents = lim(r.maxCents);
   if ((minCents !== undefined && (!Number.isInteger(minCents) || minCents < 1)) || (maxCents !== undefined && (!Number.isInteger(maxCents) || maxCents < 1))) return { ok: false, error: "minCents and maxCents are whole cents of 1 or more" };
   if (minCents !== undefined && maxCents !== undefined && minCents > maxCents) return { ok: false, error: "The smallest amount cannot be more than the largest" };
-  return { ok: true, config: { proxyType, proxyValue: proxyType === "vpa" ? String(r.proxyValue).trim() : proxyValue, displayName, outletCode, ttlMinutes: ttl, ...(ending ? { receivingAccountEnding: ending } : {}), ...(sender ? { alertSender: sender } : {}), ...(minCents !== undefined ? { minCents } : {}), ...(maxCents !== undefined ? { maxCents } : {}) } };
+  return { ok: true, config: { proxyType, proxyValue: proxyType === "vpa" ? String(r.proxyValue).trim() : proxyValue, displayName, outletCode, ttlMinutes: ttl, ...(ending ? { receivingAccountEnding: ending } : {}), ...(sender ? { alertSender: sender } : {}), ...(mailboxId ? { mailboxId } : {}), ...(minCents !== undefined ? { minCents } : {}), ...(maxCents !== undefined ? { maxCents } : {}) } };
 }
 
 const B36 = "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ";

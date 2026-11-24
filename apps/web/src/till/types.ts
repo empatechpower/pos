@@ -17,9 +17,18 @@ export interface BagLine {
   /** Table service: 1 Starter, 2 Main, 3 Dessert; and the seat it is for (split by seat). */
   course?: number;
   seat?: number;
+  /** Sold through another dining channel than the order's (its price came from that channel's pricebook). */
+  channelId?: string;
+  channelName?: string;
+  /** Held back from the kitchen until it is fired by hand. */
+  hold?: boolean;
+  /** An item that is not on the menu, added by a manager with a name and price of their own. */
+  extra?: boolean;
   /** Already sent to the kitchen as this line of the open order: it cannot be changed here, only added to. */
   sent?: { lineId: string };
 }
+/** A fee on the whole order (a percentage of the items, or a fixed amount). `existing` = already on the order. */
+export type TillFee = { id: string; kind: "percent" | "amount"; value: number; label: string; existing?: boolean };
 export type BillDiscount = { id: string; kind: "percent" | "amount"; value: number; reason: string; approver?: { id: string; name: string }; existing?: boolean };
 export const effUnit = (b: BagLine) => b.override?.unitCents ?? b.unitCents;
 
@@ -36,4 +45,5 @@ export interface HeldOrder {
   customerId: string;
   /** The open order this was taken from, when it is changes to a sent order. */
   orderId?: string;
+  fees?: TillFee[];
 }

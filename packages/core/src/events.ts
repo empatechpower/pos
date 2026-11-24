@@ -4,7 +4,7 @@ import type { StoredBuild } from "./builder.js";
 import type { Fulfilment } from "./catalog.js";
 import type { ChosenOption } from "./options.js";
 import { type Cents } from "./money.js";
-import { priceOrder, type PriceResult, type PricedLine } from "./pricing.js";
+import { feeCentsOf, priceOrder, type OrderFee, type PriceResult, type PricedLine } from "./pricing.js";
 
 /**
  * Orders are an append-only log of events, not a mutable record. Events are created on any
@@ -46,10 +46,15 @@ export type OrderEventBody =
   | { type: "CouponApplied"; title: string; amountCents: Cents; minSpendCents: Cents }
   /** Points the member spent on this order (100 points = S$1). Reduces what is owed. */
   | { type: "PointsRedeemed"; points: number }
-  | { type: "ItemAdded"; lineId: string; productId: string; name: string; /** includes the price of any options */ unitCents: Cents; qty: number; /** Table service: 1 = Starter, 2 = Main, 3 = Dessert. The kitchen gets it when that course is fired. Missing = no course, goes out at once. */ course?: number; /** The seat it was ordered for (split by seat). */ seat?: number; /** Moved here from a table that was merged in: the kitchen already has it, so it is not printed again. */ carried?: boolean; bcrs?: boolean; pointsExempt?: boolean; taxInclusive?: boolean; taxGroup?: string; options?: ChosenOption[]; /** Build-your-own: the frozen structured build. */ build?: StoredBuild }
+  | { type: "ItemAdded"; lineId: string; productId: string; name: string; /** includes the price of any options */ unitCents: Cents; qty: number; /** Table service: 1 = Starter, 2 = Main, 3 = Dessert. The kitchen gets it when that course is fired. Missing = no course, goes out at once. */ course?: number; /** The seat it was ordered for (split by seat). */ seat?: number; /** Moved here from a table that was merged in: the kitchen already has it, so it is not printed again. */ carried?: boolean; /** Sold through another dining channel than the order's (its price came from that channel's pricebook). */ channelId?: string; channelName?: string; /** Held back from the kitchen until it is fired by hand, whatever its course (an exception to the course order). */ hold?: boolean; bcrs?: boolean; pointsExempt?: boolean; taxInclusive?: boolean; taxGroup?: string; options?: ChosenOption[]; /** Build-your-own: the frozen structured build. */ build?: StoredBuild }
   | { type: "ItemQtySet"; lineId: string; qty: number }
   /** The kitchen is told to start this course (table service). Lines with a later course wait. */
   | { type: "CourseFired"; course: number; byName?: string }
+  /** A fee staff added to the whole order (a percentage of the items, or a fixed amount), and taking it off again. */
+  | { type: "FeeApplied"; feeId: string; kind: "percent" | "amount"; value: number; label: string; byName?: string }
+  | { type: "FeeRemoved"; feeId: string; byName?: string }
+  /** One held item is sent to the kitchen. */
+  | { type: "LineFired"; lineId: string; byName?: string }
   /** The guest count changed after the order was opened. */
   | { type: "GuestsChanged"; pax: number; byName?: string }
   /** The guest check was printed or the bill was asked for. */
@@ -59,7 +64,7 @@ export type OrderEventBody =
   /** The bill was split into checks. Each check has a fixed total (they add up to the order total) and, by item or seat, the units it carries. */
   | { type: "SplitCreated"; method: "even" | "manual" | "item" | "seat"; checks: Array<{ id: string; totalCents: Cents; seat?: number; shares?: Array<{ lineId: string; qty: number }> }>; byName?: string }
   | { type: "SplitCleared"; byName?: string }
-  | { type: "PaymentRecorded"; paymentId: string; method: PaymentMethod; amountCents: Cents; /** false = awaiting gateway confirmation */ confirmed: boolean; /** The cashier's shift this was taken in (the drawer it belongs to). */ shiftId?: string; /** The check of a split bill this payment settles. */ checkId?: string; /** Cash handed over, when it was more than the payment (so the receipt can show the change). */ tenderedCents?: Cents }
+  | { type: "PaymentRecorded"; paymentId: string; method: PaymentMethod; amountCents: Cents; /** false = awaiting gateway confirmation */ confirmed: boolean; /** The cashier's shift this was taken in (the drawer it belongs to). */ shiftId?: string; /** The check of a split bill this payment settles. */ checkId?: string; /** Who took it (the signed-in person at the till, or "PayNow (automatic)"). Reports by staff read this. */ byName?: string; /** A short note on how it was taken (for a PayNow payment: whether the bank's alert was matched by the order's reference or only by the amount). */ note?: string; /** Cash handed over, when it was more than the payment (so the receipt can show the change). */ tenderedCents?: Cents }
   | { type: "PaymentConfirmed"; paymentId: string }
   | { type: "StageSet"; stage: Exclude<OrderStage, "open"> }
   /** The customer moved to another table after ordering: the same order, same status, now at `to`. The old table and the time are kept. */
@@ -103,6 +108,10 @@ export interface OrderLine extends PricedLine {
   course?: number;
   seat?: number;
   carried?: boolean;
+  channelId?: string;
+  channelName?: string;
+  /** Held from the kitchen until fired by hand. */
+  held?: boolean;
 }
 
 export interface OrderState {
@@ -140,6 +149,8 @@ export interface OrderState {
   discounts?: StaffDiscount[];
   /** Set when the whole order was voided. */
   voided?: { reason: string; approvedBy: string; approvedByName: string; at: number };
+  /** Fees staff added to the whole order. */
+  fees?: OrderFee[];
   /** Courses the kitchen has been told to start. */
   firedCourses?: number[];
   /** When items were last sent for this order (not counting lines moved in from a merged table). */
@@ -155,7 +166,7 @@ export interface OrderState {
   queueNumber?: string;
   openedAt: number;
   lines: OrderLine[];
-  payments: Array<{ paymentId: string; method: PaymentMethod; amountCents: Cents; confirmed: boolean; shiftId?: string; checkId?: string; tenderedCents?: Cents }>;
+  payments: Array<{ paymentId: string; method: PaymentMethod; amountCents: Cents; confirmed: boolean; shiftId?: string; checkId?: string; tenderedCents?: Cents; byName?: string }>;
   stage: OrderStage;
   /** Time the order was first fully paid (confirmed). */
   paidAt?: number;
@@ -194,8 +205,8 @@ export function reduceOrder(orderId: string, events: readonly OrderEvent[]): Ord
     switch (e.type) {
       case "ItemAdded": {
         if (state.lines.some((l) => l.lineId === e.lineId)) break;
-        state.lines.push({ lineId: e.lineId, productId: e.productId, name: e.name, unitCents: e.unitCents, qty: e.qty, bcrs: e.bcrs, pointsExempt: e.pointsExempt, ...(e.taxInclusive !== undefined ? { taxInclusive: e.taxInclusive } : {}), ...(e.taxGroup ? { taxGroup: e.taxGroup } : {}), ...(e.build ? { build: e.build } : {}), ...(e.course ? { course: e.course } : {}), ...(e.seat ? { seat: e.seat } : {}), ...(e.carried ? { carried: true } : {}), options: e.options });
-        if (!e.carried) state.lastSentAt = e.ts;
+        state.lines.push({ lineId: e.lineId, productId: e.productId, name: e.name, unitCents: e.unitCents, qty: e.qty, bcrs: e.bcrs, pointsExempt: e.pointsExempt, ...(e.taxInclusive !== undefined ? { taxInclusive: e.taxInclusive } : {}), ...(e.taxGroup ? { taxGroup: e.taxGroup } : {}), ...(e.build ? { build: e.build } : {}), ...(e.course ? { course: e.course } : {}), ...(e.seat ? { seat: e.seat } : {}), ...(e.carried ? { carried: true } : {}), ...(e.channelId ? { channelId: e.channelId, ...(e.channelName ? { channelName: e.channelName } : {}) } : {}), ...(e.hold ? { held: true } : {}), options: e.options });
+        if (!e.carried && !e.hold) state.lastSentAt = e.ts;
         break;
       }
       case "ItemQtySet": {
@@ -205,7 +216,7 @@ export function reduceOrder(orderId: string, events: readonly OrderEvent[]): Ord
       }
       case "PaymentRecorded": {
         if (state.payments.some((p) => p.paymentId === e.paymentId)) break;
-        state.payments.push({ paymentId: e.paymentId, method: e.method, amountCents: e.amountCents, confirmed: e.confirmed, ...(e.shiftId ? { shiftId: e.shiftId } : {}), ...(e.checkId ? { checkId: e.checkId } : {}), ...(e.tenderedCents && e.tenderedCents > e.amountCents ? { tenderedCents: Math.round(e.tenderedCents) } : {}) });
+        state.payments.push({ paymentId: e.paymentId, method: e.method, amountCents: e.amountCents, confirmed: e.confirmed, ...(e.shiftId ? { shiftId: e.shiftId } : {}), ...(e.checkId ? { checkId: e.checkId } : {}), ...(e.byName ? { byName: String(e.byName).slice(0, 60) } : {}), ...(e.tenderedCents && e.tenderedCents > e.amountCents ? { tenderedCents: Math.round(e.tenderedCents) } : {}) });
         break;
       }
       case "PaymentConfirmed": {
@@ -261,6 +272,18 @@ export function reduceOrder(orderId: string, events: readonly OrderEvent[]): Ord
       case "CourseFired":
         if (Number.isInteger(e.course) && e.course >= 1 && !(state.firedCourses ?? []).includes(e.course)) state.firedCourses = [...(state.firedCourses ?? []), e.course].sort((a, b) => a - b);
         break;
+      case "FeeApplied":
+        if (state.fees?.some((f) => f.id === e.feeId) || !(e.value > 0) || (e.kind === "percent" && e.value > 100)) break;
+        (state.fees ??= []).push({ id: e.feeId, kind: e.kind, value: e.kind === "percent" ? e.value : Math.round(e.value), label: String(e.label ?? "Service fee").slice(0, 40) });
+        break;
+      case "FeeRemoved":
+        if (state.fees) state.fees = state.fees.filter((f) => f.id !== e.feeId);
+        break;
+      case "LineFired": {
+        const l = state.lines.find((x) => x.lineId === e.lineId);
+        if (l?.held) { delete l.held; state.lastSentAt = e.ts; }
+        break;
+      }
       case "GuestsChanged":
         if (Number.isInteger(e.pax) && e.pax > 0 && e.pax < 100) state.pax = e.pax;
         break;
@@ -310,7 +333,11 @@ export function reduceAll(events: readonly OrderEvent[]): OrderState[] {
 
 export function orderTotals(state: OrderState, config: BusinessConfig): PriceResult {
   const points = state.pointsRedeemed ? { balance: state.pointsRedeemed, requested: state.pointsRedeemed } : null;
-  return priceOrder({ lines: state.lines, fulfilment: state.fulfilment, serviceCharge: state.serviceCharge, points, coupon: state.coupon ?? null, discountCents: staffDiscountCents(state.lines, state.discounts ?? []).totalCents, config: config.pricing });
+  const input = { lines: state.lines, fulfilment: state.fulfilment, serviceCharge: state.serviceCharge, points, coupon: state.coupon ?? null, discountCents: staffDiscountCents(state.lines, state.discounts ?? []).totalCents, config: config.pricing };
+  const plain = priceOrder(input);
+  // A fee on the whole order: a percentage is of the items left after discounts.
+  const fee = state.fees?.length ? feeCentsOf(state.fees, plain.subtotal - plain.couponDiscount - plain.discountCents) : 0;
+  return fee ? priceOrder({ ...input, feeCents: fee }) : plain;
 }
 
 export const confirmedPaid = (state: OrderState): Cents =>
@@ -338,7 +365,7 @@ export function visibleToKitchen(state: OrderState, config: BusinessConfig): boo
 }
 
 /** Whether a line has been released to the kitchen: lines with no course always are; a course's lines wait for it to be fired. */
-export const lineFired = (state: OrderState, l: { course?: number }): boolean => !l.course || (state.firedCourses ?? []).includes(l.course);
+export const lineFired = (state: OrderState, l: { course?: number; held?: boolean }): boolean => !l.held && (!l.course || (state.firedCourses ?? []).includes(l.course));
 
 /** The lowest course that has lines and has not been fired. */
 export function nextCourse(state: OrderState): number | undefined {

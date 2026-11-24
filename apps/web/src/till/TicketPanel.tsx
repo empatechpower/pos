@@ -45,9 +45,6 @@ function Line({ l, collapsed, onToggle, onEdit, onQty, onRemove, bin, setBin }: 
         <div className="t-row">
           <h3 className="t-namecell">
             <span className="t-name">{l.item.name}</span>
-            {l.sent && <small className="t-tag sent" title="Already sent">✓ sent</small>}
-            {l.course ? <small className="t-tag">{COURSE_NAMES[l.course] ?? `Course ${l.course}`}</small> : null}
-            {l.seat ? <small className="t-tag">Seat {l.seat}</small> : null}
             {more && <button className="t-more" aria-label={open ? "Hide details" : "Show details"} onClick={(e) => { e.stopPropagation(); onToggle(); }}>{open ? "▴" : "▾"}</button>}
           </h3>
           <div className="t-qty">
@@ -60,6 +57,15 @@ function Line({ l, collapsed, onToggle, onEdit, onQty, onRemove, bin, setBin }: 
           <span className="t-each">{formatMoney(effUnit(l))}</span>
           <span className="t-amt">{formatMoney(effUnit(l) * l.qty)}</span>
         </div>
+        {(l.sent || l.course || l.seat || l.channelName || l.hold) && (
+          <div className="t-tags">
+            {l.sent && <small className="t-tag sent" title="Already sent">✓ sent</small>}
+            {l.course ? <small className="t-tag">{COURSE_NAMES[l.course] ?? `Course ${l.course}`}</small> : null}
+            {l.seat ? <small className="t-tag">Seat {l.seat}</small> : null}
+            {l.channelName ? <small className="t-tag">{l.channelName}</small> : null}
+            {l.hold ? <small className="t-tag held">Held</small> : null}
+          </div>
+        )}
         {open && det.map((d, i) => <div key={i} className="t-detail" style={d.strong ? { fontWeight: 700 } : undefined}><span>{d.text}</span>{d.amount && <span>{d.amount}</span>}</div>)}
       </div>
     </div>

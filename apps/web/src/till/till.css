@@ -290,3 +290,8 @@
   .t-pay-panel .t-keypad button { min-height: 2.1em; font-size: 1.25em; }
   .t-pay-panel .t-cashin input { min-height: 2.1em; }
 }
+.t-tag.held { background: #fff2cf; color: #7a5a00; }
+.t-chiprow { display: flex; align-items: center; gap: .4em; flex-wrap: wrap; margin: .35em 0; } .t-chiprow > span { min-width: 5em; color: #4d7384; font-size: .85em; }
+.t-chiprow button { padding: .35em .8em; border-radius: 999px; border: 1px solid #b6d6e4; background: #fff; color: #0b6f95; font-weight: 700; cursor: pointer; } .t-chiprow button.on { background: #0b8fbf; color: #fff; border-color: #0b8fbf; } .t-chiprow button:disabled { opacity: .4; cursor: not-allowed; } .t-chiprow b { min-width: 1.5em; text-align: center; }
+/* Tags (sent, course, seat, channel, held) sit on a line of their own, so a long list of them never squeezes the item name */
+.t-tags { display: flex; flex-wrap: wrap; gap: .3em; padding: 0 0 .25em .15em; } .t-tags .t-tag { margin-left: 0; }

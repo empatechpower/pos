@@ -156,8 +156,8 @@ describe("issuing a PayNow QR for a kiosk order", () => {
     expect(p).toContain(r.json.reference);
     expect(r.json.reference).toMatch(/^RZKB1[0-9A-Z]{15}$/);
     expect(referenceLooksRight(r.json.reference)).toBe(true);
-    expect(r.json.expiresAt - Date.now()).toBeGreaterThan(2.5 * 60_000);
-    expect(r.json.expiresAt - Date.now()).toBeLessThanOrEqual(3 * 60_000);
+    expect(r.json.expiresAt - Date.now()).toBeGreaterThan(1.5 * 60_000); // the default is 2 minutes
+    expect(r.json.expiresAt - Date.now()).toBeLessThanOrEqual(2 * 60_000);
     const row = (await db.query("SELECT order_id, amount_cents, state, proxy_value FROM payment_expectations WHERE payment_id=$1", [r.json.paymentId])).rows[0];
     expect(row).toMatchObject({ order_id: o.json.orderId, amount_cents: o.json.totalCents, state: "WAITING", proxy_value: "201912345K" });
     expect((await call(`/api/payments/paynow/status/${r.json.paymentId}`)).json.state).toBe("WAITING");

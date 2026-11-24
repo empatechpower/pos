@@ -10,6 +10,8 @@ export interface LayoutEditing {
   onSaveMine: (l: MenuLayout) => Promise<string | null>;
   onSaveShop: (l: MenuLayout) => Promise<string | null>;
   onResetMine: () => Promise<string | null>;
+  /** Managers can manage an item (description, sold out, photo, price) from the till: when set, a long press on an item offers it. */
+  onManageItem?: (m: MenuEntry) => void;
   /** Set true from outside (the till's settings) to start editing. */
   startRequest: number;
 }
@@ -27,12 +29,17 @@ export function TillMenu({ menu, qtyOf, onAdd, onDiscount, editing }: { menu: Me
   const [query, setQuery] = useState("");
   const swipe = useRef<number | null>(null);
   const press = useRef<number | null>(null);
+  /** A long press must not also count as a tap on the tile when the finger lifts. */
+  const held = useRef(false);
+  const unlessHeld = (fn: () => void) => () => { if (held.current) { held.current = false; return; } fn(); };
   const [draft, setDraft] = useState<MenuLayout | null>(null);
   const [sel, setSel] = useState<number | null>(null);
   const [picker, setPicker] = useState<null | "item" | "category">(null);
   const [pickQuery, setPickQuery] = useState("");
   const [msg, setMsg] = useState("");
   const [named, setNamed] = useState<string | null>(null);
+  /** A long press on an item asks what to do (managers): manage the item, or edit the layout. */
+  const [choice, setChoice] = useState<MenuEntry | null>(null);
   const editMode = draft !== null;
 
   const startEdit = () => { if (!editing) return; setDraft(JSON.parse(JSON.stringify(editing.layout ?? layoutFromAuto(menu))) as MenuLayout); setSel(null); setCategory(null); setSearching(false); setQuery(""); setMsg(""); };
@@ -120,8 +127,14 @@ export function TillMenu({ menu, qtyOf, onAdd, onDiscount, editing }: { menu: Me
       <div
         className="t-grid"
         onPointerDown={(e) => {
+          held.current = false;
           swipe.current = e.clientX;
-          if (editing && !editMode && !category && !query && (e.target as HTMLElement).closest(".t-tile")) press.current = window.setTimeout(() => { press.current = null; swipe.current = null; startEdit(); }, 700);
+          const tile = (e.target as HTMLElement).closest(".t-tile") as HTMLElement | null;
+          if (editing && !editMode && tile) {
+            const cell = tiles[Number(tile.dataset.i)];
+            if (cell?.kind === "item" && editing.onManageItem) press.current = window.setTimeout(() => { press.current = null; swipe.current = null; held.current = true; setChoice(cell.item); }, 700);
+            else if (!category && !query) press.current = window.setTimeout(() => { press.current = null; swipe.current = null; held.current = true; startEdit(); }, 700);
+          }
         }}
         onPointerMove={(e) => { if (press.current && Math.abs(e.clientX - (swipe.current ?? e.clientX)) > 12) { window.clearTimeout(press.current); press.current = null; } }}
         onPointerUp={(e) => { if (press.current) { window.clearTimeout(press.current); press.current = null; } const s = swipe.current; swipe.current = null; if (s !== null && Math.abs(e.clientX - s) > 70) goto(at + (e.clientX < s ? 1 : -1)); }}
@@ -132,13 +145,13 @@ export function TillMenu({ menu, qtyOf, onAdd, onDiscount, editing }: { menu: Me
             return <button key={i} className={`t-tile ${c ? "" : "t-blank"} ${sel === i ? "t-sel" : ""} ${c?.kind === "category" ? "t-cat" : c?.kind === "discount" ? "t-fn" : ""}`} aria-label={c ? `Move ${label}` : "Empty cell"} onClick={() => tapCell(i)}>{c ? <strong className="t-name">{label}</strong> : <span className="t-plus">{sel !== null ? "↓" : ""}</span>}</button>;
           }
           if (!c) return <div key={i} className="t-tile t-blank" aria-hidden />;
-          if (c.kind === "category") return <button key={i} className="t-tile t-cat" onClick={() => { setCategory(c.name); setPage(0); }}><strong>{c.name}</strong><span>▦</span></button>;
-          if (c.kind === "discount") return <button key={i} className="t-tile t-fn" onClick={onDiscount}><strong>Discount</strong><span>%</span></button>;
+          if (c.kind === "category") return <button key={i} className="t-tile t-cat" onClick={unlessHeld(() => { setCategory(c.name); setPage(0); })}><strong>{c.name}</strong><span>▦</span></button>;
+          if (c.kind === "discount") return <button key={i} className="t-tile t-fn" onClick={unlessHeld(onDiscount)}><strong>Discount</strong><span>%</span></button>;
           const m = c.item;
           const q = qtyOf(m.id);
           const photo = m.imageVersion ? `/api/products/${m.id}/image?v=${m.imageVersion}` : null;
           return (
-            <button key={i} className={`t-tile ${photo ? "t-photo" : ""} ${q ? "t-in" : ""} ${m.soldOut ? "t-sold" : ""}`} disabled={m.soldOut} onClick={() => onAdd(m)}>
+            <button key={i} data-i={i} className={`t-tile ${photo ? "t-photo" : ""} ${q ? "t-in" : ""} ${m.soldOut ? "t-sold" : ""}`} disabled={m.soldOut} onClick={unlessHeld(() => onAdd(m))}>
               {photo && <img src={photo} alt="" loading="lazy" onError={(e) => e.currentTarget.remove()} />}
               <strong className="t-name">{m.name}</strong>
               {q > 0 && <span className="t-badge">{q}</span>}
@@ -162,6 +175,15 @@ export function TillMenu({ menu, qtyOf, onAdd, onDiscount, editing }: { menu: Me
           <div className="t-pickhead"><input autoFocus placeholder={picker === "item" ? "Search items" : "Search categories"} value={pickQuery} onChange={(e) => setPickQuery(e.target.value)} /><button className="t-ghost" onClick={() => setPicker(null)}>Close</button></div>
           <div className="t-picklist">
             {picker === "item" ? pickList.map((m) => <button key={m.id} onClick={() => place({ k: "item", id: m.id })}>{m.name}<small>{m.category}</small></button>) : cats.map((c) => <button key={c} onClick={() => place({ k: "category", name: c })}>{c}</button>)}
+          </div>
+        </div>
+      )}
+      {choice && (
+        <div className="t-picker" role="dialog" aria-label={`${choice.name}`}>
+          <div className="t-picklist">
+            <button onClick={() => { const m = choice; setChoice(null); editing?.onManageItem?.(m); }}>Manage item<small>{choice.name}</small></button>
+            <button onClick={() => { setChoice(null); startEdit(); }}>Edit layout</button>
+            <button onClick={() => setChoice(null)}>Cancel</button>
           </div>
         </div>
       )}

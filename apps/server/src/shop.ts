@@ -11,7 +11,9 @@ import { itemNames, onHandAt, stockVersion } from "./stock.js";
 import { TabError, type TabService } from "./tabs.js";
 import { PROMO_BASIS, claimPromo, judgePromo, promoStacksWithCoupons, releasePromo, type PromoVerdict } from "./promo.js";
 import { normaliseEmail, type MemberStore } from "./members.js";
-import { assignUnassigned, dismissUnassigned, GmailMailbox, listUnassigned, startAlertWatch, type AlertMailbox, type ApplyPayment } from "./paynowMatcher.js";
+import { assignUnassigned, dismissUnassigned, GmailMailbox, listUnassigned, startAlertWatchMulti, type AlertMailbox, type ApplyPayment } from "./paynowMatcher.js";
+import { watchTargets } from "./paynowWatch.js";
+import type { ImapFactory } from "./imapMailbox.js";
 import { AmountNotAllowed, loadPaynow, issueQr, expectationStatus } from "./paynow.js";
 import { referenceLooksRight } from "./paynowQr.js";
 import { authorizeUrl, createStripeCheckout, createStripeRefund, createYeahpayPayment, refundYeahpay, verifyYeahpayCallback, orderIdFromRef, fetchProfile, sendMail, newState, newVerifier, sameSecret, verifyStripeSignature, type Integrations, type OAuthProvider } from "./integrations.js";
@@ -45,6 +47,7 @@ interface ShopDeps {
   tabs?: TabService;
   /** Where the bank's PayNow alerts are read from; when absent, Gmail is used if its settings are in the environment. */
   alertMailbox?: AlertMailbox;
+  imapFactory?: ImapFactory;
   alertWatchMs?: number;
 }
 
@@ -1184,7 +1187,7 @@ export function registerShop(app: FastifyInstance, d: ShopDeps) {
   /** Start a payment for what is still owed on an order. The customer is sent to the hosted payment page. */
   app.post<{ Params: { id: string }; Body: { method?: string; display?: string; surface?: string } }>("/api/shop/orders/:id/pay", async (req, reply) => {
     if ((await orderGate(req, reply)).blocked) return;
-    const pn = d.db ? await loadPaynow(d.db, merchantId) : null;
+    const pn = d.db ? await loadPaynow(d.db, merchantId, process.env, await outletOfOrder(req.params.id)) : null;
     const wantsQr = req.body?.display === "qr" && req.body?.method === "paynow";
     if (!integ.yeahpay && !integ.stripe && !(pn && wantsQr)) return reply.code(404).send({ error: "online_payment_not_available" });
     const method = req.body?.method;
@@ -1213,20 +1216,21 @@ export function registerShop(app: FastifyInstance, d: ShopDeps) {
   });
 
   /** Puts a bank-confirmed PayNow payment on an order, only when the order is open and exactly that much is owed. */
-  const applyPaynow: ApplyPayment = async ({ orderId, amountCents, paymentId }) => {
+  const applyPaynow: ApplyPayment = async ({ orderId, amountCents, paymentId, matchedBy }) => {
     const events = await d.store.eventsForOrder(orderId);
     const order = events.length ? reduceOrder(orderId, events) : null;
     if (!order || order.stage === "cancelled") return false;
     if (order.payments.some((p) => p.paymentId === paymentId)) return true;
     if (orderTotals(order, d.config).total - confirmedPaid(order) !== amountCents) return false;
-    await d.ingest([{ id: `paynow-${paymentId}`, orderId, deviceId: SHOP_DEVICE, ts: (d.now ?? Date.now)(), seq: Date.now(), type: "PaymentRecorded", paymentId, method: "paynow", amountCents, confirmed: true } as unknown as OrderEvent], await outletOfOrder(orderId));
+    await d.ingest([{ id: `paynow-${paymentId}`, orderId, deviceId: SHOP_DEVICE, ts: (d.now ?? Date.now)(), seq: Date.now(), type: "PaymentRecorded", paymentId, method: "paynow", amountCents, confirmed: true, byName: "PayNow (automatic)", ...(matchedBy ? { note: matchedBy === "reference" ? "matched by the order's reference" : "matched by amount (no reference in the bank's alert)" } : {}) } as unknown as OrderEvent], await outletOfOrder(orderId));
     return true;
   };
   {
     const g = process.env;
     const mailbox = d.alertMailbox ?? (g.GMAIL_CLIENT_ID && g.GMAIL_CLIENT_SECRET && g.GMAIL_REFRESH_TOKEN ? new GmailMailbox({ clientId: g.GMAIL_CLIENT_ID, clientSecret: g.GMAIL_CLIENT_SECRET, refreshToken: g.GMAIL_REFRESH_TOKEN }) : null);
-    if (mailbox) {
-      const stop = startAlertWatch({ db: d.db, merchantId, mailbox, load: () => loadPaynow(d.db, merchantId), apply: applyPaynow, now: d.now ?? Date.now, liveMs: d.alertWatchMs, idleMs: d.alertWatchMs ? d.alertWatchMs * 4 : undefined });
+    // Every mailbox a PayNow setup reads: the server's own (the Gmail in its environment) and the merchant's saved ones, outlet by outlet.
+    if (d.db) {
+      const stop = startAlertWatchMulti({ db: d.db, merchantId, targets: watchTargets(d.db, merchantId, { defaultMailbox: mailbox, imapFactory: d.imapFactory }), apply: applyPaynow, now: d.now ?? Date.now, liveMs: d.alertWatchMs, idleMs: d.alertWatchMs ? d.alertWatchMs * 4 : undefined });
       app.addHook("onClose", async () => stop());
     }
   }

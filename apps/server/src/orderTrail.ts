@@ -17,9 +17,9 @@ export function eventTrail(events: readonly OrderEvent[], deviceName: (id: strin
     const add = (kind: string, text: string, who = dev) => out.push({ at: e.ts, kind, text, who });
     switch (e.type) {
       case "OrderOpened": add("opened", x.source === "online" ? "Order placed online" : "Order opened", x.source === "online" ? "Customer" : dev); break;
-      case "ItemAdded": add("item", `Added ${x.qty} × ${x.name}`); break;
+      case "ItemAdded": add("item", `Added ${x.qty} × ${x.name}${x.channelName ? ` (${x.channelName})` : ""}${x.hold ? " · held" : ""}`); break;
       case "ItemQtySet": add("item", x.qty === 0 ? "Removed an item" : `Changed an item's quantity to ${x.qty}`); break;
-      case "PaymentRecorded": add("payment", `Payment ${formatMoney(x.amountCents)} by ${METHOD[x.method] ?? x.method}${x.confirmed ? "" : " (waiting for confirmation)"}`); break;
+      case "PaymentRecorded": add("payment", `Payment ${formatMoney(x.amountCents)} by ${METHOD[x.method] ?? x.method}${x.confirmed ? "" : " (waiting for confirmation)"}${x.note ? ` · ${x.note}` : ""}`); break;
       case "PaymentConfirmed": add("payment", "Payment confirmed"); break;
       case "RefundRecorded": add("refund", `Refunded ${formatMoney(x.amountCents)} ${METHOD[x.method] ?? x.method} · ${x.reason}`, `${x.approvedByName} (approved)`); break;
       case "OrderVoided": add("void", `Order voided · ${x.reason}`, `${x.approvedByName} (approved)`); break;
@@ -32,6 +32,9 @@ export function eventTrail(events: readonly OrderEvent[], deviceName: (id: strin
       case "OrderFired": add("stage", "Sent to the kitchen"); break;
       case "TableChanged": add("table", `Moved to ${x.to}`); break;
       case "CourseFired": add("stage", `Course fired · ${COURSE_NAMES[x.course] ?? `Course ${x.course}`}`, x.byName ?? dev); break;
+      case "FeeApplied": add("discount", `Fee added: ${x.label} ${x.kind === "percent" ? `${x.value}%` : formatMoney(x.value)}`, x.byName ?? dev); break;
+      case "FeeRemoved": add("discount", "Fee removed", x.byName ?? dev); break;
+      case "LineFired": add("stage", "An item was sent to the kitchen", x.byName ?? dev); break;
       case "GuestsChanged": add("note", `Guests changed to ${x.pax}`, x.byName ?? dev); break;
       case "BillRequested": add("stage", "Guest check printed", x.byName ?? dev); break;
       case "OrderMerged": add("table", `Merged into ${x.intoSpot ?? "another table"}`, x.byName ?? dev); break;

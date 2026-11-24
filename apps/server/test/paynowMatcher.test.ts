@@ -129,7 +129,7 @@ describe("matching alerts to QRs", () => {
 
   it("a payment after the QR's minutes went to the unassigned pool, and staff can see it", async () => {
     const o = await place(4); const q = await qr(o.json.orderId);
-    await db.query("UPDATE payment_expectations SET expires_at = now() - interval '1 minute' WHERE payment_id=$1", [q.json.paymentId]);
+    await db.query("UPDATE payment_expectations SET expires_at = now() - interval '5 minutes' WHERE payment_id=$1", [q.json.paymentId]);
     const r = ref(++n);
     expect(await processAlert(db, "bp", cfg, alert({ ref: r, cents: o.json.totalCents, payer: "WONG KAI" }), okApply)).toBe("unassigned");
     expect(await status(q.json.paymentId)).toBe("NOT_FOUND");
@@ -163,7 +163,7 @@ describe("matching alerts to QRs", () => {
 
   it("staff list the pool and assign a payment to an order that is owed exactly that", async () => {
     const lost = await place(8); const q = await qr(lost.json.orderId);
-    await db.query("UPDATE payment_expectations SET expires_at = now() - interval '1 minute' WHERE payment_id=$1", [q.json.paymentId]);
+    await db.query("UPDATE payment_expectations SET expires_at = now() - interval '5 minutes' WHERE payment_id=$1", [q.json.paymentId]);
     const r = ref(++n);
     mailbox.messages.push(alert({ ref: r, cents: lost.json.totalCents, payer: "TAY BOON" }));
     for (let i = 0; i < 60 && !(await db.query("SELECT 1 FROM payment_alerts WHERE bank_ref=$1", [r])).rowCount; i++) await new Promise((x) => setTimeout(x, 100));

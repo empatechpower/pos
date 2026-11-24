@@ -2,7 +2,7 @@ import cors from "@fastify/cors";
 import Fastify, { type FastifyReply, type FastifyRequest } from "fastify";
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
-import { type BuilderSpec, plainText, receipt, type OrderState, type PrintContext, commissionOf, tabPaymentReceipt, type ProductStock, validateProductStock, isTimeZone, validCoordinates, validateOutletOverride, validateWindows, type MenuWindows, confirmedPaid, hourly, isFullyPaid, productMix, summarize, menuFor, newId, orderTotals, reduceAll, reduceOrder, shopStatus, type BusinessConfig, type ChannelKind, type OptionGroup, type OrderEvent } from "@pos/core";
+import { type BuilderSpec, guestCheck, plainText, receipt, type OrderState, type PrintContext, commissionOf, tabPaymentReceipt, type ProductStock, validateProductStock, isTimeZone, validCoordinates, validateOutletOverride, validateWindows, type MenuWindows, confirmedPaid, hourly, isFullyPaid, productMix, summarize, menuFor, newId, orderTotals, reduceAll, reduceOrder, shopStatus, type BusinessConfig, type ChannelKind, type OptionGroup, type OrderEvent } from "@pos/core";
 import { CASHIER_TOPUP_LIMIT_CENTS, audit, checkStaffPin, authenticate, authenticateAgent, can, createAgent, createConnectCode, redeemConnectCode, createStaff, listAgents, login, logout, recentAudit, revokeAgent, type Permission, type Role, type Staff } from "./auth.js";
 import type { CatalogStore, ChangeResult, PgCatalogStore } from "./catalog.js";
 import type { Db } from "./db/pool.js";
@@ -16,11 +16,13 @@ import { registerPromoAdmin, releasePromo } from "./promo.js";
 import { reconcileOrderStock, registerStock } from "./stock.js";
 import { TabError, TabService } from "./tabs.js";
 import { registerTabRoutes } from "./tabRoutes.js";
-import { AmountNotAllowed, issueQr, loadPaynow, savePaynow } from "./paynow.js";
+import { AmountNotAllowed, issueQr, loadPaynow, loadPaynowOverrides, savePaynow, savePaynowOverride } from "./paynow.js";
 import { applyOption, loadKiosk, OPTION_KEYS, optionsOf, saveKiosk, saveSetting } from "./settings.js";
 import { openShiftOf, registerShifts } from "./shifts.js";
 import { registerFloor } from "./floor.js";
 import { cleanLayout, registerTill } from "./tillSettings.js";
+import { registerMailboxes } from "./mailboxes.js";
+import type { ImapFactory } from "./imapMailbox.js";
 import { registerDiscountPolicy } from "./discountPolicy.js";
 import { registerOrderTrail } from "./orderTrail.js";
 import { refundYeahpay, sendMail, type Integrations } from "./integrations.js";
@@ -59,6 +61,8 @@ interface Deps {
   now?: () => number;
   /** Where the bank's PayNow alerts are read from (tests use a memory mailbox; production reads Gmail). */
   alertMailbox?: import("./paynowMatcher.js").AlertMailbox;
+  /** How IMAP mailboxes are reached (tests hand in a stand-in). */
+  imapFactory?: ImapFactory;
   /** How often the mailbox is looked at while a QR is live (ms). Tests make it short. */
   alertWatchMs?: number;
 }
@@ -69,7 +73,7 @@ const deviceToken = (req: FastifyRequest) => {
   return Array.isArray(h) ? h[0] : h;
 };
 
-export async function buildApp({ config, store, db, catalog, catalogAdmin, print, logger = true, trustProxy = false, integrations, now, alertMailbox, alertWatchMs }: Deps) {
+export async function buildApp({ config, store, db, catalog, catalogAdmin, print, logger = true, trustProxy = false, integrations, now, alertMailbox, alertWatchMs, imapFactory }: Deps) {
   const app = Fastify({ logger, trustProxy });
   // Logo uploads arrive as raw image bytes.
   app.addContentTypeParser(["image/png", "image/jpeg", "image/webp"], { parseAs: "buffer", bodyLimit: 300 * 1024 + 1 }, (_req, body, done) => done(null, body));
@@ -802,9 +806,21 @@ export async function buildApp({ config, store, db, catalog, catalogAdmin, print
     return next;
   });
 
-  app.get("/api/settings/paynow", { preHandler: needs("wallet.read") }, async () => ({ config: await loadPaynow(db, merchantId) }));
-  app.put<{ Body: unknown }>("/api/settings/paynow", { preHandler: needs("staff.manage") }, async (req, reply) => {
+  // `?outlet=ID` is one outlet's setup: the shop's with that outlet's own changes on top. `overrides` lists what each outlet changes.
+  app.get<{ Querystring: { outlet?: string } }>("/api/settings/paynow", { preHandler: needs("wallet.read") }, async (req) => {
+    const overrides = await loadPaynowOverrides(db, merchantId);
+    return { config: await loadPaynow(db, merchantId, process.env, req.query.outlet), overrides: req.query.outlet ? { [req.query.outlet]: overrides[req.query.outlet] ?? null } : overrides };
+  });
+  app.put<{ Body: unknown; Querystring: { outlet?: string } }>("/api/settings/paynow", { preHandler: needs("staff.manage") }, async (req, reply) => {
     if ((await visibleOutletIds(db, merchantId, req.staff!)) !== null) return reply.code(403).send({ error: "brand_only" });
+    if (req.query.outlet) {
+      if (!(await listOutlets(db, merchantId)).some((o) => o.id === req.query.outlet)) return reply.code(404).send({ error: "outlet_not_found" });
+      const body = (req.body ?? {}) as Record<string, unknown>;
+      const o = await savePaynowOverride(db, merchantId, req.query.outlet, body.reset === true ? null : body);
+      if (!o.ok) return reply.code(400).send({ error: o.error });
+      await audit(db, merchantId, req.staff!.id, "settings.paynow_outlet", { outlet: req.query.outlet, reset: body.reset === true, outletCode: o.config?.outletCode, receivingAccountEnding: o.config?.receivingAccountEnding });
+      return { config: o.config };
+    }
     const r = await savePaynow(db, merchantId, req.body);
     if (!r.ok) return reply.code(400).send({ error: r.error });
     await audit(db, merchantId, req.staff!.id, "settings.paynow", { proxyType: r.config.proxyType, displayName: r.config.displayName, outletCode: r.config.outletCode, ttlMinutes: r.config.ttlMinutes });
@@ -813,9 +829,10 @@ export async function buildApp({ config, store, db, catalog, catalogAdmin, print
 
   // The till asks for a PayNow QR for an order it has already sent to the server. The amount is what the server says is still owed.
   app.post<{ Body: { orderId?: string } }>("/api/payments/paynow/qr", { preHandler: needs("wallet.spend") }, async (req, reply) => {
-    const cfg = await loadPaynow(db, merchantId);
-    if (!cfg) return reply.code(409).send({ error: "paynow_not_set_up" });
     const orderId = String(req.body?.orderId ?? "");
+    // The outlet that took the order decides whose PayNow it is paid into (its own account and outlet code, or the shop's).
+    const cfg = await loadPaynow(db, merchantId, process.env, orderId ? (await store.outletOfOrder?.(orderId)) ?? null : null);
+    if (!cfg) return reply.code(409).send({ error: "paynow_not_set_up" });
     const events = orderId ? await store.eventsForOrder(orderId) : [];
     const order = events.length ? reduceOrder(orderId, events) : null;
     if (!order) return reply.code(404).send({ error: "order_not_found" });
@@ -837,8 +854,8 @@ export async function buildApp({ config, store, db, catalog, catalogAdmin, print
 
   // A S$0.01 QR from the saved settings, so the owner can scan it with their own banking app and see the ID and name are right.
   // It is stored like any QR; if paid, the money lands in the unassigned pool (there is no order for it).
-  app.post("/api/settings/paynow/test", { preHandler: needs("staff.manage") }, async (req, reply) => {
-    const cfg = await loadPaynow(db, merchantId);
+  app.post<{ Querystring: { outlet?: string } }>("/api/settings/paynow/test", { preHandler: needs("staff.manage") }, async (req, reply) => {
+    const cfg = await loadPaynow(db, merchantId, process.env, req.query.outlet);
     if (!cfg) return reply.code(409).send({ error: "paynow_not_set_up" });
     const q = await issueQr(db, cfg, { merchantId, orderId: "paynow-test", amountCents: 1, channel: "P", now: (now ?? Date.now)(), skipLimits: true });
     return { payload: q.payload, reference: q.reference, expiresAt: q.expiresAt, displayName: cfg.displayName };
@@ -876,9 +893,10 @@ export async function buildApp({ config, store, db, catalog, catalogAdmin, print
   registerShifts(app, { db, merchantId, store, config, needs });
   registerFloor(app, { db, merchantId, needs });
   registerTill(app, { db, merchantId, needs });
+  registerMailboxes(app, { db, merchantId, needs, imapFactory, now });
   registerDiscountPolicy(app, { db, merchantId, needs });
   registerOrderTrail(app, { db, merchantId, store, needs });
-  registerShop(app, { db, config, store, catalog, catalogAdmin, brand: new BrandStore(db, merchantId), ingest, members, needs, integrations, now, tabs, alertMailbox, alertWatchMs });
+  registerShop(app, { db, config, store, catalog, catalogAdmin, brand: new BrandStore(db, merchantId), ingest, members, needs, integrations, now, tabs, alertMailbox, alertWatchMs, imapFactory });
 
   // ---- the Telegram bot for managing prices ---------------------------------------------------
 
@@ -1264,6 +1282,20 @@ export async function buildApp({ config, store, db, catalog, catalogAdmin, print
       const queued = await queue.reprint(order, docType, { catalog: await catalog.load(), config, print: await printCtxFor(order, orderOutlet), outletId: orderOutlet, printModifiers: req.body?.modifiers === true }, printerId);
       await audit(db, merchantId, req.staff!.id, "print.reprint", { orderId, docType, queued });
       return queued ? { queued } : reply.code(409).send({ error: "no_printer_for_this" });
+    });
+
+    /** Print the guest check (the whole bill, or one check of a split bill) on the outlet's receipt printers. Nothing is recorded as paid. */
+    app.post<{ Params: { id: string }; Body: { checkId?: string } }>("/api/orders/:id/guest-check", { preHandler: needs("print.reprint") }, async (req, reply) => {
+      const order = reduceOrder(req.params.id, await store.eventsForOrder(req.params.id));
+      if (!order) return reply.code(404).send({ error: "order_not_found" });
+      const outletId = (await store.outletOfOrder?.(req.params.id)) ?? undefined;
+      if (outletId && !outletAllowed(await visibleOutletIds(db, merchantId, req.staff!), outletId)) return reply.code(403).send({ error: "outside_your_scope" });
+      const checkId = req.body?.checkId;
+      if (checkId && !order.split?.checks.some((c) => c.id === checkId)) return reply.code(404).send({ error: "check_not_found" });
+      const doc = guestCheck(order, config, await printCtxFor(order, outletId), { checkId });
+      const made = await print.enqueueDoc(outletId ?? config.outletName, doc, `guestcheck:${order.orderId}:${checkId ?? "all"}:${Date.now()}:${Math.random()}`, `Guest check ${order.spot ?? order.queueNumber ?? ""}`.trim());
+      await audit(db, merchantId, req.staff!.id, "print.guest_check", { orderId: order.orderId, checkId: checkId ?? null, queued: made });
+      return made ? { queued: made } : reply.code(409).send({ error: "no_printer_for_this" });
     });
 
     /** The receipt as text, for a screen preview: modifiers only when asked for (?modifiers=1). Nothing is printed. */

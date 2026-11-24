@@ -1,8 +1,9 @@
 import { useEffect, useMemo, useState } from "react";
-import { confirmedPaid, formatMoney, hourly, isFullyPaid, optionLines, orderTotals, productMix, reportWeekday, summarize, type BusinessConfig, type Catalog, type OrderState } from "@pos/core";
+import { confirmedPaid, formatMoney, hourly, isFullyPaid, optionLines, orderTotals, productMix, reportWeekday, staffSales, summarize, type BusinessConfig, type Catalog, type OrderState } from "@pos/core";
 import { staffFetch } from "../auth";
 import { logView } from "../orderViews";
 import { useOrders } from "../hooks";
+import { downloadText, money, toCsv } from "../csv";
 
 const TZ = "Asia/Singapore";
 const dayKey = (ms: number) => new Date(ms).toLocaleDateString("en-CA", { timeZone: TZ });
@@ -23,7 +24,11 @@ type Detail = { kind: "order"; id: string } | { kind: "product"; name: string } 
 export function Reports({ config, catalog }: { config: BusinessConfig; catalog?: Catalog | null }) {
   const all = useOrders();
   const [credit, setCredit] = useState<CreditRow[] | null>(null);
-  const [tab, setTab] = useState<"overview" | "products" | "orders" | "credit">("overview");
+  const [tab, setTab] = useState<"overview" | "products" | "orders" | "staff" | "credit">("overview");
+  const [from, setFrom] = useState(() => dayKey(Date.now()));
+  const [to, setTo] = useState(() => dayKey(Date.now()));
+  /** Who owned each shift, for payments taken before payments carried a name. */
+  const [shiftNames, setShiftNames] = useState<Map<string, string>>(new Map());
   const [stack, setStack] = useState<Detail[]>([]);
   const [day, setDay] = useState<string | "all" | "last24" | null>(null);
   const [mixCat, setMixCat] = useState("");
@@ -37,26 +42,30 @@ export function Reports({ config, catalog }: { config: BusinessConfig; catalog?:
     void (async () => {
       const r = await staffFetch("/api/reports/credit");
       if ("res" in r && r.res.ok) setCredit(((await r.res.json()) as { members: CreditRow[] }).members);
+      const sh = await staffFetch("/api/shifts");
+      if ("res" in sh && sh.res.ok) setShiftNames(new Map(((await sh.res.json()) as { shifts: Array<{ id: string; staffName: string }> }).shifts.map((s) => [s.id, s.staffName])));
     })();
   }, []);
 
   const live = useMemo(() => all.filter((o) => o.lines.some((l) => l.qty > 0) && o.stage !== "cancelled"), [all]);
   const days = useMemo(() => [...new Set(live.map((o) => dayKey(o.openedAt)))].sort(), [live]);
   const chosen = day ?? days[days.length - 1] ?? "all";
+  // Which orders the screen covers: one day, the last 24 hours, every day, or a range of dates (from and to are both included).
+  const inChosen = (o: OrderState) => (chosen === "all" ? true : chosen === "last24" ? o.openedAt >= Date.now() - 24 * 3600_000 : chosen === "range" ? dayKey(o.openedAt) >= (from <= to ? from : to) && dayKey(o.openedAt) <= (from <= to ? to : from) : dayKey(o.openedAt) === chosen);
   const rows: Row[] = useMemo(
     () =>
       live
-        .filter((o) => chosen === "all" || (chosen === "last24" ? o.openedAt >= Date.now() - 24 * 3600_000 : dayKey(o.openedAt) === chosen))
+        .filter((o) => inChosen(o))
         .map((o) => {
           const t = orderTotals(o, config);
           return { o, total: t.total, subtotal: t.subtotal, service: t.service, items: o.lines.reduce((n, l) => n + Math.max(0, l.qty), 0), member: o.customerName ?? o.customerPhone ?? "Guest" };
         })
         .sort((a, b) => a.o.openedAt - b.o.openedAt),
-    [live, chosen, config],
+    [live, chosen, from, to, config],
   );
 
-  const inRange = (o: OrderState) => chosen === "all" || (chosen === "last24" ? o.openedAt >= Date.now() - 24 * 3600_000 : dayKey(o.openedAt) === chosen);
-  const rangeOrders = useMemo(() => all.filter((o) => o.lines.some((l) => l.qty > 0) && inRange(o)), [all, chosen]); // eslint-disable-line react-hooks/exhaustive-deps
+  const rangeOrders = useMemo(() => all.filter((o) => o.lines.some((l) => l.qty > 0) && inChosen(o)), [all, chosen, from, to]); // eslint-disable-line react-hooks/exhaustive-deps
+  const staffRows = useMemo(() => staffSales(rangeOrders, config, (id) => shiftNames.get(id)), [rangeOrders, config, shiftNames]);
   const summary = useMemo(() => summarize(rangeOrders, config), [rangeOrders, config]);
   const hours = useMemo(() => hourly(rangeOrders, config), [rangeOrders, config]);
   const categoryOf = useMemo(() => { const m = new Map((catalog?.products ?? []).map((p) => [p.id, p.category])); return (id: string) => m.get(id) ?? ""; }, [catalog]);
@@ -195,16 +204,49 @@ export function Reports({ config, catalog }: { config: BusinessConfig; catalog?:
   const topProducts = [...products].sort((a, b) => b.qty - a.qty || b.cents - a.cents);
   const spendersList = [...pool].filter((m) => m.spentCents > 0).sort((a, b) => b.spentCents - a.spentCents);
 
+  /** The tab on screen as a CSV file, named for what it is and the dates it covers. */
+  function exportCsv() {
+    const label = chosen === "range" ? `${from <= to ? from : to}_to_${from <= to ? to : from}` : chosen;
+    let rowsOut: Array<Array<string | number>> = [];
+    if (tab === "staff") {
+      rowsOut = [["Staff", "Taken (S$)", "Orders", "Average order (S$)", "Cash (S$)", "PayNow (S$)", "Card (S$)", "Credit (S$)", "Refunds approved", "Refunded (S$)", "Discounts given", "Discounted (S$)", "Orders voided", "Voided (S$)", "Net (S$)"],
+        ...staffRows.map((r) => [r.name, money(r.takenCents), r.orders, money(r.averageCents), money(r.byMethod.cash ?? 0), money(r.byMethod.paynow ?? 0), money(r.byMethod.card ?? 0), money(r.byMethod.credit ?? 0), r.refunds, money(r.refundedCents), r.discounts, money(r.discountCents), r.voids, money(r.voidedCents), money(r.netCents)])];
+    } else if (tab === "products") {
+      rowsOut = [["Item", "Category", "Quantity", "Sales (S$)", "Average (S$)", "Share of sales (%)"], ...mix.map((m) => [m.name, m.category, m.qty, money(m.cents), money(m.averageCents), (m.share * 100).toFixed(1)])];
+    } else if (tab === "orders") {
+      rowsOut = [["Date", "Time", "Order", "Where", "Customer", "Items", "Total (S$)", "Status"], ...rows.map((r) => [dayKey(r.o.openedAt), timeOf(r.o.openedAt), r.o.queueNumber ?? "", r.o.spot ?? r.o.channelName ?? r.o.fulfilment, r.member, r.items, money(r.total), r.o.voided ? "Voided" : isFullyPaid(r.o, config) ? "Paid" : "Open"])];
+    } else if (tab === "credit") {
+      rowsOut = [["Member", "Phone", "Given (S$)", "Used (S$)", "Left (S$)"], ...pool.map((m) => [m.name ?? "", m.phone ?? "", money(m.openingCents + m.topupsCents), money(m.spentCents - m.refundsCents), money(m.balanceCents)])];
+    } else {
+      const days = new Map<string, { n: number; items: number; cents: number }>();
+      for (const r of rows) { const d = dayKey(r.o.openedAt); const x = days.get(d) ?? { n: 0, items: 0, cents: 0 }; x.n++; x.items += r.items; x.cents += r.total; days.set(d, x); }
+      rowsOut = [["Date", "Orders", "Items", "Sales (S$)", "Average order (S$)"], ...[...days].sort().map(([d, x]) => [d, x.n, x.items, money(x.cents), money(x.n ? Math.round(x.cents / x.n) : 0)])];
+    }
+    downloadText(`${tab}_${label}.csv`, toCsv(rowsOut));
+  }
+
   return (
     <div className="rp">
       <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center", marginBottom: 10 }}>
         <select value={chosen} onChange={(e) => setDay(e.target.value as string)} aria-label="Which day">
           {days.slice().reverse().map((d) => <option key={d} value={d}>{d}</option>)}
           <option value="last24">Last 24 hours</option>
+          <option value="range">A range of dates…</option>
           <option value="all">All days</option>
         </select>
+        {chosen === "range" && (
+          <>
+            <label className="muted">From <input type="date" value={from} max={to} onChange={(e) => setFrom(e.target.value)} aria-label="From date" /></label>
+            <label className="muted">To <input type="date" value={to} min={from} onChange={(e) => setTo(e.target.value)} aria-label="To date" /></label>
+          </>
+        )}
         <span className="muted">{rows.length} order{rows.length === 1 ? "" : "s"}</span>
+        <span className="rp-actions" style={{ marginLeft: "auto", display: "flex", gap: 6 }}>
+          <button className="secondary sm" onClick={exportCsv}>Export CSV</button>
+          <button className="secondary sm" onClick={() => window.print()} title="Opens the print window: choose a printer, or Save as PDF">Print / Save as PDF</button>
+        </span>
       </div>
+      <h2 className="rp-printtitle">{tab[0]!.toUpperCase() + tab.slice(1)} report · {chosen === "range" ? `${from <= to ? from : to} to ${from <= to ? to : from}` : chosen === "all" ? "All days" : chosen === "last24" ? "Last 24 hours" : chosen} · {config.name}</h2>
       <div className="rp-kpis">
         <div className="rp-kpi"><small>Sales</small><b>{formatMoney(gross)}</b><span>items {formatMoney(subtotal)} + service {formatMoney(service)}</span></div>
         <div className="rp-kpi"><small>Orders</small><b>{rows.length}</b><span>{itemCount} items · avg {formatMoney(rows.length ? Math.round(gross / rows.length) : 0)}</span></div>
@@ -212,7 +254,7 @@ export function Reports({ config, catalog }: { config: BusinessConfig; catalog?:
         <div className="rp-kpi"><small>Credit left</small><b>{formatMoney(left)}</b><span>{spenders} member{spenders === 1 ? "" : "s"} spent</span></div>
       </div>
       <div className="seg" style={{ margin: "6px 0 10px" }}>
-        {(["overview", "products", "orders", "credit"] as const).map((t) => <button key={t} className={tab === t ? "on" : ""} aria-pressed={tab === t} onClick={() => setTab(t)}>{t[0]!.toUpperCase() + t.slice(1)}</button>)}
+        {(["overview", "products", "orders", "staff", "credit"] as const).map((t) => <button key={t} className={tab === t ? "on" : ""} aria-pressed={tab === t} onClick={() => setTab(t)}>{t[0]!.toUpperCase() + t.slice(1)}</button>)}
       </div>
 
       {tab === "overview" && (
@@ -296,6 +338,22 @@ export function Reports({ config, catalog }: { config: BusinessConfig; catalog?:
         </>
       )}
 
+      {tab === "staff" && (
+        <div className="rp-card"><h3>Sales by person</h3>
+          <p className="muted">Payments belong to whoever took them. Refunds and voids belong to the manager who approved them; discounts to whoever gave them. “Not recorded” is money taken before payments carried a name.</p>
+          {staffRows.length === 0 && <p className="muted">No sales in this period.</p>}
+          {staffRows.length > 0 && (
+            <div style={{ overflowX: "auto" }}>
+              <table className="rp-table" aria-label="Sales by person"><thead><tr><th>Person</th><th className="r">Taken</th><th className="r">Orders</th><th className="r">Average</th><th className="r">Cash</th><th className="r">PayNow</th><th className="r">Card</th><th className="r">Credit</th><th className="r">Refunds</th><th className="r">Discounts</th><th className="r">Voids</th><th className="r">Net</th></tr></thead>
+                <tbody>
+                  {staffRows.map((r) => <tr key={r.name}><td>{r.name}</td><td className="r">{formatMoney(r.takenCents)}</td><td className="r">{r.orders}</td><td className="r">{formatMoney(r.averageCents)}</td><td className="r">{formatMoney(r.byMethod.cash ?? 0)}</td><td className="r">{formatMoney(r.byMethod.paynow ?? 0)}</td><td className="r">{formatMoney(r.byMethod.card ?? 0)}</td><td className="r">{formatMoney(r.byMethod.credit ?? 0)}</td><td className="r">{r.refunds ? `${r.refunds} · ${formatMoney(r.refundedCents)}` : "—"}</td><td className="r">{r.discounts ? `${r.discounts} · ${formatMoney(r.discountCents)}` : "—"}</td><td className="r">{r.voids ? `${r.voids} · ${formatMoney(r.voidedCents)}` : "—"}</td><td className="r"><b>{formatMoney(r.netCents)}</b></td></tr>)}
+                  <tr><td><b>Total</b></td><td className="r"><b>{formatMoney(staffRows.reduce((n, r) => n + r.takenCents, 0))}</b></td><td className="r">{staffRows.reduce((n, r) => n + r.orders, 0)}</td><td /><td className="r">{formatMoney(staffRows.reduce((n, r) => n + (r.byMethod.cash ?? 0), 0))}</td><td className="r">{formatMoney(staffRows.reduce((n, r) => n + (r.byMethod.paynow ?? 0), 0))}</td><td className="r">{formatMoney(staffRows.reduce((n, r) => n + (r.byMethod.card ?? 0), 0))}</td><td className="r">{formatMoney(staffRows.reduce((n, r) => n + (r.byMethod.credit ?? 0), 0))}</td><td /><td /><td /><td className="r"><b>{formatMoney(staffRows.reduce((n, r) => n + r.netCents, 0))}</b></td></tr>
+                </tbody>
+              </table>
+            </div>
+          )}
+        </div>
+      )}
       {tab === "credit" && (
         <>
           {credit === null ? <p className="muted">Loading credit…</p> : (

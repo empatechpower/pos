@@ -1,6 +1,7 @@
 import type { Cents } from "./money.js";
 import type { BusinessConfig } from "./config.js";
 import { confirmedPaid, orderTotals, type OrderState } from "./events.js";
+import { staffDiscountCents } from "./discounts.js";
 
 /** Singapore day and hour of a timestamp. Reports are read in the outlet's own time. */
 const TZ = "Asia/Singapore";
@@ -117,4 +118,58 @@ export function commissionOf(order: { commission?: { cents: number } }, totalCen
   if (!channel?.commission) return null;
   if (order.commission) return { cents: order.commission.cents, source: "actual" };
   return { cents: Math.round((totalCents * channel.commission.ratePct) / 100), source: "contract" };
+}
+
+/** What one person did at the till in the period: what they took, refunded (as the approver), discounted and voided. */
+export interface StaffRow {
+  name: string;
+  /** Payments taken, and the money in them, in total and by way of paying. */
+  payments: number;
+  takenCents: Cents;
+  byMethod: Record<string, Cents>;
+  /** Orders they took a payment on. */
+  orders: number;
+  /** Refunds they approved. */
+  refunds: number;
+  refundedCents: Cents;
+  /** Discounts they gave. */
+  discounts: number;
+  discountCents: Cents;
+  /** Whole orders voided on their approval. */
+  voids: number;
+  voidedCents: Cents;
+  /** Taken less refunded. */
+  netCents: Cents;
+  averageCents: Cents;
+}
+
+/**
+ * Sales by person. A payment belongs to whoever took it (the name stamped on it; for older payments the owner of the shift it was taken in, when `shiftStaff`
+ * knows it; else "Not recorded"). Refunds and voids belong to the manager who approved them, discounts to whoever gave them. Pure, integer cents.
+ */
+export function staffSales(all: readonly OrderState[], config: BusinessConfig, shiftStaff: (shiftId: string) => string | undefined = () => undefined): StaffRow[] {
+  const rows = new Map<string, StaffRow>();
+  const row = (name: string): StaffRow => {
+    let r = rows.get(name);
+    if (!r) rows.set(name, (r = { name, payments: 0, takenCents: 0, byMethod: {}, orders: 0, refunds: 0, refundedCents: 0, discounts: 0, discountCents: 0, voids: 0, voidedCents: 0, netCents: 0, averageCents: 0 }));
+    return r;
+  };
+  for (const o of all) {
+    if (!o.lines.some((l) => l.qty > 0)) continue;
+    const paidBy = new Set<string>();
+    for (const p of o.payments) {
+      if (!p.confirmed || p.paymentId.startsWith("refund:")) continue;
+      const r = row(p.byName ?? (p.shiftId ? shiftStaff(p.shiftId) : undefined) ?? "Not recorded");
+      r.payments++;
+      r.takenCents += p.amountCents;
+      r.byMethod[p.method] = (r.byMethod[p.method] ?? 0) + p.amountCents;
+      paidBy.add(r.name);
+    }
+    for (const n of paidBy) row(n).orders++;
+    for (const f of o.refunds ?? []) { const r = row(f.approvedByName || "Not recorded"); r.refunds++; r.refundedCents += f.amountCents; }
+    for (const d of o.discounts ?? []) { const r = row(d.byName || "Not recorded"); r.discounts++; r.discountCents += staffDiscountCents(o.lines, [d]).totalCents; }
+    if (o.voided) { const r = row(o.voided.approvedByName || "Not recorded"); r.voids++; r.voidedCents += orderTotals(o, config).total; }
+  }
+  for (const r of rows.values()) { r.netCents = r.takenCents - r.refundedCents; r.averageCents = r.orders ? Math.round(r.takenCents / r.orders) : 0; }
+  return [...rows.values()].sort((a, b) => b.takenCents - a.takenCents || a.name.localeCompare(b.name));
 }
