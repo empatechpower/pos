@@ -1,3 +1,4 @@
+import { isTraining } from "./training";
 import type { BusinessConfig, Catalog } from "@pos/core";
 import { deviceHeader, getDeviceState, markDeviceRejected, needsEnrollment, refreshDeviceMode } from "./device";
 import { getMeta, ingestRemote, markSynced, setMeta, unsynced } from "./db";
@@ -65,6 +66,7 @@ export async function syncNow(): Promise<void> {
     return;
   }
   if (needsEnrollment()) return; // nothing to say to the server until this device is enrolled
+  if (isTraining()) return; // practice mode never talks to the server
   running = true;
   set({ syncing: true });
   try {
@@ -123,7 +125,7 @@ export function startSync(): () => void {
       window.clearTimeout(retry);
       retry = window.setTimeout(() => void connect(), ms);
     };
-    if (needsEnrollment()) return again(5000);
+    if (needsEnrollment() || isTraining()) return again(5000);
     try {
       const res = await fetch("/api/stream/ticket", { method: "POST", headers: deviceHeader() });
       if (res.status === 401) markDeviceRejected();

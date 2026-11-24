@@ -108,9 +108,13 @@ describe("shifts, floats and drawers", () => {
   it("closing counts the drawer against what it should hold, keeps the difference, and frees the drawer", async () => {
     expect((await call(`/api/shifts/${c1.id}/close`, { bearer: tok.C1, body: {} })).json.error).toBe("counted_cash_required");
     const exp = (c1 as any).expected as number;
-    const close = await call(`/api/shifts/${c1.id}/close`, { bearer: tok.C1, body: { countedCents: exp - 200, note: "Gave a wrong change" } });
+    // a difference needs a manager's PIN (the default rule): none, a wrong one, then the right one
+    const short = { countedCents: exp - 200, note: "Gave a wrong change" };
+    expect((await call(`/api/shifts/${c1.id}/close`, { bearer: tok.C1, body: short })).json.error).toBe("manager_approval_needed");
+    expect((await call(`/api/shifts/${c1.id}/close`, { bearer: tok.C1, body: { ...short, approverCode: "M1", approverPin: "000000" } })).json.error).toBe("approval_refused");
+    const close = await call(`/api/shifts/${c1.id}/close`, { bearer: tok.C1, body: { ...short, approverCode: "M1", approverPin: "222222" } });
     expect(close.status).toBe(200);
-    expect(close.json.report.shift).toMatchObject({ expectedCents: exp, countedCents: exp - 200, varianceCents: -200, closedByName: "Cat Cashier" });
+    expect(close.json.report.shift).toMatchObject({ expectedCents: exp, countedCents: exp - 200, varianceCents: -200, closedByName: "Cat Cashier", approvedByName: "Max Manager" });
     expect((await call(`/api/shifts/${c1.id}/close`, { bearer: tok.C1, body: { countedCents: exp } })).json.error).toBe("already_closed");
     expect((await call(`/api/shifts/${c1.id}/cash`, { bearer: tok.C1, body: { kind: "in", amountCents: 1, reason: "too late" } })).json.error).toBe("shift_closed");
     // drawer 1 is free again: the manager takes it
@@ -123,9 +127,81 @@ describe("shifts, floats and drawers", () => {
   });
 
   it("whether a shift is required before selling is the shop's setting", async () => {
-    expect((await call("/api/settings/shifts", { bearer: tok.C1 })).json).toEqual({ required: false });
+    expect((await call("/api/settings/shifts", { bearer: tok.C1 })).json).toEqual({ required: false, variancePolicy: "managerpin", dayEnd: false, lockMinutes: 3 });
     expect((await call("/api/settings/shifts", { bearer: tok.C1, method: "PUT", body: { required: true } })).status).toBe(403);
-    expect((await call("/api/settings/shifts", { bearer: tok.M1, method: "PUT", body: { required: true } })).json).toEqual({ required: true });
-    expect((await call("/api/settings/shifts", { bearer: tok.C1 })).json).toEqual({ required: true });
+    expect((await call("/api/settings/shifts", { bearer: tok.M1, method: "PUT", body: { required: true } })).json).toMatchObject({ required: true, variancePolicy: "managerpin" });
+    expect((await call("/api/settings/shifts", { bearer: tok.M1, method: "PUT", body: { lockMinutes: 999 } })).status).toBe(400);
+    expect((await call("/api/settings/shifts", { bearer: tok.C1 })).json.required).toBe(true);
+    await call("/api/settings/shifts", { bearer: tok.M1, method: "PUT", body: { required: false } });
+  });
+
+  const putSettings = (body: object) => call("/api/settings/shifts", { bearer: tok.M1, method: "PUT", body });
+  const open = async (who: string, float = 1000, denominations?: object) => (await call("/api/shifts/open", { bearer: tok[who], body: { openingFloatCents: float, ...(denominations ? { denominations } : {}) } })).json.shift;
+
+  it("the shop decides what a closing difference does: close anyway, or blocked until a manager closes it", async () => {
+    const a = await open("C1");
+    expect((await call(`/api/shifts/${a.id}/close`, { bearer: tok.C1, body: { countedCents: 800 } })).json.error).toBe("manager_approval_needed");
+    await putSettings({ variancePolicy: "proceed" });
+    const closed = await call(`/api/shifts/${a.id}/close`, { bearer: tok.C1, body: { countedCents: 800 } });
+    expect(closed.status).toBe(200);
+    expect(closed.json.report.shift).toMatchObject({ varianceCents: -200, approvedByName: null });
+    await putSettings({ variancePolicy: "blocked" });
+    const b = await open("C1");
+    expect((await call(`/api/shifts/${b.id}/close`, { bearer: tok.C1, body: { countedCents: 900 } })).json).toMatchObject({ error: "variance_blocked", varianceCents: -100 });
+    expect((await call(`/api/shifts/${b.id}/close`, { bearer: tok.C1, body: { countedCents: 1000 } })).status).toBe(200); // balanced: nothing to block
+    const c = await open("C1");
+    const byManager = await call(`/api/shifts/${c.id}/close`, { bearer: tok.M1, body: { countedCents: 700 } });
+    expect(byManager.status).toBe(200);
+    expect(byManager.json.report.shift).toMatchObject({ approvedByName: "Max Manager", varianceCents: -300 });
+    await putSettings({ variancePolicy: "managerpin" });
+  });
+
+  it("the count by note and coin is kept with the shift, at opening and at closing", async () => {
+    const a = await open("C1", 2500, { "1000": 2, "500": 1, "bad": 3, "100": -1 });
+    expect((await db.query("SELECT opening_denoms FROM shifts WHERE id=$1", [a.id])).rows[0].opening_denoms).toEqual({ "500": 1, "1000": 2 });
+    const closed = await call(`/api/shifts/${a.id}/close`, { bearer: tok.C1, body: { countedCents: 2500, denominations: { "1000": 2, "500": 1 } } });
+    expect(closed.status).toBe(200);
+    expect((await db.query("SELECT closing_denoms FROM shifts WHERE id=$1", [a.id])).rows[0].closing_denoms).toEqual({ "500": 1, "1000": 2 });
+  });
+
+  it("a shift cannot close while an order is still open unless each one is answered for", async () => {
+    const o = await order(2); // an order nobody has paid
+    const a = await open("C1");
+    const blocked = await call(`/api/shifts/${a.id}/close`, { bearer: tok.C1, body: { countedCents: 1000 } });
+    expect(blocked.status).toBe(409);
+    expect(blocked.json.error).toBe("open_orders_unanswered");
+    expect(blocked.json.orders.map((x: any) => x.orderId)).toContain(o.orderId);
+    expect((await call(`/api/shifts/${a.id}/open-orders`, { bearer: tok.C1 })).json.orders.map((x: any) => x.orderId)).toContain(o.orderId);
+    const ok = await call(`/api/shifts/${a.id}/close`, { bearer: tok.C1, body: { countedCents: 1000, dispositions: blocked.json.orders.map((x: any) => ({ orderId: x.orderId, decision: "left_open" })) } });
+    expect(ok.status).toBe(200);
+    expect(ok.json.report.shift.dispositions.map((d: any) => d.orderId)).toContain(o.orderId);
+    expect(ok.json.report.shift.dispositions[0]).toMatchObject({ decision: "left_open", by: "Cat Cashier" });
+    expect((await db.query("SELECT 1 FROM audit_log WHERE action='shift.order_left_open'")).rowCount).toBeGreaterThan(0);
+  });
+
+  it("a lock is written to the audit log with who it was and whether the till did it by itself", async () => {
+    expect((await call("/api/auth/lock", { bearer: tok.C1, body: { auto: true } })).json).toEqual({ ok: true });
+    expect((await call("/api/auth/lock", { bearer: tok.C1, body: {} })).status).toBe(200);
+    expect((await db.query("SELECT action FROM audit_log WHERE action IN ('auth.lock_auto','auth.lock') ORDER BY id")).rows.map((r) => r.action)).toEqual(["auth.lock_auto", "auth.lock"]);
+    expect((await call("/api/auth/lock", { body: {} })).status).toBe(401);
+  });
+
+  it("the formal Day-End close is a setting; it needs every shift closed and records the day", async () => {
+    expect((await call("/api/shifts/day-end", { bearer: tok.M1, body: {} })).json.error).toBe("day_end_not_switched_on");
+    await putSettings({ dayEnd: true });
+    const a = await open("C1");
+    expect((await call("/api/shifts/day-end", { bearer: tok.M1, body: {} })).json).toMatchObject({ error: "shifts_still_open" });
+    expect((await call("/api/shifts/day-end", { bearer: tok.C1, body: {} })).status).toBe(403);
+    // a manager closes every shift still open, leaving unpaid orders open
+    for (const sh of (await call("/api/shifts", { bearer: tok.M1 })).json.shifts.filter((x: any) => !x.closedAt)) {
+      expect((await call(`/api/shifts/${sh.id}/close`, { bearer: tok.M1, body: { countedCents: sh.openingFloatCents + 0, leaveAllOpen: true } })).status).toBe(200);
+    }
+    void a;
+    const end = await call("/api/shifts/day-end", { bearer: tok.M1, body: {} });
+    expect(end.status).toBe(200);
+    expect(end.json.dayEnd).toMatchObject({ closedBy: "Max Manager" });
+    expect(end.json.dayEnd.shifts).toBeGreaterThan(0);
+    expect((await call("/api/shifts", { bearer: tok.M1 })).json.dayEnds[0]).toMatchObject({ closedBy: "Max Manager" });
+    await putSettings({ dayEnd: false });
   });
 });

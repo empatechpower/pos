@@ -21,6 +21,9 @@ import { PricebookEditor } from "./views/PricebookEditor";
 import { TelegramSignIn } from "./views/TelegramSignIn";
 import { Kiosk } from "./views/Kiosk";
 import { onRouteChange, routeParts } from "./nav";
+import "./orderViews";
+import { isTraining } from "./training";
+import { lockNow, useIdleLock } from "./lock";
 import { Kitchen } from "./views/Kitchen";
 import { Pair } from "./views/Pair";
 import { Pos } from "./views/Pos";
@@ -69,6 +72,7 @@ export function App() {
   const { config, catalog } = useReference();
   const status = useSyncStatus();
   const pending = usePending();
+  useIdleLock();
 
   useEffect(() => {
     const onHash = () => setRoute(routeFromHash());
@@ -101,7 +105,7 @@ export function App() {
 
   const connected = status.online && status.reachable;
   return (
-    <div className="shell" style={staff ? theme.style : undefined}>
+    <div className={`shell ${route === "pos" ? "till-route" : ""}`} style={staff ? theme.style : undefined}>
       <header className="top">
         <div className="brand">
           <b>{config?.name ?? "POS"}</b>
@@ -128,6 +132,7 @@ export function App() {
             </label>
           )}
           <a href="/login" className="staffbtn" title={staff ? "Signed in" : "Sign in"}>{staff ? `${staff.name} · ${staff.role}` : "Sign in"}</a>
+          {staff && <button className="secondary sm" title="Lock this till. Your shift and the order on screen stay as they are." onClick={() => void lockNow(false)}>Lock</button>}
           <label className="dev" title="Each device has its own letter so queue numbers never clash offline">
             Device
             <select
@@ -143,7 +148,7 @@ export function App() {
             </select>
           </label>
           <button className={`pill ${connected ? "ok" : "off"}`} onClick={() => void syncNow()} title={status.error ? `Last sync problem: ${status.error}. Tap to try again.` : "Tap to sync now"}>
-            <i /> {connected ? "Online" : "Offline"}
+            <i /> {isTraining() ? "Practice" : connected ? "Online" : "Offline"}
             {pending > 0 ? ` · ${pending} to sync` : ""}
           </button>
         </div>

@@ -2,6 +2,8 @@ import { useEffect, useState } from "react";
 import { commissionOf, confirmedPaid, formatMoney, optionLines, orderTotals, type BusinessConfig, type Catalog, type OrderState } from "@pos/core";
 import { staffFetch } from "../auth";
 import { RefundPanel } from "./RefundPanel";
+import { OrderTrail } from "./OrderTrail";
+import { logView } from "../orderViews";
 
 interface ShopInfo {
   name: string;
@@ -28,6 +30,7 @@ export function OrderDetails({ order: o, config }: { order: OrderState; config: 
   const [amt, setAmt] = useState("");
   const [note, setNote] = useState("");
   const [msg, setMsg] = useState("");
+  useEffect(() => { logView(o.orderId, "Order details"); }, [o.orderId]);
   useEffect(() => {
     let alive = true;
     void loadInfo().then((i) => alive && setInfo(i));
@@ -69,6 +72,7 @@ export function OrderDetails({ order: o, config }: { order: OrderState; config: 
         {row("Storefront", o.source === "online" ? "Scan-to-Order" : "Counter")}
         {row("Channel", o.channelName)}
         {row("Table No.", o.spot)}
+        {row("Guests", o.pax ? String(o.pax) : undefined)}
         {row("Order note", o.note)}
         {row("Customer", [o.customerName, o.customerPhone].filter(Boolean).join(" · ") || undefined)}
       </div>
@@ -110,6 +114,7 @@ export function OrderDetails({ order: o, config }: { order: OrderState; config: 
         {o.voided ? <div className="od-row"><span>Status</span><span>Voided</span></div> : owing > 0 ? <div className="od-row od-due"><span>Balance due</span><span>{formatMoney(owing)}</span></div> : <div className="od-row"><span>Status</span><span>Paid</span></div>}
       </div>
       <RefundPanel order={o} />
+      <OrderTrail orderId={o.orderId} />
     </div>
   );
 }

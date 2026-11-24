@@ -26,3 +26,4 @@ export * from "./tab.js";
 export * from "./tabEngine.js";
 export * from "./print/raster.js";
 export * from "./reports.js";
+export * from "./split.js";

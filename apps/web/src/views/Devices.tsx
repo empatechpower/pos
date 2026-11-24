@@ -2,7 +2,9 @@ import { DisplayLink } from "./DisplayLink";
 import { PaynowPanel } from "./PaynowPanel";
 import { UnassignedPanel } from "./UnassignedPanel";
 import { ShiftsPanel } from "./ShiftsPanel";
+import { FloorPanel } from "./FloorPanel";
 import { DiscountPolicyPanel } from "./DiscountPolicyPanel";
+import { TrainingPanel } from "./TrainingPanel";
 import { useEffect, useState } from "react";
 import { authHeader, useStaff } from "../auth";
 
@@ -106,7 +108,9 @@ export function Devices() {
       ))}
       <PaynowPanel />
       <ShiftsPanel />
+      <FloorPanel />
       <DiscountPolicyPanel />
+      <TrainingPanel />
       <UnassignedPanel />
     </div>
   );

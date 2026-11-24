@@ -1,5 +1,6 @@
 import { currentShiftId } from "./shift";
-import { openDB, type DBSchema, type IDBPDatabase } from "idb";
+import { deleteDB, openDB, type DBSchema, type IDBPDatabase } from "idb";
+import { isTraining, practiceResetRequested } from "./training";
 import { newId, type OrderEvent, type OrderEventBody } from "@pos/core";
 
 /**
@@ -15,14 +16,18 @@ interface PosDB extends DBSchema {
 }
 
 let dbPromise: Promise<IDBPDatabase<PosDB>> | null = null;
+// Practice mode has a store of its own: what is practised never mixes with real orders.
 const db = () =>
-  (dbPromise ??= openDB<PosDB>("pos", 1, {
-    upgrade(d) {
-      const events = d.createObjectStore("events", { keyPath: "id" });
-      events.createIndex("bySynced", "synced");
-      d.createObjectStore("meta");
-    },
-  }));
+  (dbPromise ??= (async () => {
+    if (practiceResetRequested()) await deleteDB("pos-training");
+    return openDB<PosDB>(isTraining() ? "pos-training" : "pos", 1, {
+      upgrade(d) {
+        const events = d.createObjectStore("events", { keyPath: "id" });
+        events.createIndex("bySynced", "synced");
+        d.createObjectStore("meta");
+      },
+    });
+  })());
 
 // ---- identity ---------------------------------------------------------------------------
 
@@ -37,7 +42,7 @@ export const deviceId = (): string => {
   }
   return id;
 };
-export const getDeviceCode = (): string => localStorage.getItem(LS_CODE) ?? "A";
+export const getDeviceCode = (): string => (isTraining() ? "T" : localStorage.getItem(LS_CODE) ?? "A");
 export const setDeviceCode = (c: string) => localStorage.setItem(LS_CODE, c.toUpperCase().slice(0, 2));
 
 // ---- change notification ----------------------------------------------------------------
@@ -57,6 +62,7 @@ export async function allEvents(): Promise<OrderEvent[]> {
 }
 
 export async function pendingCount(): Promise<number> {
+  if (isTraining()) return 0; // practice orders are never waiting to be sent
   return (await db()).countFromIndex("events", "bySynced", 0);
 }
 

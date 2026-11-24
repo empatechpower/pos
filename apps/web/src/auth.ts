@@ -1,5 +1,6 @@
 import { useSyncExternalStore } from "react";
 import { deviceHeader, markDeviceRejected } from "./device";
+import { isTraining } from "./training";
 
 /** Staff sign-in. The token lives on this device; the server decides what it may do. */
 export interface StaffInfo {
@@ -82,6 +83,8 @@ export async function signOut() {
  * plain-words reason when it could not be made or the session/device is no longer good.
  */
 export async function staffFetch(path: string, init: { method?: string; body?: object } = {}): Promise<{ res: Response } | { problem: string }> {
+  // In practice mode nothing is sent to the shop's systems: reading is fine, changing anything is not.
+  if (isTraining() && (init.method ?? (init.body ? "POST" : "GET")) !== "GET") return { problem: "Training mode: this is not sent to the shop's systems. Leave training mode to do it for real." };
   let res: Response;
   try {
     res = await fetch(path, {

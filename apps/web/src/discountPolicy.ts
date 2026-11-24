@@ -1,4 +1,5 @@
 import { staffFetch } from "./auth";
+import { isTraining } from "./training";
 
 /** What a cashier may do alone before a manager has to approve. Kept so the till still knows it offline. */
 export interface DiscountPolicy { cashierMaxPercent: number; cashierMaxAmountCents: number; overrideNeedsManager: boolean }
@@ -23,6 +24,8 @@ const ERRORS: Record<string, string> = {
 };
 /** Check a manager's code and PIN with the server (needs a connection). */
 export async function askApproval(code: string, pin: string, purpose: string): Promise<{ ok: true; approver: Approver } | { ok: false; error: string }> {
+  // Practice: any code and PIN stand in for a manager, so the steps can be rehearsed; nothing is checked or recorded.
+  if (isTraining()) return code.trim() && pin ? { ok: true, approver: { id: "practice", name: "Manager (practice)" } } : { ok: false, error: "Enter a manager code and PIN to practise." };
   const r = await staffFetch("/api/approvals", { method: "POST", body: { approverCode: code.trim(), approverPin: pin, purpose } });
   if (!("res" in r)) return { ok: false, error: r.problem };
   const j = (await r.res.json().catch(() => ({}))) as { approver?: Approver; error?: string };

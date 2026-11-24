@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { confirmedPaid, formatMoney, hourly, isFullyPaid, optionLines, orderTotals, productMix, reportWeekday, summarize, type BusinessConfig, type Catalog, type OrderState } from "@pos/core";
 import { staffFetch } from "../auth";
+import { logView } from "../orderViews";
 import { useOrders } from "../hooks";
 
 const TZ = "Asia/Singapore";
@@ -97,7 +98,7 @@ export function Reports({ config, catalog }: { config: BusinessConfig; catalog?:
   const spenders = pool.filter((m) => m.spentCents > 0).length;
   const extra = pool.filter((m) => m.topupsCents !== 0 || m.adjustmentsCents !== 0);
 
-  const open = (d: Detail) => setStack((s) => [...s, d]);
+  const open = (d: Detail) => { if (d.kind === "order") logView(d.id, "Reports"); setStack((s) => [...s, d]); };
   const back = () => setStack((s) => s.slice(0, -1));
   const row = (r: Row) => (
     <button key={r.o.orderId} className="rp-row" onClick={() => open({ kind: "order", id: r.o.orderId })}>

@@ -1,6 +1,7 @@
 import {
   encodeEpl, encodeEscPos, encodeEscPosRaster, encodeZpl, isFullyPaid, itemLabel, kitchenCuts, kitchenTicket, noteSlip, receipt, splitComboLine, visibleToKitchen, withDrawer,
   type BusinessConfig, type Catalog, type CutMode, type Doc, type Label, type OrderLine, type OrderState, type PrintContext, type PrinterLanguage,
+  lineFired,
 } from "@pos/core";
 import { createHash } from "node:crypto";
 import type pg from "pg";
@@ -203,7 +204,8 @@ export class PrintStore {
           if (!targets.length) continue;
           const sent = new Set((await client.query("SELECT line_id FROM printed_lines WHERE merchant_id=$1 AND order_id=$2 AND doc_type=$3", [this.merchantId, order.orderId, docType])).rows.map((r) => r.line_id as string));
           // A combo prints as its parts, each to the printer for that kind of item; "sent" is tracked on the combo's own line id.
-          const fresh = order.lines.filter((l) => l.qty > 0 && !sent.has(l.lineId)).flatMap(splitComboLine);
+          // Lines moved over from a merged table were already sent; a course not yet fired waits.
+          const fresh = order.lines.filter((l) => l.qty > 0 && !sent.has(l.lineId) && !l.carried && lineFired(order, l)).flatMap(splitComboLine);
           // The order's note rides on every kitchen ticket. If it changes after the order went out, the kitchen gets a small "note updated" slip once.
           const hadNote = [...sent].some((x) => x.startsWith("note:"));
           const noteMark = docType !== "kitchen" ? null : order.note ? `note:${createHash("sha1").update(order.note).digest("hex").slice(0, 10)}` : hadNote ? "note:cleared" : null;

@@ -1,6 +1,8 @@
 import { useState } from "react";
 import { formatMoney, newId, type OrderState } from "@pos/core";
 import { staffFetch, useStaff } from "../auth";
+import { isTraining } from "../training";
+import { logView } from "../orderViews";
 
 const METHOD: Record<string, string> = { cash: "Cash", credit: "Member credit", card: "Card", paynow: "PayNow" };
 const REASONS = ["Wrong item", "Customer changed their mind", "Food or drink quality", "Cashier mistake", "Customer left", "Other"];
@@ -34,7 +36,7 @@ export function RefundPanel({ order: o, onDone }: { order: OrderState; onDone?: 
   const [pin, setPin] = useState("");
   const [msg, setMsg] = useState("");
   const [busy, setBusy] = useState(false);
-  if (!staff) return null;
+  if (!staff || isTraining()) return null;
   const needsManager = staff.role === "cashier";
   const paid = o.payments.filter((p) => p.confirmed && p.amountCents > 0).map((p) => ({ ...p, left: p.amountCents - (o.refunds ?? []).filter((r) => r.paymentId === p.paymentId).reduce((n, r) => n + r.amountCents, 0) }));
   const refundable = paid.filter((p) => p.left > 0);
@@ -63,7 +65,7 @@ export function RefundPanel({ order: o, onDone }: { order: OrderState; onDone?: 
     <div className="od-card">
       {(o.refunds ?? []).map((r) => <div className="od-row" key={r.refundId}><span>Refunded {METHOD[r.method] ?? r.method} · {r.reason} · {r.approvedByName}</span><span>-{formatMoney(r.amountCents)}</span></div>)}
       {msg && <div className="flash" role="status">{msg}</div>}
-      {!open ? <button className="secondary sm" onClick={() => { setOpen(true); setMsg(""); }}>Refund or void…</button> : (
+      {!open ? <button className="secondary sm" onClick={() => { setOpen(true); setMsg(""); logView(o.orderId, "Refund panel"); }}>Refund or void…</button> : (
         <div className="editor">
           {refundable.length > 0 && (
             <div className="row">

@@ -5,6 +5,7 @@ import { useOrders } from "../hooks";
 import { RefundPanel } from "./RefundPanel";
 import { NoteSheet } from "./NoteSheet";
 import { record } from "../db";
+import { logView } from "../orderViews";
 
 const timeOf = (ms: number) => new Date(ms).toLocaleTimeString("en-GB", { hour: "2-digit", minute: "2-digit", timeZone: "Asia/Singapore" });
 
@@ -18,6 +19,7 @@ export function Orders({ config }: { config: BusinessConfig }) {
 
   async function reprint(orderId: string, docType: "receipt" | "kitchen") {
     setMsg(null);
+    logView(orderId, "Recent orders");
     const r = await staffFetch("/api/print/reprint", { body: { orderId, docType } });
     if ("problem" in r) return setMsg(r.problem);
     if (r.res.ok) return setMsg(docType === "receipt" ? "Receipt sent to the printer." : "Kitchen ticket sent again.");
@@ -49,7 +51,7 @@ export function Orders({ config }: { config: BusinessConfig }) {
             <div className="tabr">
               <button className="secondary sm" disabled={!staff} onClick={() => void reprint(o.orderId, "receipt")}>Receipt</button>
               <button className="secondary sm" disabled={!staff} onClick={() => void reprint(o.orderId, "kitchen")}>Kitchen ticket</button>
-              <button className="secondary sm" onClick={() => setNoting(o.orderId)}>{o.note ? "Edit note" : "Note"}</button>
+              <button className="secondary sm" onClick={() => { logView(o.orderId, "Recent orders"); setNoting(o.orderId); }}>{o.note ? "Edit note" : "Note"}</button>
             </div>
           </div>
           {o.note && <div className="muted" style={{ padding: "0 12px" }}><b>Note:</b> {o.note}</div>}

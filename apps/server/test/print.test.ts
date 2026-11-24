@@ -199,6 +199,24 @@ describe("restaurant tabs", () => {
     expect(texts.some((t) => t.includes("Nasi Lemak") && !t.includes("ADD-ON"))).toBe(true);
   });
 
+  it("a later course waits until it is fired, and a line carried over from a merged table is not printed again", async () => {
+    const o = orderEvents([{ id: "nasi-lemak", name: "Nasi Lemak", qty: 1 }], { queue: "A230" });
+    await push(o.events, baseR);
+    const kitchen = async () => (await jobsFor(o.orderId)).filter((j) => j.doc_type === "kitchen");
+    expect(await kitchen()).toHaveLength(1);
+    await push([o.mk({ type: "ItemAdded", lineId: "c-main", productId: "teh", name: "Pandan Cake", unitCents: 400, qty: 1, course: 2 })], baseR);
+    expect(await kitchen()).toHaveLength(1); // the course is held
+    await push([o.mk({ type: "ItemAdded", lineId: "c-moved", productId: "teh", name: "Moved Tea", unitCents: 240, qty: 1, carried: true })], baseR);
+    expect(await kitchen()).toHaveLength(1); // carried over: already sent at the other table
+    await push([o.mk({ type: "CourseFired", course: 2 })], baseR);
+    expect(await kitchen()).toHaveLength(2);
+    const { got, send } = capture();
+    await agent(send);
+    const texts = got.map((g) => g.text);
+    expect(texts.some((t) => t.includes("Pandan Cake"))).toBe(true);
+    expect(texts.some((t) => t.includes("Moved Tea"))).toBe(false);
+  });
+
   it("the order's note is on the kitchen ticket, and a note changed after sending gets one 'note updated' slip", async () => {
     const o = orderEvents([{ id: "nasi-lemak", name: "Nasi Lemak", qty: 1 }], { queue: "A210" });
     await push([...o.events, o.mk({ type: "OrderNoted", note: "Allergy: nuts" })], baseR);

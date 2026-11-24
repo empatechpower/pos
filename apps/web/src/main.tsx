@@ -2,6 +2,7 @@ import { StrictMode } from "react";
 import { createRoot } from "react-dom/client";
 import { registerSW } from "virtual:pwa-register";
 import { App } from "./App";
+import { TrainingBanner } from "./views/TrainingBanner";
 import { adoptLegacyHash, installLinkHandler } from "./nav";
 import { markUpdateReady, setUpdater } from "./pwaUpdate";
 import "./styles.css";
@@ -29,5 +30,6 @@ setUpdater(updateSW);
 createRoot(document.getElementById("root")!).render(
   <StrictMode>
     <App />
+    <TrainingBanner />
   </StrictMode>,
 );
