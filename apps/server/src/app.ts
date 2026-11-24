@@ -20,6 +20,7 @@ import { AmountNotAllowed, issueQr, loadPaynow, savePaynow } from "./paynow.js";
 import { applyOption, loadKiosk, OPTION_KEYS, optionsOf, saveKiosk, saveSetting } from "./settings.js";
 import { openShiftOf, registerShifts } from "./shifts.js";
 import { registerFloor } from "./floor.js";
+import { cleanLayout, registerTill } from "./tillSettings.js";
 import { registerDiscountPolicy } from "./discountPolicy.js";
 import { registerOrderTrail } from "./orderTrail.js";
 import { refundYeahpay, sendMail, type Integrations } from "./integrations.js";
@@ -314,10 +315,20 @@ export async function buildApp({ config, store, db, catalog, catalogAdmin, print
 
   // Screen choices that belong to the person, not the till: which side the menu sits on, and how big the text is.
   const PREF_VALUES: Record<string, string[]> = { menuSide: ["left", "right"], textSize: ["compact", "standard", "large", "xl"] };
-  const cleanPrefs = (v: unknown) => Object.fromEntries(Object.entries((v ?? {}) as Record<string, unknown>).filter(([k, x]) => PREF_VALUES[k]?.includes(String(x))));
+  // A person's own menu layout rides along with their other choices (null clears it, so they see the shop's again).
+  const cleanPrefs = (v: unknown) => {
+    const o = (v ?? {}) as Record<string, unknown>;
+    const out: Record<string, unknown> = Object.fromEntries(Object.entries(o).filter(([k, x]) => PREF_VALUES[k]?.includes(String(x))));
+    if (o.layout) { const l = cleanLayout(o.layout); if (l) out.layout = l; }
+    return out;
+  };
   app.get("/api/auth/prefs", { preHandler: needs("wallet.read") }, async (req) => ({ prefs: db ? cleanPrefs((await db.query("SELECT prefs FROM staff WHERE id=$1", [req.staff!.id])).rows[0]?.prefs) : {} }));
   app.put<{ Body: Record<string, unknown> }>("/api/auth/prefs", { preHandler: needs("wallet.read") }, async (req, reply) => {
     if (!db) return reply.code(503).send({ error: "no_database" });
+    if ((req.body as { layout?: unknown } | undefined)?.layout === null) {
+      const row = (await db.query("UPDATE staff SET prefs = COALESCE(prefs, '{}'::jsonb) - 'layout' WHERE id=$1 RETURNING prefs", [req.staff!.id])).rows[0];
+      return { prefs: cleanPrefs(row?.prefs) };
+    }
     const mine = cleanPrefs(req.body);
     if (!Object.keys(mine).length) return reply.code(400).send({ error: "nothing_to_save" });
     const row = (await db.query("UPDATE staff SET prefs = COALESCE(prefs, '{}'::jsonb) || $2::jsonb WHERE id=$1 RETURNING prefs", [req.staff!.id, JSON.stringify(mine)])).rows[0];
@@ -842,6 +853,7 @@ export async function buildApp({ config, store, db, catalog, catalogAdmin, print
   registerStock(app, { db, merchantId, needs, outletIds: async () => (await listOutlets(db, merchantId)).map((o) => o.id), defaultOutlet: config.outletName });
   registerShifts(app, { db, merchantId, store, config, needs });
   registerFloor(app, { db, merchantId, needs });
+  registerTill(app, { db, merchantId, needs });
   registerDiscountPolicy(app, { db, merchantId, needs });
   registerOrderTrail(app, { db, merchantId, store, needs });
   registerShop(app, { db, config, store, catalog, catalogAdmin, brand: new BrandStore(db, merchantId), ingest, members, needs, integrations, now, tabs, alertMailbox, alertWatchMs });

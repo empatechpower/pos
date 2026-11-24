@@ -4,6 +4,8 @@ import { currentStaff, signIn, signOut, useStaff } from "../auth";
 import { useShift } from "../shift";
 import { takeAfterTraining } from "../training";
 import { takeLockNote } from "../lock";
+import { loadTillSettings, tillSettings } from "../till/tillSettings";
+import { appVersion } from "../pwaUpdate";
 import "../till/till.css";
 
 /** Staff who have signed in on this device, newest first. Kept so they can tap their name and only type a PIN. */
@@ -59,7 +61,10 @@ export function Login({ online, problem }: { online: boolean; problem?: string |
     if (r.ok) {
       const me = currentStaff();
       if (me) remember({ code: me.code, name: me.name, role: me.role });
-      go(takeAfterTraining() ? "/manager" : "/pos");
+      // Home (the Dashboard) after practice, and after every sign-in unless the shop switched it off.
+      const afterTraining = takeAfterTraining();
+      await loadTillSettings();
+      go(afterTraining || tillSettings().dashboard ? "/dashboard" : "/pos");
     } else {
       setMsg(r.reason === "locked" ? "Too many wrong PINs. This account is locked for a few minutes." : r.reason === "invalid" ? "Wrong name or PIN." : "Could not reach the server. Sign-in needs a connection.");
     }
@@ -112,6 +117,7 @@ export function Login({ online, problem }: { online: boolean; problem?: string |
           <button type="button" className="t-ghost" onClick={() => { const n = !kbd; setKbd(n); localStorage.setItem("pos.kbd", n ? "1" : "0"); }}>{kbd ? "⌨ Hide device keyboard" : "⌨ Use device keyboard"}</button>
         </div>
       </div>
+      <p className="t-muted signin-version">Version {appVersion()}</p>
     </form>
   );
 }

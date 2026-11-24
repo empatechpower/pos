@@ -4,7 +4,8 @@ import { registerSW } from "virtual:pwa-register";
 import { App } from "./App";
 import { TrainingBanner } from "./views/TrainingBanner";
 import { adoptLegacyHash, installLinkHandler } from "./nav";
-import { markUpdateReady, setUpdater } from "./pwaUpdate";
+import { checkForUpdate, markUpdateReady, setRegistration, setUpdater } from "./pwaUpdate";
+import { UpdateBar } from "./views/UpdateBar";
 import "./styles.css";
 
 adoptLegacyHash();
@@ -19,17 +20,24 @@ if (location.pathname === "/display" || location.pathname.startsWith("/display/"
 }
 installLinkHandler();
 const onKiosk = location.pathname === "/kiosk" || location.pathname.startsWith("/kiosk/");
+// The customer's own pages (shop, pair, display, queue) take a new version at once; the till's staff screens and the kiosk wait to be told.
+const staffScreen = !/^\/(shop|pair|display|queue|kiosk)(\/|$)/.test(location.pathname);
 const updateSW = registerSW({
   immediate: true,
-  // A new version waits here. Everywhere but the kiosk it is taken at once; the kiosk holds it for a quiet start screen.
-  onNeedRefresh() { if (onKiosk) markUpdateReady(); else void updateSW(true); },
-  // A kiosk is never reloaded by a visit, so it asks for a new version itself every ten minutes.
-  onRegisteredSW(_url, reg) { if (onKiosk && reg) window.setInterval(() => void reg.update().catch(() => undefined), 10 * 60_000); },
+  onNeedRefresh() { if (onKiosk || staffScreen) markUpdateReady(); else void updateSW(true); },
+  onRegisteredSW(_url, reg) {
+    if (!reg) return;
+    setRegistration(reg);
+    // A kiosk checks every ten minutes; a till every fifteen, and whenever it comes back to the foreground.
+    window.setInterval(() => void checkForUpdate(), (onKiosk ? 10 : 15) * 60_000);
+    document.addEventListener("visibilitychange", () => { if (document.visibilityState === "visible") void checkForUpdate(); });
+  },
 });
 setUpdater(updateSW);
 createRoot(document.getElementById("root")!).render(
   <StrictMode>
     <App />
     <TrainingBanner />
+    {staffScreen && !onKiosk && <UpdateBar />}
   </StrictMode>,
 );

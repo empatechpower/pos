@@ -14,6 +14,8 @@ import { Online } from "./views/Online";
 import { ErrorBoundary } from "./views/ErrorBoundary";
 import { Shop } from "./views/Shop";
 import { Orders } from "./views/Orders";
+import { Dashboard } from "./views/Dashboard";
+import { Settings } from "./views/Settings";
 import { Tabs } from "./views/Tabs";
 import { Printers } from "./views/Printers";
 import { Prices } from "./views/Prices";
@@ -54,10 +56,10 @@ function useStaffTheme(signedIn: boolean) {
   return { own, shop, setOwn, style };
 }
 
-type Route = "tabs" | "display" | "pos" | "kitchen" | "queue" | "credit" | "login" | "devices" | "prices" | "printers" | "orders" | "online" | "shop" | "kiosk" | "manager" | "tg" | "pricebook" | "pair";
+type Route = "dashboard" | "settings" | "tabs" | "display" | "pos" | "kitchen" | "queue" | "credit" | "login" | "devices" | "prices" | "printers" | "orders" | "online" | "shop" | "kiosk" | "manager" | "tg" | "pricebook" | "pair";
 const routeFromHash = (): Route => {
   const h = routeParts()[0] ?? "";
-  return h === "tabs" || h === "display" || h === "kitchen" || h === "queue" || h === "credit" || h === "login" || h === "devices" || h === "prices" || h === "printers" || h === "orders" || h === "online" || h === "shop" || h === "kiosk" || h === "manager" || h === "pos" || h === "tg" || h === "pricebook" || h === "pair" ? h : "manager";
+  return h === "dashboard" || h === "settings" || h === "tabs" || h === "display" || h === "kitchen" || h === "queue" || h === "credit" || h === "login" || h === "devices" || h === "prices" || h === "printers" || h === "orders" || h === "online" || h === "shop" || h === "kiosk" || h === "manager" || h === "pos" || h === "tg" || h === "pricebook" || h === "pair" ? h : "manager";
 };
 
 export function App() {
@@ -114,16 +116,19 @@ export function App() {
         <nav>
           {/* This version is for running the shop: orders, printing, members, menu and devices. The till (POS), Kitchen, Credit,
               Orders and Queue screens still exist at /pos, /kitchen, /credit, /orders and /queue; they are just not in the bar. */}
+          {staff && <a href="/dashboard" className={route === "dashboard" ? "on" : ""}>Home</a>}
+          {staff && <a href="/pos" className={route === "pos" ? "on" : ""}>Till</a>}
+          {staff && <a href="/orders" className={route === "orders" ? "on" : ""}>Orders</a>}
           {device.required && staff && <a href="/manager" className={route === "manager" ? "on" : ""}>Manager</a>}
           <a href="/online" className={route === "online" ? "on" : ""}>Online{newOnline > 0 ? <b className="dot">{newOnline}</b> : null}</a>
-          {staff && staff.role !== "cashier" && catalog && <a href="/printers" className={route === "printers" ? "on" : ""}>Printers{failedJobs > 0 ? <b className="dot">{failedJobs}</b> : null}</a>}
-          {staff && staff.role !== "cashier" && catalog && <a href="/prices" className={route === "prices" ? "on" : ""}>Prices</a>}
-          {device.required && staff && staff.role !== "cashier" && <a href="/devices" className={route === "devices" ? "on" : ""}>Devices</a>}
+          {/* Printers, Prices and Devices live under Settings > Menu & prices; Printers shows here only when a print job has failed. */}
+          {staff && staff.role !== "cashier" && catalog && failedJobs > 0 && <a href="/printers" className={route === "printers" ? "on" : ""}>Printers<b className="dot">{failedJobs}</b></a>}
+          {staff && <a href="/settings" className={route === "settings" ? "on" : ""}>Settings</a>}
         </nav>
         <div className="right">
           {staff && (
-            <label className="dev" title="Your own colour for these screens. Only you see it; it follows you to any device. Leave it and you see the shop's colours.">
-              Colour
+            <label className="dev colourpick" title="Your own colour for these screens. Only you see it; it follows you to any device. Leave it and you see the shop's colours.">
+              <span className="lbl">Colour</span>
               <input type="color" aria-label="My colour" value={theme.own ?? theme.shop ?? "#ea7016"} onChange={async (e) => {
                 const r = await fetch("/api/auth/theme", { method: "PUT", headers: { "content-type": "application/json", ...authHeader() }, body: JSON.stringify({ primary: e.target.value }) });
                 if (r.ok) theme.setOwn(e.target.value.toUpperCase()); else window.alert(((await r.json().catch(() => ({}))) as { message?: string }).message ?? "That colour was not saved.");
@@ -134,7 +139,7 @@ export function App() {
           <a href="/login" className="staffbtn" title={staff ? "Signed in" : "Sign in"}>{staff ? `${staff.name} · ${staff.role}` : "Sign in"}</a>
           {staff && <button className="secondary sm" title="Lock this till. Your shift and the order on screen stay as they are." onClick={() => void lockNow(false)}>Lock</button>}
           <label className="dev" title="Each device has its own letter so queue numbers never clash offline">
-            Device
+            <span className="lbl">Device</span>
             <select
               value={code}
               onChange={(e) => {
@@ -167,6 +172,10 @@ export function App() {
           <Online config={config} online={connected} />
         ) : route === "printers" ? (
           <Printers catalog={catalog} />
+        ) : route === "dashboard" ? (
+          <Dashboard config={config} />
+        ) : route === "settings" ? (
+          <Settings />
         ) : route === "manager" ? (
           <Manager config={config} catalog={catalog} />
         ) : route === "tabs" ? (

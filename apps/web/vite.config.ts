@@ -2,7 +2,13 @@ import react from "@vitejs/plugin-react";
 import { defineConfig } from "vite";
 import { VitePWA } from "vite-plugin-pwa";
 
+import { readFileSync } from "node:fs";
+
+const pkg = JSON.parse(readFileSync(new URL("./package.json", import.meta.url), "utf8")) as { version: string };
+
 export default defineConfig({
+  // Printed on the sign-in screen and in Settings > About, so support can ask which version a till is running.
+  define: { __APP_VERSION__: JSON.stringify(`${pkg.version} · ${new Date().toISOString().slice(0, 16).replace("T", " ")} UTC`) },
   plugins: [
     react(),
     // Precaches the app shell so the POS opens with no network at all.

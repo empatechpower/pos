@@ -636,3 +636,40 @@ body:has(.shop) { background: #f0eadd; }
 .training-banner button { pointer-events: auto; position: absolute; right: 10px; top: 50%; transform: translateY(-50%); min-height: 24px; padding: 2px 12px; border-radius: 999px; background: transparent; border: 1.5px solid #fff; color: #fff; font-size: 12px; font-weight: 700; cursor: pointer; }
 @keyframes trainflash { 0%, 100% { background: #c22f2f; } 50% { background: #781414; } }
 html.training-on body { box-shadow: inset 0 0 0 5px #c62828; }
+
+/* A new version is ready: a quiet bar, never an automatic restart */
+.update-bar { position: fixed; top: 0; left: 0; right: 0; z-index: 60; display: flex; gap: .7em; align-items: center; justify-content: center; padding: .45em .8em; background: #12394a; color: #fff; font-size: .9rem; }
+.update-bar button { padding: .25em .9em; border-radius: 999px; border: 1px solid #fff; background: transparent; color: #fff; font-weight: 700; cursor: pointer; }
+.update-bar button.primary { background: #fff; color: #12394a; }
+
+/* Orders screen */
+.orders-search { width: 100%; padding: .6em .8em; border-radius: .6em; border: 1px solid #c9c2b6; font: inherit; margin-bottom: .6em; }
+.orders-tabs, .orders-chips { display: flex; gap: .4em; flex-wrap: wrap; margin: .4em 0; }
+.orders-tabs button, .orders-chips button { padding: .4em .9em; border-radius: 999px; border: 1px solid #c9c2b6; background: #fff; font-weight: 700; cursor: pointer; font: inherit; }
+.orders-tabs button.on, .orders-chips button.on { background: var(--orange, #0b8fbf); border-color: var(--orange, #0b8fbf); color: #fff; }
+.orders-tabs b { margin-left: .3em; opacity: .8; }
+.ord-badge { display: inline-block; padding: .05em .55em; border-radius: 999px; font-size: .75em; font-weight: 700; background: #eee; }
+.ord-badge.open { background: #fff2cf; color: #7a5a00; } .ord-badge.paid { background: #e6f4ea; color: #1b7a3a; } .ord-badge.refunded { background: #e3f2f9; color: #0b6f95; } .ord-badge.voided, .ord-badge.cancelled { background: #fde4e2; color: #a3261e; }
+
+/* Settings: a rail and a body */
+.settings { display: grid; grid-template-columns: 12rem minmax(0, 1fr); gap: 1.2em; padding: 1em; align-items: start; }
+.settings-rail { display: flex; flex-direction: column; gap: .3em; position: sticky; top: .5em; }
+.settings-rail button { text-align: left; padding: .7em .9em; border-radius: .6em; border: 1px solid #c9c2b6; background: #fff; font: inherit; font-weight: 700; cursor: pointer; }
+.settings-rail button.on { background: var(--orange, #0b8fbf); border-color: var(--orange, #0b8fbf); color: #fff; }
+@media (max-width: 720px) { .settings { grid-template-columns: minmax(0, 1fr); } .settings-rail { flex-direction: row; flex-wrap: wrap; position: static; } }
+
+/* A busier header on a till-sized screen: tighter links, and the small labels give way first */
+@media (max-width: 1180px) {
+  .top { gap: 8px; padding: 8px 12px; flex-wrap: nowrap; }
+  .top nav { flex-wrap: nowrap; }
+  .top nav a { padding: 6px 10px; white-space: nowrap; }
+  .brand span, .top .dev .lbl { display: none; }
+  .brand b { white-space: nowrap; }
+  .right { gap: 6px; flex-shrink: 0; }
+}
+.arr-row { display: flex; align-items: center; gap: .4em; padding: .15em 0; }
+.arr-row label { flex: 1; }
+@media (max-width: 720px) { .top { flex-wrap: wrap; } .top nav { flex-wrap: wrap; flex-basis: 100%; order: 3; } }
+.settings-body { min-width: 0; }
+.settings-body .e2e-card, .settings-body .row { max-width: 100%; }
+@media (max-width: 1180px) { .top .colourpick { display: none; } }

@@ -48,7 +48,9 @@ import { ActionStrip, type Action } from "../till/ActionStrip";
 import { PayPanel, type Tender, type TenderOption } from "../till/PayPanel";
 import { Modal } from "../till/Modal";
 import { CustomerDialog, DiningDialog, DoneDialog, GuestsDialog, HeldDialog, QuantityDialog, TillSettings } from "../till/Dialogs";
-import { TEXT_SCALE, loadPrefs, usePrefs } from "../prefs";
+import { TEXT_SCALE, loadPrefs, setLayout, usePrefs } from "../prefs";
+import { arrange, loadTillSettings, saveTill, useTillSettings, ACTION_POOL } from "../till/tillSettings";
+import { queryParams } from "../nav";
 import { isTraining } from "../training";
 import { loadFloor, tableNames, useFloor } from "../floor";
 import { TableMap } from "../till/TableMap";
@@ -76,7 +78,7 @@ export function Pos({ config, catalog, online, customerId, setCustomerId }: PosP
   const [orderNote, setOrderNote] = useState(() => saved?.orderNote ?? "");
   /** The open order on screen, when this is a table's bill that was already sent (the sent lines are locked; new ones are added to it). */
   const [orderId, setOrderId] = useState<string | null>(() => saved?.orderId ?? null);
-  const [view, setView] = useState<"order" | "tables" | "checks">("order");
+  const [view, setView] = useState<"order" | "tables" | "checks">(() => (queryParams().get("view") === "tables" ? "tables" : "order"));
   const [payCheckId, setPayCheckId] = useState<string | null>(null);
   const [splitOpen, setSplitOpen] = useState(false);
   const [refundOpen, setRefundOpen] = useState(false);
@@ -91,7 +93,9 @@ export function Pos({ config, catalog, online, customerId, setCustomerId }: PosP
   const floor = useFloor();
   const [spot, setSpot] = useState("");
   const prefs = usePrefs();
-  useEffect(() => { void loadPrefs(); void loadFloor(); }, [useStaff()?.code]);
+  const till = useTillSettings();
+  useEffect(() => { void loadPrefs(); void loadFloor(); void loadTillSettings(); }, [useStaff()?.code]);
+  const [editLayoutAt, setEditLayoutAt] = useState(0);
   const [pax, setPax] = useState(1);
   const [payView, setPayView] = useState(false);
   const [dialog, setDialog] = useState<null | "dining" | "guests" | "qty" | "held" | "customer" | "settings" | "tabs" | "shift" | "table" | "line" | "seat">(null);
@@ -483,6 +487,17 @@ export function Pos({ config, catalog, online, customerId, setCustomerId }: PosP
     if (dineChannel) setChosenChannel(dineChannel.id);
     setSpot(name); setPax(1); setView("order");
   }
+  // An order opened from the Orders screen arrives here: its bill goes on the till, with sent lines locked.
+  useEffect(() => {
+    const id = localStorage.getItem("pos.openOrder");
+    if (!id) return;
+    const o = orders.find((x) => x.orderId === id);
+    if (!o) return;
+    localStorage.removeItem("pos.openOrder");
+    parkCurrent(); resetOrder(); loadOrder(o);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [orders]);
+  useEffect(() => { if (queryParams().get("dialog") === "shift") setDialog("shift"); }, []);
   function goTables() {
     // The bill on screen goes back to the map: unsent items stay with the table as a draft.
     parkCurrent(); resetOrder(); setView("tables");
@@ -546,12 +561,14 @@ export function Pos({ config, catalog, online, customerId, setCustomerId }: PosP
     setView("order");
   };
 
-  const tenders: TenderOption[] = [
+  const allTenders: TenderOption[] = [
     { id: "cash", label: "Cash" },
     { id: "credit", label: "Member credit", disabled: !!creditBlocked || paying, why: creditBlocked || undefined },
     { id: "qr", label: "PayNow QR", disabled: !qrReady || qrBusy || !!payCheckId, why: payCheckId ? "A QR pays the whole bill: use Cash or credit on a check." : !qrReady ? "PayNow is not set up. A manager does it in Devices." : undefined },
     ...(training ? [{ id: "mock" as Tender, label: "Card (practice)" }] : []),
   ];
+  const arrangedTenders = arrange(allTenders, till.tenders);
+  const tenders = arrangedTenders.length ? arrangedTenders : allTenders;
   async function payDone(t: Tender, received: number) {
     if (payCheckId) return void payCheck(t, received);
     if (mustOpenShift) return notify("Open your shift first.");
@@ -573,7 +590,7 @@ export function Pos({ config, catalog, online, customerId, setCustomerId }: PosP
   const itemCount = bag.reduce((n, l) => n + l.qty, 0);
   const dineIn = channel.kind === "dine_in";
   const fire = linked ? courseProgress(linked) : null;
-  const actions: Action[] = [
+  const allActions: Action[] = [
     { id: "cancel", label: "Cancel Order", icon: "✕", onClick: cancelOrder, disabled: !bag.length },
     { id: "hold", label: "Hold Order", icon: "‖", onClick: holdCurrent, disabled: !unsent },
     { id: "send", label: "Send Order", icon: "▶", onClick: () => void sendOrder(), disabled: !bag.some((l) => !l.sent) || prepay, title: prepay ? "This shop is paid up front: use Pay" : undefined },
@@ -590,6 +607,9 @@ export function Pos({ config, catalog, online, customerId, setCustomerId }: PosP
     { id: "drawer", label: "Open Cash Drawer", icon: "▭", onClick: () => void openDrawer(), disabled: !staff || !online || training },
     ...(!prepay ? [{ id: "tabs", label: "Open Tabs", icon: "▤", onClick: () => setDialog("tabs" as const), badge: openTabs.length || undefined }] : []),
   ];
+  // The manager's choice of which buttons show, and in what order (the pool's natural order is the starting point).
+  const poolRank = (id: string) => ACTION_POOL.findIndex((x) => x.id === id);
+  const actions = arrange([...allActions].sort((a, b) => poolRank(a.id) - poolRank(b.id)), till.actions);
 
   const row = (k: string, v: string, neg = false) => <div className="row"><span>{k}</span><span>{neg ? "−" : ""}{v}</span></div>;
   const totals = (
@@ -667,7 +687,9 @@ export function Pos({ config, catalog, online, customerId, setCustomerId }: PosP
             onSplit={!payCheckId && floor.splitBill && config.modules.splitBill && dineIn && !linked?.split ? () => setSplitOpen(true) : undefined}
           />
         ) : (
-          <TillMenu menu={menu} qtyOf={qtyOf} onAdd={(m) => (m.soldOut ? undefined : add(m))} onDiscount={() => (staff && bag.length ? setSheet({ scope: "bill" }) : notify(staff ? "Add an item first." : "Sign in to give a discount."))} />
+          <TillMenu
+            editing={staff ? { layout: prefs.layout ?? till.layout, hasOwn: !!prefs.layout, canEditShop: staff.role !== "cashier", startRequest: editLayoutAt, onSaveMine: (l) => setLayout(l), onResetMine: () => setLayout(null), onSaveShop: (l) => saveTill({ layout: l }) } : undefined}
+            menu={menu} qtyOf={qtyOf} onAdd={(m) => (m.soldOut ? undefined : add(m))} onDiscount={() => (staff && bag.length ? setSheet({ scope: "bill" }) : notify(staff ? "Add an item first." : "Sign in to give a discount."))} />
         )}
       </div>
       <button className="t-mobilebar" onClick={() => setSheetOpen(true)}><span>View order · {itemCount} item{itemCount === 1 ? "" : "s"}</span><strong>{formatMoney(priced.total)} ↑</strong></button>
@@ -679,7 +701,7 @@ export function Pos({ config, catalog, online, customerId, setCustomerId }: PosP
       {dialog === "qty" && <QuantityDialog current={pendingQty} onSave={setPendingQty} onClose={() => setDialog(null)} />}
       {dialog === "held" && <HeldDialog held={held} onRecall={recall} onDrop={(id) => setHeld((h) => h.filter((x) => x.id !== id))} onClose={() => setDialog(null)} formatTotal={heldTotal} />}
       {dialog === "customer" && <CustomerDialog current={customerId} balance={balance} onSave={setCustomerId} onClose={() => setDialog(null)} />}
-      {dialog === "settings" && <TillSettings onClose={() => setDialog(null)} />}
+      {dialog === "settings" && <TillSettings onClose={() => setDialog(null)} onEditLayout={staff ? () => { setDialog(null); setView("order"); setEditLayoutAt((n) => n + 1); } : undefined} />}
       {dialog === "shift" && <Modal title="Shift and drawer" wide onClose={() => setDialog(null)}><ShiftBar /></Modal>}
       {dialog === "table" && (
         <Modal title="Table" onClose={() => setDialog(null)}>

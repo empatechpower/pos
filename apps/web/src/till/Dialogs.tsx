@@ -65,7 +65,7 @@ export function CustomerDialog({ current, balance, onSave, onClose }: { current:
   );
 }
 
-export function TillSettings({ onClose }: { onClose: () => void }) {
+export function TillSettings({ onClose, onEditLayout }: { onClose: () => void; onEditLayout?: () => void }) {
   const prefs = usePrefs();
   return (
     <Modal title="My till settings" onClose={onClose}>
@@ -75,6 +75,14 @@ export function TillSettings({ onClose }: { onClose: () => void }) {
       <h3 className="t-h3">Text size</h3>
       <p className="t-muted">Standard is 20% bigger than the original size.</p>
       <div className="t-seg">{([["compact", "Compact"], ["standard", "Standard"], ["large", "Large"], ["xl", "Extra large"]] as const).map(([k, l]) => <button key={k} className={prefs.textSize === k ? "on" : ""} onClick={() => void setPref("textSize", k)}>{l}</button>)}</div>
+      {onEditLayout && (
+        <>
+          <h3 className="t-h3">Menu layout</h3>
+          <p className="t-muted">Arrange the tiles and pages your way. You can also press and hold any tile.</p>
+          <button className="t-ghost" onClick={onEditLayout}>Edit my menu layout</button>
+        </>
+      )}
+      <p className="t-muted" style={{ marginTop: ".8em" }}><a href="/settings">All settings</a></p>
       <div className="t-dact"><button className="t-primary" onClick={onClose}>Done</button></div>
     </Modal>
   );
