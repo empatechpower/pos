@@ -63,7 +63,8 @@ export function receipt(order: OrderState, config: BusinessConfig, ctx: PrintCon
   b.push({ t: "rule" }, { t: "cols", left: order.queueNumber && opts.showQueue !== false ? `Order ${order.queueNumber}` : "Order", right: where(order) }, { t: "rule" });
   let depositUnits = 0;
   for (const l of liveLines(order)) {
-    b.push({ t: "cols", left: `${l.qty} x ${l.name.toUpperCase()}`, right: money(l.unitCents * l.qty) });
+    // An item sold with a barcode or SKU prints it before its name, as on the reference receipt ("10237 CORIANDER SEED").
+    b.push({ t: "cols", left: `${l.qty} x ${l.sku ? `${l.sku} ` : ""}${l.name.toUpperCase()}`, right: money(l.unitCents * l.qty) });
     if (opts.printModifiers) {
       // Options sit under the item, marked with a dash (leading spaces would be collapsed when wrapping). Free ones print by name, never as S$0.00.
       if (l.build) {
@@ -165,6 +166,22 @@ export function guestCheck(order: OrderState, config: BusinessConfig, ctx: Print
 }
 
 /** DDMMYYYY then the order's number (the digits of its queue number, six places; or a short code from its id). */
+/**
+ * The order someone means when they scan a bag's receipt barcode or type what is on it: the receipt's transaction code, the queue number
+ * ("A012", or just "12"), or the start of the order's id. Newest first, so today's A012 wins over last week's. Null when nothing matches.
+ */
+export function findOrderByCode(orders: readonly OrderState[], typed: string, ctx: Pick<PrintContext, "now" | "timeZone">): OrderState | null {
+  const code = typed.trim().toUpperCase();
+  if (!code || (code.length < 2 && !/^\d$/.test(code))) return null;
+  const newest = [...orders].filter((o) => o.lines.some((l) => l.qty > 0)).sort((a, b) => b.openedAt - a.openedAt);
+  const digits = /^\d+$/.test(code) ? String(Number(code)) : null;
+  return newest.find((o) => transactionCode(o, ctx) === code)
+    ?? newest.find((o) => (o.queueNumber ?? "").toUpperCase() === code)
+    ?? (digits ? newest.find((o) => o.queueNumber && String(Number(o.queueNumber.replace(/\D/g, "") || "-1")) === digits) : undefined)
+    ?? (code.length >= 6 ? newest.find((o) => o.orderId.toUpperCase().startsWith(code)) : undefined)
+    ?? null;
+}
+
 export function transactionCode(order: OrderState, ctx: Pick<PrintContext, "now" | "timeZone">): string {
   const p = Object.fromEntries(new Intl.DateTimeFormat("en-GB", { timeZone: ctx.timeZone ?? "Asia/Singapore", day: "2-digit", month: "2-digit", year: "numeric" }).formatToParts(new Date(order.openedAt)).map((x) => [x.type, x.value])) as Record<string, string>;
   const digits = (order.queueNumber ?? "").replace(/\D/g, "");

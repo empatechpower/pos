@@ -29,6 +29,7 @@ export function eventTrail(events: readonly OrderEvent[], deviceName: (id: strin
       case "TaxRemovalSet": add("tax", x.removed ? `Tax removed · ${x.reason}` : "Tax put back", `${x.byName ?? dev}${x.approvedByName ? `, approved by ${x.approvedByName}` : ""}`); break;
       case "LinesReady": add("kitchen", `Kitchen finished ${x.lineIds?.length ?? 0} item${x.lineIds?.length === 1 ? "" : "s"}${x.station ? ` · ${x.station}` : ""}`, x.byName ?? dev); break;
       case "LinesServed": add("kitchen", `Served ${x.lineIds?.length ?? 0} item${x.lineIds?.length === 1 ? "" : "s"}`, x.byName ?? dev); break;
+      case "OrderHandedOver": add("handover", `Handed to ${x.to}${x.ref ? ` (${x.ref})` : ""}`, x.byName ?? dev); break;
       case "OrderNoted": add("note", x.note ? `Order note: ${x.note}` : "Order note removed", x.byName ?? dev); break;
       case "StageSet": add("stage", x.stage === "cancelled" ? "Order cancelled" : `Marked ${x.stage}`); break;
       case "OrderAccepted": add("stage", "Order accepted"); break;

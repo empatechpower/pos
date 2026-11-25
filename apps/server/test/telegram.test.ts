@@ -121,8 +121,8 @@ describe("who the bot talks to", () => {
     expect((await call("POST", "/api/telegram/webhook", { body: { message: {} }, device: null })).status).toBe(401);
   });
 
-  it("only managers and owners can make a link code", async () => {
-    expect((await call("POST", "/api/telegram/link-code", { staff: cashier })).status).toBe(403);
+  it("anyone signed in can make a link code for themselves (it is what lets them sign in at a till by QR); nobody else can", async () => {
+    expect((await call("POST", "/api/telegram/link-code", { staff: cashier })).status).toBe(200);
     expect((await call("POST", "/api/telegram/link-code", {})).status).toBe(401);
     expect((await call("POST", "/api/telegram/link-code", { staff: mgr, device: null })).status).toBe(401);
   });
@@ -542,5 +542,64 @@ describe("menu changes and reports by Telegram (for an AI assistant working Tele
     const closed = await press(1001, buttons(ask).find((b: any) => /Yes, close/.test(b.text))!.callback_data!);
     expect(closed[0].text).toBe("Tab closed.");
     expect((await say(1001, "/tabs")).said[0].text).toMatch(/No open tabs/);
+  });
+});
+
+describe("signing in at a till by scanning its QR in Telegram", () => {
+  const CAT_TG = 4242;
+  const ask = () => call("POST", "/api/telegram/till-login", {});
+  const poll = (nonce: string, o: object = {}) => call("GET", `/api/telegram/till-login/${nonce}`, o);
+
+  it("a cashier links their own Telegram, and the bot does not offer them the menu commands", async () => {
+    const r = await link(CAT_TG, cashier);
+    const text = r.said.map((m: any) => m.text).join("\n");
+    expect(text).toContain("Linked. Hello Cat");
+    expect(text).toContain("Scan QR with Telegram");
+    expect((await say(CAT_TG, "/items")).said[0].text).toContain("Only managers and owners");
+  });
+
+  it("the till gets a QR link that works once: scanning it signs Cat in on that till and clocks her in", async () => {
+    const a = await ask();
+    expect(a.status).toBe(200);
+    expect(a.json.url).toBe(`https://t.me/rezein_test_bot?start=till_${a.json.nonce}`);
+    expect((await poll(a.json.nonce)).json).toEqual({ state: "waiting" });
+    const bot = await say(CAT_TG, `/start till_${a.json.nonce}`);
+    expect(bot.said[0].text).toMatch(/Cat, you are signed in at the till\. Clocked in at \d\d:\d\d\./);
+    const got = await poll(a.json.nonce);
+    expect(got.json.state).toBe("approved");
+    expect(got.json.staff).toMatchObject({ name: "Cat", code: "C1", role: "cashier" });
+    expect(got.json.staff.permissions).toContain("wallet.spend");
+    expect((await call("GET", "/api/auth/me", { staff: got.json.token })).json.name).toBe("Cat");
+    expect((await call("GET", "/api/time/me", { staff: got.json.token })).json.clockedIn).toBe(true);
+    // the session is handed over once
+    expect((await poll(a.json.nonce)).status).toBe(410);
+    // scanning the same code again does nothing
+    expect((await say(CAT_TG, `/start till_${a.json.nonce}`)).said[0].text).toContain("expired or was already used");
+  });
+
+  it("signing in again later does not clock her in twice", async () => {
+    const a = await ask();
+    expect((await say(CAT_TG, `/start till_${a.json.nonce}`)).said[0].text).toContain("You have been clocked in since");
+    expect((await poll(a.json.nonce)).json.state).toBe("approved");
+    expect((await db.query("SELECT count(*)::int AS n FROM time_entries WHERE staff_name='Cat'")).rows[0].n).toBe(1);
+  });
+
+  it("someone the bot does not know is told how to link, and the till keeps waiting", async () => {
+    const a = await ask();
+    expect((await say(909090, `/start till_${a.json.nonce}`)).said[0].text).toContain("I don't know you yet");
+    expect((await poll(a.json.nonce)).json).toEqual({ state: "waiting" });
+  });
+
+  it("another till cannot collect the session, and a code that has run out is refused", async () => {
+    const other = (await enroll(db, "bp", (await createEnrollmentCode(db, { merchantId: "bp", outletId: "EV", createdBy: null })).code, "Other till"))!.token;
+    const a = await ask();
+    await say(CAT_TG, `/start till_${a.json.nonce}`);
+    expect((await poll(a.json.nonce, { device: other })).status).toBe(410);
+    expect((await poll(a.json.nonce)).json.state).toBe("approved");
+    const b = await ask();
+    await db.query("UPDATE telegram_till_logins SET expires_at = now() - interval '1 second' WHERE used_at IS NULL AND approved_at IS NULL");
+    expect((await say(CAT_TG, `/start till_${b.json.nonce}`)).said[0].text).toContain("expired or was already used");
+    expect((await poll(b.json.nonce)).status).toBe(410);
+    expect((await call("POST", "/api/telegram/till-login", { device: null })).status).toBe(401);
   });
 });

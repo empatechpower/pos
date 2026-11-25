@@ -49,7 +49,7 @@ export type OrderEventBody =
   | { type: "CouponApplied"; title: string; amountCents: Cents; minSpendCents: Cents }
   /** Points the member spent on this order (100 points = S$1). Reduces what is owed. */
   | { type: "PointsRedeemed"; points: number }
-  | { type: "ItemAdded"; lineId: string; productId: string; name: string; /** includes the price of any options */ unitCents: Cents; qty: number; /** Table service: 1 = Starter, 2 = Main, 3 = Dessert. The kitchen gets it when that course is fired. Missing = no course, goes out at once. */ course?: number; /** The seat it was ordered for (split by seat). */ seat?: number; /** Moved here from a table that was merged in: the kitchen already has it, so it is not printed again. */ carried?: boolean; /** Sold through another dining channel than the order's (its price came from that channel's pricebook). */ channelId?: string; channelName?: string; /** Held back from the kitchen until it is fired by hand, whatever its course (an exception to the course order). */ hold?: boolean; bcrs?: boolean; pointsExempt?: boolean; taxInclusive?: boolean; taxGroup?: string; options?: ChosenOption[]; /** Build-your-own: the frozen structured build. */ build?: StoredBuild }
+  | { type: "ItemAdded"; lineId: string; productId: string; name: string; /** The item's barcode or SKU when it had one, as the receipt prints it before the name. */ sku?: string; /** includes the price of any options */ unitCents: Cents; qty: number; /** Table service: 1 = Starter, 2 = Main, 3 = Dessert. The kitchen gets it when that course is fired. Missing = no course, goes out at once. */ course?: number; /** The seat it was ordered for (split by seat). */ seat?: number; /** Moved here from a table that was merged in: the kitchen already has it, so it is not printed again. */ carried?: boolean; /** Sold through another dining channel than the order's (its price came from that channel's pricebook). */ channelId?: string; channelName?: string; /** Held back from the kitchen until it is fired by hand, whatever its course (an exception to the course order). */ hold?: boolean; bcrs?: boolean; pointsExempt?: boolean; taxInclusive?: boolean; taxGroup?: string; options?: ChosenOption[]; /** Build-your-own: the frozen structured build. */ build?: StoredBuild }
   | { type: "ItemQtySet"; lineId: string; qty: number }
   /** The kitchen is told to start this course (table service). Lines with a later course wait. */
   | { type: "CourseFired"; course: number; byName?: string }
@@ -88,6 +88,8 @@ export type OrderEventBody =
   | { type: "DiscountRemoved"; discountId: string; byName?: string }
   /** A note on the whole order for the kitchen and the guest check ("allergy: nuts", "birthday"). The latest one wins; empty clears it. */
   | { type: "OrderNoted"; note: string; byName?: string }
+  /** The order was handed to whoever came for it (a delivery rider, the customer): who took it, and any reference they gave (a rider's card or id, the platform's order number). */
+  | { type: "OrderHandedOver"; to: string; ref?: string; byName?: string }
   /** Staff attached a member to the order at the till (empty = taken off again). The server checks the member exists before it keeps this. */
   | { type: "MemberAttached"; memberId: string; byName?: string }
   /** The kitchen finished these lines (a station pressed Done), and later the floor served or handed them over. */
@@ -115,6 +117,8 @@ export interface OrderLine extends PricedLine {
   listUnitCents?: Cents;
   override?: { reason: string; byName?: string; approvedByName?: string; at: number };
   productId: string;
+  /** The item's barcode or SKU at the time of sale. */
+  sku?: string;
   options?: ChosenOption[];
   build?: StoredBuild;
   course?: number;
@@ -166,6 +170,8 @@ export interface OrderState {
   discounts?: StaffDiscount[];
   /** Set when the whole order was voided. */
   voided?: { reason: string; approvedBy: string; approvedByName: string; at: number };
+  /** Who collected the order, when it was handed over at the counter (the first handover stands; a second is ignored). */
+  handover?: { to: string; ref?: string; byName?: string; at: number };
   /** Set while the tax is taken off this order (Add/Remove Tax). */
   taxRemoved?: { reason: string; byName?: string; approvedByName?: string; at: number };
   /** Fees staff added to the whole order. */
@@ -226,7 +232,7 @@ export function reduceOrder(orderId: string, events: readonly OrderEvent[]): Ord
     switch (e.type) {
       case "ItemAdded": {
         if (state.lines.some((l) => l.lineId === e.lineId)) break;
-        state.lines.push({ lineId: e.lineId, productId: e.productId, name: e.name, unitCents: e.unitCents, qty: e.qty, bcrs: e.bcrs, pointsExempt: e.pointsExempt, ...(e.taxInclusive !== undefined ? { taxInclusive: e.taxInclusive } : {}), ...(e.taxGroup ? { taxGroup: e.taxGroup } : {}), ...(e.build ? { build: e.build } : {}), ...(e.course ? { course: e.course } : {}), ...(e.seat ? { seat: e.seat } : {}), ...(e.carried ? { carried: true } : {}), ...(e.channelId ? { channelId: e.channelId, ...(e.channelName ? { channelName: e.channelName } : {}) } : {}), ...(e.hold ? { held: true } : {}), options: e.options });
+        state.lines.push({ lineId: e.lineId, productId: e.productId, name: e.name, ...(typeof e.sku === "string" && e.sku ? { sku: e.sku.slice(0, 40) } : {}), unitCents: e.unitCents, qty: e.qty, bcrs: e.bcrs, pointsExempt: e.pointsExempt, ...(e.taxInclusive !== undefined ? { taxInclusive: e.taxInclusive } : {}), ...(e.taxGroup ? { taxGroup: e.taxGroup } : {}), ...(e.build ? { build: e.build } : {}), ...(e.course ? { course: e.course } : {}), ...(e.seat ? { seat: e.seat } : {}), ...(e.carried ? { carried: true } : {}), ...(e.channelId ? { channelId: e.channelId, ...(e.channelName ? { channelName: e.channelName } : {}) } : {}), ...(e.hold ? { held: true } : {}), options: e.options });
         if (!e.carried && !e.hold) state.lastSentAt = e.ts;
         break;
       }
@@ -339,6 +345,11 @@ export function reduceOrder(orderId: string, events: readonly OrderEvent[]): Ord
         (state.tableChanges ??= []).push({ ...(state.spot ? { from: state.spot } : {}), to: e.to, at: e.ts });
         state.spot = e.to;
         break;
+      case "OrderHandedOver": {
+        const to = String(e.to ?? "").replace(/\s+/g, " ").trim().slice(0, 60);
+        if (to && !state.handover) state.handover = { to, ...(typeof e.ref === "string" && e.ref.trim() ? { ref: e.ref.trim().slice(0, 60) } : {}), ...(e.byName ? { byName: String(e.byName).slice(0, 60) } : {}), at: e.ts };
+        break;
+      }
       case "MemberAttached":
         if (typeof e.memberId === "string" && e.memberId) state.memberId = e.memberId.slice(0, 64); else delete state.memberId;
         break;

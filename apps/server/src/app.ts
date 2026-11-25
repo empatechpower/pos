@@ -11,6 +11,7 @@ import { authenticateDevice, createEnrollmentCode, enroll, markPrintPoll, setSms
 import { BrandStore } from "./brand.js";
 import { PrintStore, validatePrinter, type Printer } from "./print.js";
 import { registerShop } from "./shop.js";
+import { registerTimeclock } from "./timeclock.js";
 import { registerDisplay } from "./display.js";
 import { registerPromoAdmin, releasePromo } from "./promo.js";
 import { reconcileOrderStock, registerStock } from "./stock.js";
@@ -89,11 +90,11 @@ export async function buildApp({ config, store, db, catalog, catalogAdmin, print
   if (db) await ensureDefaultOutlet(db, merchantId, config.outletName, config.outletName);
 
   /** Tax follows the country of the outlet (standing rule 1): the country's pack is written into the pricing rules at start and whenever the outlet is saved. */
-  const outletTax = new Map<string, { country: string; gstOn: boolean | null }>();
+  const outletTax = new Map<string, { country: string; gstOn: boolean | null; serviceMode: "qsr" | "tsr" | "retail" | null }>();
   async function applyOutletTax(): Promise<void> {
     const all = db ? await listOutlets(db, merchantId) : [];
     outletTax.clear();
-    for (const o of all) outletTax.set(o.id, { country: o.country, gstOn: o.gstOn });
+    for (const o of all) outletTax.set(o.id, { country: o.country, gstOn: o.gstOn, serviceMode: o.serviceMode });
     const p = withTaxPack(config.pricing, outletTax.get(config.outletName)?.country);
     delete config.pricing.rounding;
     Object.assign(config.pricing, p);
@@ -107,7 +108,7 @@ export async function buildApp({ config, store, db, catalog, catalogAdmin, print
     const o = outletId ? outletTax.get(outletId) : undefined;
     if (!o) return config;
     const pricing = withTaxPack(config.pricing, o.country);
-    return { ...config, pricing: { ...pricing, gstOn: o.gstOn ?? config.pricing.gstOn } };
+    return { ...config, ...(o.serviceMode ? { serviceMode: o.serviceMode } : {}), pricing: { ...pricing, gstOn: o.gstOn ?? config.pricing.gstOn } };
   }
 
   const streams = new Set<(s: StoredEvent[]) => void>();
@@ -772,8 +773,8 @@ export async function buildApp({ config, store, db, catalog, catalogAdmin, print
       if (b.active !== undefined) active = b.active !== false;
       if (franchiseId && !(await listFranchises(db, merchantId)).some((f) => f.id === franchiseId)) return reply.code(400).send({ error: "unknown_franchise" });
     }
-    if (b.serviceMode != null && b.serviceMode !== "qsr" && b.serviceMode !== "tsr") return reply.code(400).send({ error: "service mode is qsr (quick service, no table) or tsr (table service)" });
-    const serviceMode = b.serviceMode === "qsr" || b.serviceMode === "tsr" ? b.serviceMode : null;
+    if (b.serviceMode != null && b.serviceMode !== "qsr" && b.serviceMode !== "tsr" && b.serviceMode !== "retail") return reply.code(400).send({ error: "service mode is qsr (quick service, no table), tsr (table service) or retail (a shop that sells by scanning)" });
+    const serviceMode = b.serviceMode === "qsr" || b.serviceMode === "tsr" || b.serviceMode === "retail" ? b.serviceMode : null;
     if (b.prepMinutes != null && (!Number.isInteger(b.prepMinutes) || b.prepMinutes < 0 || b.prepMinutes > 600)) return reply.code(400).send({ error: "prepMinutes is a whole number of minutes, 0 to 600" });
     const prepMinutes = b.prepMinutes === undefined ? existing?.prepMinutes ?? null : b.prepMinutes;
     // Coordinates come as a pair (or both cleared with null); left out, the saved ones stay.
@@ -983,6 +984,7 @@ export async function buildApp({ config, store, db, catalog, catalogAdmin, print
   registerTabRoutes(app, { db, merchantId, tabs, members, needs, outletIds: async () => (await listOutlets(db, merchantId)).map((o) => o.id) });
   registerStock(app, { db, merchantId, needs, outletIds: async () => (await listOutlets(db, merchantId)).map((o) => o.id), defaultOutlet: config.outletName });
   registerShifts(app, { db, merchantId, store, config, needs });
+  registerTimeclock(app, { db, merchantId, defaultOutletId: config.outletName, needs, needsDevice });
   registerFloor(app, { db, merchantId, needs });
   registerTill(app, { db, merchantId, needs });
   registerMailboxes(app, { db, merchantId, needs, imapFactory, now });
@@ -1000,7 +1002,7 @@ export async function buildApp({ config, store, db, catalog, catalogAdmin, print
     timer.unref();
     app.addHook("onClose", async () => clearInterval(timer));
   }
-  if (catalogAdmin) registerTelegram(app, { db, merchantId, outletId: config.outletName, integ: integrations ?? { publicUrl: "" }, cat: catalogAdmin as PgCatalogStore, needs, reports: { sales: salesReport, orders: ordersReport, today: () => dayOf(Date.now()), hour: () => hourOf(Date.now()) }, tabs: {
+  if (catalogAdmin) registerTelegram(app, { db, merchantId, outletId: config.outletName, needsDevice, integ: integrations ?? { publicUrl: "" }, cat: catalogAdmin as PgCatalogStore, needs, reports: { sales: salesReport, orders: ordersReport, today: () => dayOf(Date.now()), hour: () => hourOf(Date.now()) }, tabs: {
       open: () => tabs.openSummary(),
       view: async (id) => { try { return (await tabs.view(id, "")) as never; } catch { return null; } },
       release: async (id, staffId) => { await tabs.release_(id); await audit(db, merchantId, staffId, "tab.release", { tab: id, via: "telegram" }); },

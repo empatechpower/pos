@@ -29,6 +29,7 @@ import "./orderViews";
 import { isTraining } from "./training";
 import { lockNow, useIdleLock } from "./lock";
 import { Kitchen } from "./views/Kitchen";
+import { Clock } from "./views/Clock";
 import { Pair } from "./views/Pair";
 import { Pos } from "./views/Pos";
 import { Queue } from "./views/Queue";
@@ -58,10 +59,10 @@ function useStaffTheme(signedIn: boolean) {
   return { own, shop, setOwn, style };
 }
 
-type Route = "dashboard" | "settings" | "tabs" | "display" | "pos" | "kitchen" | "queue" | "credit" | "login" | "devices" | "prices" | "printers" | "orders" | "online" | "shop" | "kiosk" | "manager" | "tg" | "pricebook" | "pair";
+type Route = "dashboard" | "settings" | "tabs" | "display" | "pos" | "kitchen" | "queue" | "credit" | "login" | "devices" | "prices" | "printers" | "orders" | "online" | "shop" | "kiosk" | "manager" | "tg" | "pricebook" | "pair" | "clock";
 const routeFromHash = (): Route => {
   const h = routeParts()[0] ?? "";
-  return h === "dashboard" || h === "settings" || h === "tabs" || h === "display" || h === "kitchen" || h === "queue" || h === "credit" || h === "login" || h === "devices" || h === "prices" || h === "printers" || h === "orders" || h === "online" || h === "shop" || h === "kiosk" || h === "manager" || h === "pos" || h === "tg" || h === "pricebook" || h === "pair" ? h : "manager";
+  return h === "dashboard" || h === "settings" || h === "tabs" || h === "display" || h === "kitchen" || h === "queue" || h === "credit" || h === "login" || h === "devices" || h === "prices" || h === "printers" || h === "orders" || h === "online" || h === "shop" || h === "kiosk" || h === "manager" || h === "pos" || h === "tg" || h === "pricebook" || h === "pair" || h === "clock" ? h : "manager";
 };
 
 export function App() {
@@ -105,13 +106,16 @@ export function App() {
   // Nothing talks to the server until this device is enrolled (queue displays included).
   if (needsEnrollment(device)) return <Enroll online={status.online} />;
 
+  // Clocking in and out needs an enrolled till but nobody signed in: full screen, no navigation.
+  if (route === "clock") return <ErrorBoundary><Clock /></ErrorBoundary>;
+
   // The queue screen is a public display: no chrome.
   if (route === "queue") return <Queue config={config} />;
 
   const connected = status.online && status.reachable;
   // The till screens share the prototype's header and its text scale; the back-office pages keep the wider navigation bar.
   const tillStyle = route === "pos" || route === "dashboard" || route === "orders" || route === "settings" || route === "login";
-  const hasTables = !!config && config.paymentTiming === "postpay" && !!catalog?.channels.some((c) => c.active && c.kind === "dine_in");
+  const hasTables = !!config && config.paymentTiming === "postpay" && config.serviceMode !== "retail" && !!catalog?.channels.some((c) => c.active && c.kind === "dine_in"); // a retail outlet has no tables
   const shellStyle = { ...(staff ? theme.style : {}), ...(tillStyle ? { "--t-scale": TEXT_SCALE[prefs.textSize] } : {}) } as React.CSSProperties;
   return (
     <div className={`shell ${route === "pos" ? "till-route" : ""} ${tillStyle ? "tillshell" : ""}`} style={shellStyle}>

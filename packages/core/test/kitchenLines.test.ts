@@ -47,3 +47,25 @@ describe("what the kitchen has to make", () => {
     expect(reduceOrder("o", [...evs, ...evs])).toEqual(reduceOrder("o", evs));
   });
 });
+
+describe("handing an order over", () => {
+  it("records who took it, once: a second handover does not replace the first", () => {
+    const o = reduceOrder("o", [...open(), ev({ type: "OrderHandedOver", to: "  Rider   Ali ", ref: "GRAB-8841", byName: "Cat" }), ev({ type: "OrderHandedOver", to: "Someone else" })])!;
+    expect(o.handover).toMatchObject({ to: "Rider Ali", ref: "GRAB-8841", byName: "Cat" });
+  });
+  it("finds the order a scanned or typed code means", async () => {
+    const { findOrderByCode, transactionCode } = await import("../src/print/templates.js");
+    const mk = (id: string, q: string, ts: number) => reduceOrder(id, [
+      { id: `${id}-1`, orderId: id, deviceId: "t", ts, seq: 1, type: "OrderOpened", fulfilment: "takeaway", queueNumber: q },
+      { id: `${id}-2`, orderId: id, deviceId: "t", ts: ts + 1, seq: 2, type: "ItemAdded", lineId: "l", productId: "p", name: "Tea", unitCents: 100, qty: 1 },
+    ] as unknown as OrderEvent[])!;
+    const old = mk("aaaaaaaa-1111", "A012", 1_790_000_000_000), today = mk("bbbbbbbb-2222", "A012", 1_795_000_000_000), other = mk("cccccccc-3333", "B007", 1_795_000_100_000);
+    const all = [old, today, other], ctx = { now: 1_795_000_200_000 };
+    expect(findOrderByCode(all, "a012", ctx)?.orderId).toBe("bbbbbbbb-2222"); // the newest order with that number
+    expect(findOrderByCode(all, "7", ctx)?.orderId).toBe("cccccccc-3333");
+    expect(findOrderByCode(all, transactionCode(old, ctx), ctx)?.orderId).toBe("aaaaaaaa-1111"); // the receipt's barcode names its own order
+    expect(findOrderByCode(all, "CCCCCCCC", ctx)?.orderId).toBe("cccccccc-3333");
+    expect(findOrderByCode(all, "Z999", ctx)).toBeNull();
+    expect(findOrderByCode(all, "x", ctx)).toBeNull();
+  });
+});

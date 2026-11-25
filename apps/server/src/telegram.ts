@@ -1,7 +1,8 @@
 import { createHash, randomBytes, randomInt } from "node:crypto";
 import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
 import { formatMoney, type Catalog, type ChannelKind, type Product } from "@pos/core";
-import { audit, can, createStaff, startSessionFor, type Permission } from "./auth.js";
+import { audit, can, createStaff, rolePermissions, startSessionFor, type Permission } from "./auth.js";
+import { punch } from "./timeclock.js";
 import type { PgCatalogStore } from "./catalog.js";
 import type { Db } from "./db/pool.js";
 import { createLinkedDevice } from "./devices.js";
@@ -31,6 +32,8 @@ export interface TelegramDeps {
   integ: Integrations;
   cat: PgCatalogStore;
   needs: (permission: Permission) => (req: FastifyRequest, reply: FastifyReply) => unknown;
+  /** Checks that a request comes from an enrolled till (for signing in at a till by QR). */
+  needsDevice?: (req: FastifyRequest, reply: FastifyReply) => unknown;
   /** Sales and order data for /sales and /orders. */
   reports?: {
     sales: (from?: string, to?: string) => Promise<{ from: string; to: string; orders: number; items: number; grossCents: number; serviceCents: number; averageOrderCents: number; byChannel: { commissionCents?: number; channel: string; orders: number; cents: number }[]; products: { name: string; qty: number; cents: number }[] }>;
@@ -532,9 +535,24 @@ export function registerTelegram(app: FastifyInstance, d: TelegramDeps): void {
     const cmd = word.split("@")[0]!.toLowerCase();
     const arg = text.slice(word.length).trim();
 
+    // The QR on a till's sign-in screen opens the bot with "/start till_<code>": the linked person is signed in at that till, and clocked in.
+    if (cmd === "/start" && /^till_[A-Za-z0-9_-]{16,64}$/.test(arg)) {
+      const who = await linkedStaff(m.from.id, m.from);
+      if (!who) return send(chatId, "I don't know you yet, so I can't sign you in. Ask someone to sign in at the till the usual way, open Settings > Station > Link my Telegram, and send me the code with /link CODE. Then scan the till again.");
+      const r = await d.db.query(
+        "UPDATE telegram_till_logins SET staff_id=$3, approved_at=now() WHERE nonce_hash=$1 AND merchant_id=$2 AND approved_at IS NULL AND used_at IS NULL AND expires_at > now() RETURNING outlet_id, device_id",
+        [sha256(arg.slice(5)), d.merchantId, who.staffId],
+      );
+      if (!r.rows[0]) return send(chatId, "That QR code has expired or was already used. Press “Scan QR with Telegram” on the till again and scan the new one.");
+      const p = await punch(d.db, d.merchantId, { id: who.staffId, name: who.name }, { outletId: r.rows[0].outlet_id, deviceId: r.rows[0].device_id, method: "telegram", only: "in" });
+      const at = new Date(p.at).toLocaleTimeString("en-GB", { hour: "2-digit", minute: "2-digit", timeZone: "Asia/Singapore" });
+      if (!p.repeated) await audit(d.db, d.merchantId, who.staffId, "time.clock_in", { method: "telegram", deviceId: r.rows[0].device_id, outletId: r.rows[0].outlet_id });
+      return send(chatId, `✅ ${who.name}, you are signed in at the till. ${p.repeated ? `You have been clocked in since ${at}.` : `Clocked in at ${at}.`}`);
+    }
     if (cmd === "/start" || cmd === "/help") {
       const who = await linkedStaff(m.from.id, m.from);
       if (!who) return send(chatId, `Hello! I manage the ${merchantLabel} menu. To use me, link your account: on the shop's staff site open Manager > Telegram, press “Link my Telegram”, and send me the code like this:\n\n/link ABCD2345`);
+      if (!can(who.role, "catalog.manage")) return send(chatId, `Hello ${who.name}. To sign in and clock in, press “Scan QR with Telegram” on the till's sign-in screen and scan the code with your phone's camera.`);
       return help(chatId);
     }
     if (cmd === "/link") {
@@ -550,7 +568,7 @@ export function registerTelegram(app: FastifyInstance, d: TelegramDeps): void {
         return send(chatId, "That code isn't valid, or it has expired (codes last 10 minutes and work once). Make a new one on the Manager page.");
       }
       const s = await d.db.query("SELECT id, name, role FROM staff WHERE id=$1 AND active", [used.rows[0].staff_id]);
-      if (!s.rows[0] || !can(s.rows[0].role, "catalog.manage")) return send(chatId, "That staff account can't manage prices. Only managers and owners can link.");
+      if (!s.rows[0] || s.rows[0].role === "agent") return send(chatId, "That staff account can't be linked.");
       await d.db.query(
         `INSERT INTO telegram_links (merchant_id, telegram_id, chat_id, staff_id, name) VALUES ($1,$2,$3,$4,$5)
          ON CONFLICT (merchant_id, telegram_id) DO UPDATE SET chat_id=EXCLUDED.chat_id, staff_id=EXCLUDED.staff_id, name=EXCLUDED.name`,
@@ -558,6 +576,8 @@ export function registerTelegram(app: FastifyInstance, d: TelegramDeps): void {
       );
       await audit(d.db, d.merchantId, s.rows[0].id, "telegram.link", { telegramId: m.from.id });
       await send(chatId, `✅ Linked. Hello ${s.rows[0].name}! You are a ${s.rows[0].role}.`);
+      // Anyone can sign in at a till by QR; only managers and owners run the menu from here.
+      if (!can(s.rows[0].role, "catalog.manage")) return send(chatId, "To sign in and clock in, press “Scan QR with Telegram” on the till's sign-in screen and scan the code.");
       return help(chatId);
     }
 
@@ -781,7 +801,37 @@ export function registerTelegram(app: FastifyInstance, d: TelegramDeps): void {
     return { configured: true, bot: botName ?? null, linked: r.rows.map((x) => ({ telegramId: String(x.telegram_id), name: x.name as string | null, staffName: x.staff_name as string, role: x.role as string, since: x.created_at as Date })) };
   });
 
-  app.post("/api/telegram/link-code", { preHandler: d.needs("catalog.manage") as never }, async (req, reply) => {
+  // ---- signing in at a till by scanning its QR code in Telegram (decision Q9: sign-in that doubles as clock-in) ----
+  const TILL_SECONDS = 120;
+  const till = d.needsDevice ? { preHandler: d.needsDevice as never } : {};
+  /** The till asks for a code to show as a QR. It works once, for two minutes, and only for the till that asked. */
+  app.post("/api/telegram/till-login", till, async (req, reply) => {
+    if (!t) return reply.code(404).send({ error: "telegram_not_set_up" });
+    if (!req.device) return reply.code(401).send({ error: "device_not_enrolled" });
+    if (!botName) botName = (await api("getMe", {})).result?.username;
+    if (!botName) return reply.code(503).send({ error: "telegram_unreachable" });
+    const nonce = randomBytes(18).toString("base64url");
+    await d.db.query("DELETE FROM telegram_till_logins WHERE expires_at < now() - interval '1 day'");
+    await d.db.query("INSERT INTO telegram_till_logins (nonce_hash, merchant_id, device_id, outlet_id, expires_at) VALUES ($1,$2,$3,$4, now() + make_interval(secs => $5))", [sha256(nonce), d.merchantId, req.device.id, req.device.outletId ?? d.outletId, TILL_SECONDS]);
+    return { nonce, url: `https://t.me/${botName}?start=till_${nonce}`, seconds: TILL_SECONDS };
+  });
+  /** The till keeps asking: once the person's Telegram has approved, it is handed their session, once. */
+  app.get<{ Params: { nonce: string } }>("/api/telegram/till-login/:nonce", till, async (req, reply) => {
+    if (!t) return reply.code(404).send({ error: "telegram_not_set_up" });
+    if (!req.device || !/^[A-Za-z0-9_-]{16,64}$/.test(req.params.nonce)) return reply.code(401).send({ error: "device_not_enrolled" });
+    const row = (await d.db.query("SELECT staff_id, approved_at, used_at, expires_at FROM telegram_till_logins WHERE nonce_hash=$1 AND merchant_id=$2 AND device_id=$3", [sha256(req.params.nonce), d.merchantId, req.device.id])).rows[0];
+    if (!row || row.used_at) return reply.code(410).send({ state: "gone" });
+    if (!row.approved_at) return new Date(row.expires_at).getTime() < Date.now() ? reply.code(410).send({ state: "expired" }) : { state: "waiting" };
+    const used = await d.db.query("UPDATE telegram_till_logins SET used_at=now() WHERE nonce_hash=$1 AND used_at IS NULL RETURNING staff_id", [sha256(req.params.nonce)]);
+    if (!used.rows[0]) return reply.code(410).send({ state: "gone" });
+    const session = await startSessionFor(d.db, d.merchantId, used.rows[0].staff_id, "telegram-till");
+    if (!session) return reply.code(403).send({ state: "not_allowed" });
+    const s = session.staff;
+    return { state: "approved", token: session.token, expiresAt: session.expiresAt, staff: { name: s.name, code: s.code, role: s.role, franchiseId: s.franchiseId ?? null, outletId: s.outletId ?? null, phoneHint: s.phoneHint ?? null, permissions: rolePermissions(s.role) } };
+  });
+
+  // Anyone signed in can link their own Telegram (it is what lets them sign in at a till by QR); the bot still only runs the menu for managers and owners.
+  app.post("/api/telegram/link-code", { preHandler: d.needs("wallet.read") as never }, async (req, reply) => {
     if (!t) return reply.code(404).send({ error: "telegram_not_set_up" });
     const code = newCode();
     await d.db.query("INSERT INTO telegram_codes (code_hash, merchant_id, staff_id, kind, expires_at) VALUES ($1,$2,$3,'link', now() + make_interval(mins => $4))", [sha256(code), d.merchantId, req.staff!.id, LINK_MINUTES]);

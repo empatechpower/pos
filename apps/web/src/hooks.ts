@@ -55,7 +55,7 @@ export function useReference(): { config: BusinessConfig | null; catalog: Catalo
   useEffect(() => {
     if (!status.reachable) return;
     const load = () =>
-      void refreshReference().then((r) => r && setRef((cur) => (cur.catalog?.version === r.catalog.version && cur.config ? cur : r)));
+      void refreshReference().then((r) => r && setRef((cur) => (cur.catalog?.version === r.catalog.version && cur.config && JSON.stringify(cur.config) === JSON.stringify(r.config) ? cur : r)));
     load();
     window.addEventListener("pos:catalog-refresh", load); // a manager just changed something on this device
     const t = window.setInterval(load, 30_000); // a manager's price change reaches the tills within half a minute

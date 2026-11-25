@@ -5,7 +5,7 @@ import type { Staff } from "./auth.js";
 export interface Franchise { id: string; name: string; active: boolean }
 export interface Outlet { id: string; name: string; franchiseId: string | null; address: string | null; phone: string | null; hours: string | null; active: boolean;
   /** quick service (no table) or table service (a table is required); null until chosen, then the old SHOP_TABLES rule applies. */
-  serviceMode: "qsr" | "tsr" | null;
+  serviceMode: "qsr" | "tsr" | "retail" | null;
   /** Minutes to prepare an order here (a setting), shown before ordering. null = not set. */
   prepMinutes: number | null;
   /** Where the outlet is. Both or neither; with them, customers can sort outlets by distance. */
@@ -25,7 +25,7 @@ export const validId = (s: unknown): s is string => typeof s === "string" && ID.
 const toOutlet = (r: Record<string, unknown>): Outlet => ({
   id: r.id as string, name: r.name as string, franchiseId: (r.franchise_id as string | null) ?? null,
   address: (r.address as string | null) ?? null, phone: (r.phone as string | null) ?? null, hours: (r.hours as string | null) ?? null, active: r.active as boolean,
-  serviceMode: r.service_mode === "qsr" || r.service_mode === "tsr" ? r.service_mode : null,
+  serviceMode: r.service_mode === "qsr" || r.service_mode === "tsr" || r.service_mode === "retail" ? r.service_mode : null,
   prepMinutes: r.prep_minutes === null || r.prep_minutes === undefined ? null : Number(r.prep_minutes),
   latitude: r.latitude === null || r.latitude === undefined ? null : Number(r.latitude),
   longitude: r.longitude === null || r.longitude === undefined ? null : Number(r.longitude),
@@ -56,7 +56,7 @@ export async function upsertFranchise(db: Db, merchantId: string, f: { id: strin
 }
 
 /** A franchise that does not exist is refused by the foreign key; callers check first for a friendly message. */
-export async function upsertOutlet(db: Db, merchantId: string, o: { id: string; name: string; franchiseId?: string | null; address?: string | null; phone?: string | null; hours?: string | null; active?: boolean; serviceMode?: "qsr" | "tsr" | null; prepMinutes?: number | null; latitude?: number | null; longitude?: number | null; country?: string; gstRegNo?: string | null; uen?: string | null; gstOn?: boolean | null }): Promise<void> {
+export async function upsertOutlet(db: Db, merchantId: string, o: { id: string; name: string; franchiseId?: string | null; address?: string | null; phone?: string | null; hours?: string | null; active?: boolean; serviceMode?: "qsr" | "tsr" | "retail" | null; prepMinutes?: number | null; latitude?: number | null; longitude?: number | null; country?: string; gstRegNo?: string | null; uen?: string | null; gstOn?: boolean | null }): Promise<void> {
   await db.query(
     `INSERT INTO outlets (merchant_id, id, name, franchise_id, address, phone, hours, active, service_mode, prep_minutes, latitude, longitude, country, gst_reg_no, uen, gst_on) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16)
      ON CONFLICT (merchant_id, id) DO UPDATE SET name=EXCLUDED.name, franchise_id=EXCLUDED.franchise_id, address=EXCLUDED.address, phone=EXCLUDED.phone, hours=EXCLUDED.hours, active=EXCLUDED.active, service_mode=COALESCE(EXCLUDED.service_mode, outlets.service_mode), prep_minutes=EXCLUDED.prep_minutes, latitude=EXCLUDED.latitude, longitude=EXCLUDED.longitude, country=EXCLUDED.country, gst_reg_no=EXCLUDED.gst_reg_no, uen=EXCLUDED.uen, gst_on=EXCLUDED.gst_on`,

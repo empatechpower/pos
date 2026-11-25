@@ -3,14 +3,14 @@ import { DEFAULT_COUNTRY, TAX_PACKS, formatMoney } from "@pos/core";
 import { staffFetch } from "../auth";
 
 interface Franchise { id: string; name: string; active: boolean }
-interface Outlet { id: string; name: string; franchiseId: string | null; address: string | null; phone: string | null; hours: string | null; active: boolean; serviceMode: "qsr" | "tsr" | null; prepMinutes?: number | null; latitude?: number | null; longitude?: number | null; country?: string; gstRegNo?: string | null; uen?: string | null; gstOn?: boolean | null }
+interface Outlet { id: string; name: string; franchiseId: string | null; address: string | null; phone: string | null; hours: string | null; active: boolean; serviceMode: "qsr" | "tsr" | "retail" | null; prepMinutes?: number | null; latitude?: number | null; longitude?: number | null; country?: string; gstRegNo?: string | null; uen?: string | null; gstOn?: boolean | null }
 interface Summary { orders: number; netCents: number; netToAccountForCents: number; discountsCents: number; voided: { orders: number } }
 interface Row { outletId: string; name: string; franchiseId: string | null; summary: Summary }
 interface Info { brand: { id: string; name: string }; scope: { franchiseId: string | null; outletId: string | null; brandWide: boolean }; franchises: Franchise[]; outlets: Outlet[] }
 
 const TZ = "Asia/Singapore";
 const day = (offset: number) => new Date(Date.now() - offset * 86_400_000).toLocaleDateString("en-CA", { timeZone: TZ });
-const MODE = { qsr: "Quick service (no table)", tsr: "Table service (a table is required)" } as const;
+const MODE = { qsr: "Quick service (no table)", tsr: "Table service (a table is required)", retail: "Retail (sells by scanning; no tables or kitchen)" } as const;
 const RANGES = { today: ["Today", 0], week: ["Last 7 days", 6], month: ["Last 30 days", 29] } as const;
 
 /**
@@ -102,7 +102,7 @@ export function Outlets() {
           const s = row(o.id)?.summary;
           return (
             <button key={o.id} className="rp-row" onClick={() => { setEditing(o); setIsNew(false); }}>
-              <span className="rp-main"><b>{o.name}{!o.active ? " (off)" : ""}</b><small>{o.serviceMode === "qsr" ? "Quick service · " : o.serviceMode === "tsr" ? "Table service · " : ""}{frName(o.franchiseId) ?? "No franchise"}{o.hours ? ` · ${o.hours}` : ""}{s ? ` · ${s.orders} order${s.orders === 1 ? "" : "s"}` : ""}</small></span>
+              <span className="rp-main"><b>{o.name}{!o.active ? " (off)" : ""}</b><small>{o.serviceMode === "qsr" ? "Quick service · " : o.serviceMode === "tsr" ? "Table service · " : o.serviceMode === "retail" ? "Retail · " : ""}{frName(o.franchiseId) ?? "No franchise"}{o.hours ? ` · ${o.hours}` : ""}{s ? ` · ${s.orders} order${s.orders === 1 ? "" : "s"}` : ""}</small></span>
               <span className="rp-amt">{s ? formatMoney(s.netToAccountForCents) : "—"}</span><span className="rp-chev">›</span>
             </button>
           );
@@ -144,6 +144,7 @@ export function Outlets() {
               <option value="">Not chosen (follows the server's table list)</option>
               <option value="qsr">{MODE.qsr}</option>
               <option value="tsr">{MODE.tsr}</option>
+              <option value="retail">{MODE.retail}</option>
             </select>
           </label>
           <p className="muted">Quick service: customers order with no table, and Dine in and Take away are both offered. Table service: Dine in only, and a table is required.</p>

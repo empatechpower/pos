@@ -162,6 +162,29 @@ function CustomActionsEditor({ actions, onSave }: { actions: CustomAction[]; onS
   );
 }
 
+/** Link the signed-in person's own Telegram, so they can sign in at any till by scanning its QR (which also clocks them in). */
+function TelegramLink() {
+  const [code, setCode] = useState<{ code: string; bot: string | null; minutes: number } | null>(null);
+  const [msg, setMsg] = useState("");
+  const make = async () => {
+    setMsg("");
+    const r = await staffFetch("/api/telegram/link-code", { method: "POST" });
+    if (!("res" in r)) return setMsg(r.problem);
+    if (r.res.status === 404) return setMsg("Telegram is not set up for this shop yet.");
+    if (!r.res.ok) return setMsg("A code could not be made just now.");
+    setCode((await r.res.json()) as { code: string; bot: string | null; minutes: number });
+  };
+  return (
+    <>
+      <h3>Sign in with Telegram</h3>
+      <p className="muted">Link your Telegram once. After that, scan the QR on any till's sign-in screen to sign in and clock in, with no PIN.</p>
+      <div className="row"><button className="secondary sm" onClick={() => void make()}>Link my Telegram</button></div>
+      {code && <p role="status">Open Telegram, find {code.bot ? <b>@{code.bot}</b> : "the shop's bot"} and send it: <b>/link {code.code}</b><span className="muted"> · works once, for {code.minutes} minutes</span></p>}
+      {msg && <p className="muted" role="alert">{msg}</p>}
+    </>
+  );
+}
+
 /** Kitchen stations: a name and the menu categories it makes. The kitchen display can then show one station's work. */
 function StationsEditor({ stations, categories, onSave }: { stations: KitchenStation[]; categories: string[]; onSave: (s: KitchenStation[]) => void }) {
   const [name, setName] = useState("");
@@ -224,6 +247,7 @@ export function Settings({ catalog }: { catalog?: Catalog | null } = {}) {
             <div className="row">{(["compact", "standard", "large", "xl"] as const).map((k) => <button key={k} className={prefs.textSize === k ? "primary sm" : "secondary sm"} aria-pressed={prefs.textSize === k} onClick={() => void setPref("textSize", k)}>{k === "xl" ? "Extra large" : k[0]!.toUpperCase() + k.slice(1)} · {Math.round(TEXT_SCALE[k] * 100)}%</button>)}</div>
             <h3>Menu panel</h3>
             <div className="row">{(["left", "right"] as const).map((s) => <button key={s} className={prefs.menuSide === s ? "primary sm" : "secondary sm"} aria-pressed={prefs.menuSide === s} onClick={() => void setPref("menuSide", s)}>{s === "left" ? "Left" : "Right"}</button>)}</div>
+            <TelegramLink />
             <h3>This device</h3>
             <p className="muted">A kitchen display is this same app on a screen in the kitchen: it opens on the kitchen's orders after sign-in.</p>
             <div className="row">{(["till", "kitchen"] as const).map((r) => <button key={r} className={role === r ? "primary sm" : "secondary sm"} aria-pressed={role === r} onClick={() => { setDeviceRole(r); setRole(r); setMsg(r === "kitchen" ? "This device is now a kitchen display." : "This device is now a till."); }}>{r === "till" ? "Till" : "Kitchen display"}</button>)}{role === "kitchen" && <button className="secondary sm" onClick={() => go("/kitchen")}>Open the kitchen display</button>}</div>

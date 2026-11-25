@@ -297,3 +297,58 @@ export function InvoiceDialog({ title, lines, onClose }: { title: string; lines:
     </Modal>
   );
 }
+
+/**
+ * Handing an order to whoever came for it (a delivery rider, or the customer). Scan the bag's receipt barcode or type the order number:
+ * the till shows that order, so the bag can be checked against it before it leaves, and warns when it is not paid, not ready, cancelled,
+ * or already gone. Then it records who took it. A rider's card held to the reader fills in the rider box.
+ */
+export function HandoverDialog({ find, onHandOver, onClose }: { find: (code: string) => HandoverOrder | null; onHandOver: (orderId: string, to: string, ref: string) => Promise<void>; onClose: () => void }) {
+  const [code, setCode] = useState("");
+  const [order, setOrder] = useState<HandoverOrder | null>(null);
+  const [to, setTo] = useState("");
+  const [ref, setRef] = useState("");
+  const [msg, setMsg] = useState("");
+  const [busy, setBusy] = useState(false);
+  const look = () => { const c = code.trim(); if (!c) return; const o = find(c); setMsg(o ? "" : `No order matches ${c}. Check the number on the bag.`); setOrder(o); setCode(""); setTo(""); setRef(""); };
+  const blocked = order ? order.cancelled || !!order.handedTo : true;
+  const hand = async () => {
+    if (!order || blocked || !to.trim() || busy) return;
+    setBusy(true);
+    await onHandOver(order.orderId, to.trim(), ref.trim());
+    setBusy(false);
+    setMsg(`Order ${order.number} handed to ${to.trim()}.`);
+    setOrder(null);
+  };
+  return (
+    <Modal title="Hand over an order" wide onClose={onClose}>
+      {!order && (
+        <>
+          <label className="t-field">Scan the bag, or type the order number<input value={code} autoFocus autoComplete="off" aria-label="Order code" onChange={(e) => setCode(e.target.value)} onKeyDown={(e) => { if (e.key === "Enter") look(); }} /></label>
+          {msg && <p className="t-muted" role="status">{msg}</p>}
+          <div className="t-dact"><button className="t-ghost" onClick={onClose}>Close</button><button className="t-primary" disabled={!code.trim()} onClick={look}>Find</button></div>
+        </>
+      )}
+      {order && (
+        <>
+          <p style={{ margin: "0 0 .3em" }}><b style={{ fontSize: "1.5em" }}>Order {order.number}</b> <span className="t-muted">· {order.where}{order.customer ? ` · ${order.customer}` : ""} · {order.when}</span></p>
+          <div aria-label="Items in this order">{order.items.map((l, i) => <div className="t-row2" key={i}><span><b>{l.qty}×</b> {l.name}{l.detail ? <small className="t-muted"> · {l.detail}</small> : null}</span></div>)}</div>
+          <p className="t-muted">{order.itemCount} item{order.itemCount === 1 ? "" : "s"} in the bag · {order.total}</p>
+          {order.cancelled && <p className="t-flash" role="alert">This order was cancelled. Do not hand it over.</p>}
+          {order.handedTo && <p className="t-flash" role="alert">Already handed to {order.handedTo}. Do not hand it over again.</p>}
+          {!order.cancelled && !order.handedTo && !order.paid && <p className="t-flash" role="alert">This order is not paid yet ({order.owing} to collect).</p>}
+          {!order.cancelled && !order.handedTo && order.paid && !order.ready && <p className="t-flash" role="alert">The kitchen has not marked this order ready. Check the bag is complete.</p>}
+          {!blocked && (
+            <>
+              <label className="t-field">Who is taking it (name, or hold the rider's card to the reader)<input value={to} autoFocus maxLength={60} aria-label="Taken by" onChange={(e) => setTo(e.target.value)} onKeyDown={(e) => { if (e.key === "Enter") void hand(); }} /></label>
+              <label className="t-field">Their order number or reference, if they gave one<input value={ref} maxLength={60} aria-label="Rider reference" onChange={(e) => setRef(e.target.value)} onKeyDown={(e) => { if (e.key === "Enter") void hand(); }} /></label>
+            </>
+          )}
+          <div className="t-dact"><button className="t-ghost" onClick={() => { setOrder(null); setMsg(""); }}>Another order</button>{!blocked && <button className="t-primary" disabled={!to.trim() || busy} onClick={() => void hand()}>Hand over</button>}</div>
+        </>
+      )}
+    </Modal>
+  );
+}
+/** An order as the handover dialog shows it. */
+export interface HandoverOrder { orderId: string; number: string; where: string; customer: string; when: string; items: Array<{ qty: number; name: string; detail: string }>; itemCount: number; total: string; owing: string; paid: boolean; ready: boolean; cancelled: boolean; handedTo: string }

@@ -172,8 +172,9 @@ export function registerShop(app: FastifyInstance, d: ShopDeps) {
     const all = await listOutlets(d.db, merchantId);
     const want = typeof asked === "string" && asked ? all.find((o) => o.id === asked && o.active) : undefined;
     const o = want ?? all.find((x) => x.id === d.config.outletName);
+    // Online, a retail outlet orders like quick service: no table.
     // Quick service (no table) or table service (a table is required). Until an outlet is set, a table list on the server means table service.
-    return { id: o?.id ?? d.config.outletName, name: o?.name ?? d.config.outletName, hours: o?.hours?.trim() || undefined, phone: o?.phone?.trim() || undefined, address: o?.address?.trim() || undefined, mode: o?.serviceMode ?? (tables.length ? "tsr" : "qsr"), chosen: !!o?.serviceMode, prepMinutes: o?.prepMinutes ?? null };
+    return { id: o?.id ?? d.config.outletName, name: o?.name ?? d.config.outletName, hours: o?.hours?.trim() || undefined, phone: o?.phone?.trim() || undefined, address: o?.address?.trim() || undefined, mode: o?.serviceMode === "retail" ? "qsr" : o?.serviceMode ?? (tables.length ? "tsr" : "qsr"), chosen: !!o?.serviceMode, prepMinutes: o?.prepMinutes ?? null };
   };
   /** The outlet an existing order belongs to. */
   const outletOfOrder = async (orderId: string) => (await d.store.outletOfOrder?.(orderId)) ?? d.config.outletName;

@@ -110,6 +110,7 @@ export function OrderDetails({ order: o, config }: { order: OrderState; config: 
         {t.discountCents > 0 && <div className="od-row"><span>Discount{(o.discounts ?? []).length ? ` · ${(o.discounts ?? []).map((x) => x.reason).join(", ")}` : ""}</span><span>-{formatMoney(t.discountCents)}</span></div>}
         {t.pointsDiscount > 0 && <div className="od-row"><span>Points</span><span>-{formatMoney(t.pointsDiscount)}</span></div>}
         <div className="od-row od-grand"><span>Total</span><span>{formatMoney(t.total)}</span></div>
+        {o.handover && <div className="od-row"><span>Handed to {o.handover.to}{o.handover.ref ? ` (${o.handover.ref})` : ""}{o.handover.byName ? ` · by ${o.handover.byName}` : ""}</span><span>{new Date(o.handover.at).toLocaleTimeString("en-GB", { hour: "2-digit", minute: "2-digit", timeZone: "Asia/Singapore" })}</span></div>}
         {o.payments.filter((p) => p.confirmed && !p.paymentId.startsWith("refund:")).map((p, i) => <div className="od-row" key={i}><span>Paid by {recordedTender(p.tender)?.label ?? METHOD[p.method] ?? p.method}</span><span>{formatMoney(p.amountCents)}</span></div>)}
         {o.voided ? <div className="od-row"><span>Status</span><span>Voided</span></div> : owing > 0 ? <div className="od-row od-due"><span>Balance due</span><span>{formatMoney(owing)}</span></div> : <div className="od-row"><span>Status</span><span>Paid</span></div>}
       </div>

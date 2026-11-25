@@ -16,6 +16,7 @@ import {
   COURSE_NAMES,
   menuFor,
   optionLines,
+  findOrderByCode,
   totalsLines,
   basePriceFor,
   RECORDED_TENDERS,
@@ -54,7 +55,7 @@ import { ActionStrip, type Action } from "../till/ActionStrip";
 import { PayPanel, type Tender, type TenderOption } from "../till/PayPanel";
 import { Modal } from "../till/Modal";
 import { ManageItem } from "../till/ManageItem";
-import { CustomerDialog, DiningDialog, DoneDialog, ExtraItemDialog, FeeDialog, GuestsDialog, HeldDialog, QuantityDialog, TaxDialog, TillSettings, loadMember, BarcodeDialog, CouponDialog, InvoiceDialog, couponCents, type MemberSummary, type TillCoupon } from "../till/Dialogs";
+import { CustomerDialog, DiningDialog, DoneDialog, ExtraItemDialog, FeeDialog, GuestsDialog, HeldDialog, QuantityDialog, TaxDialog, TillSettings, loadMember, BarcodeDialog, CouponDialog, HandoverDialog, InvoiceDialog, couponCents, type HandoverOrder, type MemberSummary, type TillCoupon } from "../till/Dialogs";
 import { TEXT_SCALE, loadPrefs, setLayout, usePrefs } from "../prefs";
 import { arrange, arrangeAll, loadTillSettings, openCustomAction, saveTill, useTillSettings, actionsPref, tendersPref, ACTION_POOL } from "../till/tillSettings";
 import { onRouteChange, queryParams } from "../nav";
@@ -112,7 +113,7 @@ export function Pos({ config, catalog, online, customerId, setCustomerId, header
   const [managing, setManaging] = useState<MenuEntry | null>(null);
   const [pax, setPax] = useState(1);
   const [payView, setPayView] = useState(false);
-  const [dialog, setDialog] = useState<null | "dining" | "guests" | "qty" | "held" | "customer" | "settings" | "tabs" | "shift" | "table" | "line" | "seat" | "fee" | "extra" | "reports" | "tax" | "coupon" | "barcode" | "invoice">(null);
+  const [dialog, setDialog] = useState<null | "dining" | "guests" | "qty" | "held" | "customer" | "settings" | "tabs" | "shift" | "table" | "line" | "seat" | "fee" | "extra" | "reports" | "tax" | "coupon" | "barcode" | "invoice" | "handover">(null);
   const [lineKey, setLineKey] = useState<string | null>(null);
   const [pendingQty, setPendingQty] = useState(1);
   const [sheetOpen, setSheetOpen] = useState(false);
@@ -332,6 +333,44 @@ export function Pos({ config, catalog, online, customerId, setCustomerId, header
     addWith(hit, []);
     return `Added ${hit.name}.`;
   };
+  // Retail: a barcode scanner types the code quickly and presses Enter. When that happens with no box being typed in, the item is added
+  // straight away. Slow typing (a person) is ignored, so the keyboard can still be used for everything else.
+  const scanAdd = useRef(addByBarcode);
+  scanAdd.current = addByBarcode;
+  useEffect(() => {
+    if (config.serviceMode !== "retail" || view !== "order" || payView || dialog) return;
+    let buf = "", last = 0;
+    const onKey = (e: KeyboardEvent) => {
+      const el = e.target as HTMLElement | null;
+      if (el && (el.tagName === "INPUT" || el.tagName === "TEXTAREA" || el.tagName === "SELECT" || el.isContentEditable)) return;
+      const now = Date.now();
+      if (now - last > 80) buf = "";
+      last = now;
+      if (e.key === "Enter") { if (buf.length >= 4) { const said = scanAdd.current(buf); if (said) notify(said); e.preventDefault(); } buf = ""; return; }
+      if (e.key.length === 1 && /[A-Za-z0-9._-]/.test(e.key)) buf += e.key;
+    };
+    window.addEventListener("keydown", onKey, true);
+    return () => window.removeEventListener("keydown", onKey, true);
+  }, [config.serviceMode, view, payView, dialog]);
+  /** Hand Over: the order a scanned or typed code means, as the dialog shows it. */
+  const findForHandover = (code: string): HandoverOrder | null => {
+    const o = findOrderByCode(orders, code, { now: Date.now() });
+    if (!o) return null;
+    const t = orderTotals(o, config), paid = confirmedPaid(o), live = o.lines.filter((l) => l.qty > 0);
+    return {
+      orderId: o.orderId, number: o.queueNumber ?? o.spot ?? o.orderId.slice(0, 6).toUpperCase(), where: o.channelName ?? o.fulfilment, customer: o.customerName ?? "",
+      when: new Date(o.openedAt).toLocaleString("en-GB", { day: "2-digit", month: "short", hour: "2-digit", minute: "2-digit", timeZone: "Asia/Singapore" }),
+      items: live.map((l) => ({ qty: l.qty, name: l.name, detail: optionLines(l.options ?? []).join(" · ") })), itemCount: live.reduce((n, l) => n + l.qty, 0),
+      total: formatMoney(t.total), owing: formatMoney(Math.max(0, t.total - paid)), paid: paid >= t.total, ready: o.stage === "ready" || o.stage === "completed",
+      cancelled: o.stage === "cancelled" || !!o.voided, handedTo: o.handover ? `${o.handover.to} at ${new Date(o.handover.at).toLocaleTimeString("en-GB", { hour: "2-digit", minute: "2-digit", timeZone: "Asia/Singapore" })}` : "",
+    };
+  };
+  /** Record who took the order; an order that was waiting to be collected is finished by this. */
+  const handOver = async (id: string, to: string, ref: string) => {
+    const o = orders.find((x) => x.orderId === id);
+    await record(id, { type: "OrderHandedOver", to, ...(ref ? { ref } : {}), ...(staff ? { byName: staff.name } : {}) });
+    if (o && o.stage !== "completed" && o.stage !== "cancelled" && confirmedPaid(o) >= orderTotals(o, config).total) await record(id, { type: "StageSet", stage: "completed" });
+  };
   /** Print Invoice: the order as it stands, as plain lines. */
   const invoiceLines = (): string[] => {
     const pad = (left: string, right: string) => (left.length + right.length >= 40 ? `${left}\n${" ".repeat(Math.max(0, 40 - right.length))}${right}` : left + " ".repeat(40 - left.length - right.length) + right);
@@ -420,6 +459,7 @@ export function Pos({ config, catalog, online, customerId, setCustomerId, header
         lineId: lineIds.get(l.key)!,
         productId: l.item.id,
         name: l.item.name,
+        ...(l.item.barcode ? { sku: l.item.barcode } : {}),
         unitCents: l.unitCents,
         qty: l.qty,
         pointsExempt: l.item.pointsExempt,
@@ -550,7 +590,9 @@ export function Pos({ config, catalog, online, customerId, setCustomerId, header
   // ---- the order on screen: holding, recalling, opening a table's bill ----
   const dineChannel = channels.find((c) => c.kind === "dine_in");
   /** Table service: postpay shops with a dine-in channel get the Table Map, open bills and courses. */
-  const tableService = !prepay && !!dineChannel;
+  /** Retail: a shop that sells by scanning. No tables, no kitchen; a scan anywhere on the selling screen adds the item. */
+  const retail = config.serviceMode === "retail";
+  const tableService = !prepay && !!dineChannel && !retail;
   const unsent = bag.some((l) => !l.sent) || (!orderId && bag.length > 0);
   const resetOrder = () => { setBag([]); setBillDiscounts([]); setFees([]); setTaxOff(null); setUsePoints(false); setCoupon(null); setOrderNote(""); setPax(1); setPendingQty(1); setPayView(false); setSheetOpen(false); setOrderId(null); setPayCheckId(null); };
   /** Put what is on screen aside as a draft (a table's bill with unsent items stays with the table). */
@@ -809,6 +851,7 @@ export function Pos({ config, catalog, online, customerId, setCustomerId, header
     { id: "barcode", label: "Enter Barcode", icon: "▥", onClick: () => setDialog("barcode"), disabled: !!linked?.split },
     { id: "coupon", label: "Scan Coupon", icon: "⌗", onClick: () => setDialog("coupon"), disabled: !staff || !bag.length || !online || !!linked?.split || !!linked?.coupon, title: !online ? "A coupon needs a connection" : linked?.coupon ? "This order already has a coupon" : undefined },
     { id: "invoice", label: "Print Invoice", icon: "⎙", onClick: () => setDialog("invoice"), disabled: !bag.length },
+    { id: "handover", label: "Hand Over", icon: "⇪", onClick: () => setDialog("handover"), disabled: !staff, title: !staff ? "Sign in first" : undefined },
     { id: "drawer", label: "Open Cash Drawer", icon: "▭", onClick: () => void openDrawer(), disabled: !staff || !online || training },
     // The shop's own buttons: each opens its web address in a new tab.
     ...(till.customActions ?? []).filter((a) => a.where !== "dashboard").map((a) => ({ id: a.id, label: a.label, icon: a.icon, onClick: () => openCustomAction(a) })),
@@ -816,7 +859,9 @@ export function Pos({ config, catalog, online, customerId, setCustomerId, header
   ];
   // The manager's choice of which buttons show, and in what order (the pool's natural order is the starting point).
   const poolRank = (id: string) => { const i = ACTION_POOL.findIndex((x) => x.id === id); return i < 0 ? 999 : i; }; // the shop's own buttons come after the built-in ones until arranged
-  const actions = arrange([...allActions].sort((a, b) => poolRank(a.id) - poolRank(b.id)), actionsPref(till));
+  // Retail has no tables or kitchen: those buttons are left off whatever the lists say.
+  const RETAIL_OFF = new Set(["send", "tables", "fire", "guests", "bill", "tabs", "dining"]);
+  const actions = arrange([...allActions].filter((a) => !retail || !RETAIL_OFF.has(a.id)).sort((a, b) => poolRank(a.id) - poolRank(b.id)), actionsPref(till));
 
   const row = (k: string, v: string, neg = false) => <div className="row"><span>{k}</span><span>{neg ? "−" : ""}{v}</span></div>;
   // The markup and class names are the prototype's own (totalsHTML).
@@ -939,6 +984,7 @@ export function Pos({ config, catalog, online, customerId, setCustomerId, header
       {dialog === "coupon" && <CouponDialog current={coupon} subtotalCents={priced.subtotal} memberId={isMember ? memberInfo!.member.id : null} onSet={setCoupon} onClose={() => setDialog(null)} />}
       {dialog === "barcode" && <BarcodeDialog find={addByBarcode} onClose={() => setDialog(null)} />}
       {dialog === "invoice" && <InvoiceDialog title={`Invoice · ${linked?.queueNumber ? `Order ${linked.queueNumber}` : spot && channel.kind === "dine_in" ? spot : "New order"}`} lines={invoiceLines()} onClose={() => setDialog(null)} />}
+      {dialog === "handover" && <HandoverDialog find={findForHandover} onHandOver={handOver} onClose={() => setDialog(null)} />}
       {dialog === "tax" && <TaxDialog name={config.pricing.taxName ?? "GST"} current={taxOff} onSet={setTaxOff} onClose={() => setDialog(null)} />}
       {dialog === "fee" && <FeeDialog fees={fees} onAdd={(kind, value, label) => setFees((cur) => [...cur, { id: newId(), kind, value, label }])} onRemove={(id) => setFees((cur) => cur.filter((f) => f.id !== id))} onClose={() => setDialog(null)} />}
       {dialog === "settings" && <TillSettings onClose={() => setDialog(null)} onEditLayout={staff ? () => { setDialog(null); setView("order"); setEditLayoutAt((n) => n + 1); } : undefined} />}

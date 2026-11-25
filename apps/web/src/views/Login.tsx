@@ -1,7 +1,8 @@
-import { deviceRole } from "../device";
+import QRCode from "qrcode";
+import { deviceHeader, deviceRole } from "../device";
 import { go } from "../nav";
-import { useState } from "react";
-import { currentStaff, signIn, signOut, useStaff } from "../auth";
+import { useEffect, useState } from "react";
+import { adoptSession, currentStaff, signIn, signOut, useStaff, type StaffInfo } from "../auth";
 import { useShift } from "../shift";
 import { takeAfterTraining } from "../training";
 import { takeLockNote } from "../lock";
@@ -40,6 +41,25 @@ export function Login({ online, problem }: { online: boolean; problem?: string |
   const shift = useShift();
   const [blocked, setBlocked] = useState(false);
 
+  // Telegram QR sign-in: its state and its polling sit here, above the signed-in screen below, so the hooks run in the same order every time.
+  const [tg, setTg] = useState<{ nonce: string; qr: string; until: number } | null>(null);
+  const [tgLeft, setTgLeft] = useState(0);
+  useEffect(() => {
+    if (!tg) return;
+    let alive = true;
+    const tick = async () => {
+      if (!alive) return;
+      setTgLeft(Math.max(0, Math.ceil((tg.until - Date.now()) / 1000)));
+      const res = await fetch(`/api/telegram/till-login/${tg.nonce}`, { headers: { ...deviceHeader() } }).catch(() => null);
+      if (!alive || !res) return;
+      if (res.status === 410) { setTg(null); return setMsg("That QR code ran out. Press Scan QR with Telegram for a new one."); }
+      const j = (await res.json().catch(() => ({}))) as { state?: string; token?: string; staff?: StaffInfo };
+      if (j.state === "approved" && j.token && j.staff) { alive = false; setTg(null); adoptSession(j.token, j.staff); await landed(); }
+    };
+    void tick();
+    const t = window.setInterval(() => void tick(), 2000);
+    return () => { alive = false; window.clearInterval(t); };
+  }, [tg]); // eslint-disable-line react-hooks/exhaustive-deps
   if (staff) {
     return (
       <div className="credit">
@@ -69,16 +89,30 @@ export function Login({ online, problem }: { online: boolean; problem?: string |
     const r = await signIn(who, pin);
     setBusy(false);
     setPin("");
-    if (r.ok) {
-      const me = currentStaff();
-      if (me) remember({ code: me.code, name: me.name, role: me.role, hint: me.phoneHint ?? null });
-      // Home (the Dashboard) after practice, and after every sign-in unless the shop switched it off.
-      const afterTraining = takeAfterTraining();
-      await loadTillSettings();
-      go(!afterTraining && deviceRole() === "kitchen" ? "/kitchen" : afterTraining || tillSettings().dashboard ? "/dashboard" : "/pos"); // a device set up as the kitchen display opens there
-    } else {
+    if (r.ok) await landed();
+    else {
       setMsg(r.reason === "locked" ? "Too many wrong PINs. This account is locked for a few minutes." : r.reason === "invalid" ? "Wrong name or PIN." : "Could not reach the server. Sign-in needs a connection.");
     }
+  }
+  /** Signed in (by PIN or by Telegram): remember the person on this till and open where the shop starts. */
+  async function landed() {
+    const me = currentStaff();
+    if (me) remember({ code: me.code, name: me.name, role: me.role, hint: me.phoneHint ?? null });
+    // Home (the Dashboard) after practice, and after every sign-in unless the shop switched it off.
+    const afterTraining = takeAfterTraining();
+    await loadTillSettings();
+    go(!afterTraining && deviceRole() === "kitchen" ? "/kitchen" : afterTraining || tillSettings().dashboard ? "/dashboard" : "/pos"); // a device set up as the kitchen display opens there
+  }
+
+  // Sign in by scanning this till's QR in Telegram (decision Q9): the person's own Telegram approves, and it clocks them in.
+  async function startTelegram() {
+    setMsg(null);
+    const res = await fetch("/api/telegram/till-login", { method: "POST", headers: { ...deviceHeader() } }).catch(() => null);
+    if (!res) return setMsg("Could not reach the server. Telegram sign-in needs a connection.");
+    if (res.status === 404) return setMsg("Telegram sign-in is not set up for this shop yet. Use your phone number or staff code.");
+    if (!res.ok) return setMsg("Telegram could not be reached just now. Use your phone number or staff code.");
+    const j = (await res.json()) as { nonce: string; url: string; seconds: number };
+    setTg({ nonce: j.nonce, qr: await QRCode.toDataURL(j.url, { margin: 1, width: 300 }), until: Date.now() + j.seconds * 1000 });
   }
   const top = list.slice(0, 5);
   const rest = list.slice(5);
@@ -130,7 +164,7 @@ export function Login({ online, problem }: { online: boolean; problem?: string |
                     <input className={target === "code" ? "padactive" : ""} value={code} autoCapitalize="characters" autoComplete="username" aria-label="Staff code" readOnly={!kbd} onFocus={() => setTarget("code")} onClick={() => setTarget("code")} onChange={(e) => setCode(e.target.value)} />
                   </>
                 )}
-                <button type="button" className="telegrammini" onClick={() => setMsg("Telegram sign-in is not set up for this shop yet. Use your phone number or staff code.")}>Scan QR with Telegram</button>
+                <button type="button" className="telegrammini" onClick={() => void startTelegram()}>Scan QR with Telegram</button>
               </div>
               <div className="loginpad">
                 <label className="pinlabel" htmlFor="pin">{label}</label>
@@ -146,10 +180,21 @@ export function Login({ online, problem }: { online: boolean; problem?: string |
             </div>
           </form>
           <p className="sync">Local storage ready · This device is {online ? "connected" : "not connected"} to the shop server{!online && problem ? ` (${problem})` : ""}.</p>
-          <details className="testaccounts"><summary>Other ways to sign in</summary><p>{!showCode ? <button type="button" className="phonepath" onClick={() => { setMode("code"); setPicked(null); setTarget("code"); }}>Use staff code</button> : "You are using a staff code."}</p></details>
+          <details className="testaccounts"><summary>Other ways to sign in</summary><p>{!showCode ? <button type="button" className="phonepath" onClick={() => { setMode("code"); setPicked(null); setTarget("code"); }}>Use staff code</button> : "You are using a staff code."}</p><p><button type="button" className="phonepath" onClick={() => go("/clock")}>Clock in / out</button></p></details>
           <p className="sync verline">Rezein {appVersion()}</p>
         </div>
       </section>
+      {tg && (
+        <div className="overlay" role="dialog" aria-modal="true" aria-label="Sign in with Telegram">
+          <section className="dialog" style={{ textAlign: "center" }}>
+            <div className="heading"><h2>Scan with your phone</h2></div>
+            <img src={tg.qr} alt="QR code to sign in with Telegram" width={260} height={260} style={{ margin: "0 auto", display: "block" }} />
+            <p className="muted">Point your phone's camera at the code and open it in Telegram. You are signed in here and clocked in. {tgLeft} s left.</p>
+            <p className="muted">First time? Sign in the usual way, then Settings → Station → Link my Telegram.</p>
+            <div className="actions"><button type="button" onClick={() => setTg(null)}>Cancel</button></div>
+          </section>
+        </div>
+      )}
     </div>
   );
 }

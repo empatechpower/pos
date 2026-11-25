@@ -24,6 +24,8 @@ export interface BusinessConfig {
     /** Night-club allocation ledger. Off everywhere; see docs/open-questions.md. */
     allocation: boolean;
   };
+  /** How this outlet serves, when it has been chosen: quick service, table service, or retail (sells by scanning; no tables or kitchen). A till is sent its own outlet's. */
+  serviceMode?: "qsr" | "tsr" | "retail";
   pricing: PricingConfig;
   /** Points programme. Rates are merchant settings, not constants (addendum 6.6). */
   rewards: RewardsConfig;
