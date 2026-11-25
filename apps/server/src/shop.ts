@@ -808,6 +808,7 @@ export function registerShop(app: FastifyInstance, d: ShopDeps) {
         channelName: quote.channel.name,
         serviceCharge: quote.channel.serviceCharge,
         taxOn: cfgOf(outlet.id).pricing.gstOn,
+        serviceRate: cfgOf(outlet.id).pricing.serviceRate,
         source: "online",
         customerName: clean(b.customerName, 40) ?? member?.name ?? undefined,
         customerPhone: phone ?? member?.phone ?? undefined,

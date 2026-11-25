@@ -144,8 +144,8 @@ describe("shifts, floats and drawers", () => {
   });
 
   it("whether a shift is required before selling is the shop's setting", async () => {
-    expect((await call("/api/settings/shifts", { bearer: tok.C1 })).json).toEqual({ required: false, variancePolicy: "managerpin", dayEnd: false, lockMinutes: 3 });
-    expect((await call("/api/settings/shifts", { bearer: tok.C1, method: "PUT", body: { required: true } })).status).toBe(403);
+    expect((await call("/api/settings/shifts", { bearer: tok.C1 })).json).toEqual({ required: true, variancePolicy: "managerpin", dayEnd: false, lockMinutes: 3 }); // decision Q13: the gate is on until the shop switches it off
+    expect((await call("/api/settings/shifts", { bearer: tok.C1, method: "PUT", body: { required: false } })).status).toBe(403);
     expect((await call("/api/settings/shifts", { bearer: tok.M1, method: "PUT", body: { required: true } })).json).toMatchObject({ required: true, variancePolicy: "managerpin" });
     expect((await call("/api/settings/shifts", { bearer: tok.M1, method: "PUT", body: { lockMinutes: 999 } })).status).toBe(400);
     expect((await call("/api/settings/shifts", { bearer: tok.C1 })).json.required).toBe(true);

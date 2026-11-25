@@ -95,13 +95,14 @@ export interface ShiftSettings {
   /** Minutes of no use before a till locks itself (0 = never). */
   lockMinutes: number;
 }
-export const DEFAULT_SHIFT_SETTINGS: ShiftSettings = { required: false, variancePolicy: "managerpin", dayEnd: false, lockMinutes: 3 };
+// Decision Q13: a cashier opens their own shift before selling. It stays a shop setting (standing rule 2), but that is where it starts.
+export const DEFAULT_SHIFT_SETTINGS: ShiftSettings = { required: true, variancePolicy: "managerpin", dayEnd: false, lockMinutes: 3 };
 
 export async function loadShiftSettings(db: Db | null, merchantId: string): Promise<ShiftSettings> {
   const r = db ? (await db.query("SELECT value FROM merchant_settings WHERE merchant_id=$1 AND key='shifts'", [merchantId])).rows[0] : undefined;
   const v = r?.value ?? {};
   return {
-    required: !!v.required,
+    required: v.required === undefined ? DEFAULT_SHIFT_SETTINGS.required : !!v.required,
     variancePolicy: ["proceed", "managerpin", "blocked"].includes(v.variancePolicy) ? v.variancePolicy : DEFAULT_SHIFT_SETTINGS.variancePolicy,
     dayEnd: !!v.dayEnd,
     lockMinutes: Number.isInteger(v.lockMinutes) && v.lockMinutes >= 0 && v.lockMinutes <= 240 ? v.lockMinutes : DEFAULT_SHIFT_SETTINGS.lockMinutes,

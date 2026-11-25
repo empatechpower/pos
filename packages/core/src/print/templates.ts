@@ -60,6 +60,8 @@ export function receipt(order: OrderState, config: BusinessConfig, ctx: PrintCon
   const b: Block[] = [{ t: "text", text: ctx.merchantName.toUpperCase(), align: "center", bold: true, size: 2 }, { t: "text", text: ctx.outletName, align: "center" }];
   if (ctx.address) b.push({ t: "text", text: ctx.address, align: "center" });
   if (gstOn) b.push({ t: "text", text: "TAX Invoice", align: "center", bold: true }, { t: "text", text: `GST ${ctx.gstRegNo}${ctx.uen ? ` BIZ ${ctx.uen}` : ""}`, align: "center" });
+  // Quick service: the number the customer collects by, as on the reference receipt ("Collection #007").
+  if (config.paymentTiming === "prepay" && order.queueNumber && opts.showQueue !== false) b.push({ t: "text", text: `Collection #${order.queueNumber}`, align: "center", bold: true });
   b.push({ t: "rule" }, { t: "cols", left: order.queueNumber && opts.showQueue !== false ? `Order ${order.queueNumber}` : "Order", right: where(order) }, { t: "rule" });
   let depositUnits = 0;
   for (const l of liveLines(order)) {
@@ -116,7 +118,10 @@ export function receipt(order: OrderState, config: BusinessConfig, ctx: PrintCon
   const code = transactionCode(order, ctx);
   b.push({ t: "rule" }, { t: "barcode", data: code }, { t: "text", text: code, align: "center" });
   b.push({ t: "text", text: "Please retain and present this Receipt for any refund or replacement of Products", align: "center" });
-  b.push({ t: "text", text: `POSID:${ctx.posId ?? "001"}${ctx.cashier ? ` C:${ctx.cashier}` : ""} TR${code.slice(8)}` });
+  // The till, who served, when the sale was made, and the transaction number, on one line as on the reference receipt.
+  const at = new Intl.DateTimeFormat("en-GB", { timeZone: ctx.timeZone ?? "Asia/Singapore", hour: "2-digit", minute: "2-digit", second: "2-digit", day: "2-digit", month: "2-digit", year: "numeric", hour12: false }).formatToParts(new Date(order.paidAt ?? ctx.now));
+  const part = (k: string) => at.find((x) => x.type === k)?.value ?? "";
+  b.push({ t: "text", text: `POSID:${ctx.posId ?? "001"}${ctx.cashier ? ` C:${ctx.cashier}` : ""} ${part("hour")}:${part("minute")}:${part("second")} ${part("day")}-${part("month")}-${part("year")} TR${code.slice(8)}` });
   b.push({ t: "text", text: "Terms and Conditions apply." }, { t: "rule" }, { t: "text", text: printedAt(ctx.now, ctx.timeZone) });
   b.push({ t: "feed", n: 3 }, { t: "cut" });
   return { blocks: b };

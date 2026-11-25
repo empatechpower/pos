@@ -16,7 +16,7 @@ const startOfDay = (t = Date.now()) => new Date(t).setHours(0, 0, 0, 0);
 const startOfMonth = () => { const d = new Date(); d.setDate(1); d.setHours(0, 0, 0, 0); return d.getTime(); };
 
 type Tab = "open" | "today" | "week" | "month" | "range" | "all";
-type Status = "all" | "open" | "paid" | "refunded" | "voided";
+type Status = "all" | "open" | "paid" | "cancelled" | "refunded" | "voided";
 export type OrderStatus = "open" | "paid" | "refunded" | "voided" | "cancelled";
 
 /** Where an order stands: still to be paid, paid, partly or wholly refunded, voided, or cancelled (or merged into another table). */
@@ -26,7 +26,7 @@ export function statusOf(o: OrderState, config: BusinessConfig): OrderStatus {
   if (o.refunds?.length) return "refunded";
   return o.lines.length > 0 && confirmedPaid(o) >= orderTotals(o, config).total ? "paid" : "open";
 }
-const LABEL: Record<OrderStatus, string> = { open: "Open", paid: "Paid", refunded: "Refunded", voided: "Voided", cancelled: "Cancelled" };
+const LABEL: Record<OrderStatus, string> = { open: "Open", paid: "Paid", refunded: "Refund", voided: "Void", cancelled: "Cancelled" }; // the names the handout fixes for these statuses (4.1, decision Q27)
 
 /** Which tab an order belongs in by date: open orders are always shown under Open, whatever their age. */
 export function inRange(o: OrderState, tab: Tab, now: number, range: { from: number; to: number }): boolean {
@@ -72,7 +72,9 @@ export function Orders({ config }: { config: BusinessConfig }) {
   };
   const byTab = (t: Tab) => all.filter((o) => matches(o) && (t === "open" ? stat.get(o.orderId) === "open" : inRange(o, t, now, range)));
   const counts: Record<Tab, number> = { open: byTab("open").length, today: byTab("today").length, week: byTab("week").length, month: byTab("month").length, range: byTab("range").length, all: byTab("all").length };
-  const list = byTab(tab).filter((o) => status === "all" || stat.get(o.orderId) === status || (status === "voided" && stat.get(o.orderId) === "cancelled"));
+  // Open orders stay pinned above the history in a range view, until a status is chosen (decision Q27).
+  const picked = byTab(tab).filter((o) => status === "all" || stat.get(o.orderId) === status);
+  const list = status === "all" && tab !== "open" ? [...picked.filter((o) => stat.get(o.orderId) === "open"), ...picked.filter((o) => stat.get(o.orderId) !== "open")] : picked;
 
   async function reprint(orderId: string, docType: "receipt" | "kitchen") {
     setMsg(null);
@@ -90,7 +92,7 @@ export function Orders({ config }: { config: BusinessConfig }) {
     go("/pos");
   }
 
-  const TABS: Array<[Tab, string]> = [["open", "Open"], ["today", "Today"], ["week", "Week"], ["month", "Month"], ["range", "Range"], ["all", "All"]];
+  const TABS: Array<[Tab, string]> = [["open", "Open"], ["today", "Today"], ["week", "This Week"], ["month", "This Month"], ["range", "Date Range"], ["all", "All"]];
   return (
     <div className="credit prices orders-screen">
       <h2>Orders</h2>
@@ -106,7 +108,7 @@ export function Orders({ config }: { config: BusinessConfig }) {
       </div>
       {tab === "range" && <div className="row"><label>From <input type="date" value={from} max={to} onChange={(e) => setFrom(e.target.value)} /></label><label>To <input type="date" value={to} min={from} onChange={(e) => setTo(e.target.value)} /></label></div>}
       <div className="orders-chips" aria-label="Filter by status">
-        {(["all", "open", "paid", "refunded", "voided"] as Status[]).map((s) => <button key={s} className={status === s ? "on" : ""} aria-pressed={status === s} onClick={() => setStatus(s)}>{s === "all" ? "All statuses" : LABEL[s]}</button>)}
+        {(["all", "paid", "cancelled", "refunded", "voided"] as Status[]).map((s) => <button key={s} className={status === s ? "on" : ""} aria-pressed={status === s} onClick={() => setStatus(s)}>{s === "all" ? "All statuses" : LABEL[s]}</button>)}
       </div>
       {list.length === 0 && <p className="muted">No orders here.</p>}
       {noting && (() => {

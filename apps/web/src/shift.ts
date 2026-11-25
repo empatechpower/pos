@@ -105,7 +105,7 @@ export async function closeShift(id: string, countedCents: number, note: string,
 /** The shop's shift rules. Kept on the device so a till that starts offline still knows them. */
 export interface ShiftSettings { required: boolean; variancePolicy: "proceed" | "managerpin" | "blocked"; dayEnd: boolean; lockMinutes: number }
 const LS_SET = "pos.shiftSettings";
-const DEFAULT: ShiftSettings = { required: false, variancePolicy: "managerpin", dayEnd: false, lockMinutes: 3 };
+const DEFAULT: ShiftSettings = { required: true, variancePolicy: "managerpin", dayEnd: false, lockMinutes: 3 };
 let settings: ShiftSettings = (() => { try { return { ...DEFAULT, ...(JSON.parse(localStorage.getItem(LS_SET) ?? "null") ?? {}) }; } catch { return DEFAULT; } })();
 export async function loadShiftRequired(): Promise<void> {
   if (isTraining()) return;

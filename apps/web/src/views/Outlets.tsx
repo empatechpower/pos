@@ -3,7 +3,7 @@ import { DEFAULT_COUNTRY, TAX_PACKS, formatMoney } from "@pos/core";
 import { staffFetch } from "../auth";
 
 interface Franchise { id: string; name: string; active: boolean }
-interface Outlet { id: string; name: string; franchiseId: string | null; address: string | null; phone: string | null; hours: string | null; active: boolean; serviceMode: "qsr" | "tsr" | "retail" | null; prepMinutes?: number | null; latitude?: number | null; longitude?: number | null; country?: string; gstRegNo?: string | null; uen?: string | null; gstOn?: boolean | null }
+interface Outlet { id: string; name: string; franchiseId: string | null; address: string | null; phone: string | null; hours: string | null; active: boolean; serviceMode: "qsr" | "tsr" | "retail" | null; prepMinutes?: number | null; latitude?: number | null; longitude?: number | null; country?: string; gstRegNo?: string | null; uen?: string | null; gstOn?: boolean | null; receiptFooter?: string | null; customerService?: string | null }
 interface Summary { orders: number; netCents: number; netToAccountForCents: number; discountsCents: number; voided: { orders: number } }
 interface Row { outletId: string; name: string; franchiseId: string | null; summary: Summary }
 interface Info { brand: { id: string; name: string }; scope: { franchiseId: string | null; outletId: string | null; brandWide: boolean }; franchises: Franchise[]; outlets: Outlet[] }
@@ -48,6 +48,10 @@ export function Outlets() {
   async function setKioskOption(body: object) {
     const r = await staffFetch("/api/settings/kiosk", { method: "PUT", body });
     if ("res" in r && r.res.ok) { setKiosk((await r.res.json()) as NonNullable<typeof kiosk>); say("Saved. A kiosk picks it up when its screen is next reloaded."); } else say("Could not save.");
+  }
+  async function setRate(pct: number) {
+    const r = await staffFetch("/api/settings", { method: "PUT", body: { serviceRatePct: pct } });
+    if ("res" in r && r.res.ok) { setOpts((await r.res.json()) as NonNullable<typeof opts>); say("Saved. Orders opened from now on use the new rate."); } else say("The rate is a percentage from 0 to 30, with at most one decimal place.");
   }
   async function setOption(body: Partial<Record<"serviceChargeOn" | "gstOn" | "stackable" | "pointsItemsEligibleOnly" | "pointsDeductService" | "pointsDeductTax" | "pointsDeductDeposit", boolean>>) {
     const r = await staffFetch("/api/settings", { method: "PUT", body });
@@ -139,6 +143,9 @@ export function Outlets() {
               <p className="muted">Applies to orders opened from now on. Orders already open keep what they were opened with.</p>
             </>
           )}
+          <label className="cust"><span>Receipt closing lines</span><textarea aria-label="Receipt closing lines" rows={3} value={editing.receiptFooter ?? ""} placeholder={"Thank you\nFollow us @yourshop"} onChange={(e) => setEditing({ ...editing, receiptFooter: e.target.value })} /></label>
+          <p className="muted">Printed at the foot of this outlet's receipts: up to four lines of 42 letters. Leave empty for "Thank you".</p>
+          <label className="cust"><span>Customer service line</span><input aria-label="Customer service line" maxLength={60} value={editing.customerService ?? ""} placeholder="e.g. 6123 4567 or help@yourshop.sg" onChange={(e) => setEditing({ ...editing, customerService: e.target.value })} /></label>
           <label className="cust"><span>Service mode</span>
             <select value={editing.serviceMode ?? ""} onChange={(e) => setEditing({ ...editing, serviceMode: (e.target.value || null) as Outlet["serviceMode"] })}>
               <option value="">Not chosen (follows the server's table list)</option>
@@ -168,7 +175,7 @@ export function Outlets() {
           <p className="muted">Customers see the address, phone and hours under Help &amp; support.</p>
           <div style={{ display: "flex", gap: 8 }}>
             <button className="primary" disabled={!editing.name.trim() || (isNew && !editing.id)} onClick={async () => {
-              const body = brandWide ? { name: editing.name, address: editing.address, phone: editing.phone, hours: editing.hours, franchiseId: editing.franchiseId, active: editing.active, country: editing.country ?? DEFAULT_COUNTRY, gstRegNo: editing.gstRegNo?.trim() || null, uen: editing.uen?.trim() || null, gstOn: editing.gstOn ?? null, serviceMode: editing.serviceMode, prepMinutes: editing.prepMinutes ?? null, latitude: editing.latitude ?? null, longitude: editing.longitude ?? null } : { name: editing.name, address: editing.address, phone: editing.phone, hours: editing.hours, serviceMode: editing.serviceMode, prepMinutes: editing.prepMinutes ?? null, latitude: editing.latitude ?? null, longitude: editing.longitude ?? null };
+              const body = brandWide ? { name: editing.name, receiptFooter: editing.receiptFooter ?? null, customerService: editing.customerService ?? null, address: editing.address, phone: editing.phone, hours: editing.hours, franchiseId: editing.franchiseId, active: editing.active, country: editing.country ?? DEFAULT_COUNTRY, gstRegNo: editing.gstRegNo?.trim() || null, uen: editing.uen?.trim() || null, gstOn: editing.gstOn ?? null, serviceMode: editing.serviceMode, prepMinutes: editing.prepMinutes ?? null, latitude: editing.latitude ?? null, longitude: editing.longitude ?? null } : { name: editing.name, receiptFooter: editing.receiptFooter ?? null, customerService: editing.customerService ?? null, address: editing.address, phone: editing.phone, hours: editing.hours, serviceMode: editing.serviceMode, prepMinutes: editing.prepMinutes ?? null, latitude: editing.latitude ?? null, longitude: editing.longitude ?? null };
               if (await save(`/api/outlets/${encodeURIComponent(editing.id)}`, body, "Saved.")) setEditing(null);
             }}>Save</button>
             <button className="secondary" onClick={() => setEditing(null)}>Cancel</button>
@@ -180,7 +187,8 @@ export function Outlets() {
         <div className="rp-card">
           <h3>Charges</h3>
           <p className="muted">Off by default. Most quick-service shops have neither; turn them on only if you charge them.</p>
-          <label className="inline"><input type="checkbox" checked={opts.serviceChargeOn} onChange={(e) => void setOption({ serviceChargeOn: e.target.checked })} /> Service charge ({Math.round(opts.serviceRate * 1000) / 10}%, dine-in only)</label>
+          <label className="inline"><input type="checkbox" checked={opts.serviceChargeOn} onChange={(e) => void setOption({ serviceChargeOn: e.target.checked })} /> Service charge (dine-in only)</label>
+          <label className="cust" style={{ marginTop: 6 }}><span>Service charge rate (%)</span><input aria-label="Service charge rate" inputMode="decimal" style={{ width: 90 }} defaultValue={String(Math.round(opts.serviceRate * 1000) / 10)} key={opts.serviceRate} onBlur={(e) => { const n = Number(e.target.value); if (e.target.value.trim() !== "" && n !== Math.round(opts.serviceRate * 1000) / 10) void setRate(n); }} /></label>
           <label className="inline" style={{ marginTop: 6 }}><input type="checkbox" checked={opts.gstOn} onChange={(e) => void setOption({ gstOn: e.target.checked })} /> Tax ({opts.taxName ?? "GST"} {Math.round(opts.gstRate * 1000) / 10}%, set by the outlet's country)</label>
           <p className="muted" style={{ margin: "10px 0 4px" }}>Promotions and points</p>
           <label className="inline"><input type="checkbox" checked={opts.stackable} onChange={(e) => void setOption({ stackable: e.target.checked })} /> A coupon and points can be used on the same order</label>

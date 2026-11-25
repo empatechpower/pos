@@ -12,6 +12,9 @@ import "../till/till.css";
 import "../proto/proto.css";
 
 /** Country codes for the phone sign-in: Singapore first, then the neighbours. */
+/** Country (ISO code) to its dial code, and the time zones that mean a country when the server cannot say where the device is. */
+const DIAL: Record<string, string> = { SG: "+65", MY: "+60", ID: "+62", TH: "+66", CN: "+86", HK: "+852", TW: "+886", PH: "+63", VN: "+84", IN: "+91", JP: "+81", KR: "+82", AU: "+61", NZ: "+64", AE: "+971", GB: "+44", US: "+1" };
+const ZONE: Record<string, string> = { "Asia/Singapore": "SG", "Asia/Kuala_Lumpur": "MY", "Asia/Kuching": "MY", "Asia/Jakarta": "ID", "Asia/Makassar": "ID", "Asia/Bangkok": "TH", "Asia/Shanghai": "CN", "Asia/Hong_Kong": "HK", "Asia/Taipei": "TW", "Asia/Manila": "PH", "Asia/Ho_Chi_Minh": "VN", "Asia/Kolkata": "IN", "Asia/Tokyo": "JP", "Asia/Seoul": "KR", "Australia/Sydney": "AU", "Australia/Melbourne": "AU", "Australia/Perth": "AU", "Pacific/Auckland": "NZ", "Asia/Dubai": "AE", "Europe/London": "GB" };
 const COUNTRIES: Array<[string, string]> = [["+65", "Singapore"], ["+60", "Malaysia"], ["+62", "Indonesia"], ["+66", "Thailand"], ["+86", "China"], ["+852", "Hong Kong"], ["+886", "Taiwan"], ["+63", "Philippines"], ["+84", "Vietnam"], ["+91", "India"], ["+81", "Japan"], ["+82", "South Korea"], ["+61", "Australia"], ["+64", "New Zealand"], ["+971", "UAE"], ["+44", "United Kingdom"], ["+1", "United States"]];
 
 /** Staff who have signed in on this device, newest first. Kept so they can tap their name and only type a PIN. */
@@ -30,6 +33,17 @@ export function Login({ online, problem }: { online: boolean; problem?: string |
   const [picked, setPicked] = useState<Recent | null>(null);
   const [mode, setMode] = useState<"list" | "phone" | "code">(() => (recents().length ? "list" : "phone"));
   const [cc, setCc] = useState(() => localStorage.getItem("pos.cc") ?? "+65");
+  // The country code is preset from where the device is (decision Q9 addendum): the server's answer from the device's address, else the
+  // device's own time zone. Once someone has signed in by phone here, the code they used is kept instead.
+  useEffect(() => {
+    if (localStorage.getItem("pos.cc")) return;
+    let alive = true;
+    void fetch("/api/auth/country").then((r) => (r.ok ? r.json() : null)).catch(() => null).then((j: { country?: string | null } | null) => {
+      const iso = j?.country ?? ZONE[Intl.DateTimeFormat().resolvedOptions().timeZone] ?? null;
+      if (alive && iso && DIAL[iso] && !localStorage.getItem("pos.cc")) setCc(DIAL[iso]!);
+    });
+    return () => { alive = false; };
+  }, []);
   const [phone, setPhone] = useState("");
   const [code, setCode] = useState("");
   const [pin, setPin] = useState("");

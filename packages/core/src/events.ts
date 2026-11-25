@@ -30,6 +30,8 @@ export type OrderEventBody =
       serviceCharge?: boolean;
       /** Whether the outlet charged tax when the order was opened, frozen like the service charge. Missing on older orders: the shop's setting applies. */
       taxOn?: boolean;
+      /** The service charge rate when the order was opened (0.09 = 9%), frozen so a later change of the shop's rate never reprices it. Missing on older orders. */
+      serviceRate?: number;
       /** "online" = placed by a customer in the ordering app; the shop must accept it before the kitchen sees it. */
       source?: "pos" | "online";
       customerName?: string;
@@ -49,7 +51,7 @@ export type OrderEventBody =
   | { type: "CouponApplied"; title: string; amountCents: Cents; minSpendCents: Cents }
   /** Points the member spent on this order (100 points = S$1). Reduces what is owed. */
   | { type: "PointsRedeemed"; points: number }
-  | { type: "ItemAdded"; lineId: string; productId: string; name: string; /** The item's barcode or SKU when it had one, as the receipt prints it before the name. */ sku?: string; /** includes the price of any options */ unitCents: Cents; qty: number; /** Table service: 1 = Starter, 2 = Main, 3 = Dessert. The kitchen gets it when that course is fired. Missing = no course, goes out at once. */ course?: number; /** The seat it was ordered for (split by seat). */ seat?: number; /** Moved here from a table that was merged in: the kitchen already has it, so it is not printed again. */ carried?: boolean; /** Sold through another dining channel than the order's (its price came from that channel's pricebook). */ channelId?: string; channelName?: string; /** Held back from the kitchen until it is fired by hand, whatever its course (an exception to the course order). */ hold?: boolean; bcrs?: boolean; pointsExempt?: boolean; taxInclusive?: boolean; taxGroup?: string; options?: ChosenOption[]; /** Build-your-own: the frozen structured build. */ build?: StoredBuild }
+  | { type: "ItemAdded"; lineId: string; productId: string; name: string; /** The item's barcode or SKU when it had one, as the receipt prints it before the name. */ sku?: string; /** includes the price of any options */ unitCents: Cents; qty: number; /** Table service: 1 = Starter, 2 = Main, 3 = Dessert. The kitchen gets it when that course is fired. Missing = no course, goes out at once. */ course?: number; /** The seat it was ordered for (split by seat). */ seat?: number; /** Moved here from a table that was merged in: the kitchen already has it, so it is not printed again. */ carried?: boolean; /** Sold through another dining channel than the order's (its price came from that channel's pricebook). */ channelId?: string; channelName?: string; /** Whether that other channel carries the service charge (the line then follows it, not the order). */ serviceCharge?: boolean; /** Held back from the kitchen until it is fired by hand, whatever its course (an exception to the course order). */ hold?: boolean; bcrs?: boolean; pointsExempt?: boolean; taxInclusive?: boolean; taxGroup?: string; options?: ChosenOption[]; /** Build-your-own: the frozen structured build. */ build?: StoredBuild }
   | { type: "ItemQtySet"; lineId: string; qty: number }
   /** The kitchen is told to start this course (table service). Lines with a later course wait. */
   | { type: "CourseFired"; course: number; byName?: string }
@@ -144,6 +146,8 @@ export interface OrderState {
   serviceCharge?: boolean;
   /** Whether the outlet charged tax when the order was opened. Undefined on older orders: the shop's setting applies. */
   taxOn?: boolean;
+  /** The service charge rate the order was opened at. Undefined on older orders: the shop's rate applies. */
+  serviceRate?: number;
   source: "pos" | "online";
   customerName?: string;
   customerPhone?: string;
@@ -227,14 +231,14 @@ export function reduceOrder(orderId: string, events: readonly OrderEvent[]): Ord
   for (const e of mine) {
     if (e.type === "OrderOpened") {
       if (state) continue; // first open wins
-      state = { orderId, fulfilment: e.fulfilment, channelId: e.channelId, channelName: e.channelName, serviceCharge: e.serviceCharge, ...(typeof e.taxOn === "boolean" ? { taxOn: e.taxOn } : {}), source: e.source ?? "pos", customerName: e.customerName, customerPhone: e.customerPhone, memberId: e.memberId, scheduledFor: e.scheduledFor, fireAt: e.fireAt, ...(e.onTab ? { onTab: true } : {}), spot: e.spot, ...(Number.isInteger(e.pax) && (e.pax as number) > 0 ? { pax: e.pax } : {}), queueNumber: e.queueNumber, openedAt: e.ts, lines: [], payments: [], stage: "open" };
+      state = { orderId, fulfilment: e.fulfilment, channelId: e.channelId, channelName: e.channelName, serviceCharge: e.serviceCharge, ...(typeof e.taxOn === "boolean" ? { taxOn: e.taxOn } : {}), ...(typeof e.serviceRate === "number" && e.serviceRate >= 0 && e.serviceRate <= 0.5 ? { serviceRate: e.serviceRate } : {}), source: e.source ?? "pos", customerName: e.customerName, customerPhone: e.customerPhone, memberId: e.memberId, scheduledFor: e.scheduledFor, fireAt: e.fireAt, ...(e.onTab ? { onTab: true } : {}), spot: e.spot, ...(Number.isInteger(e.pax) && (e.pax as number) > 0 ? { pax: e.pax } : {}), queueNumber: e.queueNumber, openedAt: e.ts, lines: [], payments: [], stage: "open" };
       continue;
     }
     if (!state) continue; // events that arrived before the open are applied once it exists on the next replay
     switch (e.type) {
       case "ItemAdded": {
         if (state.lines.some((l) => l.lineId === e.lineId)) break;
-        state.lines.push({ lineId: e.lineId, productId: e.productId, name: e.name, ...(typeof e.sku === "string" && e.sku ? { sku: e.sku.slice(0, 40) } : {}), unitCents: e.unitCents, qty: e.qty, bcrs: e.bcrs, pointsExempt: e.pointsExempt, ...(e.taxInclusive !== undefined ? { taxInclusive: e.taxInclusive } : {}), ...(e.taxGroup ? { taxGroup: e.taxGroup } : {}), ...(e.build ? { build: e.build } : {}), ...(e.course ? { course: e.course } : {}), ...(e.seat ? { seat: e.seat } : {}), ...(e.carried ? { carried: true } : {}), ...(e.channelId ? { channelId: e.channelId, ...(e.channelName ? { channelName: e.channelName } : {}) } : {}), ...(e.hold ? { held: true } : {}), options: e.options });
+        state.lines.push({ lineId: e.lineId, productId: e.productId, name: e.name, ...(typeof e.sku === "string" && e.sku ? { sku: e.sku.slice(0, 40) } : {}), ...(e.channelId && typeof e.serviceCharge === "boolean" ? { serviceCharge: e.serviceCharge } : {}), unitCents: e.unitCents, qty: e.qty, bcrs: e.bcrs, pointsExempt: e.pointsExempt, ...(e.taxInclusive !== undefined ? { taxInclusive: e.taxInclusive } : {}), ...(e.taxGroup ? { taxGroup: e.taxGroup } : {}), ...(e.build ? { build: e.build } : {}), ...(e.course ? { course: e.course } : {}), ...(e.seat ? { seat: e.seat } : {}), ...(e.carried ? { carried: true } : {}), ...(e.channelId ? { channelId: e.channelId, ...(e.channelName ? { channelName: e.channelName } : {}) } : {}), ...(e.hold ? { held: true } : {}), options: e.options });
         if (!e.carried && !e.hold) state.lastSentAt = e.ts;
         break;
       }
@@ -383,9 +387,15 @@ export function reduceAll(events: readonly OrderEvent[]): OrderState[] {
     .sort((a, b) => b.openedAt - a.openedAt);
 }
 
+/** The shop's pricing rules with what the order froze when it opened: whether tax was charged, and the service charge rate. */
+function frozenPricing(state: Pick<OrderState, "taxOn" | "serviceRate">, p: BusinessConfig["pricing"]): BusinessConfig["pricing"] {
+  const tax = state.taxOn !== undefined && state.taxOn !== p.gstOn, rate = state.serviceRate !== undefined && state.serviceRate !== p.serviceRate;
+  return tax || rate ? { ...p, ...(tax ? { gstOn: state.taxOn! } : {}), ...(rate ? { serviceRate: state.serviceRate! } : {}) } : p;
+}
+
 export function orderTotals(state: OrderState, config: BusinessConfig): PriceResult {
   const points = state.pointsRedeemed ? { balance: state.pointsRedeemed, requested: state.pointsRedeemed } : null;
-  const input = { lines: state.lines, fulfilment: state.fulfilment, serviceCharge: state.serviceCharge, points, coupon: state.coupon ?? null, discountCents: staffDiscountCents(state.lines, state.discounts ?? []).totalCents, ...(state.taxRemoved ? { taxRemoved: true } : {}), config: state.taxOn === undefined || state.taxOn === config.pricing.gstOn ? config.pricing : { ...config.pricing, gstOn: state.taxOn } };
+  const input = { lines: state.lines, fulfilment: state.fulfilment, serviceCharge: state.serviceCharge, points, coupon: state.coupon ?? null, discountCents: staffDiscountCents(state.lines, state.discounts ?? []).totalCents, ...(state.taxRemoved ? { taxRemoved: true } : {}), config: frozenPricing(state, config.pricing) };
   const plain = priceOrder(input);
   // A fee on the whole order: a percentage is of the items left after discounts.
   const fee = state.fees?.length ? feeCentsOf(state.fees, plain.subtotal - plain.couponDiscount - plain.discountCents) : 0;

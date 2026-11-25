@@ -60,6 +60,11 @@ export interface PricedLine {
   taxInclusive?: boolean;
   /** Which tax group this line belongs to (see `taxGroups`). Default: the GST rate. */
   taxGroup?: string;
+  /**
+   * Set on a line sold through another dining channel than the order's (one item take away on a dine-in order): whether THAT channel
+   * carries the service charge. Missing = the line follows the order. (Handout section 6: service charge on service channels only.)
+   */
+  serviceCharge?: boolean;
 }
 
 export interface CouponInput {
@@ -226,7 +231,12 @@ export function priceOrder(input: PriceInput): PriceResult {
 
   // Service charge: dine-in only, on the items AFTER the bill discount, never on the deposit (owner rule, 16 Nov 2026).
   // Points are paid like money at the end, so they do not lower it.
-  const service = cfg.serviceOn !== false && (input.serviceCharge ?? input.fulfilment === "dine_in") ? percentOf(Math.max(0, subtotal - allDiscount), cfg.serviceRate) : 0;
+  // A line sold through another channel follows that channel: a take-away item on a dine-in order pays none, and the discount is shared
+  // between the lines by value so only the charged lines' part of it lowers the charge.
+  const orderCharges = input.serviceCharge ?? input.fulfilment === "dine_in";
+  const chargedBase = lines.reduce((n, l) => ((l.serviceCharge ?? orderCharges) ? n + l.unitCents * l.qty : n), 0);
+  const chargedAfterDiscount = chargedBase === subtotal ? subtotal - allDiscount : chargedBase - (subtotal > 0 ? Math.round((allDiscount * chargedBase) / subtotal) : 0);
+  const service = cfg.serviceOn !== false && chargedBase > 0 ? percentOf(Math.max(0, chargedAfterDiscount), cfg.serviceRate) : 0;
 
   // GST is never charged on the deposit. For points, it is fixed on the full items + service.
   const taxDiscount = points ? 0 : allDiscount;

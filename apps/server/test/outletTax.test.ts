@@ -179,3 +179,61 @@ describe("tax is charged outlet by outlet", () => {
     expect((await call("/api/outlets/EV", { method: "PUT", body: { name: "EV", gstOn: "yes" }, staff: owner })).status).toBe(400);
   });
 });
+
+describe("the rest of the outlet's receipt profile", () => {
+  it("its own closing lines and customer service line print on its receipts; an outlet manager may set them", async () => {
+    const set = await call("/api/outlets/EV", { method: "PUT", body: { name: "EV", receiptFooter: "  Thank you, see you soon  \n\nFollow us @baileypatch\nline three\nline four\nline five is dropped", customerService: "6123 4567" }, staff: mgr });
+    expect(set.status).toBe(200);
+    const o = ((await call("/api/outlets", { staff: owner })).json.outlets as any[]).find((x) => x.id === "EV");
+    expect(o.receiptFooter).toBe("Thank you, see you soon\nFollow us @baileypatch\nline three\nline four");
+    expect(o.customerService).toBe("6123 4567");
+    const text = (await call("/api/orders/tax-order-1/receipt", { staff: owner })).json.text as string;
+    expect(text).toContain("Thank you, see you soon");
+    expect(text).toContain("Follow us @baileypatch");
+    expect(text).toContain("Customer Service: 6123 4567");
+    expect(text).not.toContain("line five");
+  });
+  it("cleared, the receipt goes back to a plain thank-you; saving something else leaves them alone", async () => {
+    expect((await call("/api/outlets/EV", { method: "PUT", body: { name: "EV", address: "2 Lengkok Bahru" }, staff: mgr })).status).toBe(200);
+    expect((((await call("/api/outlets", { staff: owner })).json.outlets as any[]).find((x) => x.id === "EV")).customerService).toBe("6123 4567");
+    await call("/api/outlets/EV", { method: "PUT", body: { name: "EV", receiptFooter: "", customerService: "" }, staff: mgr });
+    const text = (await call("/api/orders/tax-order-1/receipt", { staff: owner })).json.text as string;
+    expect(text).toContain("Thank you");
+    expect(text).not.toContain("Customer Service");
+    expect(text).not.toContain("Follow us");
+  });
+});
+
+describe("where the device is, for the sign-in screen's country code", () => {
+  it("passes on the country the hosting edge worked out, and says nothing when it did not", async () => {
+    const ask = async (headers: Record<string, string>) => (await (await fetch(base + "/api/auth/country", { headers })).json()) as { country: string | null };
+    expect(await ask({ "cf-ipcountry": "my" })).toEqual({ country: "MY" });
+    expect(await ask({})).toEqual({ country: null });
+    expect(await ask({ "cf-ipcountry": "XX" })).toEqual({ country: null }); // the edge's own "unknown"
+    expect(await ask({ "cf-ipcountry": "<script>" })).toEqual({ country: null });
+  });
+});
+
+describe("other things the handout fixes", () => {
+  it("a shop has at most eight dining options; an existing one can still be changed", async () => {
+    const count = async () => ((await call("/api/catalog")).json.channels as any[]).length;
+    let made = 0;
+    while ((await count()) < 8) { expect((await call("/api/catalog/channels", { body: { name: `Extra ${++made}`, kind: "takeaway", serviceCharge: false, active: true }, staff: owner })).status).toBe(200); }
+    const ninth = await call("/api/catalog/channels", { body: { name: "One too many", kind: "takeaway", serviceCharge: false, active: true }, staff: owner });
+    expect(ninth.status).toBe(400);
+    expect(ninth.json.problems[0]).toContain("up to 8");
+    expect(await count()).toBe(8);
+    const first = ((await call("/api/catalog")).json.channels as any[])[0];
+    expect((await call("/api/catalog/channels", { body: { id: first.id, name: first.name, kind: first.kind, serviceCharge: first.serviceCharge, active: first.active }, staff: owner })).status).toBe(200);
+  });
+  it("the service charge rate is the owner's to set, within reason", async () => {
+    expect((await call("/api/settings", { method: "PUT", body: { serviceRatePct: 9 }, staff: mgr })).status).toBe(403);
+    expect((await call("/api/settings", { method: "PUT", body: { serviceRatePct: 45 }, staff: owner })).status).toBe(400);
+    expect((await call("/api/settings", { method: "PUT", body: { serviceRatePct: 9.25 }, staff: owner })).status).toBe(400);
+    const set = await call("/api/settings", { method: "PUT", body: { serviceRatePct: 9 }, staff: owner });
+    expect(set.json.serviceRate).toBe(0.09);
+    expect((await call("/api/config")).json.pricing.serviceRate).toBe(0.09);
+    expect((await db.query("SELECT value FROM merchant_settings WHERE merchant_id='bp' AND key='serviceRatePct'")).rows[0].value).toBe(9);
+  });
+});
+

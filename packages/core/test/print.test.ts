@@ -312,7 +312,7 @@ describe("the 7-Eleven style receipt", () => {
     expect(t).toMatch(/Cash tendered\s+S\$20\.00/);
     expect(t).toMatch(/Change\s+S\$9\.10/);
     expect(t).toContain("Member ID: ***4821");
-    expect(t).toMatch(/POSID:002 C:Cat TR\d{6}/);
+    expect(t).toMatch(/POSID:002 C:Cat \d\d:\d\d:\d\d\s+\d\d-\d\d-\d{4}\s+TR\d{6}/); // till, cashier, time, date and transaction together (it wraps on narrow paper)
     expect(t).toContain("Terms and Conditions apply.");
     const doc = receipt(paid, config, { ...base, now: NOW });
     const bar = doc.blocks.find((x) => x.t === "barcode") as { data: string } | undefined;

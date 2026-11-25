@@ -96,3 +96,44 @@ describe("taking the tax off an order", () => {
     expect(orderTotals(back, config).total).toBe(1090);
   });
 });
+
+describe("service charge: by each line's own channel, at the rate the order opened with", () => {
+  const rest: PricingConfig = { ...DEFAULT_PRICING, serviceOn: true, serviceRate: 0.09 };
+  it("a take-away line on a dine-in order pays no service charge (the prototype's totals)", () => {
+    // Dine in: Kaya 2.00 and Milo 2.50 (charged) + one Coffee 2.00 taken away (not charged): 9% of 4.50 = 0.405 -> 0.41
+    const r = priceOrder({ lines: [line(200), line(250), line(200, 1, { serviceCharge: false })], fulfilment: "dine_in", config: rest });
+    expect(r.service).toBe(41);
+    expect(r.total).toBe(691);
+  });
+  it("and a dine-in line on a take-away order does", () => {
+    const r = priceOrder({ lines: [line(1000), line(1000, 1, { serviceCharge: true })], fulfilment: "takeaway", config: rest });
+    expect(r.service).toBe(90);
+  });
+  it("with no line on another channel, nothing changes", () => {
+    expect(priceOrder({ lines: [line(200), line(250)], fulfilment: "dine_in", config: rest }).service).toBe(41);
+    expect(priceOrder({ lines: [line(200), line(250)], fulfilment: "takeaway", config: rest }).service).toBe(0);
+    expect(priceOrder({ lines: [line(1000)], fulfilment: "dine_in", discountCents: 200, config: rest }).service).toBe(72);
+  });
+  it("a bill discount is shared by value, so only the charged lines' part lowers the charge", () => {
+    // 10.00 charged + 10.00 not charged, 4.00 off the bill: the charged half carries 2.00 of it -> 9% of 8.00
+    const r = priceOrder({ lines: [line(1000), line(1000, 1, { serviceCharge: false })], fulfilment: "dine_in", discountCents: 400, config: rest });
+    expect(r.service).toBe(72);
+    expect(r.total).toBe(1672);
+  });
+  it("an order keeps the rate it was opened at when the shop changes its rate", () => {
+    const config = PRESETS.restaurant("m", "Shop", "Outlet");
+    config.pricing = { ...config.pricing, serviceOn: true, serviceRate: 0.09 };
+    const base = { orderId: "o9", deviceId: "d" };
+    const evs = [
+      { ...base, id: "s1", seq: 1, ts: 1, type: "OrderOpened", fulfilment: "dine_in", serviceCharge: true, serviceRate: 0.09 },
+      { ...base, id: "s2", seq: 2, ts: 2, type: "ItemAdded", lineId: "l1", productId: "p", name: "Set", unitCents: 1000, qty: 1 },
+      { ...base, id: "s3", seq: 3, ts: 3, type: "ItemAdded", lineId: "l2", productId: "q", name: "Tea", unitCents: 1000, qty: 1, channelId: "take-away", serviceCharge: false },
+    ] as unknown as OrderEvent[];
+    const o = reduceOrder("o9", evs)!;
+    expect(orderTotals(o, config).service).toBe(90); // the take-away tea is not charged
+    config.pricing = { ...config.pricing, serviceRate: 0.1 };
+    expect(orderTotals(o, config).service).toBe(90); // still 9%
+    const old = reduceOrder("o9", [{ ...evs[0]!, serviceRate: undefined } as unknown as OrderEvent, evs[1]!])!;
+    expect(orderTotals(old, config).service).toBe(100); // an order from before this follows the shop's rate
+  });
+});

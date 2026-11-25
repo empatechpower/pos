@@ -291,12 +291,22 @@ describe("container deposit (BCRS) on a new item", () => {
     expect((await make("Test Plain Water")).status).toBe(200);
     expect((await find("Test Plain Water"))?.bcrs).toBeFalsy();
   });
-  it("an explicit choice wins over the name, and a rename never switches an existing item's deposit", async () => {
+  it("an explicit choice wins over the name; renaming an item INTO a BCRS name switches the deposit on; a manual off sticks", async () => {
     expect((await make("Test Zero BCRS", { bcrs: false })).status).toBe(200);
     expect((await find("Test Zero BCRS"))?.bcrs).toBeFalsy();
+    // standing rule 3 of the developer handout: the name gaining "BCRS" switches the deposit on, at creation or at a rename
     const id = (await find("Test Plain Water"))!.id;
     expect((await staffPost("/api/catalog/products", { id, name: "Test Plain Water BCRS", category: "Beverages" })).status).toBe(200);
-    expect((await find("Test Plain Water BCRS"))?.bcrs).toBeFalsy(); // the manager's rename dialog asks and sends it; the server alone never guesses
+    expect((await find("Test Plain Water BCRS"))?.bcrs).toBe(true);
+    // switched off by hand, it stays off through later edits and renames that keep the word
+    expect((await staffPost("/api/catalog/products", { id, name: "Test Plain Water BCRS", category: "Beverages", bcrs: false })).status).toBe(200);
+    expect((await staffPost("/api/catalog/products", { id, name: "Test Still Water BCRS 500ml", category: "Beverages" })).status).toBe(200);
+    expect((await find("Test Still Water BCRS 500ml"))?.bcrs).toBeFalsy();
+    // renaming the word OUT never switches anything by itself: the rename dialog asks the manager, and sends their answer
+    const zero = (await find("Test Zero BCRS"))!.id;
+    expect((await staffPost("/api/catalog/products", { id: zero, name: "Test Zero BCRS", category: "Beverages", bcrs: true })).status).toBe(200);
+    expect((await staffPost("/api/catalog/products", { id: zero, name: "Test Zero", category: "Beverages" })).status).toBe(200);
+    expect((await find("Test Zero"))?.bcrs).toBe(true);
   });
 });
 

@@ -18,7 +18,7 @@ import { reconcileOrderStock, registerStock } from "./stock.js";
 import { TabError, TabService } from "./tabs.js";
 import { registerTabRoutes } from "./tabRoutes.js";
 import { AmountNotAllowed, issueQr, loadPaynow, loadPaynowOverrides, savePaynow, savePaynowOverride } from "./paynow.js";
-import { applyOption, loadKiosk, OPTION_KEYS, optionsOf, saveKiosk, saveSetting } from "./settings.js";
+import { applyOption, loadKiosk, OPTION_KEYS, optionsOf, saveKiosk, saveSetting , validServiceRatePct } from "./settings.js";
 import { openShiftOf, registerShifts } from "./shifts.js";
 import { registerFloor } from "./floor.js";
 import { cleanLayout, registerTill } from "./tillSettings.js";
@@ -125,6 +125,15 @@ export async function buildApp({ config, store, db, catalog, catalogAdmin, print
   };
 
   app.get("/api/auth/mode", async () => ({ deviceRequired: !!db }));
+  /**
+   * Where this device seems to be, for presetting the country code on the sign-in screen (decision Q9 addendum). The country comes from the
+   * hosting edge, which works it out from the caller's address; nothing is looked up with an outside service. Null when the edge does not say.
+   */
+  app.get("/api/auth/country", async (req) => {
+    const h = req.headers["cf-ipcountry"] ?? req.headers["x-vercel-ip-country"] ?? req.headers["x-country-code"];
+    const c = typeof h === "string" ? h.trim().toUpperCase() : "";
+    return { country: /^[A-Z]{2}$/.test(c) && c !== "XX" && c !== "T1" ? c : null };
+  });
 
   /** A till asks with its device token and gets its own outlet's rules (tax differs by outlet); anyone else gets the brand's. */
   app.get("/api/config", async (req) => {
@@ -171,7 +180,12 @@ export async function buildApp({ config, store, db, catalog, catalogAdmin, print
     if (gst) ctx.gstRegNo = gst;
     const uen = profile?.uen ?? process.env.BUSINESS_UEN?.trim();
     if (uen) ctx.uen = uen;
-    if (process.env.CUSTOMER_SERVICE?.trim()) ctx.customerService = process.env.CUSTOMER_SERVICE.trim();
+    // The outlet's own customer service line and closing lines come first; CUSTOMER_SERVICE on the server is the fallback.
+    // With no line of its own, the outlet's phone number is the customer service line (as the reference receipt does).
+    const service = profile?.customerService ?? process.env.CUSTOMER_SERVICE?.trim() ?? profile?.phone ?? undefined;
+    if (service) ctx.customerService = service;
+    const footer = (profile?.receiptFooter ?? "").split("\n").map((x) => x.trim()).filter(Boolean).slice(0, 4);
+    if (footer.length) ctx.footer = footer;
     if (!db) return ctx;
     try {
       const outlet = outletId ? (await listOutlets(db, merchantId)).find((o) => o.id === outletId) : undefined;
@@ -756,7 +770,7 @@ export async function buildApp({ config, store, db, catalog, catalogAdmin, print
    * Create or change an outlet. Adding an outlet, moving it between franchises and switching it off are for the brand owner;
    * a manager of an outlet (or of its franchise) can update its name, address, phone and opening hours.
    */
-  app.put<{ Params: { id: string }; Body: { name?: string; franchiseId?: string | null; address?: string | null; phone?: string | null; hours?: string | null; active?: boolean; serviceMode?: string | null; prepMinutes?: number | null; latitude?: number | null; longitude?: number | null; country?: string; gstRegNo?: string | null; uen?: string | null; gstOn?: boolean | null } }>("/api/outlets/:id", { preHandler: needs("device.manage") }, async (req, reply) => {
+  app.put<{ Params: { id: string }; Body: { name?: string; franchiseId?: string | null; address?: string | null; phone?: string | null; hours?: string | null; active?: boolean; serviceMode?: string | null; prepMinutes?: number | null; latitude?: number | null; longitude?: number | null; country?: string; gstRegNo?: string | null; uen?: string | null; gstOn?: boolean | null; receiptFooter?: string | null; customerService?: string | null } }>("/api/outlets/:id", { preHandler: needs("device.manage") }, async (req, reply) => {
     const visible = await visibleOutletIds(db, merchantId, req.staff!);
     const id = req.params.id;
     const b = req.body ?? {};
@@ -792,7 +806,10 @@ export async function buildApp({ config, store, db, catalog, catalogAdmin, print
     const uen = b.uen === undefined ? existing?.uen ?? null : reg(b.uen);
     if (gstRegNo === undefined || uen === undefined) return reply.code(400).send({ error: "bad_registration", message: "A registration number is letters, digits and dashes only." });
     if (visible !== null && existing && (country !== existing.country || gstRegNo !== existing.gstRegNo || uen !== existing.uen || gstOn !== existing.gstOn)) return reply.code(403).send({ error: "brand_only", message: "Only the brand owner can change an outlet's country, its tax, or its registration numbers." });
-    await upsertOutlet(db, merchantId, { id, name, franchiseId, address: text(b.address, 200), phone: text(b.phone, 40), hours: text(b.hours, 120), active, serviceMode, prepMinutes, latitude, longitude, country, gstRegNo, uen, gstOn });
+    // The receipt's closing lines (up to four, 42 letters each, as wide as the paper) and the customer service line: the outlet's manager may set these.
+    const receiptFooter = b.receiptFooter === undefined ? existing?.receiptFooter ?? null : (String(b.receiptFooter ?? "").split("\n").map((x) => x.replace(/[\u0000-\u001f\u007f]+/g, " ").trim().slice(0, 42)).filter(Boolean).slice(0, 4).join("\n") || null);
+    const customerService = b.customerService === undefined ? existing?.customerService ?? null : text(b.customerService, 60);
+    await upsertOutlet(db, merchantId, { id, name, franchiseId, receiptFooter, customerService, address: text(b.address, 200), phone: text(b.phone, 40), hours: text(b.hours, 120), active, serviceMode, prepMinutes, latitude, longitude, country, gstRegNo, uen, gstOn });
     await audit(db, merchantId, req.staff!.id, "outlet.save", { id, name, franchiseId, serviceMode, prepMinutes, country, gstRegNo, uen, gstOn, created: !existing });
     await applyOutletTax();
     return { ok: true };
@@ -880,7 +897,9 @@ export async function buildApp({ config, store, db, catalog, catalogAdmin, print
     if ((await visibleOutletIds(db, merchantId, req.staff!)) !== null) return reply.code(403).send({ error: "brand_only" });
     const b = (req.body ?? {}) as Record<string, unknown>;
     for (const k of OPTION_KEYS) if (b[k] !== undefined && typeof b[k] !== "boolean") return reply.code(400).send({ error: `${k} must be true or false` });
-    const changed: Record<string, boolean> = {};
+    if (b.serviceRatePct !== undefined && !validServiceRatePct(b.serviceRatePct)) return reply.code(400).send({ error: "serviceRatePct is a percentage from 0 to 30, to one decimal place" });
+    const changed: Record<string, boolean | number> = {};
+    if (b.serviceRatePct !== undefined) { await saveSetting(db, merchantId, "serviceRatePct", b.serviceRatePct); config.pricing.serviceRate = (b.serviceRatePct as number) / 100; changed.serviceRatePct = b.serviceRatePct as number; }
     for (const k of OPTION_KEYS) {
       if (typeof b[k] !== "boolean") continue;
       await saveSetting(db, merchantId, k, b[k]);

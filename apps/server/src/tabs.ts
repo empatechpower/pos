@@ -950,7 +950,7 @@ export class TabService {
     let seq = 0;
     const mk = (extra: object) => ({ id: newId(), orderId, deviceId: "shop", ts, seq: ++seq, ...extra }) as unknown as OrderEvent;
     await this.d.ingest([
-      mk({ type: "OrderOpened", fulfilment: quote.fulfilment, channelId: quote.channel.id, channelName: quote.channel.name, serviceCharge: quote.channel.serviceCharge, taxOn: (this.d.configFor?.(t.outletId) ?? this.d.config).pricing.gstOn, source: "online", customerName: "Staff", spot: t.spot ?? undefined, onTab: true }),
+      mk({ type: "OrderOpened", fulfilment: quote.fulfilment, channelId: quote.channel.id, channelName: quote.channel.name, serviceCharge: quote.channel.serviceCharge, taxOn: (this.d.configFor?.(t.outletId) ?? this.d.config).pricing.gstOn, serviceRate: (this.d.configFor?.(t.outletId) ?? this.d.config).pricing.serviceRate, source: "online", customerName: "Staff", spot: t.spot ?? undefined, onTab: true }),
       ...quote.lines.map((l) => mk({ type: "ItemAdded", lineId: newId(), productId: l.productId, name: l.name, unitCents: l.unitCents, qty: l.qty, pointsExempt: l.pointsExempt, bcrs: l.bcrs, ...(l.taxInclusive !== undefined ? { taxInclusive: l.taxInclusive } : {}), ...(l.taxGroup ? { taxGroup: l.taxGroup } : {}), options: l.options.length ? l.options : undefined, ...(l.build ? { build: l.build } : {}) })),
       mk({ type: "OrderAccepted" }),
     ], t.outletId);

@@ -43,10 +43,16 @@ export function applyOption(config: BusinessConfig, key: string, value: boolean)
 }
 export const OPTION_KEYS = ["serviceChargeOn", "gstOn", "stackable", "pointsItemsEligibleOnly", "pointsDeductService", "pointsDeductTax", "pointsDeductDeposit"] as const;
 
+/** A service charge percentage: 0 to 30, to one decimal place. */
+export const validServiceRatePct = (v: unknown): v is number => typeof v === "number" && Number.isFinite(v) && v >= 0 && v <= 30 && Math.round(v * 10) === v * 10;
+
 export async function loadSettings(db: Db | null, merchantId: string, config: BusinessConfig): Promise<void> {
   const rows = db ? (await db.query("SELECT key, value FROM merchant_settings WHERE merchant_id=$1", [merchantId])).rows : [];
   const get = (k: string): boolean | undefined => (typeof rows.find((r) => r.key === k)?.value === "boolean" ? (rows.find((r) => r.key === k)!.value as boolean) : undefined);
   config.pricing.serviceOn = get("serviceChargeOn") ?? /^(1|true|yes|on)$/i.test(process.env.SERVICE_CHARGE ?? "");
+  // The service charge rate is the shop's own (standing rule 2): the owner's saved percentage, else the built-in one.
+  const rate = rows.find((r) => r.key === "serviceRatePct")?.value;
+  if (validServiceRatePct(rate)) config.pricing.serviceRate = (rate as number) / 100;
   for (const k of OPTION_KEYS) {
     if (k === "serviceChargeOn") continue;
     const v = get(k);

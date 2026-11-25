@@ -18,7 +18,7 @@ export const DEFAULT_FLOOR: FloorSettings = {
   ],
   splitBill: true,
   courses: true,
-  overdueMinutes: 45,
+  overdueMinutes: 90,
 };
 
 const KEY = "pos.floor";

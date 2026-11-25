@@ -232,8 +232,10 @@ export function Pos({ config, catalog, online, customerId, setCustomerId, header
   const openedTax = openedOrder?.taxOn;
   // Points already spent on this order stay as they are; otherwise the attached member's points are used when staff asked for them.
   const pointsIn = openedOrder?.pointsRedeemed ? { balance: openedOrder.pointsRedeemed, requested: openedOrder.pointsRedeemed } : usePoints && memberInfo?.rewards.pointsEnabled && !openedOrder?.split ? { balance: memberInfo.member.points, requested: null } : null;
+  /** A line sold through another dining channel follows that channel's service charge, not the order's. */
+  const lineService = (b: BagLine): { serviceCharge?: boolean } => { const c = b.channelId && b.channelId !== channelId ? catalog.channels.find((x) => x.id === b.channelId) : undefined; return c ? { serviceCharge: c.serviceCharge } : {}; };
   const priceInput = {
-    lines: bag.map((b) => ({ name: b.item.name, unitCents: effUnit(b), qty: b.qty, pointsExempt: b.item.pointsExempt, bcrs: !!b.item.bcrs, taxInclusive: b.item.taxInclusive, taxGroup: b.item.taxGroup })),
+    lines: bag.map((b) => ({ name: b.item.name, unitCents: effUnit(b), qty: b.qty, pointsExempt: b.item.pointsExempt, bcrs: !!b.item.bcrs, taxInclusive: b.item.taxInclusive, taxGroup: b.item.taxGroup, ...lineService(b) })),
     fulfilment,
     serviceCharge: channel.serviceCharge,
     discountCents: staffDiscountCents(bag.map((b) => ({ lineId: b.key, unitCents: effUnit(b), qty: b.qty })), staffDiscounts).totalCents,
@@ -242,7 +244,7 @@ export function Pos({ config, catalog, online, customerId, setCustomerId, header
     // A coupon already on the order stays as it was applied; one just scanned is worked out on the items as they stand.
     coupon: openedOrder?.coupon ? { amountCents: openedOrder.coupon.amountCents, minSpendCents: openedOrder.coupon.minSpendCents } : coupon ? { amountCents: couponCents(coupon, bag.reduce((n, b) => n + effUnit(b) * b.qty, 0)), minSpendCents: coupon.minSpendCents } : null,
     // An order already opened keeps the tax answer it was opened with, even if the outlet's setting has changed since.
-    config: openedTax === undefined || openedTax === config.pricing.gstOn ? config.pricing : { ...config.pricing, gstOn: openedTax },
+    config: (openedTax === undefined || openedTax === config.pricing.gstOn) && (openedOrder?.serviceRate === undefined || openedOrder.serviceRate === config.pricing.serviceRate) ? config.pricing : { ...config.pricing, ...(openedTax !== undefined ? { gstOn: openedTax } : {}), ...(openedOrder?.serviceRate !== undefined ? { serviceRate: openedOrder.serviceRate } : {}) },
   };
   // A fee on the whole order: a percentage is of the items left after discounts.
   const unfeed = priceOrder(priceInput);
@@ -446,6 +448,7 @@ export function Pos({ config, catalog, online, customerId, setCustomerId, header
         channelName: channel.name,
         serviceCharge: channel.serviceCharge,
         taxOn: config.pricing.gstOn,
+        serviceRate: config.pricing.serviceRate,
         spot: channel.kind === "dine_in" ? spot : undefined,
         ...(channel.kind === "dine_in" && pax > 0 ? { pax } : {}),
         queueNumber,
@@ -470,7 +473,7 @@ export function Pos({ config, catalog, online, customerId, setCustomerId, header
         ...(l.item.taxGroup ? { taxGroup: l.item.taxGroup } : {}),
         ...(l.course ? { course: l.course } : {}),
         ...(l.seat ? { seat: l.seat } : {}),
-        ...(l.channelId && l.channelId !== channelId ? { channelId: l.channelId, ...(l.channelName ? { channelName: l.channelName } : {}) } : {}),
+        ...(l.channelId && l.channelId !== channelId ? { channelId: l.channelId, ...(l.channelName ? { channelName: l.channelName } : {}), ...lineService(l) } : {}),
         ...(l.hold ? { hold: true } : {}),
         options: l.options.length || l.note ? [...l.options, ...(l.note ? [{ group: "Special request", name: `Note: ${l.note}`, qty: 1, priceCents: 0 }] : [])] : undefined,
       });

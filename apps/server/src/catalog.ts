@@ -29,6 +29,9 @@ const shortId = (prefix: string) => `${prefix}-${randomBytes(4).toString("hex")}
  * applies the edit, re-validates the whole result, and bumps the version. A change that would leave
  * the catalog inconsistent is rolled back and reported, never half-applied.
  */
+/** The most dining options (channels) one shop can have. */
+export const MAX_CHANNELS = 8;
+
 export class PgCatalogStore implements CatalogStore {
   constructor(
     private readonly db: Db,
@@ -325,6 +328,9 @@ export class PgCatalogStore implements CatalogStore {
   upsertChannel(ch: { id?: string; name: string; kind: ChannelKind; serviceCharge: boolean; active: boolean; commission?: { ratePct: number } | null }) {
     return this.change(async (c) => {
       const id = ch.id ?? shortId("ch");
+      // A shop has up to 8 dining options, each with its own pricebook (decisions Q15 and Q19). Changing an existing one is always allowed.
+      const have = (await c.query("SELECT id FROM channels WHERE merchant_id=$1", [this.merchantId])).rows.map((r) => r.id as string);
+      if (!have.includes(id) && have.length >= MAX_CHANNELS) throw new ChangeError(`a shop can have up to ${MAX_CHANNELS} dining options; switch one off or rename it instead`);
       await c.query(
         `INSERT INTO channels (merchant_id,id,name,kind,service_charge,active,commission_rate_pct) VALUES ($1,$2,$3,$4,$5,$6,$7)
          ON CONFLICT (merchant_id,id) DO UPDATE SET name=EXCLUDED.name, kind=EXCLUDED.kind, service_charge=EXCLUDED.service_charge, active=EXCLUDED.active,
@@ -416,7 +422,7 @@ export class PgCatalogStore implements CatalogStore {
     return this.change(async (c) => {
       const m = this.merchantId;
       const id = p.id ?? shortId("item");
-      const existing = await c.query("SELECT 1 FROM products WHERE merchant_id=$1 AND id=$2", [m, id]);
+      const existing = await c.query("SELECT name FROM products WHERE merchant_id=$1 AND id=$2", [m, id]);
       if (!existing.rowCount && p.priceCents === undefined) throw new ChangeError("a new product needs a price");
       const text = (v: string | undefined) => (v === undefined ? [false, null] : [true, v.trim() === "" ? null : v.trim()]);
       const [descGiven, desc] = text(p.description);
@@ -427,7 +433,9 @@ export class PgCatalogStore implements CatalogStore {
       const cleanNames = Object.fromEntries(Object.entries(p.names ?? {}).map(([k, v]) => [k, String(v ?? "").trim()]).filter(([k, v]) => /^[a-z]{2,3}$/.test(k as string) && v));
       // A NEW item whose name says BCRS gets the container deposit switched on (handover 8); for an existing item, not sent = left as it is,
       // so a rename or a sold-out toggle never switches the deposit off. (An explicit true/false always wins.)
-      const autoBcrs = !existing.rowCount && p.bcrs === undefined && /bcrs/i.test(p.name);
+      // The same when an existing item is renamed INTO a BCRS name (standing rule 3). An item already named BCRS that was switched off by hand
+      // stays off: only gaining the word switches it on.
+      const autoBcrs = p.bcrs === undefined && /bcrs/i.test(p.name) && (!existing.rowCount || !/bcrs/i.test(String(existing.rows[0]!.name ?? "")));
       const bcrsGiven = p.bcrs !== undefined || autoBcrs;
       // A builder spec sent replaces the old one (null removes it); not sent = left as it is. Its rules are checked with the whole catalogue before it is kept.
       const builderGiven = p.builder !== undefined;

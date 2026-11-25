@@ -24,7 +24,7 @@ export const DEFAULT_FLOOR: FloorSettings = {
   ],
   splitBill: true,
   courses: true,
-  overdueMinutes: 45,
+  overdueMinutes: 90, // decision Q18: a table is overdue after 90 minutes unless the shop sets another time
 };
 
 export async function loadFloor(db: Db, merchantId: string): Promise<FloorSettings> {
