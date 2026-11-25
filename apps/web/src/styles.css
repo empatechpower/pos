@@ -705,3 +705,10 @@ html.training-on body { box-shadow: inset 0 0 0 5px #c62828; }
 .ticket.late .kds-timer { color: #c62828; font-weight: 700; }
 .kds-acts { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
 .kds-acts .primary { flex: 1; }
+
+/* Print Invoice from the till: only the invoice goes to paper */
+@media print {
+  body.print-invoice * { visibility: hidden !important; }
+  body.print-invoice .invoice-print, body.print-invoice .invoice-print * { visibility: visible !important; }
+  body.print-invoice .invoice-print { position: fixed; left: 0; top: 0; width: 72mm; font-size: 11px; background: #fff; color: #000; }
+}

@@ -178,6 +178,23 @@ describe("member prices", () => {
     expect(basePriceFor(kaya, false)).toBe(200);
     expect(basePriceFor(tea, true)).toBe(150);
   });
+  it("priced for a member, the menu and an order both use the member price and keep the usual one beside it", async () => {
+    const { menuFor } = await import("../src/catalog.js");
+    const { quoteOrder } = await import("../src/shop.js");
+    const { PRESETS } = await import("../src/config.js");
+    const kaya = menuFor(cat(), { outletId: "o", channelId: "dine", member: true }).find((m) => m.id === "kaya")!;
+    expect(kaya).toMatchObject({ priceCents: 180, listPriceCents: 200 });
+    const guest = menuFor(cat(), { outletId: "o", channelId: "dine" }).find((m) => m.id === "kaya")!;
+    expect(guest.priceCents).toBe(200);
+    expect(guest.listPriceCents).toBeUndefined();
+    const config = PRESETS.fastServe("m", "Shop", "o");
+    config.pricing = { ...config.pricing, serviceOn: false };
+    const items = [{ productId: "kaya", qty: 2 }, { productId: "tea", qty: 1 }];
+    const asMember = quoteOrder(cat(), config, { outletId: "o", channelId: "dine", member: true }, items);
+    const asGuest = quoteOrder(cat(), config, { outletId: "o", channelId: "dine" }, items);
+    expect(asMember.ok && asMember.priced.subtotal).toBe(510);
+    expect(asGuest.ok && asGuest.priced.subtotal).toBe(550);
+  });
   it("a promotion already below the member price wins: the member price never raises what anyone pays", async () => {
     const { menuFor, basePriceFor } = await import("../src/catalog.js");
     const now = Date.now();

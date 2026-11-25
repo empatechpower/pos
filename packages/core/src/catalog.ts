@@ -26,6 +26,8 @@ export interface Product {
   id: string;
   name: string;
   category: string;
+  /** Its barcode or SKU: the till adds the item when this is scanned or typed. */
+  barcode?: string;
   soldOut?: boolean;
   pointsExempt?: boolean;
   /** This item's price already includes tax (overrides the merchant default). */
@@ -132,6 +134,8 @@ export interface PriceContext {
   channelId: string;
   /** When the sale happens (ms). Default: now. Only promotional overrides care. */
   at?: number;
+  /** The buyer is a signed-in member: an item with a member price is priced at it (the price everyone else pays is kept as `listPriceCents`). */
+  member?: boolean;
 }
 
 /** The old three-way fulfilment an order still records, for anything that predates channels. */
@@ -165,6 +169,8 @@ export interface ResolvedPrice {
   pricebookId: string;
   /** What a member pays, when the item has a member price below the price everyone pays right now (a promotion can already be lower). */
   memberPriceCents?: Cents;
+  /** Set when `priceCents` is the member price (the context said the buyer is a member): what everyone else pays. */
+  listPriceCents?: Cents;
   /** Set when a promotional override set this price. */
   overrideId?: string;
 }
@@ -182,7 +188,8 @@ export function resolvePrice(catalog: Catalog, productId: string, ctx: PriceCont
   }
   const open = promo ? promo.priceCents : book.prices[productId]!;
   const mp = book.memberPrices?.[productId];
-  return { priceCents: open, pricebookId: book.id, ...(promo ? { overrideId: promo.id } : {}), ...(mp !== undefined && mp < open ? { memberPriceCents: mp } : {}) };
+  const forMember = mp !== undefined && mp < open;
+  return { priceCents: forMember && ctx.member ? mp : open, pricebookId: book.id, ...(promo ? { overrideId: promo.id } : {}), ...(forMember ? { memberPriceCents: mp } : {}), ...(forMember && ctx.member ? { listPriceCents: open } : {}) };
 }
 
 /** Products shown on the menu but not orderable here: no price in the winning book, and the book says "show". */
@@ -205,6 +212,8 @@ export interface MenuEntry extends Product {
   pricebookId: string;
   /** What a member pays here, when that is less than the price. */
   memberPriceCents?: Cents;
+  /** Set when this entry is priced for a member: what everyone else pays. */
+  listPriceCents?: Cents;
 }
 
 /** Everything sellable in this context, with its price. */

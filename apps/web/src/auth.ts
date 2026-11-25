@@ -12,6 +12,8 @@ export interface StaffInfo {
   outletId?: string | null;
   /** The phone number with its middle hidden, for the staff buttons on the sign-in screen. */
   phoneHint?: string | null;
+  /** What this person may do, as the shop set it for their role (from sign-in). Missing on a session from before this existed. */
+  permissions?: string[];
 }
 
 const LS_TOKEN = "pos.token";
@@ -22,6 +24,8 @@ const emit = () => listeners.forEach((l) => l());
 
 /** Who is signed in on this device right now (read without React). */
 export const currentStaff = (): StaffInfo | null => staff;
+/** May this person do it without a manager? A session without a list falls back to the old rule: managers and owners may, cashiers may not. */
+export const hasPerm = (s: StaffInfo | null | undefined, p: string): boolean => !!s && (s.permissions ? s.permissions.includes(p) : s.role !== "cashier");
 export const getToken = () => localStorage.getItem(LS_TOKEN);
 /** Staff token plus this device's token: the server wants both for anything that touches money. */
 export const authHeader = (): Record<string, string> => {

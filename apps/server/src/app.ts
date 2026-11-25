@@ -3,7 +3,7 @@ import Fastify, { type FastifyReply, type FastifyRequest } from "fastify";
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { withTaxPack, isTaxCountry, TAX_PACKS, DEFAULT_COUNTRY, type BuilderSpec, guestCheck, plainText, receipt, type OrderState, type PrintContext, commissionOf, tabPaymentReceipt, type ProductStock, validateProductStock, isTimeZone, validCoordinates, validateOutletOverride, validateWindows, type MenuWindows, confirmedPaid, hourly, isFullyPaid, productMix, summarize, menuFor, newId, orderTotals, reduceAll, reduceOrder, shopStatus, type BusinessConfig, type ChannelKind, type OptionGroup, type OrderEvent } from "@pos/core";
-import { CASHIER_TOPUP_LIMIT_CENTS, audit, checkStaffPin, authenticate, authenticateAgent, can, createAgent, createConnectCode, redeemConnectCode, createStaff, listAgents, login, loginByPhone, logout, normalisePhone, setStaffPhone, recentAudit, revokeAgent, type Permission, type Role, type Staff } from "./auth.js";
+import { PERMISSION_OPTIONS, loadRolePermissions, rolePermissions, saveRolePermissions, setRolePermissions, CASHIER_TOPUP_LIMIT_CENTS, audit, checkStaffPin, authenticate, authenticateAgent, can, createAgent, createConnectCode, redeemConnectCode, createStaff, listAgents, login, loginByPhone, logout, normalisePhone, setStaffPhone, recentAudit, revokeAgent, type Permission, type Role, type Staff } from "./auth.js";
 import type { CatalogStore, ChangeResult, PgCatalogStore } from "./catalog.js";
 import type { Db } from "./db/pool.js";
 import { adjustTo, balanceOf, creditBlockedFor, creditExemptIds, creditFrozen, refund, setCreditExempt, setCreditFrozen, spend, topUp } from "./ledger.js";
@@ -363,7 +363,7 @@ export async function buildApp({ config, store, db, catalog, catalogAdmin, print
       if (r.reason === "invalid") loginFailures.fail(who);
       return reply.code(r.reason === "locked" ? 429 : 401).send({ error: r.reason });
     }
-    return { token: r.token, expiresAt: r.expiresAt, staff: { name: r.staff.name, code: r.staff.code, role: r.staff.role, franchiseId: r.staff.franchiseId ?? null, outletId: r.staff.outletId ?? null, phoneHint: r.staff.phoneHint ?? null } };
+    return { token: r.token, expiresAt: r.expiresAt, staff: { name: r.staff.name, code: r.staff.code, role: r.staff.role, franchiseId: r.staff.franchiseId ?? null, outletId: r.staff.outletId ?? null, phoneHint: r.staff.phoneHint ?? null, permissions: rolePermissions(r.staff.role) } };
   });
 
   // ---- a person's own colour for the staff screens (Q&A F-2); anyone who has not chosen follows the merchant's theme ------------------
@@ -409,7 +409,23 @@ export async function buildApp({ config, store, db, catalog, catalogAdmin, print
     return { prefs: cleanPrefs(row?.prefs) };
   });
 
-  app.get("/api/auth/me", { preHandler: needs("wallet.read") }, async (req) => ({ name: req.staff!.name, code: req.staff!.code, role: req.staff!.role, franchiseId: req.staff!.franchiseId ?? null, outletId: req.staff!.outletId ?? null }));
+  app.get("/api/auth/me", { preHandler: needs("wallet.read") }, async (req) => ({ name: req.staff!.name, code: req.staff!.code, role: req.staff!.role, franchiseId: req.staff!.franchiseId ?? null, outletId: req.staff!.outletId ?? null, permissions: rolePermissions(req.staff!.role) }));
+
+  // ---- what cashiers and managers may do: the owner's choice ----
+  if (db) await loadRolePermissions(db, merchantId);
+  const permissionView = () => ({ roles: { cashier: rolePermissions("cashier"), manager: rolePermissions("manager") }, options: PERMISSION_OPTIONS });
+  app.get("/api/settings/permissions", { preHandler: needs("wallet.read") }, async () => permissionView());
+  app.put<{ Body: { cashier?: unknown; manager?: unknown } }>("/api/settings/permissions", { preHandler: needs("staff.manage") }, async (req, reply) => {
+    const b = req.body ?? {};
+    const list = (v: unknown) => v === undefined || (Array.isArray(v) && v.length <= 40 && v.every((x) => typeof x === "string"));
+    if (!list(b.cashier) || !list(b.manager)) return reply.code(400).send({ error: "cashier and manager are lists of permission names" });
+    if ((await visibleOutletIds(db, merchantId, req.staff!)) !== null) return reply.code(403).send({ error: "brand_only" });
+    if (b.cashier !== undefined) setRolePermissions("cashier", b.cashier as string[]);
+    if (b.manager !== undefined) setRolePermissions("manager", b.manager as string[]);
+    await saveRolePermissions(db, merchantId);
+    await audit(db, merchantId, req.staff!.id, "settings.permissions", permissionView().roles);
+    return permissionView();
+  });
 
   /** Your own sign-in phone number. Needs your PIN, because it opens the account. Send phone: null to remove it. */
   app.put<{ Body: { phone?: string | null; pin?: string } }>("/api/auth/phone", { preHandler: needs("wallet.read") }, async (req, reply) => {
@@ -572,12 +588,12 @@ export async function buildApp({ config, store, db, catalog, catalogAdmin, print
 
   type Approval = { ok: true; id: string; name: string } | { ok: false; status: number; error: string };
   const approvalFor = async (staff: Staff, body: { approverCode?: string; approverPin?: string }): Promise<Approval> => {
-    if (can(staff.role, "wallet.refund")) return { ok: true, id: staff.id, name: staff.name };
+    if (can(staff.role, "order.refund")) return { ok: true, id: staff.id, name: staff.name };
     if (!body.approverCode || !body.approverPin) return { ok: false, status: 428, error: "manager_approval_needed" };
     if (!db) return { ok: false, status: 503, error: "needs_a_database" };
     const v = await checkStaffPin(db, merchantId, String(body.approverCode).trim(), String(body.approverPin));
     if (!v.ok) return { ok: false, status: v.reason === "locked" ? 423 : 422, error: v.reason === "locked" ? "approver_locked" : "approval_refused" };
-    if (!can(v.row.role, "wallet.refund")) return { ok: false, status: 422, error: "approver_cannot_approve" };
+    if (!can(v.row.role, "order.refund")) return { ok: false, status: 422, error: "approver_cannot_approve" };
     return { ok: true, id: v.row.id, name: v.row.name };
   };
   const reasonOf = (b: { reason?: unknown }) => (typeof b.reason === "string" ? b.reason.trim().slice(0, 200) : "");
@@ -1095,6 +1111,12 @@ export async function buildApp({ config, store, db, catalog, catalogAdmin, print
         return changed(req, reply, "price", () => cat.setPrice(req.params.id, req.params.productId, p as number | null));
       },
     );
+
+    app.put<{ Params: { id: string }; Body: { barcode?: string | null } }>("/api/catalog/products/:id/barcode", manage, async (req, reply) => {
+      const b = req.body?.barcode;
+      if (b !== null && typeof b !== "string") return bad(reply, "barcode is text, or null to remove it");
+      return changed(req, reply, "product.barcode", () => cat.setBarcode(req.params.id, b === null || b.trim() === "" ? null : b));
+    });
 
     app.put<{ Params: { id: string } }>("/api/catalog/products/:id/image", manage, async (req, reply) => {
       if (!Buffer.isBuffer(req.body)) return reply.code(415).send({ error: "send the photo as image/png, image/jpeg or image/webp" });

@@ -143,3 +143,68 @@ describe("member prices in a pricebook", () => {
   });
 });
 
+describe("the till's other actions", () => {
+  it("Scan Coupon: a code is checked with the reason said, counted once when the order is paid, and given back when the order is cancelled", async () => {
+    expect((await call("/api/promos/WELCOME3", { method: "PUT", body: { title: "Welcome", kind: "amount", value: 300, minSpendCents: 2000, maxUses: 1 }, staff: mgr })).status).toBe(200);
+    const low = await call("/api/promos/check", { body: { code: "welcome3", subtotalCents: 1500 }, staff: cashier });
+    expect(low.status).toBe(409);
+    expect(low.json).toMatchObject({ error: "below_minimum", shortfallCents: 500 });
+    expect((await call("/api/promos/check", { body: { code: "NOPE", subtotalCents: 5000 }, staff: cashier })).json.error).toBe("unknown");
+    const ok = await call("/api/promos/check", { body: { code: "welcome3", subtotalCents: 2500 }, staff: cashier });
+    expect(ok.json).toMatchObject({ code: "WELCOME3", kind: "amount", value: 300, discountCents: 300 });
+    // checking uses nothing up; claiming does, once per order
+    const claim = await call("/api/promos/claim", { body: { code: "WELCOME3", orderId: "co-1", subtotalCents: 2500 }, staff: cashier });
+    expect(claim.json).toMatchObject({ discountCents: 300, replayed: false });
+    expect((await call("/api/promos/claim", { body: { code: "WELCOME3", orderId: "co-1", subtotalCents: 2500 }, staff: cashier })).json).toMatchObject({ discountCents: 300, replayed: true });
+    expect((await call("/api/promos/claim", { body: { code: "WELCOME3", orderId: "co-2", subtotalCents: 2500 }, staff: cashier })).json.error).toBe("usage_exhausted");
+    await push([
+      ev("co-1", { type: "OrderOpened", fulfilment: "takeaway" }),
+      ev("co-1", { type: "ItemAdded", lineId: "l1", productId: "x", name: "Set", unitCents: 2500, qty: 1 }),
+      ev("co-1", { type: "CouponApplied", title: "WELCOME3 · Welcome", amountCents: 300, minSpendCents: 2000 }),
+      ev("co-1", { type: "StageSet", stage: "cancelled" }),
+    ]);
+    expect((await call("/api/promos/check", { body: { code: "WELCOME3", subtotalCents: 2500 }, staff: cashier })).status).toBe(200); // the use came back
+  });
+
+  it("an item gets a barcode; the same code cannot be on two items", async () => {
+    const cat = (await call("/api/catalog")).json;
+    const [a, b] = cat.products as any[];
+    expect((await call(`/api/catalog/products/${a.id}/barcode`, { method: "PUT", body: { barcode: "8888001234567" }, staff: mgr })).status).toBe(200);
+    expect(((await call("/api/catalog")).json.products as any[]).find((p) => p.id === a.id).barcode).toBe("8888001234567");
+    const dup = await call(`/api/catalog/products/${b.id}/barcode`, { method: "PUT", body: { barcode: "8888001234567" }, staff: mgr });
+    expect(dup.status).toBe(400);
+    expect(dup.json.problems[0]).toContain("already on");
+    expect((await call(`/api/catalog/products/${a.id}/barcode`, { method: "PUT", body: { barcode: "no spaces" }, staff: mgr })).status).toBe(400);
+    expect((await call(`/api/catalog/products/${a.id}/barcode`, { method: "PUT", body: { barcode: "X1" }, staff: cashier })).status).toBe(403);
+    expect((await call(`/api/catalog/products/${a.id}/barcode`, { method: "PUT", body: { barcode: null }, staff: mgr })).status).toBe(200);
+    expect(((await call("/api/catalog")).json.products as any[]).find((p) => p.id === a.id).barcode).toBeUndefined();
+  });
+
+  it("taking over another person's order is written to the audit log", async () => {
+    expect((await call("/api/auth/takeover", { body: { from: "Max", orderId: "co-9", items: 3 }, staff: cashier })).status).toBe(200);
+    const a = await db.query("SELECT detail FROM audit_log WHERE merchant_id='bp' AND action='till.takeover'");
+    expect(a.rows.length).toBe(1);
+    expect(a.rows[0].detail).toMatchObject({ from: "Max", orderId: "co-9", items: 3 });
+  });
+});
+
+describe("member prices in the online shop", () => {
+  it("a signed-in member is charged the member price; a guest pays the normal price for the same item", async () => {
+    const made = await call("/api/catalog/products", { body: { name: "Member Kaya", category: "Member test", priceCents: 200 }, staff: mgr });
+    expect(made.status).toBe(200);
+    const cat = (await call("/api/catalog")).json;
+    const item = (cat.products as any[]).find((p) => p.name === "Member Kaya");
+    for (const b of cat.pricebooks as any[]) if (b.prices[item.id] !== undefined) expect((await call(`/api/catalog/pricebooks/${b.id}/bulk`, { body: { memberPrices: { [item.id]: 180 } }, staff: mgr })).status).toBe(200);
+    const guest = await call("/api/shop/orders", { body: { channelId: "take-away", items: [{ productId: item.id, qty: 2 }], customerName: "Guest", customerPhone: "" } });
+    expect(guest.status).toBe(200);
+    expect(guest.json.totalCents).toBe(400);
+    // the member signs in on their phone (a session opened for them), and orders the same thing
+    const { MemberStore } = await import("../src/members.js");
+    const token = await new MemberStore(db, "bp").openSession(memberId);
+    const res = await fetch(base + "/api/shop/orders", { method: "POST", headers: { "content-type": "application/json", authorization: `Bearer ${token}`, "x-forwarded-for": "198.51.100.77" }, body: JSON.stringify({ channelId: "take-away", items: [{ productId: item.id, qty: 2 }] }) });
+    const j = (await res.json()) as any;
+    expect(res.status).toBe(200);
+    expect(j.totalCents).toBe(360);
+  });
+});
+

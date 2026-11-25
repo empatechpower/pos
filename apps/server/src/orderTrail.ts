@@ -19,7 +19,7 @@ export function eventTrail(events: readonly OrderEvent[], deviceName: (id: strin
       case "OrderOpened": add("opened", x.source === "online" ? "Order placed online" : "Order opened", x.source === "online" ? "Customer" : dev); break;
       case "ItemAdded": add("item", `Added ${x.qty} × ${x.name}${x.channelName ? ` (${x.channelName})` : ""}${x.hold ? " · held" : ""}`); break;
       case "ItemQtySet": add("item", x.qty === 0 ? "Removed an item" : `Changed an item's quantity to ${x.qty}`); break;
-      case "PaymentRecorded": add("payment", `Payment ${formatMoney(x.amountCents)} by ${recordedTender(x.tender)?.label.toLowerCase() ?? METHOD[x.method] ?? x.method}${x.confirmed ? "" : " (waiting for confirmation)"}${x.note ? ` · ${x.note}` : ""}`); break;
+      case "PaymentRecorded": add("payment", `Payment ${formatMoney(x.amountCents)} by ${recordedTender(x.tender)?.label.toLowerCase() ?? (x.tenderName ? String(x.tenderName) : undefined) ?? METHOD[x.method] ?? x.method}${x.confirmed ? "" : " (waiting for confirmation)"}${x.note ? ` · ${x.note}` : ""}`); break;
       case "PaymentConfirmed": add("payment", "Payment confirmed"); break;
       case "RefundRecorded": add("refund", `Refunded ${formatMoney(x.amountCents)} ${METHOD[x.method] ?? x.method} · ${x.reason}`, `${x.approvedByName} (approved)`); break;
       case "OrderVoided": add("void", `Order voided · ${x.reason}`, `${x.approvedByName} (approved)`); break;

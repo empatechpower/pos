@@ -5,6 +5,7 @@ import { useOrders } from "../hooks";
 import { useShift } from "../shift";
 import { isTraining } from "../training";
 import { isSeatedOrder } from "../till/tableOps";
+import { openCustomAction, useTillSettings } from "../till/tillSettings";
 
 const startOfDay = () => new Date().setHours(0, 0, 0, 0);
 
@@ -14,6 +15,7 @@ const startOfDay = () => new Date().setHours(0, 0, 0, 0);
  */
 export function Dashboard({ config }: { config: BusinessConfig }) {
   const staff = useStaff();
+  const till = useTillSettings();
   const orders = useOrders();
   const shift = useShift();
   if (!staff) return <div className="credit"><h2>Home</h2><p className="muted">Sign in to see today. <a href="/login">Sign in</a></p></div>;
@@ -43,6 +45,7 @@ export function Dashboard({ config }: { config: BusinessConfig }) {
         {tile("Drawer & Shift", "▭", "/pos?dialog=shift", shift ? `On Drawer ${shift.drawer}` : "Open your shift")}
         {staff.role !== "cashier" && tile("Reports", "▥", "/manager")}
         {tile("Settings", "⚙", "/settings")}
+        {(till.customActions ?? []).filter((a) => a.where !== "strip").map((a) => <button key={a.id} className="dash-tile" style={{ borderColor: a.color }} onClick={() => openCustomAction(a)}><i style={{ color: a.color }}>{a.icon}</i><strong>{a.label}</strong><small>Opens in a new tab</small></button>)}
       </div>
     </div>
   );

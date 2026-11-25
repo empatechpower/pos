@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { formatMoney, newId, type OrderState } from "@pos/core";
-import { staffFetch, useStaff } from "../auth";
+import { hasPerm, staffFetch, useStaff } from "../auth";
 import { isTraining } from "../training";
 import { logView } from "../orderViews";
 
@@ -37,7 +37,7 @@ export function RefundPanel({ order: o, onDone }: { order: OrderState; onDone?: 
   const [msg, setMsg] = useState("");
   const [busy, setBusy] = useState(false);
   if (!staff || isTraining()) return null;
-  const needsManager = staff.role === "cashier";
+  const needsManager = !hasPerm(staff, "order.refund");
   const paid = o.payments.filter((p) => p.confirmed && p.amountCents > 0).map((p) => ({ ...p, left: p.amountCents - (o.refunds ?? []).filter((r) => r.paymentId === p.paymentId).reduce((n, r) => n + r.amountCents, 0) }));
   const refundable = paid.filter((p) => p.left > 0);
   const chosen = refundable.find((p) => p.paymentId === pay) ?? refundable[0];

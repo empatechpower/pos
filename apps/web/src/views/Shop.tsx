@@ -693,8 +693,9 @@ function Menu({ info, catalog, config, loginError, recheck }: { info: Info; cata
     setScreen("login");
   };
 
-  const ctx = { outletId: info.outletId ?? info.outletName, channelId };
-  const menu = useMemo(() => menuFor(catalog, ctx), [catalog, info.outletId, info.outletName, channelId]);
+  // A signed-in member is shown, and charged, member prices where an item has one. The server prices the order the same way.
+  const ctx = { outletId: info.outletId ?? info.outletName, channelId, member: !!member };
+  const menu = useMemo(() => menuFor(catalog, ctx), [catalog, info.outletId, info.outletName, channelId, !!member]);
   const byId = useMemo(() => new Map(menu.map((m) => [m.id, m])), [menu]);
   const channel = channels.find((c) => c.id === channelId);
   const categories = useMemo(() => ["All", ...new Set(menu.map((m) => m.category))], [menu]);
@@ -1277,7 +1278,7 @@ function Menu({ info, catalog, config, loginError, recheck }: { info: Info; cata
                 <div className="sc-main" onClick={() => { if (!m.soldOut) setPicking(m); }}>
                   <b>{itemName(m)}</b>
                   <span className="muted">{m.description ?? m.category}</span>
-                  <span className="sc-price">{m.soldOut ? "Sold out" : cardPrice(m, isCombo(m.options) ? comboSaving(m.priceCents, m.options, (id) => menu.find((x) => x.id === id)?.priceCents ?? null) : 0)}{!m.soldOut && m.bcrs && <em className="bcrs-badge"><Icon name="can" size={11} />+{config.pricing.bcrsDepositCents}c BCRS Deposit</em>}</span>
+                  <span className="sc-price">{m.soldOut ? "Sold out" : cardPrice(m, isCombo(m.options) ? comboSaving(m.priceCents, m.options, (id) => menu.find((x) => x.id === id)?.priceCents ?? null) : 0)}{!m.soldOut && m.listPriceCents !== undefined && <em className="bcrs-badge" title={tx("Member price")}>{tx("Member price")} · <s>{formatMoney(m.listPriceCents)}</s></em>}{!m.soldOut && m.bcrs && <em className="bcrs-badge"><Icon name="can" size={11} />+{config.pricing.bcrsDepositCents}c BCRS Deposit</em>}</span>
                 </div>
                 {!m.soldOut && (
                   <div className="sc-act">

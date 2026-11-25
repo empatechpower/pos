@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { DISCOUNT_REASONS, formatMoney } from "@pos/core";
-import { useStaff } from "../auth";
+import { hasPerm, useStaff } from "../auth";
 import { askApproval, cachedPolicy, loadDiscountPolicy, needsApproval, type Approver, type DiscountPolicy } from "../discountPolicy";
 
 export interface DiscountChoice {
@@ -35,7 +35,7 @@ export function DiscountSheet({ target, onApply, onClose }: { target: { scope: "
   const reason = why === "Other" ? other.trim() : why;
   const base = target.scope === "line" ? target.unitCents * target.qty : target.subtotalCents;
   const valid = val !== "" && raw > 0 && (kind === "percent" ? raw <= 100 : kind === "amount" ? value <= base : value >= 0) && reason.length >= 3;
-  const approval = needsApproval(staff.role, policy, { kind, value });
+  const approval = needsApproval(hasPerm(staff, "discount.approve"), policy, { kind, value });
   const off = kind === "percent" ? Math.round((base * Math.min(raw, 100)) / 100) : kind === "amount" ? Math.min(value, base) : 0;
 
   async function apply() {

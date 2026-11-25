@@ -241,3 +241,59 @@ export function TaxDialog({ name, current, onSet, onClose }: { name: string; cur
     </Modal>
   );
 }
+
+/** A promo code on the order as the till holds it (Scan Coupon). The amount follows the order as items change. */
+export interface TillCoupon { code: string; title: string; kind: "percent" | "amount"; value: number; minSpendCents: number }
+/** What a code takes off an items subtotal: the same sum the server does. */
+export const couponCents = (c: Pick<TillCoupon, "kind" | "value">, subtotalCents: number): number => Math.max(0, Math.min(subtotalCents, c.kind === "percent" ? Math.floor((subtotalCents * c.value) / 100) : c.value));
+
+/** Scan Coupon: type or scan a promo code. The server says whether it is good for this order, and why not when it is not. */
+export function CouponDialog({ current, subtotalCents, memberId, onSet, onClose }: { current: TillCoupon | null; subtotalCents: number; memberId: string | null; onSet: (c: TillCoupon | null) => void; onClose: () => void }) {
+  const [code, setCode] = useState("");
+  const [msg, setMsg] = useState("");
+  const [busy, setBusy] = useState(false);
+  const apply = async () => {
+    if (!code.trim()) return;
+    setBusy(true); setMsg("");
+    const r = await staffFetch("/api/promos/check", { body: { code: code.trim(), subtotalCents, memberId } });
+    setBusy(false);
+    if (!("res" in r)) return setMsg(r.problem);
+    const j = (await r.res.json().catch(() => ({}))) as Partial<TillCoupon> & { message?: string; shortfallCents?: number };
+    if (!r.res.ok) return setMsg(`${j.message ?? "That code could not be used."}${j.shortfallCents ? ` Add ${formatMoney(j.shortfallCents)} more.` : ""}`);
+    onSet({ code: j.code!, title: j.title ?? j.code!, kind: j.kind!, value: j.value!, minSpendCents: j.minSpendCents ?? 0 });
+    onClose();
+  };
+  return (
+    <Modal title="Scan Coupon" onClose={onClose}>
+      {current && <p className="t-muted">On this order: <b>{current.code}</b> · {current.title} · {formatMoney(couponCents(current, subtotalCents))} off <button className="t-ghost" onClick={() => { onSet(null); onClose(); }}>Remove</button></p>}
+      <label className="t-field">Coupon code<input value={code} autoFocus autoCapitalize="characters" autoComplete="off" aria-label="Coupon code" onChange={(e) => setCode(e.target.value.toUpperCase())} onKeyDown={(e) => { if (e.key === "Enter") void apply(); }} /></label>
+      {msg && <p className="t-muted" role="alert">{msg}</p>}
+      <div className="t-dact"><button className="t-ghost" onClick={onClose}>Cancel</button><button className="t-primary" disabled={busy || !code.trim()} onClick={() => void apply()}>Apply</button></div>
+    </Modal>
+  );
+}
+
+/** Enter Barcode: scan (a scanner types the code and presses Enter) or type an item's barcode or SKU. It stays open for the next scan. */
+export function BarcodeDialog({ find, onClose }: { /** Adds the item with that code; says what happened. */ find: (code: string) => string; onClose: () => void }) {
+  const [code, setCode] = useState("");
+  const [msg, setMsg] = useState("");
+  const go = () => { const c = code.trim(); if (!c) return; setMsg(find(c)); setCode(""); };
+  return (
+    <Modal title="Enter Barcode" onClose={onClose}>
+      <label className="t-field">Barcode or SKU<input value={code} autoFocus autoComplete="off" aria-label="Barcode" onChange={(e) => setCode(e.target.value)} onKeyDown={(e) => { if (e.key === "Enter") go(); }} /></label>
+      {msg && <p className="t-muted" role="status">{msg}</p>}
+      <div className="t-dact"><button className="t-ghost" onClick={onClose}>Done</button><button className="t-primary" disabled={!code.trim()} onClick={go}>Add</button></div>
+    </Modal>
+  );
+}
+
+/** Print Invoice: the order as it stands, before payment, for the customer to take. Printed through the browser's print window. */
+export function InvoiceDialog({ title, lines, onClose }: { title: string; lines: string[]; onClose: () => void }) {
+  const print = () => { document.body.classList.add("print-invoice"); const done = () => { document.body.classList.remove("print-invoice"); window.removeEventListener("afterprint", done); }; window.addEventListener("afterprint", done); window.print(); };
+  return (
+    <Modal title={title} onClose={onClose}>
+      <pre className="receipt invoice-print" aria-label="Invoice" style={{ whiteSpace: "pre-wrap", margin: "0 auto .6em" }}>{lines.join("\n")}</pre>
+      <div className="t-dact"><button className="t-ghost" onClick={onClose}>Close</button><button className="t-primary" onClick={print}>Print</button></div>
+    </Modal>
+  );
+}

@@ -16,6 +16,7 @@ import {
   COURSE_NAMES,
   menuFor,
   optionLines,
+  totalsLines,
   basePriceFor,
   RECORDED_TENDERS,
   recordedTender,
@@ -53,9 +54,9 @@ import { ActionStrip, type Action } from "../till/ActionStrip";
 import { PayPanel, type Tender, type TenderOption } from "../till/PayPanel";
 import { Modal } from "../till/Modal";
 import { ManageItem } from "../till/ManageItem";
-import { CustomerDialog, DiningDialog, DoneDialog, ExtraItemDialog, FeeDialog, GuestsDialog, HeldDialog, QuantityDialog, TaxDialog, TillSettings, loadMember, type MemberSummary } from "../till/Dialogs";
+import { CustomerDialog, DiningDialog, DoneDialog, ExtraItemDialog, FeeDialog, GuestsDialog, HeldDialog, QuantityDialog, TaxDialog, TillSettings, loadMember, BarcodeDialog, CouponDialog, InvoiceDialog, couponCents, type MemberSummary, type TillCoupon } from "../till/Dialogs";
 import { TEXT_SCALE, loadPrefs, setLayout, usePrefs } from "../prefs";
-import { arrange, arrangeAll, loadTillSettings, saveTill, useTillSettings, ACTION_POOL } from "../till/tillSettings";
+import { arrange, arrangeAll, loadTillSettings, openCustomAction, saveTill, useTillSettings, actionsPref, tendersPref, ACTION_POOL } from "../till/tillSettings";
 import { onRouteChange, queryParams } from "../nav";
 import { isTraining } from "../training";
 import { loadFloor, saveFloor, tableNames, useFloor } from "../floor";
@@ -111,7 +112,7 @@ export function Pos({ config, catalog, online, customerId, setCustomerId, header
   const [managing, setManaging] = useState<MenuEntry | null>(null);
   const [pax, setPax] = useState(1);
   const [payView, setPayView] = useState(false);
-  const [dialog, setDialog] = useState<null | "dining" | "guests" | "qty" | "held" | "customer" | "settings" | "tabs" | "shift" | "table" | "line" | "seat" | "fee" | "extra" | "reports" | "tax">(null);
+  const [dialog, setDialog] = useState<null | "dining" | "guests" | "qty" | "held" | "customer" | "settings" | "tabs" | "shift" | "table" | "line" | "seat" | "fee" | "extra" | "reports" | "tax" | "coupon" | "barcode" | "invoice">(null);
   const [lineKey, setLineKey] = useState<string | null>(null);
   const [pendingQty, setPendingQty] = useState(1);
   const [sheetOpen, setSheetOpen] = useState(false);
@@ -125,6 +126,8 @@ export function Pos({ config, catalog, online, customerId, setCustomerId, header
   /** The member attached to this order (their points and last orders), and whether their points pay for part of it. */
   const [memberInfo, setMemberInfo] = useState<MemberSummary | null>(null);
   const [usePoints, setUsePoints] = useState(false);
+  /** A promo code scanned or typed onto this order (Scan Coupon). */
+  const [coupon, setCoupon] = useState<TillCoupon | null>(null);
   const [paying, setPaying] = useState(false);
   const shift = useShift();
   const shiftRequired = useShiftRequired();
@@ -235,6 +238,8 @@ export function Pos({ config, catalog, online, customerId, setCustomerId, header
     discountCents: staffDiscountCents(bag.map((b) => ({ lineId: b.key, unitCents: effUnit(b), qty: b.qty })), staffDiscounts).totalCents,
     ...(taxOff ? { taxRemoved: true } : {}),
     points: pointsIn,
+    // A coupon already on the order stays as it was applied; one just scanned is worked out on the items as they stand.
+    coupon: openedOrder?.coupon ? { amountCents: openedOrder.coupon.amountCents, minSpendCents: openedOrder.coupon.minSpendCents } : coupon ? { amountCents: couponCents(coupon, bag.reduce((n, b) => n + effUnit(b) * b.qty, 0)), minSpendCents: coupon.minSpendCents } : null,
     // An order already opened keeps the tax answer it was opened with, even if the outlet's setting has changed since.
     config: openedTax === undefined || openedTax === config.pricing.gstOn ? config.pricing : { ...config.pricing, gstOn: openedTax },
   };
@@ -291,6 +296,55 @@ export function Pos({ config, catalog, online, customerId, setCustomerId, header
     setBag((cur) => cur.map((x) => (x.key === old.key ? { ...x, item: e, options: r.options, ...unitOf(e, r.extraCents), override: undefined, ...(back ? { channelId: undefined, channelName: undefined } : { channelId: chId, channelName: name }) } : x)));
     if (old.override) notify("The price you set was taken off, because the channel changed.");
   };
+  // Taking over: someone else's order was left on this till (it locked, or they stepped away) and this person carries it on. It is written to the audit log.
+  useEffect(() => {
+    if (!staff) return;
+    const KEY = isTraining() ? "pos.bagOwner.practice" : "pos.bagOwner";
+    try {
+      if (!bag.length) return void localStorage.removeItem(KEY);
+      const owner = JSON.parse(localStorage.getItem(KEY) ?? "null") as { code: string; name: string } | null;
+      if (owner && owner.code !== staff.code) {
+        notify(`You took over ${owner.name}'s order.`);
+        if (!isTraining()) void staffFetch("/api/auth/takeover", { body: { from: owner.name, orderId, items: bag.length } });
+      }
+      if (!owner || owner.code !== staff.code) localStorage.setItem(KEY, JSON.stringify({ code: staff.code, name: staff.name }));
+    } catch { /* storage not available: nothing to note */ }
+  }, [staff?.code, bag.length > 0]); // eslint-disable-line react-hooks/exhaustive-deps
+  /** Press and hold a line: sell it through the next dining channel that sells it (decision Q5: one item take away on a dine-in order). */
+  const cycleLineChannel = (key: string) => {
+    const l = bag.find((x) => x.key === key);
+    if (!l || l.sent || l.extra) return;
+    const cur = l.channelId ?? channelId, at = channels.findIndex((c) => c.id === cur);
+    for (let i = 1; i < channels.length; i++) {
+      const c = channels[(at + i) % channels.length]!;
+      if (!menuFor(catalog, { outletId: config.outletName, channelId: c.id }).some((x) => x.id === l.item.id)) continue;
+      setLineChannel(l, c.id);
+      return notify(`${l.item.name}: ${c.name}`);
+    }
+    notify(`${l.item.name} is not sold in another dining option.`);
+  };
+  /** Enter Barcode: the item with this barcode or SKU goes onto the order (its options are asked for when it has any). */
+  const addByBarcode = (code: string): string => {
+    const hit = menu.find((m) => m.barcode && m.barcode.toLowerCase() === code.toLowerCase());
+    if (!hit) return catalog.products.some((p) => p.barcode?.toLowerCase() === code.toLowerCase()) ? `That item is not sold in ${channel.name}.` : `No item has the code ${code}.`;
+    if (hit.soldOut) return `${hit.name} is sold out.`;
+    if (hit.options?.length) { setDialog(null); setPicking(hit); return ""; }
+    addWith(hit, []);
+    return `Added ${hit.name}.`;
+  };
+  /** Print Invoice: the order as it stands, as plain lines. */
+  const invoiceLines = (): string[] => {
+    const pad = (left: string, right: string) => (left.length + right.length >= 40 ? `${left}\n${" ".repeat(Math.max(0, 40 - right.length))}${right}` : left + " ".repeat(40 - left.length - right.length) + right);
+    return [
+      config.name.toUpperCase(), config.outletName, new Date().toLocaleString("en-GB", { day: "2-digit", month: "short", year: "numeric", hour: "2-digit", minute: "2-digit", timeZone: "Asia/Singapore" }),
+      `${channel.name}${channel.kind === "dine_in" && spot ? ` · ${spot}` : ""}${linked?.queueNumber ? ` · Order ${linked.queueNumber}` : ""}`, "-".repeat(40),
+      ...bag.flatMap((l) => [pad(`${l.qty} x ${l.item.name}`, formatMoney(effUnit(l) * l.qty)), ...optionLines(l.options).map((o) => `   ${o}`)]),
+      "-".repeat(40),
+      ...totalsLines(priced).map((t) => pad(t.label, `${t.negative ? "-" : ""}${formatMoney(t.cents)}`)),
+      ...(paidSoFar > 0 ? [pad("Paid", formatMoney(paidSoFar)), pad("Balance due", formatMoney(due))] : []),
+      "", "This is not a receipt.",
+    ];
+  };
   /** Put an item in the bag with its chosen options (none for a plain item). */
   const addWith = (item: MenuEntry, selection: ChosenOptionInput[]) => {
     const r = resolveOptions(item.options, selection);
@@ -336,7 +390,7 @@ export function Pos({ config, catalog, online, customerId, setCustomerId, header
    * Put what is on screen into the local log. A new order is opened; a table's open order gets only the lines not yet sent (the sent ones are
    * already there), plus any change to guests, the note, or discounts. Nothing here needs the network.
    */
-  async function place(payment: { method: PaymentMethod; tender?: string; confirmed: boolean; amountCents?: number; checkId?: string; tenderedCents?: number } | null, existingOrderId?: string): Promise<{ queue?: string; orderId: string } | undefined> {
+  async function place(payment: { method: PaymentMethod; tender?: string; tenderName?: string; confirmed: boolean; amountCents?: number; checkId?: string; tenderedCents?: number } | null, existingOrderId?: string): Promise<{ queue?: string; orderId: string } | undefined> {
     if (!bag.length) return undefined;
     const id = orderId ?? existingOrderId ?? newId();
     let queueNumber = linked?.queueNumber;
@@ -407,9 +461,11 @@ export function Pos({ config, catalog, online, customerId, setCustomerId, header
     if (memberNow !== (linked?.memberId ?? "")) await record(id, { type: "MemberAttached", memberId: memberNow, ...(staff ? { byName: staff.name } : {}) });
     // Points already taken from the member (payDone did that first) are written onto the order, so its total says the same as the till.
     if (payment && pointsToTake > 0) await record(id, { type: "PointsRedeemed", points: pointsToTake });
+    // The coupon (already counted as used by payDone) is written onto the order with what it took off.
+    if (payment && coupon && !linked?.coupon && priced.couponDiscount > 0) await record(id, { type: "CouponApplied", title: `${coupon.code} · ${coupon.title}`.slice(0, 80), amountCents: priced.couponDiscount, minSpendCents: coupon.minSpendCents });
     if (payment) {
       const paymentId = newId();
-      await record(id, { type: "PaymentRecorded", paymentId, method: payment.method, ...(payment.tender ? { tender: payment.tender } : {}), amountCents: payment.amountCents ?? due, confirmed: payment.confirmed, ...(payment.checkId ? { checkId: payment.checkId } : {}), ...(payment.tenderedCents ? { tenderedCents: payment.tenderedCents } : {}) });
+      await record(id, { type: "PaymentRecorded", paymentId, method: payment.method, ...(payment.tender ? { tender: payment.tender } : {}), ...(payment.tenderName ? { tenderName: payment.tenderName } : {}), amountCents: payment.amountCents ?? due, confirmed: payment.confirmed, ...(payment.checkId ? { checkId: payment.checkId } : {}), ...(payment.tenderedCents ? { tenderedCents: payment.tenderedCents } : {}) });
       if (!payment.confirmed) {
         // MOCK gateway: stands in for the YeahPay callback until real credentials exist.
         window.setTimeout(() => void record(id, { type: "PaymentConfirmed", paymentId }), 1500);
@@ -422,6 +478,7 @@ export function Pos({ config, catalog, online, customerId, setCustomerId, header
     setOrderId(null);
     // The member belongs to the order that just went, not to whoever is served next.
     if (memberInfo) { setCustomerId(""); setUsePoints(false); }
+    if (payment) { setCoupon(null); pendingId.current = newId(); }
     return { queue: queueNumber, orderId: id };
   }
 
@@ -495,7 +552,7 @@ export function Pos({ config, catalog, online, customerId, setCustomerId, header
   /** Table service: postpay shops with a dine-in channel get the Table Map, open bills and courses. */
   const tableService = !prepay && !!dineChannel;
   const unsent = bag.some((l) => !l.sent) || (!orderId && bag.length > 0);
-  const resetOrder = () => { setBag([]); setBillDiscounts([]); setFees([]); setTaxOff(null); setUsePoints(false); setOrderNote(""); setPax(1); setPendingQty(1); setPayView(false); setSheetOpen(false); setOrderId(null); setPayCheckId(null); };
+  const resetOrder = () => { setBag([]); setBillDiscounts([]); setFees([]); setTaxOff(null); setUsePoints(false); setCoupon(null); setOrderNote(""); setPax(1); setPendingQty(1); setPayView(false); setSheetOpen(false); setOrderId(null); setPayCheckId(null); };
   /** Put what is on screen aside as a draft (a table's bill with unsent items stays with the table). */
   const parkCurrent = () => {
     if (!unsent) return false;
@@ -648,8 +705,8 @@ export function Pos({ config, catalog, online, customerId, setCustomerId, header
         if (!r.ok) return notify(r.reason === "insufficient_funds" ? `Not enough credit: ${formatMoney(r.balanceCents)} available.` : failText(r));
         setBalance(r.balanceCents);
         await record(linked.orderId, { type: "PaymentRecorded", paymentId, method: "credit", amountCents: owed, confirmed: true, checkId: payCheckId });
-      } else if (recordedTender(t)) {
-        await record(linked.orderId, { type: "PaymentRecorded", paymentId, method: recordedTender(t)!.method, tender: t, amountCents: owed, confirmed: true, checkId: payCheckId });
+      } else if (recordedAs(t)) {
+        await record(linked.orderId, { type: "PaymentRecorded", paymentId, ...recordedAs(t)!, amountCents: owed, confirmed: true, checkId: payCheckId });
       } else {
         const method: PaymentMethod = t === "cash" ? "cash" : "paynow";
         await record(linked.orderId, { type: "PaymentRecorded", paymentId, method, amountCents: applied, confirmed: t === "cash", checkId: payCheckId, ...(t === "cash" && received > applied ? { tenderedCents: received } : {}) });
@@ -677,16 +734,36 @@ export function Pos({ config, catalog, online, customerId, setCustomerId, header
     { id: "qr", label: "PayNow QR", disabled: !qrReady || qrBusy || !!payCheckId, why: payCheckId ? "A QR pays the whole bill: use Cash or credit on a check." : !qrReady ? "PayNow is not set up. A manager does it in Devices." : undefined },
     // Recorded tenders: taken on a card terminal or by hand, and confirmed by the cashier.
     ...RECORDED_TENDERS.map((t) => ({ id: t.id as Tender, label: t.label, ...(t.optional ? { optional: true } : {}) })),
+    // The shop's own tenders (a delivery platform, a gift certificate): recorded under the shop's name for them.
+    ...(till.customTenders ?? []).map((t) => ({ id: t.id as Tender, label: t.name })),
     ...(training ? [{ id: "mock" as Tender, label: "Card (practice)" }] : []),
   ];
-  const arrangedTenders = arrange(allTenders, till.tenders);
+  /** How a recorded tender is written on a payment: a built-in one by its id, the shop's own with its name too. */
+  const recordedAs = (t: Tender): { method: PaymentMethod; tender: string; tenderName?: string } | null => {
+    const built = recordedTender(t);
+    if (built) return { method: built.method, tender: t };
+    const own = (till.customTenders ?? []).find((x) => x.id === t);
+    return own ? { method: "other", tender: own.id, tenderName: own.name } : null;
+  };
+  const arrangedTenders = arrange(allTenders, tendersPref(till));
   const tenders = arrangedTenders.length ? arrangedTenders : allTenders;
+  /** The id a new order will get, fixed while it is being paid so a coupon, points and the order itself all name the same order. */
+  const pendingId = useRef(newId());
   async function payDone(t: Tender, received: number) {
     if (payCheckId) return void payCheck(t, received);
     if (mustOpenShift) return notify("Open your shift first.");
     const owed = due;
+    if (coupon && !openedOrder?.coupon && priced.couponDiscount > 0 && (t === "credit" || t === "qr")) return notify("With a coupon, take the payment in cash or by card.");
+    // A coupon is counted as used for this order first. If the code is no longer good, nothing is recorded.
+    if (coupon && !openedOrder?.coupon && priced.couponDiscount > 0) {
+      const r = await staffFetch("/api/promos/claim", { body: { code: coupon.code, orderId: orderId ?? pendingId.current, subtotalCents: priced.subtotal, memberId: isMember ? memberInfo!.member.id : null } });
+      if (!("res" in r)) return notify(r.problem);
+      if (!r.res.ok) { const j = (await r.res.json().catch(() => ({}))) as { message?: string }; setCoupon(null); return notify(`${j.message ?? "That coupon can no longer be used."} It was taken off the order.`); }
+      const j = (await r.res.json()) as { discountCents: number };
+      if (j.discountCents !== priced.couponDiscount) return notify("The coupon's value changed. Check the total and press Done again.");
+    }
     // Points are taken from the member first. If that fails, nothing is recorded and the order stays as it is.
-    const oid = orderId ?? newId();
+    const oid = orderId ?? pendingId.current;
     if (pointsToTake > 0) {
       if (t === "credit" || t === "qr") return notify("With points, take the rest in cash or by card.");
       const r = await staffFetch(`/api/members/${memberInfo!.member.id}/redeem`, { body: { points: pointsToTake, orderId: oid } });
@@ -696,7 +773,7 @@ export function Pos({ config, catalog, online, customerId, setCustomerId, header
     if (t === "cash") { const p = await place({ method: "cash", confirmed: true, tenderedCents: received }, oid); setPayView(false); setDone({ queue: p?.queue, change: Math.max(0, received - owed), total: owed }); }
     else if (t === "credit") await payWithCredit();
     else if (t === "qr") await payWithQr();
-    else if (recordedTender(t)) { const p = await place({ method: recordedTender(t)!.method, tender: t, confirmed: true }, oid); setPayView(false); setDone({ queue: p?.queue, change: 0, total: owed }); }
+    else if (recordedAs(t)) { const p = await place({ ...recordedAs(t)!, confirmed: true }, oid); setPayView(false); setDone({ queue: p?.queue, change: 0, total: owed }); }
     else { const p = await place({ method: "paynow", confirmed: false }); setPayView(false); setDone({ queue: p?.queue, change: 0, total: owed }); }
   }
   const sendOrder = async () => {
@@ -728,13 +805,18 @@ export function Pos({ config, catalog, online, customerId, setCustomerId, header
     { id: "guests", label: "Guest Count", icon: "👥", onClick: () => setDialog("guests"), disabled: !dineIn },
     ...(tableService && linked ? [{ id: "bill", label: "Guest Check", icon: "🧾", onClick: () => void printGuestCheck() }] : []),
     { id: "held", label: "Held Orders", icon: "☰", onClick: () => setDialog("held"), badge: held.length || undefined },
-    { id: "member", label: "Member", icon: "👤", onClick: () => setDialog("customer") },
+    { id: "member", label: "Loyalty", icon: "★", onClick: () => setDialog("customer") },
+    { id: "barcode", label: "Enter Barcode", icon: "▥", onClick: () => setDialog("barcode"), disabled: !!linked?.split },
+    { id: "coupon", label: "Scan Coupon", icon: "⌗", onClick: () => setDialog("coupon"), disabled: !staff || !bag.length || !online || !!linked?.split || !!linked?.coupon, title: !online ? "A coupon needs a connection" : linked?.coupon ? "This order already has a coupon" : undefined },
+    { id: "invoice", label: "Print Invoice", icon: "⎙", onClick: () => setDialog("invoice"), disabled: !bag.length },
     { id: "drawer", label: "Open Cash Drawer", icon: "▭", onClick: () => void openDrawer(), disabled: !staff || !online || training },
+    // The shop's own buttons: each opens its web address in a new tab.
+    ...(till.customActions ?? []).filter((a) => a.where !== "dashboard").map((a) => ({ id: a.id, label: a.label, icon: a.icon, onClick: () => openCustomAction(a) })),
     ...(!prepay ? [{ id: "tabs", label: "Open Tabs", icon: "▤", onClick: () => setDialog("tabs" as const), badge: openTabs.length || undefined }] : []),
   ];
   // The manager's choice of which buttons show, and in what order (the pool's natural order is the starting point).
-  const poolRank = (id: string) => ACTION_POOL.findIndex((x) => x.id === id);
-  const actions = arrange([...allActions].sort((a, b) => poolRank(a.id) - poolRank(b.id)), till.actions);
+  const poolRank = (id: string) => { const i = ACTION_POOL.findIndex((x) => x.id === id); return i < 0 ? 999 : i; }; // the shop's own buttons come after the built-in ones until arranged
+  const actions = arrange([...allActions].sort((a, b) => poolRank(a.id) - poolRank(b.id)), actionsPref(till));
 
   const row = (k: string, v: string, neg = false) => <div className="row"><span>{k}</span><span>{neg ? "−" : ""}{v}</span></div>;
   // The markup and class names are the prototype's own (totalsHTML).
@@ -745,6 +827,8 @@ export function Pos({ config, catalog, online, customerId, setCustomerId, header
         {row("Discounts", formatMoney(priced.discountCents), priced.discountCents > 0)}
         {priced.fee > 0 && row("Service fee", formatMoney(priced.fee))}
         {priced.service > 0 && row(`Service charge (${Math.round(config.pricing.serviceRate * 100)}%)`, formatMoney(priced.service))}
+        {priced.couponDiscount > 0 && <div className="row"><span>Coupon{coupon ? ` ${coupon.code}` : ""} · −{formatMoney(priced.couponDiscount)}</span>{coupon && !linked?.coupon && <span className="unlink" role="button" tabIndex={0} onClick={() => setCoupon(null)}>remove</span>}</div>}
+        {coupon && priced.couponIneligible && <div className="row"><span>Coupon {coupon.code}: needs {formatMoney(coupon.minSpendCents)} of items</span><span className="unlink" role="button" tabIndex={0} onClick={() => setCoupon(null)}>remove</span></div>}
         {priced.pointsDiscount > 0 && row(`Points (${priced.pointsUsed})`, `−${formatMoney(priced.pointsDiscount)}`)}
         {priced.gst > 0 && row(config.pricing.taxName ?? "GST", formatMoney(priced.gst))}
         {priced.taxRemoved && <div className="row"><span>{priced.taxRemoved.name} removed{priced.taxRemoved.offTotal ? ` · −${formatMoney(priced.taxRemoved.offTotal)}` : ""} · {taxOff?.reason}</span>{!linked?.split && staff && staff.role !== "cashier" && <span className="unlink" role="button" tabIndex={0} onClick={() => setTaxOff(null)}>add back</span>}</div>}
@@ -770,7 +854,7 @@ export function Pos({ config, catalog, online, customerId, setCustomerId, header
       <button className={customerId ? "selected" : ""} aria-label="Attach member" onClick={() => setDialog("customer")}>{customerId ? `👤 ${memberInfo ? memberInfo.member.name?.split(" ")[0] || `···· ${(memberInfo.member.phone ?? "").slice(-4)}` : `···· ${customerId.slice(-4)}`}${balance !== null ? ` · ${formatMoney(balance)}` : ""}${memberInfo?.rewards.pointsEnabled ? ` · ${memberInfo.member.points} pts` : ""}` : "👤 Member"}</button>
     </>
   );
-  const strip = <ActionStrip actions={actions} everything={arrangeAll([...allActions].sort((a, b) => poolRank(a.id) - poolRank(b.id)), till.actions)} pref={till.actions} canArrange={staff?.role === "manager" || staff?.role === "owner"} onArrange={(next) => void saveTill({ actions: next })} payLabel={`Pay ${formatMoney(priced.total)}`} onPay={() => { setSheetOpen(false); if (linked?.split) setView("checks"); else setPayView(true); }} payDisabled={!bag.length} />;
+  const strip = <ActionStrip actions={actions} everything={arrangeAll([...allActions].sort((a, b) => poolRank(a.id) - poolRank(b.id)), actionsPref(till))} pref={actionsPref(till)} canArrange={staff?.role === "manager" || staff?.role === "owner"} onArrange={(next) => void saveTill(till.thisTill?.actions ? { thisTill: { ...till.thisTill, actions: next } } : { actions: next })} payLabel={`Pay ${formatMoney(priced.total)}`} onPay={() => { setSheetOpen(false); if (linked?.split) setView("checks"); else setPayView(true); }} payDisabled={!bag.length} />;
 
   return (
     <>
@@ -808,6 +892,7 @@ export function Pos({ config, catalog, online, customerId, setCustomerId, header
       <TicketPanel
         kitchen={linked ? Object.fromEntries(linked.lines.filter((l) => l.readyAt).map((l) => [l.lineId, l.servedAt ? "served" as const : "ready" as const])) : undefined}
         lineRemove={till.lineRemove}
+        onHoldLine={channels.length > 1 && !linked?.split ? cycleLineChannel : undefined}
         channelName={channel.name} title={linked ? (linked.queueNumber ? `Order ${linked.queueNumber}` : linked.spot ?? "Order") : nextQueue ? `Order ${nextQueue}` : "New order"} open={sheetOpen} onCloseSheet={() => setSheetOpen(false)}
         subline={[dineIn ? spot : "", staff?.name ?? ""].filter(Boolean).join(" · ")}
         shiftChip={chips} bag={bag} flash={flash}
@@ -851,6 +936,9 @@ export function Pos({ config, catalog, online, customerId, setCustomerId, header
         }} />
       )}
       {managing && <ManageItem item={managing} catalog={catalog} outletId={config.outletName} channels={channels.map((c) => ({ id: c.id, name: c.name }))} onClose={() => setManaging(null)} />}
+      {dialog === "coupon" && <CouponDialog current={coupon} subtotalCents={priced.subtotal} memberId={isMember ? memberInfo!.member.id : null} onSet={setCoupon} onClose={() => setDialog(null)} />}
+      {dialog === "barcode" && <BarcodeDialog find={addByBarcode} onClose={() => setDialog(null)} />}
+      {dialog === "invoice" && <InvoiceDialog title={`Invoice · ${linked?.queueNumber ? `Order ${linked.queueNumber}` : spot && channel.kind === "dine_in" ? spot : "New order"}`} lines={invoiceLines()} onClose={() => setDialog(null)} />}
       {dialog === "tax" && <TaxDialog name={config.pricing.taxName ?? "GST"} current={taxOff} onSet={setTaxOff} onClose={() => setDialog(null)} />}
       {dialog === "fee" && <FeeDialog fees={fees} onAdd={(kind, value, label) => setFees((cur) => [...cur, { id: newId(), kind, value, label }])} onRemove={(id) => setFees((cur) => cur.filter((f) => f.id !== id))} onClose={() => setDialog(null)} />}
       {dialog === "settings" && <TillSettings onClose={() => setDialog(null)} onEditLayout={staff ? () => { setDialog(null); setView("order"); setEditLayoutAt((n) => n + 1); } : undefined} />}

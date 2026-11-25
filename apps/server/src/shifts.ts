@@ -35,8 +35,8 @@ export interface ShiftReport {
 export async function shiftReport(db: Db, merchantId: string, s: ShiftRow): Promise<ShiftReport> {
   const pay = (await db.query(
     // A payment taken as a named tender (debit, check, gift card...) is its own row; a refund is filed under the tender of the payment it gives back.
-    `SELECT COALESCE(CASE WHEN e.body->>'type'='PaymentRecorded' THEN e.body->>'tender'
-                          ELSE (SELECT p.body->>'tender' FROM events p WHERE p.merchant_id=e.merchant_id AND p.order_id=e.order_id AND p.body->>'type'='PaymentRecorded' AND p.body->>'paymentId'=e.body->>'paymentId' LIMIT 1) END,
+    `SELECT COALESCE(CASE WHEN e.body->>'type'='PaymentRecorded' THEN COALESCE('custom:' || NULLIF(e.body->>'tenderName',''), e.body->>'tender')
+                          ELSE (SELECT COALESCE('custom:' || NULLIF(p.body->>'tenderName',''), p.body->>'tender') FROM events p WHERE p.merchant_id=e.merchant_id AND p.order_id=e.order_id AND p.body->>'type'='PaymentRecorded' AND p.body->>'paymentId'=e.body->>'paymentId' LIMIT 1) END,
                      e.body->>'method') AS method, e.body->>'type' AS type, SUM((e.body->>'amountCents')::bigint) AS cents
        FROM events e WHERE e.merchant_id=$1 AND e.body->>'shiftId'=$2 AND e.body->>'type' IN ('PaymentRecorded','RefundRecorded')
         AND (e.body->>'type'='RefundRecorded' OR (e.body->>'confirmed')::boolean IS TRUE)
@@ -115,7 +115,7 @@ export async function loadShiftSettings(db: Db | null, merchantId: string): Prom
  */
 export function registerShifts(app: FastifyInstance, d: { db: Db; merchantId: string; store: EventStore; config: BusinessConfig; needs: (p: Permission) => (req: FastifyRequest, reply: FastifyReply) => Promise<unknown> }) {
   const { db, merchantId, store, config, needs } = d;
-  const isManager = (s: Staff) => can(s.role, "wallet.refund");
+  const isManager = (s: Staff) => can(s.role, "shift.approve");
 
   app.get("/api/settings/shifts", { preHandler: needs("wallet.read") }, async () => loadShiftSettings(db, merchantId));
   app.put<{ Body: Partial<ShiftSettings> }>("/api/settings/shifts", { preHandler: needs("device.manage") }, async (req, reply) => {
@@ -134,6 +134,12 @@ export function registerShifts(app: FastifyInstance, d: { db: Db; merchantId: st
   });
 
   /** A till locked itself (idle) or was locked by hand: the lock is written to the audit log with who it was. Their shift stays open for them. */
+  /** Someone signed in at a till that still held another person's order and carried it on (decision Q2: lock, then anyone takes over). */
+  app.post<{ Body: { from?: string; orderId?: string | null; items?: number } }>("/api/auth/takeover", { preHandler: needs("wallet.spend") }, async (req) => {
+    await audit(db, merchantId, req.staff!.id, "till.takeover", { deviceId: req.device?.id ?? null, from: String(req.body?.from ?? "").slice(0, 60), orderId: req.body?.orderId ? String(req.body.orderId).slice(0, 64) : null, items: Number.isInteger(req.body?.items) ? req.body!.items : null });
+    return { ok: true };
+  });
+
   app.post<{ Body: { auto?: boolean } }>("/api/auth/lock", { preHandler: needs("wallet.spend") }, async (req) => {
     await audit(db, merchantId, req.staff!.id, req.body?.auto ? "auth.lock_auto" : "auth.lock", { deviceId: req.device?.id ?? null });
     return { ok: true };
@@ -268,7 +274,7 @@ export function registerShifts(app: FastifyInstance, d: { db: Db; merchantId: st
         if (!b.approverCode || !b.approverPin) return reply.code(428).send({ error: "manager_approval_needed", varianceCents: variance });
         const v = await checkStaffPin(db, merchantId, String(b.approverCode).trim(), String(b.approverPin));
         if (!v.ok) return reply.code(v.reason === "locked" ? 423 : 422).send({ error: v.reason === "locked" ? "approver_locked" : "approval_refused" });
-        if (!can(v.row.role, "wallet.refund")) return reply.code(422).send({ error: "approver_cannot_approve" });
+        if (!can(v.row.role, "shift.approve")) return reply.code(422).send({ error: "approver_cannot_approve" });
         approvedBy = v.row.name;
       }
     }

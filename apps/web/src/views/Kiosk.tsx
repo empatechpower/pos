@@ -154,8 +154,9 @@ function KioskSession({ info, catalog, config }: { info: Info; catalog: Catalog;
   const devDialog = import.meta.env.DEV ? new URLSearchParams(location.search).get("dialog") : null;
 
   // ---- menu data
-  const ctx = { outletId: info.outletId ?? info.outletName, channelId };
-  const menu = useMemo(() => menuFor(catalog, ctx), [catalog, info.outletId, info.outletName, channelId]);
+  // A signed-in member is shown, and charged, member prices where an item has one. The server prices the order the same way.
+  const ctx = { outletId: info.outletId ?? info.outletName, channelId, member: !!member };
+  const menu = useMemo(() => menuFor(catalog, ctx), [catalog, info.outletId, info.outletName, channelId, !!member]);
   const byId = useMemo(() => new Map(menu.map((m) => [m.id, m])), [menu]);
   const items = bag.map((l) => ({ productId: l.productId, qty: l.qty, options: l.selection, ...(l.build ? { build: l.build } : {}), ...(l.note ? { note: l.note } : {}) }));
   // Points and a coupon, for a signed-in member (handover 4.2). The core applies them in the shop's order: the coupon off the items first,

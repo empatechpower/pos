@@ -2,7 +2,7 @@ import type { BusinessConfig } from "../config.js";
 import type { OrderLine, OrderState } from "../events.js";
 import { confirmedPaid, orderTotals } from "../events.js";
 import { formatMoney } from "../money.js";
-import { recordedTender } from "../tenders.js";
+import { customTenderName, recordedTender } from "../tenders.js";
 import { optionLines } from "../options.js";
 import { buildTicketLines } from "../builder.js";
 import type { Block, Doc, Label } from "./doc.js";
@@ -98,7 +98,7 @@ export function receipt(order: OrderState, config: BusinessConfig, ctx: PrintCon
   const paid = order.payments.filter((x) => x.confirmed && !x.paymentId.startsWith("refund:"));
   const checkNo = new Map((order.split?.checks ?? []).map((c) => [c.id, c.no]));
   for (const p of paid) {
-    const label = recordedTender(p.tender)?.label ?? METHOD[p.method] ?? p.method;
+    const label = recordedTender(p.tender)?.label ?? customTenderName(p) ?? METHOD[p.method] ?? p.method;
     b.push({ t: "cols", left: p.checkId && checkNo.has(p.checkId) ? `Check ${String(checkNo.get(p.checkId)).padStart(2, "0")} ${label}` : label, right: money(p.amountCents) });
     if (p.tenderedCents) b.push({ t: "cols", left: "  Cash tendered", right: money(p.tenderedCents) }, { t: "cols", left: "  Change", right: money(p.tenderedCents - p.amountCents) });
   }

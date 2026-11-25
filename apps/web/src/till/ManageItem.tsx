@@ -11,6 +11,7 @@ import { Modal } from "./Modal";
 export function ManageItem({ item, catalog, outletId, channels, onClose }: { item: MenuEntry; catalog: Catalog; outletId: string; channels: Array<{ id: string; name: string }>; onClose: () => void }) {
   const product = catalog.products.find((p) => p.id === item.id) ?? item;
   const [desc, setDesc] = useState(product.description ?? "");
+  const [code, setCode] = useState(product.barcode ?? "");
   const [soldOut, setSoldOut] = useState(!!product.soldOut);
   const [msg, setMsg] = useState("");
   const [busy, setBusy] = useState(false);
@@ -42,6 +43,8 @@ export function ManageItem({ item, catalog, outletId, channels, onClose }: { ite
   return (
     <Modal title={`Manage · ${item.name}`} wide onClose={onClose}>
       {msg && <div className="t-flash" role="status">{msg}</div>}
+      <label className="t-field">Barcode or SKU<input value={code} maxLength={40} aria-label="Barcode or SKU" placeholder="Scan or type the code" onChange={(e) => setCode(e.target.value.trim())} /></label>
+      <div className="t-dact" style={{ justifyContent: "flex-start" }}><button className="t-ghost" disabled={busy || code === (product.barcode ?? "")} onClick={() => void run("Barcode", async () => { const r = await staffFetch(`/api/catalog/products/${encodeURIComponent(item.id)}/barcode`, { method: "PUT", body: { barcode: code || null } }); if ("res" in r && r.res.status === 400) { const j = (await r.res.clone().json().catch(() => ({}))) as { problems?: string[] }; if (j.problems?.[0]) setMsg(j.problems[0]); } return "res" in r ? r.res : r; })}>Save barcode</button></div>
       <label className="t-field">Description<textarea rows={2} maxLength={200} value={desc} onChange={(e) => setDesc(e.target.value)} /></label>
       <div className="t-dact" style={{ justifyContent: "flex-start" }}><button className="t-ghost" disabled={busy || desc === (product.description ?? "")} onClick={() => void save({ description: desc })}>Save description</button></div>
       <div className="t-chiprow"><span>Availability</span><button className={soldOut ? "on" : ""} disabled={busy} onClick={() => { const next = !soldOut; setSoldOut(next); void save({ soldOut: next }); }}>{soldOut ? "Sold out (tap to put back on sale)" : "On sale (tap to mark sold out)"}</button></div>

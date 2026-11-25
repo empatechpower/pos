@@ -4,6 +4,7 @@ import { staffFetch } from "../auth";
 import { logView } from "../orderViews";
 import { useOrders } from "../hooks";
 import { downloadText, money, toCsv } from "../csv";
+import { downloadBytes, tablePdf } from "../pdf";
 
 const TZ = "Asia/Singapore";
 const dayKey = (ms: number) => new Date(ms).toLocaleDateString("en-CA", { timeZone: TZ });
@@ -204,8 +205,8 @@ export function Reports({ config, catalog }: { config: BusinessConfig; catalog?:
   const topProducts = [...products].sort((a, b) => b.qty - a.qty || b.cents - a.cents);
   const spendersList = [...pool].filter((m) => m.spentCents > 0).sort((a, b) => b.spentCents - a.spentCents);
 
-  /** The tab on screen as a CSV file, named for what it is and the dates it covers. */
-  function exportCsv() {
+  /** The tab on screen as rows (the first is the headings), and a name for the file: what it is and the dates it covers. */
+  function exportRows(): { name: string; rows: Array<Array<string | number>> } {
     const label = chosen === "range" ? `${from <= to ? from : to}_to_${from <= to ? to : from}` : chosen;
     let rowsOut: Array<Array<string | number>> = [];
     if (tab === "staff") {
@@ -222,8 +223,11 @@ export function Reports({ config, catalog }: { config: BusinessConfig; catalog?:
       for (const r of rows) { const d = dayKey(r.o.openedAt); const x = days.get(d) ?? { n: 0, items: 0, cents: 0 }; x.n++; x.items += r.items; x.cents += r.total; days.set(d, x); }
       rowsOut = [["Date", "Orders", "Items", "Sales (S$)", "Average order (S$)"], ...[...days].sort().map(([d, x]) => [d, x.n, x.items, money(x.cents), money(x.n ? Math.round(x.cents / x.n) : 0)])];
     }
-    downloadText(`${tab}_${label}.csv`, toCsv(rowsOut));
+    return { name: `${tab}_${label}`, rows: rowsOut };
   }
+  const exportCsv = () => { const x = exportRows(); downloadText(`${x.name}.csv`, toCsv(x.rows)); };
+  const TAB_TITLE: Record<string, string> = { staff: "Sales by staff", products: "Sales by item", orders: "Orders", credit: "Member credit" };
+  const exportPdf = () => { const x = exportRows(); downloadBytes(`${x.name}.pdf`, tablePdf({ title: `${config.name} - ${TAB_TITLE[tab] ?? "Sales by day"}`, subtitle: `${config.outletName} - ${x.name.split("_").slice(1).join(" ").replace(" to ", " to ")}`, rows: x.rows })); };
 
   return (
     <div className="rp">
@@ -243,7 +247,8 @@ export function Reports({ config, catalog }: { config: BusinessConfig; catalog?:
         <span className="muted">{rows.length} order{rows.length === 1 ? "" : "s"}</span>
         <span className="rp-actions" style={{ marginLeft: "auto", display: "flex", gap: 6 }}>
           <button className="secondary sm" onClick={exportCsv}>Export CSV</button>
-          <button className="secondary sm" onClick={() => window.print()} title="Opens the print window: choose a printer, or Save as PDF">Print / Save as PDF</button>
+          <button className="secondary sm" onClick={exportPdf}>Export PDF</button>
+          <button className="secondary sm" onClick={() => window.print()} title="Opens the print window to print what is on screen">Print</button>
         </span>
       </div>
       <h2 className="rp-printtitle">{tab[0]!.toUpperCase() + tab.slice(1)} report · {chosen === "range" ? `${from <= to ? from : to} to ${from <= to ? to : from}` : chosen === "all" ? "All days" : chosen === "last24" ? "Last 24 hours" : chosen} · {config.name}</h2>

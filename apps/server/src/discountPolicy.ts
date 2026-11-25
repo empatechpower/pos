@@ -43,7 +43,7 @@ export function registerDiscountPolicy(app: FastifyInstance, d: { db: Db; mercha
     if (!code || !pin) return reply.code(428).send({ error: "manager_approval_needed" });
     const v = await checkStaffPin(db, merchantId, code, pin);
     if (!v.ok) return reply.code(v.reason === "locked" ? 423 : 422).send({ error: v.reason === "locked" ? "approver_locked" : "approval_refused" });
-    if (!can(v.row.role, "wallet.refund")) return reply.code(422).send({ error: "approver_cannot_approve" });
+    if (!can(v.row.role, "discount.approve")) return reply.code(422).send({ error: "approver_cannot_approve" });
     await audit(db, merchantId, req.staff!.id, "approval.given", { approvedBy: v.row.id, approverName: v.row.name, purpose: String(req.body?.purpose ?? "").slice(0, 60) });
     return { ok: true, approver: { id: v.row.id, name: v.row.name } };
   });

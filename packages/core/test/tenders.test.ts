@@ -41,3 +41,21 @@ describe("recorded tenders", () => {
     expect(text).not.toContain("Other");
   });
 });
+
+describe("the shop's own tenders", () => {
+  it("a delivery platform payment keeps the name it was taken under, on the order, the receipt and the report", async () => {
+    const { customTenderName } = await import("../src/tenders.js");
+    const o = sale("x", { method: "other", tender: "ct-grab", tenderName: "GrabFood" });
+    expect(o.payments[0]).toMatchObject({ method: "other", tender: "ct-grab", tenderName: "GrabFood" });
+    expect(customTenderName(o.payments[0]!)).toBe("GrabFood");
+    const s = summarize([o, sale("y", { method: "other", tender: "ct-grab", tenderName: "GrabFood" }), sale("z", { method: "cash" })], config);
+    expect(Object.fromEntries(s.payments.map((p) => [paymentLabel(p.method), p.cents]))).toEqual({ GrabFood: 1000, Cash: 500 });
+    const text = plainText(receipt(o, config, { merchantName: "Shop", outletName: "Outlet", now: 1_800_000_000_000 }), 42).join("\n");
+    expect(text).toMatch(/GrabFood\s+S?\$5\.00/);
+  });
+  it("a name without a proper custom id, or an id without a name, is not kept", () => {
+    expect(sale("a2", { method: "other", tender: "ct-grab" }).payments[0]!.tender).toBeUndefined();
+    expect(sale("b2", { method: "other", tender: "grab", tenderName: "GrabFood" }).payments[0]!.tenderName).toBeUndefined();
+    expect(paymentKey({ method: "other", tender: "grab", tenderName: "GrabFood" })).toBe("other");
+  });
+});

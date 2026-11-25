@@ -33,8 +33,8 @@ export async function askApproval(code: string, pin: string, purpose: string): P
 }
 
 /** Does a cashier need a manager for this? Managers and owners never do. */
-export function needsApproval(role: string, p: DiscountPolicy, what: { kind: "percent" | "amount" | "price"; value: number }): boolean {
-  if (role !== "cashier") return false;
+export function needsApproval(mayApprove: boolean, p: DiscountPolicy, what: { kind: "percent" | "amount" | "price"; value: number }): boolean {
+  if (mayApprove) return false;
   if (what.kind === "price") return p.overrideNeedsManager;
   return what.kind === "percent" ? what.value > p.cashierMaxPercent : what.value > p.cashierMaxAmountCents;
 }

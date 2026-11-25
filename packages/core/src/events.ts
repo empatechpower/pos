@@ -1,5 +1,5 @@
 import { staffDiscountCents, type StaffDiscount } from "./discounts.js";
-import { recordedTender } from "./tenders.js";
+import { CUSTOM_TENDER_ID, cleanTenderName, recordedTender } from "./tenders.js";
 import type { BusinessConfig } from "./config.js";
 import type { StoredBuild } from "./builder.js";
 import type { Fulfilment } from "./catalog.js";
@@ -69,7 +69,7 @@ export type OrderEventBody =
   /** The bill was split into checks. Each check has a fixed total (they add up to the order total) and, by item or seat, the units it carries. */
   | { type: "SplitCreated"; method: "even" | "manual" | "item" | "seat"; checks: Array<{ id: string; totalCents: Cents; seat?: number; shares?: Array<{ lineId: string; qty: number }> }>; byName?: string }
   | { type: "SplitCleared"; byName?: string }
-  | { type: "PaymentRecorded"; paymentId: string; method: PaymentMethod; /** The named tender it was taken as (tenders.ts: card, debit, check, gift card...), when the till only recorded it. */ tender?: string; amountCents: Cents; /** false = awaiting gateway confirmation */ confirmed: boolean; /** The cashier's shift this was taken in (the drawer it belongs to). */ shiftId?: string; /** The check of a split bill this payment settles. */ checkId?: string; /** Who took it (the signed-in person at the till, or "PayNow (automatic)"). Reports by staff read this. */ byName?: string; /** A short note on how it was taken (for a PayNow payment: whether the bank's alert was matched by the order's reference or only by the amount). */ note?: string; /** Cash handed over, when it was more than the payment (so the receipt can show the change). */ tenderedCents?: Cents }
+  | { type: "PaymentRecorded"; paymentId: string; method: PaymentMethod; /** The named tender it was taken as (tenders.ts: card, debit, check, gift card...), when the till only recorded it. */ tender?: string; /** The shop's own name for it, when it is one of its custom tenders (a delivery platform, a gift certificate). */ tenderName?: string; amountCents: Cents; /** false = awaiting gateway confirmation */ confirmed: boolean; /** The cashier's shift this was taken in (the drawer it belongs to). */ shiftId?: string; /** The check of a split bill this payment settles. */ checkId?: string; /** Who took it (the signed-in person at the till, or "PayNow (automatic)"). Reports by staff read this. */ byName?: string; /** A short note on how it was taken (for a PayNow payment: whether the bank's alert was matched by the order's reference or only by the amount). */ note?: string; /** Cash handed over, when it was more than the payment (so the receipt can show the change). */ tenderedCents?: Cents }
   | { type: "PaymentConfirmed"; paymentId: string }
   | { type: "StageSet"; stage: Exclude<OrderStage, "open"> }
   /** The customer moved to another table after ordering: the same order, same status, now at `to`. The old table and the time are kept. */
@@ -187,7 +187,7 @@ export interface OrderState {
   queueNumber?: string;
   openedAt: number;
   lines: OrderLine[];
-  payments: Array<{ paymentId: string; method: PaymentMethod; tender?: string; amountCents: Cents; confirmed: boolean; shiftId?: string; checkId?: string; tenderedCents?: Cents; byName?: string }>;
+  payments: Array<{ paymentId: string; method: PaymentMethod; tender?: string; tenderName?: string; amountCents: Cents; confirmed: boolean; shiftId?: string; checkId?: string; tenderedCents?: Cents; byName?: string }>;
   stage: OrderStage;
   /** Time the order was first fully paid (confirmed). */
   paidAt?: number;
@@ -237,7 +237,7 @@ export function reduceOrder(orderId: string, events: readonly OrderEvent[]): Ord
       }
       case "PaymentRecorded": {
         if (state.payments.some((p) => p.paymentId === e.paymentId)) break;
-        state.payments.push({ paymentId: e.paymentId, method: e.method, ...(recordedTender(e.tender) ? { tender: e.tender } : {}), amountCents: e.amountCents, confirmed: e.confirmed, ...(e.shiftId ? { shiftId: e.shiftId } : {}), ...(e.checkId ? { checkId: e.checkId } : {}), ...(e.byName ? { byName: String(e.byName).slice(0, 60) } : {}), ...(e.tenderedCents && e.tenderedCents > e.amountCents ? { tenderedCents: Math.round(e.tenderedCents) } : {}) });
+        state.payments.push({ paymentId: e.paymentId, method: e.method, ...(recordedTender(e.tender) ? { tender: e.tender } : e.tender && CUSTOM_TENDER_ID.test(e.tender) && cleanTenderName(e.tenderName) ? { tender: e.tender, tenderName: cleanTenderName(e.tenderName) } : {}), amountCents: e.amountCents, confirmed: e.confirmed, ...(e.shiftId ? { shiftId: e.shiftId } : {}), ...(e.checkId ? { checkId: e.checkId } : {}), ...(e.byName ? { byName: String(e.byName).slice(0, 60) } : {}), ...(e.tenderedCents && e.tenderedCents > e.amountCents ? { tenderedCents: Math.round(e.tenderedCents) } : {}) });
         break;
       }
       case "PaymentConfirmed": {

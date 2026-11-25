@@ -2,7 +2,7 @@ import { useState } from "react";
 import { formatMoney, recordedTender } from "@pos/core";
 
 /** Cash, member credit, a PayNow QR, practice, or a recorded tender (card, debit, manualcard, check, giftcard: taken outside the till). */
-export type Tender = "cash" | "credit" | "qr" | "mock" | "card" | "debit" | "manualcard" | "check" | "giftcard";
+export type Tender = "cash" | "credit" | "qr" | "mock" | "card" | "debit" | "manualcard" | "check" | "giftcard" | `ct-${string}`;
 export interface TenderOption { id: Tender; label: string; disabled?: boolean; why?: string; /** Off until a manager shows it in Settings. */ optional?: boolean }
 
 /**
@@ -43,8 +43,8 @@ export function PayPanel({ totalCents, title, venue, tenders, busy, onBack, onDo
           </>
         ) : (
           <>
-            <div className="tender-card">{tender === "credit" ? "Member credit" : tender === "qr" ? "PayNow QR" : recordedTender(tender)?.label ?? "Card / PayNow (practice)"} payment</div>
-            <p className="connectionnote">{cur?.why ?? (tender === "qr" ? "A QR for the exact amount is shown next." : tender === "credit" ? "The member's credit is charged when you press Done." : recordedTender(tender) ? `Take the ${recordedTender(tender)!.label.toLowerCase()} payment for the full amount first. Press Done only once it has gone through: the till records it and does not charge anything itself.` : "Practice only: no money moves.")}</p>
+            <div className="tender-card">{tender === "credit" ? "Member credit" : tender === "qr" ? "PayNow QR" : recordedTender(tender)?.label ?? (tender.startsWith("ct-") ? cur?.label : undefined) ?? "Card / PayNow (practice)"} payment</div>
+            <p className="connectionnote">{cur?.why ?? (tender === "qr" ? "A QR for the exact amount is shown next." : tender === "credit" ? "The member's credit is charged when you press Done." : recordedTender(tender) ? `Take the ${recordedTender(tender)!.label.toLowerCase()} payment for the full amount first. Press Done only once it has gone through: the till records it and does not charge anything itself.` : tender.startsWith("ct-") ? `Recorded as ${cur?.label ?? "this payment type"} for the full amount. The till does not charge anything itself.` : "Practice only: no money moves.")}</p>
           </>
         )}
         <div className="payment-bottom">

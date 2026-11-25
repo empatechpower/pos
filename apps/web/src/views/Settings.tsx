@@ -4,7 +4,7 @@ import { deviceRole, setDeviceRole } from "../device";
 import { go } from "../nav";
 import { staffFetch, useStaff } from "../auth";
 import { TEXT_SCALE, setPref, usePrefs } from "../prefs";
-import { ACTION_POOL, TENDER_POOL, arrangeAll, isHidden, loadTillSettings, saveTill, useTillSettings, type ArrangePref, type KitchenStation, type TillSettings } from "../till/tillSettings";
+import { ACTION_POOL, TENDER_POOL, actionsPref, tendersPref, arrangeAll, isHidden, loadTillSettings, saveTill, useTillSettings, type ArrangePref, type CustomAction, type CustomTender, type KitchenStation, type TillSettings } from "../till/tillSettings";
 import { appVersion, checkForUpdate, useUpdatePending } from "../pwaUpdate";
 import { FloorPanel } from "./FloorPanel";
 import { ShiftsPanel } from "./ShiftsPanel";
@@ -75,6 +75,93 @@ function Arrange({ title, help, pool, pref, onChange }: { title: string; help: s
  * Settings as a full screen with a rail (Q18): Station (this person's own choices), Selling (what the shop's till shows and how it behaves),
  * Menu & prices, Training and About. Sections that change the shop's setup are for managers.
  */
+/**
+ * What cashiers and managers may do without a manager (handout 4.10: per-permission gates). The owner ticks; the server enforces it.
+ * A change reaches a person the next time they sign in.
+ */
+function PermissionsCard() {
+  type View = { roles: { cashier: string[]; manager: string[] }; options: Array<{ id: string; label: string; help: string; roles: Array<"cashier" | "manager"> }> };
+  const [v, setV] = useState<View | null>(null);
+  const [msg, setMsg] = useState("");
+  useEffect(() => { void staffFetch("/api/settings/permissions").then(async (r) => { if ("res" in r && r.res.ok) setV((await r.res.json()) as View); }); }, []);
+  if (!v) return null;
+  const toggle = async (role: "cashier" | "manager", id: string) => {
+    const next = v.roles[role].includes(id) ? v.roles[role].filter((x) => x !== id) : [...v.roles[role], id];
+    const r = await staffFetch("/api/settings/permissions", { method: "PUT", body: { [role]: next } });
+    if (!("res" in r)) return setMsg(r.problem);
+    if (!r.res.ok) return setMsg(r.res.status === 403 ? "Only the brand owner can change what staff may do." : "That was not saved.");
+    setV((await r.res.json()) as View);
+    setMsg("Saved. It applies the next time that person signs in.");
+  };
+  return (
+    <section className="e2e-card" style={{ marginTop: 16 }}>
+      <h3>What staff may do</h3>
+      <p className="muted">Tick what a cashier or a manager may do on their own. Where a box is empty, the till asks for the code and PIN of someone who may. The owner may always do everything.</p>
+      {msg && <p className="flash" role="status">{msg}</p>}
+      <table className="perm-table" style={{ width: "100%", borderCollapse: "collapse" }}>
+        <thead><tr><th style={{ textAlign: "left" }}>Permission</th><th>Cashier</th><th>Manager</th></tr></thead>
+        <tbody>
+          {v.options.map((o) => (
+            <tr key={o.id} style={{ borderTop: "1px solid var(--line)" }}>
+              <td style={{ padding: "8px 0" }}>{o.label}{o.help ? <div className="muted" style={{ fontSize: ".85em" }}>{o.help}</div> : null}</td>
+              {(["cashier", "manager"] as const).map((role) => <td key={role} style={{ textAlign: "center" }}>{o.roles.includes(role) ? <input type="checkbox" aria-label={`${role === "cashier" ? "Cashier" : "Manager"}: ${o.label}`} checked={v.roles[role].includes(o.id)} onChange={() => void toggle(role, o.id)} /> : <span className="muted" title="Not offered for this role">—</span>}</td>)}
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </section>
+  );
+}
+
+/** The shop's own ways to pay: a delivery platform, a gift certificate, a house account. Each is recorded under its name, like Card. */
+function CustomTendersEditor({ tenders, onSave }: { tenders: CustomTender[]; onSave: (t: CustomTender[]) => void }) {
+  const [name, setName] = useState("");
+  const taken = tenders.some((t) => t.name.toLowerCase() === name.trim().toLowerCase());
+  return (
+    <section className="e2e-card" style={{ marginTop: 16 }}>
+      <h3>Your own payment types</h3>
+      <p className="muted">For money that reaches you another way: a delivery platform (GrabFood, foodpanda), a gift certificate, a house account. The till records the payment under this name and does not charge anything. Each one appears under Payment options below, where it can be hidden or moved.</p>
+      {tenders.map((t) => <div className="arr-row" key={t.id}><label style={{ flex: 1 }}>{t.name}</label><button className="secondary sm" aria-label={`Remove payment type ${t.name}`} onClick={() => onSave(tenders.filter((x) => x.id !== t.id))}>Remove</button></div>)}
+      {tenders.length < 12 && (
+        <div className="row" style={{ marginTop: 8 }}>
+          <input aria-label="New payment type name" placeholder="e.g. GrabFood" maxLength={30} value={name} onChange={(e) => setName(e.target.value)} />
+          <button className="secondary sm" disabled={!name.trim() || taken} onClick={() => { onSave([...tenders, { id: `ct-${Date.now().toString(36)}`, name: name.trim() }]); setName(""); }}>Add payment type</button>
+        </div>
+      )}
+      <p className="muted">Removing one does not change past sales: each payment keeps the name it was taken under.</p>
+    </section>
+  );
+}
+
+/** The shop's own buttons (handout 4.11): a name, a colour, an icon and a web address, shown on the action strip, the dashboard, or both. */
+function CustomActionsEditor({ actions, onSave }: { actions: CustomAction[]; onSave: (a: CustomAction[]) => void }) {
+  const blank = { label: "", icon: "↗", color: "#1b9bd8", url: "https://", where: "dashboard" as CustomAction["where"] };
+  const [d, setD] = useState(blank);
+  const okUrl = /^https?:\/\/[^\s.]+\.[^\s]+$/i.test(d.url.trim());
+  return (
+    <section className="e2e-card" style={{ marginTop: 16 }}>
+      <h3>Your own buttons</h3>
+      <p className="muted">A button that opens a web page in a new tab: a supplier's ordering page, a delivery platform's merchant screen, a staff handbook. Only web addresses can be opened.</p>
+      {actions.map((a) => (
+        <div className="arr-row" key={a.id}>
+          <label style={{ flex: 1 }}><span style={{ color: a.color, fontWeight: 700 }}>{a.icon}</span> {a.label} <span className="muted">· {a.where === "both" ? "Strip and dashboard" : a.where === "strip" ? "Action strip" : "Dashboard"} · {a.url.replace(/^https?:\/\//, "").slice(0, 40)}</span></label>
+          <button className="secondary sm" aria-label={`Remove button ${a.label}`} onClick={() => onSave(actions.filter((x) => x.id !== a.id))}>Remove</button>
+        </div>
+      ))}
+      {actions.length < 12 && (
+        <div className="row" style={{ marginTop: 8, flexWrap: "wrap", gap: 8 }}>
+          <input aria-label="Button name" placeholder="Name" maxLength={24} value={d.label} onChange={(e) => setD({ ...d, label: e.target.value })} />
+          <input aria-label="Button icon" placeholder="Icon" maxLength={2} style={{ width: 60 }} value={d.icon} onChange={(e) => setD({ ...d, icon: e.target.value })} />
+          <input aria-label="Button colour" type="color" value={d.color} onChange={(e) => setD({ ...d, color: e.target.value })} />
+          <input aria-label="Button web address" placeholder="https://..." style={{ flex: 1, minWidth: 200 }} maxLength={500} value={d.url} onChange={(e) => setD({ ...d, url: e.target.value })} />
+          <select aria-label="Where the button shows" value={d.where} onChange={(e) => setD({ ...d, where: e.target.value as CustomAction["where"] })}><option value="dashboard">Dashboard</option><option value="strip">Action strip</option><option value="both">Both</option></select>
+          <button className="secondary sm" disabled={!d.label.trim() || !okUrl} onClick={() => { onSave([...actions, { id: `ca-${Date.now().toString(36)}`, label: d.label.trim(), icon: d.icon.trim() || "↗", color: d.color, url: d.url.trim(), where: d.where }]); setD(blank); }}>Add button</button>
+        </div>
+      )}
+    </section>
+  );
+}
+
 /** Kitchen stations: a name and the menu categories it makes. The kitchen display can then show one station's work. */
 function StationsEditor({ stations, categories, onSave }: { stations: KitchenStation[]; categories: string[]; onSave: (s: KitchenStation[]) => void }) {
   const [name, setName] = useState("");
@@ -113,6 +200,8 @@ export function Settings({ catalog }: { catalog?: Catalog | null } = {}) {
   const [checking, setChecking] = useState(false);
   const [letter, setLetter] = useState(getDeviceCode());
   const [role, setRole] = useState(deviceRole());
+  /** Whether the action and payment lists being edited are the shop's or this till's own. */
+  const [scope, setScope] = useState<"shop" | "till">("shop");
   const categories = useMemo(() => [...new Set((catalog?.products ?? []).map((p) => p.category))].sort(), [catalog]);
   useEffect(() => { void loadTillSettings(); }, [staff?.code]);
   if (!staff) return <div className="credit"><h2>Settings</h2><p className="muted">Sign in to change settings. <a href="/login">Sign in</a></p></div>;
@@ -160,9 +249,22 @@ export function Settings({ catalog }: { catalog?: Catalog | null } = {}) {
                 </select>
               </label>
             </section>
-            <Arrange title="Order actions" help="Which buttons show on the till's action strip, and in what order. Pay is always there." pool={ACTION_POOL} pref={till.actions} onChange={(p) => void save({ actions: p })} />
+            <section className="e2e-card" style={{ marginTop: 16 }}>
+              <h3>Lists for every till, or this till only</h3>
+              <p className="muted">The two lists marked below (Order actions and Payment options) are the shop's. A till can keep its own: for example a bar till without Table Map, or a delivery counter with only GrabFood and Card.</p>
+              <div className="row">
+                <button className={scope === "shop" ? "primary sm" : "secondary sm"} aria-pressed={scope === "shop"} onClick={() => setScope("shop")}>Every till</button>
+                <button className={scope === "till" ? "primary sm" : "secondary sm"} aria-pressed={scope === "till"} onClick={() => setScope("till")}>This till only</button>
+                {till.thisTill && <button className="secondary sm" onClick={() => { void save({ thisTill: null }); setScope("shop"); }}>Use the shop's lists on this till</button>}
+              </div>
+              <p className="muted">{till.thisTill ? `This till has its own ${[till.thisTill.actions ? "order actions" : "", till.thisTill.tenders ? "payment options" : ""].filter(Boolean).join(" and ")}.` : "This till uses the shop's lists."}{scope === "till" ? " Changes below are for this till only." : " Changes below are for every till that has no list of its own."}</p>
+            </section>
+            <CustomActionsEditor actions={till.customActions ?? []} onSave={(a) => void save({ customActions: a })} />
+            <Arrange title={scope === "till" ? "Order actions · this till" : "Order actions · every till"} help="Which buttons show on the till's action strip, and in what order. Pay is always there." pool={[...ACTION_POOL, ...(till.customActions ?? []).filter((a) => a.where !== "dashboard").map((a) => ({ id: a.id, label: a.label, note: "Your own button" }))]} pref={scope === "till" ? actionsPref(till) : till.actions} onChange={(p) => void save(scope === "till" ? { thisTill: { ...(till.thisTill ?? {}), actions: p } } : { actions: p })} />
+            <CustomTendersEditor tenders={till.customTenders ?? []} onSave={(t) => void save({ customTenders: t })} />
+            {staff.role === "owner" && <PermissionsCard />}
             <StationsEditor stations={till.stations ?? []} categories={categories} onSave={(s) => void save({ stations: s })} />
-            <Arrange title="Payment options" help="Which ways to pay show on the payment panel, and in what order." pool={TENDER_POOL} pref={till.tenders} onChange={(p) => void save({ tenders: p })} />
+            <Arrange title={scope === "till" ? "Payment options · this till" : "Payment options · every till"} help="Which ways to pay show on the payment panel, and in what order." pool={[...TENDER_POOL, ...(till.customTenders ?? []).map((t) => ({ id: t.id, label: t.name, note: "Your own payment type" }))]} pref={scope === "till" ? tendersPref(till) : till.tenders} onChange={(p) => void save(scope === "till" ? { thisTill: { ...(till.thisTill ?? {}), tenders: p } } : { tenders: p })} />
             <FloorPanel />
             <ShiftsPanel />
             <DiscountPolicyPanel />

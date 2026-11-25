@@ -86,7 +86,7 @@ export class PgCatalogStore implements CatalogStore {
     const m = this.merchantId;
     const [meta, products, books, prices, channels, assigns, offs, catNames, zoneRows, zoneOutlets, zoneBooks, overrideRows] = await Promise.all([
       q.query("SELECT version, default_pricebook_id FROM catalog_meta WHERE merchant_id=$1", [m]),
-      q.query("SELECT id,name,category,sold_out,points_exempt,description,alt_name,options,image_version,bcrs,names,builder,tax_inclusive,tax_group,stock FROM products WHERE merchant_id=$1 ORDER BY sort", [m]),
+      q.query("SELECT barcode,id,name,category,sold_out,points_exempt,description,alt_name,options,image_version,bcrs,names,builder,tax_inclusive,tax_group,stock FROM products WHERE merchant_id=$1 ORDER BY sort", [m]),
       q.query("SELECT id,name,missing FROM pricebooks WHERE merchant_id=$1 ORDER BY name", [m]),
       q.query("SELECT pricebook_id, product_id, price_cents, member_price_cents FROM pricebook_prices WHERE merchant_id=$1", [m]),
       q.query("SELECT id,name,kind,service_charge,active,commission_rate_pct FROM channels WHERE merchant_id=$1 ORDER BY sort", [m]),
@@ -122,6 +122,7 @@ export class PgCatalogStore implements CatalogStore {
           soldOut: p.sold_out || undefined,
           pointsExempt: p.points_exempt || undefined,
           bcrs: p.bcrs || undefined,
+          ...(p.barcode ? { barcode: p.barcode as string } : {}),
           description: p.description ?? undefined,
           altName: p.alt_name ?? undefined,
           ...(p.names && Object.keys(p.names).length ? { names: p.names as Record<string, string> } : {}),
@@ -175,6 +176,20 @@ export class PgCatalogStore implements CatalogStore {
     } finally {
       client.release();
     }
+  }
+
+  /** Give an item its barcode or SKU (letters, digits, dashes), or take it off (null). One code belongs to one item. */
+  setBarcode(productId: string, barcode: string | null) {
+    return this.change(async (c) => {
+      const m = this.merchantId;
+      if (!(await c.query("SELECT 1 FROM products WHERE merchant_id=$1 AND id=$2", [m, productId])).rowCount) throw new ChangeError("item not found");
+      const code = barcode === null ? null : barcode.trim();
+      if (code !== null && !/^[A-Za-z0-9._-]{3,40}$/.test(code)) throw new ChangeError("a barcode is 3 to 40 letters, digits, dots or dashes");
+      const other = code ? (await c.query("SELECT name FROM products WHERE merchant_id=$1 AND barcode=$2 AND id<>$3", [m, code, productId])).rows[0] : undefined;
+      if (other) throw new ChangeError(`that barcode is already on ${other.name}`);
+      await c.query("UPDATE products SET barcode=$3 WHERE merchant_id=$1 AND id=$2", [m, productId, code]);
+      return { productId, barcode: code };
+    });
   }
 
   /** Set a product's price in a pricebook, or remove it (null) so it falls through to the next book. */

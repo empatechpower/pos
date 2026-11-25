@@ -50,6 +50,45 @@ describe("till settings and menu layouts", () => {
     expect((await call("/api/settings/till", { bearer: m, method: "PUT", body: { layout: { pages: [page("TOP MENU", [{ k: "fn", id: "refund" }])] } } })).status).toBe(400);
     await call("/api/settings/till", { bearer: m, method: "PUT", body: { layout: null } });
   });
+  it("the shop's own payment types and buttons: saved, tidied, and anything unsafe refused", async () => {
+    const m = (await call("/api/auth/login", { body: { code: "M1", pin: "222222" } })).json.token;
+    const put = (body: object) => call("/api/settings/till", { bearer: m, method: "PUT", body });
+    const t = await put({ customTenders: [{ id: "ct-grab", name: "  GrabFood  " }, { id: "ct-panda", name: "foodpanda" }] });
+    expect(t.json.customTenders).toEqual([{ id: "ct-grab", name: "GrabFood" }, { id: "ct-panda", name: "foodpanda" }]);
+    expect((await put({ customTenders: [{ id: "ct-a", name: "Grab" }, { id: "ct-b", name: "grab" }] })).status).toBe(400); // two with one name
+    expect((await put({ customTenders: [{ id: "cash", name: "Cash again" }] })).status).toBe(400); // cannot stand in for a built-in tender
+    // the payment options list can now hold all of them
+    expect((await put({ tenders: { order: ["cash", "ct-grab", "ct-panda", "card"], hidden: [], shown: ["debit"] } })).json.tenders.order).toEqual(["cash", "ct-grab", "ct-panda", "card"]);
+    const a = await put({ customActions: [{ id: "ca-sup", label: "Supplier", icon: "🛒", color: "#AA3300", url: "https://supplier.example/order", where: "both" }] });
+    expect(a.json.customActions).toEqual([{ id: "ca-sup", label: "Supplier", icon: "🛒", color: "#aa3300", url: "https://supplier.example/order", where: "both" }]);
+    for (const url of ["javascript:alert(1)", "file:///etc/passwd", "not a url", "data:text/html,hi"]) expect((await put({ customActions: [{ id: "ca-x", label: "Bad", icon: "!", color: "#000000", url, where: "strip" }] })).status).toBe(400);
+    expect((await call("/api/settings/till", { bearer: m })).json.customActions).toHaveLength(1); // the refused ones changed nothing
+    await put({ customTenders: [], customActions: [], tenders: { order: [], hidden: [], shown: [] } });
+  });
+
+  it("a till can keep its own action and payment lists; other tills keep the shop's, and it can go back", async () => {
+    const m = (await call("/api/auth/login", { body: { code: "M1", pin: "222222" } })).json.token;
+    const front = till;
+    const bar = (await enroll(db, "bp", (await createEnrollmentCode(db, { merchantId: "bp", outletId: "EV", createdBy: null })).code, "Bar till"))!.token;
+    const at = async (token: string, o: Parameters<typeof call>[1] = {}) => { till = token; try { return await call("/api/settings/till", o); } finally { till = front; } };
+    await at(front, { bearer: m, method: "PUT", body: { actions: { order: ["qty", "discount"], hidden: [] } } });
+    expect((await at(bar, { bearer: m })).json.thisTill).toBeNull();
+    // the bar till hides Table Map and keeps only cash and card
+    const set = await at(bar, { bearer: m, method: "PUT", body: { thisTill: { actions: { order: ["qty"], hidden: ["tables"] }, tenders: { order: ["cash", "card"], hidden: ["credit", "qr"], shown: [] } } } });
+    expect(set.status).toBe(200);
+    expect(set.json.thisTill).toEqual({ actions: { order: ["qty"], hidden: ["tables"] }, tenders: { order: ["cash", "card"], hidden: ["credit", "qr"], shown: [] } });
+    expect(set.json.actions).toEqual({ order: ["qty", "discount"], hidden: [] }); // the shop's list is untouched
+    expect(set.json.devices).toBeUndefined(); // a till is never sent the other tills' lists
+    expect((await at(front, { bearer: m })).json.thisTill).toBeNull();
+    expect((await at(bar, { bearer: m })).json.thisTill.actions.hidden).toEqual(["tables"]);
+    // only one list of its own: the other follows the shop
+    expect((await at(bar, { bearer: m, method: "PUT", body: { thisTill: { actions: { order: ["qty"], hidden: [] } } } })).json.thisTill).toEqual({ actions: { order: ["qty"], hidden: [] } });
+    expect((await at(bar, { bearer: m, method: "PUT", body: { thisTill: { actions: "everything" } } })).status).toBe(400);
+    expect((await at(bar, { bearer: (await call("/api/auth/login", { body: { code: "C1", pin: "3333" } })).json.token, method: "PUT", body: { thisTill: null } })).status).toBe(403); // a cashier cannot change it
+    expect((await at(bar, { bearer: m, method: "PUT", body: { thisTill: null } })).json.thisTill).toBeNull();
+    await at(front, { bearer: m, method: "PUT", body: { actions: { order: [], hidden: [] } } });
+  });
+
   it("a manager chooses whether sliding a line removes it at once; the default is a bin button, and nonsense is refused", async () => {
     const m = (await call("/api/auth/login", { body: { code: "M1", pin: "222222" } })).json.token;
     expect((await call("/api/settings/till", { bearer: m })).json.lineRemove).toBe("bin");

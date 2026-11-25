@@ -5,17 +5,59 @@ import type { Db } from "./db/pool.js";
 const scrypt = promisify(scryptCb) as (pw: string, salt: Buffer, len: number) => Promise<Buffer>;
 
 export type Role = "cashier" | "manager" | "owner" | "agent";
-export type Permission = "print.manage" | "print.reprint" | "catalog.manage" | "device.manage" | "wallet.read" | "wallet.topup" | "wallet.spend" | "wallet.refund" | "audit.read" | "staff.manage";
+export type Permission = "print.manage" | "print.reprint" | "catalog.manage" | "device.manage" | "wallet.read" | "wallet.topup" | "wallet.spend" | "wallet.refund" | "audit.read" | "staff.manage"
+  /** Approving on the spot what a cashier otherwise needs a manager's PIN for: refunds and voids, discounts above the cashier's limit, closing a shift whose cash does not match. */
+  | "order.refund" | "discount.approve" | "shift.approve";
 
-const PERMISSIONS: Record<Role, Permission[]> = {
+const DEFAULTS: Record<Role, Permission[]> = {
   cashier: ["wallet.read", "wallet.topup", "wallet.spend", "print.reprint"],
-  manager: ["wallet.read", "wallet.topup", "wallet.spend", "wallet.refund", "audit.read", "device.manage", "catalog.manage", "print.manage", "print.reprint"],
-  owner: ["wallet.read", "wallet.topup", "wallet.spend", "wallet.refund", "audit.read", "device.manage", "catalog.manage", "print.manage", "print.reprint", "staff.manage"],
+  manager: ["wallet.read", "wallet.topup", "wallet.spend", "wallet.refund", "audit.read", "device.manage", "catalog.manage", "print.manage", "print.reprint", "order.refund", "discount.approve", "shift.approve"],
+  owner: ["wallet.read", "wallet.topup", "wallet.spend", "wallet.refund", "audit.read", "device.manage", "catalog.manage", "print.manage", "print.reprint", "staff.manage", "order.refund", "discount.approve", "shift.approve"],
   // An AI helper or script: change the menu and prices, read reports and credit, reprint tickets. It can never move money,
   // freeze credit, manage devices or printers, or create staff.
   agent: ["wallet.read", "audit.read", "catalog.manage", "print.reprint"],
 };
+/**
+ * What each role may do. Cashiers and managers can be changed by the owner (handout 4.10: staff roles and per-permission gates); the owner
+ * and agents are fixed. One server runs one brand, so the shop's choice is held here for the life of the process and loaded at start.
+ */
+const PERMISSIONS: Record<Role, Permission[]> = { cashier: [...DEFAULTS.cashier], manager: [...DEFAULTS.manager], owner: [...DEFAULTS.owner], agent: [...DEFAULTS.agent] };
 export const can = (role: Role, p: Permission) => PERMISSIONS[role].includes(p);
+export const rolePermissions = (role: Role): Permission[] => [...PERMISSIONS[role]];
+
+/** The permissions an owner can switch for a role, in the words the settings screen shows. Selling itself (signing in, taking payment) is never switched off. */
+export const PERMISSION_OPTIONS: Array<{ id: Permission; label: string; help: string; roles: Array<"cashier" | "manager"> }> = [
+  { id: "order.refund", label: "Refund and void orders", help: "Without it, a manager's code and PIN is asked for each time.", roles: ["cashier", "manager"] },
+  { id: "discount.approve", label: "Give any discount or change a price", help: "Without it, discounts above the cashier's limit need a manager's code and PIN.", roles: ["cashier", "manager"] },
+  { id: "shift.approve", label: "Close a shift whose cash does not match, and close other people's shifts", help: "Without it, a manager approves the difference.", roles: ["cashier", "manager"] },
+  { id: "wallet.topup", label: "Top up member credit and add members", help: "", roles: ["cashier", "manager"] },
+  { id: "print.reprint", label: "Reprint receipts and kitchen tickets, open the cash drawer", help: "", roles: ["cashier", "manager"] },
+  { id: "audit.read", label: "See the back-office reports and the audit log", help: "", roles: ["cashier", "manager"] },
+  { id: "catalog.manage", label: "Change the menu and prices", help: "", roles: ["cashier", "manager"] },
+  { id: "wallet.refund", label: "Adjust member credit and points, freeze credit", help: "", roles: ["manager"] },
+  { id: "device.manage", label: "Set up tills, outlets and the floor plan", help: "", roles: ["manager"] },
+  { id: "print.manage", label: "Set up printers", help: "", roles: ["manager"] },
+];
+const ALWAYS: Permission[] = ["wallet.read", "wallet.spend"];
+
+/** Set what a role may do. Only the options offered for that role count; anything else in the list is ignored. */
+export function setRolePermissions(role: "cashier" | "manager", perms: readonly string[]): Permission[] {
+  const allowed = PERMISSION_OPTIONS.filter((o) => o.roles.includes(role)).map((o) => o.id);
+  PERMISSIONS[role] = [...ALWAYS, ...allowed.filter((p) => perms.includes(p))];
+  return rolePermissions(role);
+}
+export function resetRolePermissions(): void { PERMISSIONS.cashier = [...DEFAULTS.cashier]; PERMISSIONS.manager = [...DEFAULTS.manager]; }
+/** The shop's saved choice, read at start. Nothing saved = the defaults. */
+export async function loadRolePermissions(db: Db, merchantId: string): Promise<void> {
+  resetRolePermissions();
+  const r = await db.query("SELECT value FROM merchant_settings WHERE merchant_id=$1 AND key='permissions'", [merchantId]);
+  const v = (r.rows[0]?.value ?? null) as { cashier?: unknown; manager?: unknown } | null;
+  if (Array.isArray(v?.cashier)) setRolePermissions("cashier", v!.cashier as string[]);
+  if (Array.isArray(v?.manager)) setRolePermissions("manager", v!.manager as string[]);
+}
+export async function saveRolePermissions(db: Db, merchantId: string): Promise<void> {
+  await db.query("INSERT INTO merchant_settings (merchant_id, key, value) VALUES ($1,'permissions',$2::jsonb) ON CONFLICT (merchant_id, key) DO UPDATE SET value=EXCLUDED.value, updated_at=now()", [merchantId, JSON.stringify({ cashier: rolePermissions("cashier"), manager: rolePermissions("manager") })]);
+}
 
 /** Largest single top-up a cashier may add. Managers and owners are not capped. An assumption to confirm with the client. */
 export const CASHIER_TOPUP_LIMIT_CENTS = 20_000;

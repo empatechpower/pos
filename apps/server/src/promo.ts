@@ -124,6 +124,32 @@ export function validatePromoInput(b: Record<string, unknown>): { problems: stri
 /** Staff routes: list, save and switch codes on or off, and the stacking setting. */
 export function registerPromoAdmin(app: FastifyInstance, d: { db: Db; merchantId: string; needs: (p: Permission) => (req: FastifyRequest, reply: FastifyReply) => Promise<unknown> }) {
   const manage = { preHandler: d.needs("catalog.manage") };
+  /**
+   * Scan Coupon at the till: is this code good for an order of this size? The answer says why not when it is not. Nothing is used up here.
+   */
+  const till = { preHandler: d.needs("wallet.spend") };
+  const WHY: Record<PromoReason, string> = { unknown: "That code is not known.", inactive: "That code is switched off.", not_started: "That code has not started yet.", expired: "That code has ended.", below_minimum: "The order is below the code's minimum spend.", usage_exhausted: "That code has been used up.", member_limit_reached: "This member has already used that code.", sign_in_required: "Attach a member to use that code." };
+  app.post<{ Body: { code?: string; subtotalCents?: number; memberId?: string | null } }>("/api/promos/check", till, async (req, reply) => {
+    const sub = req.body?.subtotalCents;
+    if (!Number.isSafeInteger(sub) || (sub as number) < 0) return reply.code(400).send({ error: "subtotalCents is required" });
+    const v = await judgePromo(d.db, d.merchantId, req.body?.code, { now: Date.now(), subtotalCents: sub as number, memberId: req.body?.memberId ?? null });
+    if (!v.ok) return reply.code(409).send({ error: v.reason, message: WHY[v.reason], ...(v.minSpendCents !== undefined ? { minSpendCents: v.minSpendCents, shortfallCents: v.shortfallCents } : {}) });
+    return { code: v.promo.code, title: v.promo.title, kind: v.promo.kind, value: v.promo.value, minSpendCents: v.promo.minSpendCents, discountCents: v.discountCents };
+  });
+  /** The code is used for one order when it is paid: checked again and counted, once per order. Cancelling the order gives the use back. */
+  app.post<{ Body: { code?: string; orderId?: string; subtotalCents?: number; memberId?: string | null } }>("/api/promos/claim", till, async (req, reply) => {
+    const sub = req.body?.subtotalCents, orderId = String(req.body?.orderId ?? "");
+    if (!Number.isSafeInteger(sub) || (sub as number) < 0 || !orderId || orderId.length > 64) return reply.code(400).send({ error: "subtotalCents and orderId are required" });
+    const memberId = req.body?.memberId ?? null;
+    const had = await d.db.query("SELECT code, discount_cents FROM promo_redemptions WHERE merchant_id=$1 AND order_id=$2 AND reversed_at IS NULL", [d.merchantId, orderId]);
+    if (had.rows[0]) return { code: had.rows[0].code as string, discountCents: Number(had.rows[0].discount_cents), replayed: true };
+    const v = await judgePromo(d.db, d.merchantId, req.body?.code, { now: Date.now(), subtotalCents: sub as number, memberId });
+    if (!v.ok) return reply.code(409).send({ error: v.reason, message: WHY[v.reason] });
+    if (!(await claimPromo(d.db, d.merchantId, v.promo.code, orderId, memberId, v.discountCents))) return reply.code(409).send({ error: "usage_exhausted", message: WHY.usage_exhausted });
+    await audit(d.db, d.merchantId, req.staff!.id, "promo.claim_till", { code: v.promo.code, orderId, discountCents: v.discountCents });
+    return { code: v.promo.code, title: v.promo.title, discountCents: v.discountCents, minSpendCents: v.promo.minSpendCents, replayed: false };
+  });
+
   app.get("/api/promos", manage, async () => {
     const r = await d.db.query(
       `SELECT c.*, (SELECT count(*) FROM promo_redemptions x WHERE x.merchant_id=c.merchant_id AND x.code=c.code AND x.reversed_at IS NULL) AS uses,

@@ -13,7 +13,20 @@ export interface TillSettings {
   layout: MenuLayout | null;
   /** Kitchen stations: each makes the items of its categories. */
   stations?: KitchenStation[];
+  /** The shop's own ways to pay (a delivery platform, a gift certificate): recorded only. */
+  customTenders?: CustomTender[];
+  /** The shop's own buttons: a name, a colour, an icon and a web address to open. */
+  customActions?: CustomAction[];
+  /** This till's own action and payment lists, when it has any (per station). Missing or null: it uses the shop's. */
+  thisTill?: { actions?: ArrangePref; tenders?: ArrangePref } | null;
 }
+/** The lists this till actually uses: its own when it has them, else the shop's. */
+export const actionsPref = (t: TillSettings): ArrangePref => t.thisTill?.actions ?? t.actions;
+export const tendersPref = (t: TillSettings): ArrangePref => t.thisTill?.tenders ?? t.tenders;
+export interface CustomTender { id: string; name: string }
+export interface CustomAction { id: string; label: string; icon: string; color: string; url: string; where: "strip" | "dashboard" | "both" }
+/** Open a custom button's web address in a new tab. Only web addresses open; the new page cannot reach back into the till. */
+export function openCustomAction(a: CustomAction): void { if (/^https?:\/\//i.test(a.url)) window.open(a.url, "_blank", "noopener,noreferrer"); }
 export interface KitchenStation { id: string; name: string; categories: string[] }
 export const DEFAULT_TILL: TillSettings = { actions: { order: [], hidden: [] }, tenders: { order: [], hidden: [], shown: [] }, dashboard: true, lineRemove: "bin", layout: null };
 
@@ -22,7 +35,7 @@ export const ACTION_POOL: Array<{ id: string; label: string; note?: string }> = 
   { id: "cancel", label: "Cancel Order" }, { id: "hold", label: "Hold Order" }, { id: "send", label: "Send Order", note: "Shops that pay after ordering" },
   { id: "qty", label: "Quantity" }, { id: "tables", label: "Table Map", note: "Shops with table service" }, { id: "fire", label: "Fire Course", note: "Shows when a course is waiting" },
   { id: "discount", label: "Discount Order" }, { id: "tax", label: "Add/Remove Tax", note: "Only where the country's tax rules allow it" }, { id: "fee", label: "Service Fee" }, { id: "extra", label: "Add Extra Item", note: "Managers" }, { id: "dining", label: "Dining Option" }, { id: "note", label: "Order Note" }, { id: "guests", label: "Guest Count" },
-  { id: "bill", label: "Guest Check", note: "Shows on an open table" }, { id: "held", label: "Held Orders" }, { id: "member", label: "Member" },
+  { id: "bill", label: "Guest Check", note: "Shows on an open table" }, { id: "held", label: "Held Orders" }, { id: "member", label: "Loyalty" }, { id: "barcode", label: "Enter Barcode" }, { id: "coupon", label: "Scan Coupon" }, { id: "invoice", label: "Print Invoice" },
   { id: "drawer", label: "Open Cash Drawer" }, { id: "tabs", label: "Open Tabs", note: "Shops that pay after ordering" },
 ];
 export const TENDER_POOL: Array<{ id: string; label: string; note?: string; optional?: boolean }> = [
