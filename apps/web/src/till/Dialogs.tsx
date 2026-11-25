@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { formatMoney } from "@pos/core";
 import { Modal } from "./Modal";
+import { staffFetch } from "../auth";
 import { setPref, usePrefs } from "../prefs";
 import type { HeldOrder } from "./types";
 
@@ -54,13 +55,91 @@ export function HeldDialog({ held, onRecall, onDrop, onClose, formatTotal }: { h
   );
 }
 
-export function CustomerDialog({ current, balance, onSave, onClose }: { current: string; balance: number | null; onSave: (id: string) => void; onClose: () => void }) {
-  const [v, setV] = useState(current);
+/** A member as the till shows them: who they are, what they hold, and their last orders. */
+export interface MemberSummary {
+  member: { id: string; name: string | null; phone: string | null; email: string | null; points: number; creditCents: number };
+  rewards: { pointsEnabled: boolean; minPointsRedeem: number };
+  recent: Array<{ orderId: string; at: number; totalCents: number; status: string; items: string; where: string }>;
+}
+const isMemberId = (s: string) => /^[0-9a-f-]{36}$/i.test(s);
+export async function loadMember(id: string): Promise<MemberSummary | null> {
+  if (!isMemberId(id)) return null;
+  const r = await staffFetch(`/api/members/${id}/summary`);
+  return "res" in r && r.res.ok ? ((await r.res.json()) as MemberSummary) : null;
+}
+const maskPhone = (p: string | null) => (p ? `···· ${p.replace(/\D/g, "").slice(-4)}` : "");
+const memberWhen = (ms: number) => new Date(ms).toLocaleDateString("en-GB", { day: "2-digit", month: "short", timeZone: "Asia/Singapore" });
+
+/**
+ * The member on this order (handout 4.6): find one by name or phone, or add a new one, and attach them. Once attached the till shows their
+ * credit, their points and their last orders, and the order becomes theirs: it earns points when paid and shows in their history.
+ */
+export function CustomerDialog({ current, info, usePoints, pointsWorthCents, onUsePoints, onSave, onClose }: { current: string; info: MemberSummary | null; usePoints: boolean; /** What the points would take off this order. */ pointsWorthCents: number; onUsePoints: (on: boolean) => void; onSave: (id: string) => void; onClose: () => void }) {
+  const [q, setQ] = useState("");
+  const [found, setFound] = useState<Array<{ id: string; name: string | null; phone: string | null; points: number; creditCents: number }> | null>(null);
+  const [adding, setAdding] = useState(false);
+  const [name, setName] = useState("");
+  const [phone, setPhone] = useState("");
+  const [msg, setMsg] = useState("");
+  const [busy, setBusy] = useState(false);
+  const search = async () => {
+    if (q.trim().length < 2) return setMsg("Type at least two letters or digits.");
+    setBusy(true); setMsg("");
+    const r = await staffFetch(`/api/members?q=${encodeURIComponent(q.trim())}`);
+    setBusy(false);
+    if (!("res" in r)) return setMsg(r.problem);
+    if (!r.res.ok) return setMsg("Members could not be searched. Check the connection.");
+    setFound(((await r.res.json()) as { members: Array<{ id: string; name: string | null; phone: string | null; points: number; creditCents: number }> }).members.slice(0, 8));
+  };
+  const add = async () => {
+    setBusy(true); setMsg("");
+    const r = await staffFetch("/api/members", { body: { name: name.trim() || undefined, phone: phone.trim() } });
+    setBusy(false);
+    if (!("res" in r)) return setMsg(r.problem);
+    if (!r.res.ok) return setMsg("That member could not be added. Give a phone number with the country code, like +65 8111 1111.");
+    const j = (await r.res.json()) as { created: boolean; member: { id: string } };
+    onSave(j.member.id); onClose();
+  };
+  if (current && info) {
+    const m = info.member;
+    return (
+      <Modal title="Member" onClose={onClose}>
+        <p style={{ margin: "0 0 .3em" }}><b>{m.name || "Member"}</b> <span className="t-muted">{maskPhone(m.phone)}</span></p>
+        <div className="t-row2"><span>Credit</span><b>{formatMoney(m.creditCents)}</b></div>
+        {info.rewards.pointsEnabled && <div className="t-row2"><span>Points</span><b>{m.points.toLocaleString()}</b></div>}
+        {info.rewards.pointsEnabled && m.points > 0 && (
+          <label className="t-row2" style={{ cursor: "pointer" }}><span>Use points on this order{pointsWorthCents > 0 ? ` (${formatMoney(pointsWorthCents)} off)` : ""}</span><input type="checkbox" aria-label="Use points on this order" checked={usePoints} disabled={m.points < info.rewards.minPointsRedeem} onChange={(e) => onUsePoints(e.target.checked)} /></label>
+        )}
+        {info.rewards.pointsEnabled && m.points > 0 && m.points < info.rewards.minPointsRedeem && <p className="t-muted">Points can be used from {info.rewards.minPointsRedeem} points.</p>}
+        <h3 className="t-h3">Last orders</h3>
+        <div aria-label="Last orders">
+          {info.recent.length === 0 && <p className="t-muted">No orders yet.</p>}
+          {info.recent.map((o) => <div className="t-row2" key={o.orderId}><span>{memberWhen(o.at)} · {o.items}{o.status !== "paid" ? ` · ${o.status}` : ""}</span><span>{formatMoney(o.totalCents)}</span></div>)}
+        </div>
+        <div className="t-dact"><button className="t-ghost" onClick={() => { onSave(""); onClose(); }}>Remove</button><button className="t-primary" onClick={onClose}>Done</button></div>
+      </Modal>
+    );
+  }
   return (
     <Modal title="Member" onClose={onClose}>
-      <label className="t-field">Phone or member code<input value={v} inputMode="tel" autoFocus onChange={(e) => setV(e.target.value.trim())} /></label>
-      {current && balance !== null && <p className="t-muted">Credit balance: <b>{formatMoney(balance)}</b></p>}
-      <div className="t-dact">{current && <button className="t-ghost" onClick={() => { onSave(""); onClose(); }}>Remove</button>}<button className="t-ghost" onClick={onClose}>Cancel</button><button className="t-primary" onClick={() => { onSave(v); onClose(); }}>OK</button></div>
+      {current && <p className="t-muted">On this order: {current} <button className="t-ghost" onClick={() => { onSave(""); onClose(); }}>Remove</button></p>}
+      {!adding ? (
+        <>
+          <label className="t-field">Name or phone<input value={q} inputMode="search" autoFocus aria-label="Find a member" onChange={(e) => setQ(e.target.value)} onKeyDown={(e) => { if (e.key === "Enter") void search(); }} /></label>
+          <div className="t-dact" style={{ justifyContent: "flex-start" }}><button className="t-primary" disabled={busy} onClick={() => void search()}>Find</button><button className="t-ghost" onClick={() => { setAdding(true); setPhone(/^[+\d\s]+$/.test(q) ? q : ""); setName(/^[+\d\s]+$/.test(q) ? "" : q); setMsg(""); }}>Add a new member</button></div>
+          {found && found.length === 0 && <p className="t-muted">Nobody found. Check the spelling, or add them as a new member.</p>}
+          {found && found.length === 0 && q.trim() && <button className="t-ghost" onClick={() => { onSave(q.trim()); onClose(); }}>Use "{q.trim()}" as a credit code only</button>}
+          {found?.map((m) => <button key={m.id} className="t-radio" onClick={() => { onSave(m.id); onClose(); }}><i>○</i> {m.name || "Member"} {maskPhone(m.phone)} <span className="t-muted">· {formatMoney(m.creditCents)} credit{m.points ? ` · ${m.points} pts` : ""}</span></button>)}
+        </>
+      ) : (
+        <>
+          <label className="t-field">Name<input value={name} maxLength={60} aria-label="New member name" onChange={(e) => setName(e.target.value)} /></label>
+          <label className="t-field">Phone, with country code<input value={phone} inputMode="tel" aria-label="New member phone" placeholder="+65 8111 1111" onChange={(e) => setPhone(e.target.value)} /></label>
+          <div className="t-dact"><button className="t-ghost" onClick={() => setAdding(false)}>Back</button><button className="t-primary" disabled={busy || phone.replace(/\D/g, "").length < 8} onClick={() => void add()}>Add and attach</button></div>
+        </>
+      )}
+      {msg && <p className="t-muted" role="alert">{msg}</p>}
+      <div className="t-dact"><button className="t-ghost" onClick={onClose}>Close</button></div>
     </Modal>
   );
 }
@@ -139,6 +218,26 @@ export function ExtraItemDialog({ onAdd, onClose }: { onAdd: (name: string, cent
       <label className="t-field">Price (S$)<input inputMode="decimal" value={price} onChange={(e) => setPrice(e.target.value.replace(/[^\d.]/g, ""))} placeholder="0.00" /></label>
       <div className="t-stepper"><button onClick={() => setQty(Math.max(1, qty - 1))}>−</button><strong>{qty}</strong><button onClick={() => setQty(Math.min(99, qty + 1))}>+</button></div>
       <div className="t-dact"><button className="t-ghost" onClick={onClose}>Cancel</button><button className="t-primary" disabled={!ok} onClick={() => { onAdd(name.trim(), cents, qty); onClose(); }}>Add to order</button></div>
+    </Modal>
+  );
+}
+
+/** Add/Remove Tax: take the tax off the whole order, with a reason, or put it back. It is written to the order with who did it. */
+export function TaxDialog({ name, current, onSet, onClose }: { name: string; current: { reason: string } | null; onSet: (t: { reason: string } | null) => void; onClose: () => void }) {
+  const [reason, setReason] = useState("");
+  if (current) {
+    return (
+      <Modal title={`Add ${name}`} onClose={onClose}>
+        <p className="t-muted">{name} was taken off this order: {current.reason}</p>
+        <div className="t-dact"><button className="t-ghost" onClick={onClose}>Cancel</button><button className="t-primary" onClick={() => { onSet(null); onClose(); }}>Put {name} back</button></div>
+      </Modal>
+    );
+  }
+  return (
+    <Modal title={`Remove ${name}`} onClose={onClose}>
+      <p className="t-muted">Takes {name} off the whole order. It is recorded on the order with your name and the reason.</p>
+      <label className="t-field">Reason<input value={reason} maxLength={120} autoFocus onChange={(e) => setReason(e.target.value)} placeholder="Why is this sale not taxed?" /></label>
+      <div className="t-dact"><button className="t-ghost" onClick={onClose}>Cancel</button><button className="t-primary" disabled={reason.trim().length < 3} onClick={() => { onSet({ reason: reason.trim() }); onClose(); }}>Remove {name}</button></div>
     </Modal>
   );
 }

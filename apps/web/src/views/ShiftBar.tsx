@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { formatMoney } from "@pos/core";
+import { formatMoney, paymentLabel } from "@pos/core";
 import { useStaff } from "../auth";
 import { isTraining } from "../training";
 import { cashMove, closeShift, drawerCount, drawerHistory, type DrawerHistory, loadShiftRequired, openOrders, openShift, shiftReport, syncShift, useShift, useShiftSettings, type OpenOrder, type ShiftReport } from "../shift";
@@ -17,7 +17,7 @@ export function ShiftReportView({ r, final }: { r: ShiftReport; final?: boolean 
     <div className="od-card">
       <b>{final ? "Z report · shift closed" : "Shift so far"} · Drawer {s.drawer} · {s.staffName}</b>
       <div className="muted">Opened {hm(s.openedAt)}{s.closedAt ? ` · closed ${hm(s.closedAt)}` : ""} · {r.orders} order{r.orders === 1 ? "" : "s"}</div>
-      {r.tenders.map((t) => row(`${METHOD[t.method] ?? t.method}${t.refundsCents ? ` (refunded ${formatMoney(t.refundsCents)})` : ""}`, formatMoney(t.netCents)))}
+      {r.tenders.map((t) => row(`${METHOD[t.method] ?? paymentLabel(t.method)}${t.refundsCents ? ` (refunded ${formatMoney(t.refundsCents)})` : ""}`, formatMoney(t.netCents)))}
       {row("Opening float", formatMoney(s.openingFloatCents))}
       {r.cashIn.map((m) => row(`Cash in · ${m.reason}`, `+${formatMoney(m.amountCents)}`))}
       {r.cashOut.map((m) => row(`Cash out · ${m.reason}`, `-${formatMoney(m.amountCents)}`))}

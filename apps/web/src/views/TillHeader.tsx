@@ -1,3 +1,4 @@
+import { deviceRole } from "../device";
 import { go } from "../nav";
 import { useStaff } from "../auth";
 import { useOrders } from "../hooks";
@@ -36,6 +37,7 @@ export function TillHeader({ route, config, connected, pending, newOnline, hasTa
             <button onClick={() => go("/pos?dialog=reports")}>Reports</button>
             {till.dashboard && <button onClick={() => go("/dashboard")}>Home</button>}
             {hasTables && <button onClick={() => go("/pos?view=tables")}>Table Map</button>}
+            {deviceRole() === "kitchen" && <button onClick={() => go("/kitchen")}>Kitchen</button>}
             {newOnline > 0 && <button onClick={() => go("/online")}>Online ({newOnline})</button>}
           </span>
         </>

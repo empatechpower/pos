@@ -85,12 +85,21 @@ describe("tax-inclusive items, end to end", () => {
     expect((await call(`/api/shop/orders/${o.json.orderId}`)).json.totalCents).toBe(3020);
   });
 
-  it("an item without the flag is taxed on top, and the bill says GST (not included)", async () => {
-    const tea = await product("Plain Tea", 1000);
+  it("an item marked as priced before tax is taxed on top, and the bill says GST (not included)", async () => {
+    const tea = await product("Plain Tea", 1000, { taxInclusive: false });
     const o = await call("/api/shop/orders", { body: { channelId: "take-away", items: [{ productId: tea.id, qty: 1 }], customerName: "T", customerPhone: "" } });
     expect(o.json.totalCents).toBe(1090);
     const v = (await call(`/api/shop/orders/${o.json.orderId}`)).json;
     expect(v.taxIncludedCents).toBe(0);
     expect(v.totals.find((l: any) => l.key === "tax_added")).toMatchObject({ label: "GST", cents: 90 });
+  });
+
+  it("an item with no flag follows the country: in Singapore the price already includes GST", async () => {
+    const kopi = await product("Plain Kopi", 1090);
+    const o = await call("/api/shop/orders", { body: { channelId: "take-away", items: [{ productId: kopi.id, qty: 1 }], customerName: "T", customerPhone: "" } });
+    expect(o.json.totalCents).toBe(1090);
+    const v = (await call(`/api/shop/orders/${o.json.orderId}`)).json;
+    expect(v.taxIncludedCents).toBe(90);
+    expect(v.totals.find((l: any) => l.key === "tax_included")).toMatchObject({ label: "GST (included)", cents: 90 });
   });
 });

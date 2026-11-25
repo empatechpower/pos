@@ -159,3 +159,32 @@ describe("channels on orders", () => {
     expect(fulfilmentOf("dine_in")).toBe("dine_in");
   });
 });
+
+describe("member prices", () => {
+  const cat = (extra: object = {}): import("../src/catalog.js").Catalog => ({
+    version: 1, defaultPricebookId: "std",
+    products: [{ id: "kaya", name: "Kaya Toast", category: "Toast" }, { id: "tea", name: "Tea", category: "Drinks" }],
+    pricebooks: [{ id: "std", name: "Standard", missing: "hide", prices: { kaya: 200, tea: 150 }, memberPrices: { kaya: 180 } }],
+    channels: [{ id: "dine", name: "Dine in", kind: "dine_in", serviceCharge: false, active: true }],
+    assignments: [], ...extra,
+  } as import("../src/catalog.js").Catalog);
+  it("an item with a member price says so; one without does not", async () => {
+    const { menuFor, basePriceFor } = await import("../src/catalog.js");
+    const menu = menuFor(cat(), { outletId: "o", channelId: "dine" });
+    const kaya = menu.find((m) => m.id === "kaya")!, tea = menu.find((m) => m.id === "tea")!;
+    expect(kaya).toMatchObject({ priceCents: 200, memberPriceCents: 180 });
+    expect(tea.memberPriceCents).toBeUndefined();
+    expect(basePriceFor(kaya, true)).toBe(180);
+    expect(basePriceFor(kaya, false)).toBe(200);
+    expect(basePriceFor(tea, true)).toBe(150);
+  });
+  it("a promotion already below the member price wins: the member price never raises what anyone pays", async () => {
+    const { menuFor, basePriceFor } = await import("../src/catalog.js");
+    const now = Date.now();
+    const promo = cat({ overrides: [{ id: "p1", title: "Happy hour", productId: "kaya", priceCents: 150, startsAt: now - 1000, endsAt: now + 100000 }] });
+    const kaya = menuFor(promo, { outletId: "o", channelId: "dine" }).find((m) => m.id === "kaya")!;
+    expect(kaya.priceCents).toBe(150);
+    expect(kaya.memberPriceCents).toBeUndefined();
+    expect(basePriceFor(kaya, true)).toBe(150);
+  });
+});

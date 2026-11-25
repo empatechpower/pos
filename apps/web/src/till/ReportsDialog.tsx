@@ -1,5 +1,5 @@
 import { useMemo, useState } from "react";
-import { confirmedPaid, formatMoney, orderTotals, productMix, reportDay, staffSales, summarize, type BusinessConfig, type OrderState } from "@pos/core";
+import { confirmedPaid, formatMoney, orderTotals, productMix, reportDay, staffSales, summarize, type BusinessConfig, type OrderState, paymentKey, paymentLabel } from "@pos/core";
 import { staffFetch } from "../auth";
 import { go } from "../nav";
 import { ProtoDialog } from "../proto/ProtoDialog";
@@ -42,7 +42,7 @@ export function ReportsDialog({ orders, config, categoryOf, manager, onShift, on
         <table className="rep"><tbody>
           <tr><td>Paid orders</td><td>{s.orders - s.unpaidOrders}</td></tr>
           <tr><td>Gross sales</td><td>{formatMoney(s.grossCents)}</td></tr>
-          {s.payments.map((p) => <tr key={p.method}><td>{METHOD[p.method] ?? p.method}</td><td>{formatMoney(p.cents)}</td></tr>)}
+          {s.payments.map((p) => <tr key={p.method}><td>{METHOD[p.method] ?? paymentLabel(p.method)}</td><td>{formatMoney(p.cents)}</td></tr>)}
           <tr><td>Service charge</td><td>{formatMoney(s.serviceCents)}</td></tr>
           {s.gstCents > 0 && <tr><td>GST</td><td>{formatMoney(s.gstCents)}</td></tr>}
           <tr><td>Discounts given</td><td>{formatMoney(s.discountsCents)}</td></tr>
@@ -65,7 +65,7 @@ export function ReportsDialog({ orders, config, categoryOf, manager, onShift, on
         {history.length === 0 && <p className="muted">No transactions yet.</p>}
         {history.map((o) => {
           const st = statusOf(o, config), t = orderTotals(o, config);
-          const tenders = [...new Set(o.payments.filter((p) => p.confirmed).map((p) => METHOD[p.method] ?? p.method))].join(", ");
+          const tenders = [...new Set(o.payments.filter((p) => p.confirmed).map((p) => METHOD[paymentKey(p)] ?? paymentLabel(paymentKey(p))))].join(", ");
           return (
             <button key={o.orderId} className="heldrow" onClick={() => void open(o)}>
               <div className="row"><strong>{st === "cancelled" ? "Cancelled order" : `Order ${o.queueNumber ?? o.spot ?? "—"}`}</strong><span>{formatMoney(t.total)}</span></div>

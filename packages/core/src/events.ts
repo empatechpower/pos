@@ -1,4 +1,5 @@
 import { staffDiscountCents, type StaffDiscount } from "./discounts.js";
+import { recordedTender } from "./tenders.js";
 import type { BusinessConfig } from "./config.js";
 import type { StoredBuild } from "./builder.js";
 import type { Fulfilment } from "./catalog.js";
@@ -27,6 +28,8 @@ export type OrderEventBody =
       channelId?: string;
       channelName?: string;
       serviceCharge?: boolean;
+      /** Whether the outlet charged tax when the order was opened, frozen like the service charge. Missing on older orders: the shop's setting applies. */
+      taxOn?: boolean;
       /** "online" = placed by a customer in the ordering app; the shop must accept it before the kitchen sees it. */
       source?: "pos" | "online";
       customerName?: string;
@@ -66,7 +69,7 @@ export type OrderEventBody =
   /** The bill was split into checks. Each check has a fixed total (they add up to the order total) and, by item or seat, the units it carries. */
   | { type: "SplitCreated"; method: "even" | "manual" | "item" | "seat"; checks: Array<{ id: string; totalCents: Cents; seat?: number; shares?: Array<{ lineId: string; qty: number }> }>; byName?: string }
   | { type: "SplitCleared"; byName?: string }
-  | { type: "PaymentRecorded"; paymentId: string; method: PaymentMethod; amountCents: Cents; /** false = awaiting gateway confirmation */ confirmed: boolean; /** The cashier's shift this was taken in (the drawer it belongs to). */ shiftId?: string; /** The check of a split bill this payment settles. */ checkId?: string; /** Who took it (the signed-in person at the till, or "PayNow (automatic)"). Reports by staff read this. */ byName?: string; /** A short note on how it was taken (for a PayNow payment: whether the bank's alert was matched by the order's reference or only by the amount). */ note?: string; /** Cash handed over, when it was more than the payment (so the receipt can show the change). */ tenderedCents?: Cents }
+  | { type: "PaymentRecorded"; paymentId: string; method: PaymentMethod; /** The named tender it was taken as (tenders.ts: card, debit, check, gift card...), when the till only recorded it. */ tender?: string; amountCents: Cents; /** false = awaiting gateway confirmation */ confirmed: boolean; /** The cashier's shift this was taken in (the drawer it belongs to). */ shiftId?: string; /** The check of a split bill this payment settles. */ checkId?: string; /** Who took it (the signed-in person at the till, or "PayNow (automatic)"). Reports by staff read this. */ byName?: string; /** A short note on how it was taken (for a PayNow payment: whether the bank's alert was matched by the order's reference or only by the amount). */ note?: string; /** Cash handed over, when it was more than the payment (so the receipt can show the change). */ tenderedCents?: Cents }
   | { type: "PaymentConfirmed"; paymentId: string }
   | { type: "StageSet"; stage: Exclude<OrderStage, "open"> }
   /** The customer moved to another table after ordering: the same order, same status, now at `to`. The old table and the time are kept. */
@@ -85,6 +88,13 @@ export type OrderEventBody =
   | { type: "DiscountRemoved"; discountId: string; byName?: string }
   /** A note on the whole order for the kitchen and the guest check ("allergy: nuts", "birthday"). The latest one wins; empty clears it. */
   | { type: "OrderNoted"; note: string; byName?: string }
+  /** Staff attached a member to the order at the till (empty = taken off again). The server checks the member exists before it keeps this. */
+  | { type: "MemberAttached"; memberId: string; byName?: string }
+  /** The kitchen finished these lines (a station pressed Done), and later the floor served or handed them over. */
+  | { type: "LinesReady"; lineIds: string[]; station?: string; byName?: string }
+  | { type: "LinesServed"; lineIds: string[]; byName?: string }
+  /** Add/Remove Tax: staff took the tax off the whole order, or put it back. Only where the country's tax pack allows it; a manager approves. */
+  | { type: "TaxRemovalSet"; removed: boolean; reason: string; byName?: string; approvedBy?: string; approvedByName?: string }
   /** The price of one line changed by hand (the list price is kept). Always manager-approved. */
   | { type: "LinePriceOverridden"; lineId: string; unitCents: Cents; reason: string; byName?: string; approvedBy?: string; approvedByName?: string };
 
@@ -114,6 +124,9 @@ export interface OrderLine extends PricedLine {
   channelName?: string;
   /** Held from the kitchen until fired by hand. */
   held?: boolean;
+  /** When the kitchen finished it, and when it was served or collected. */
+  readyAt?: number;
+  servedAt?: number;
 }
 
 export interface OrderState {
@@ -123,6 +136,8 @@ export interface OrderState {
   channelName?: string;
   /** Whether the channel charged service. Undefined on older orders: fall back to dine-in. */
   serviceCharge?: boolean;
+  /** Whether the outlet charged tax when the order was opened. Undefined on older orders: the shop's setting applies. */
+  taxOn?: boolean;
   source: "pos" | "online";
   customerName?: string;
   customerPhone?: string;
@@ -151,6 +166,8 @@ export interface OrderState {
   discounts?: StaffDiscount[];
   /** Set when the whole order was voided. */
   voided?: { reason: string; approvedBy: string; approvedByName: string; at: number };
+  /** Set while the tax is taken off this order (Add/Remove Tax). */
+  taxRemoved?: { reason: string; byName?: string; approvedByName?: string; at: number };
   /** Fees staff added to the whole order. */
   fees?: OrderFee[];
   /** Courses the kitchen has been told to start. */
@@ -170,7 +187,7 @@ export interface OrderState {
   queueNumber?: string;
   openedAt: number;
   lines: OrderLine[];
-  payments: Array<{ paymentId: string; method: PaymentMethod; amountCents: Cents; confirmed: boolean; shiftId?: string; checkId?: string; tenderedCents?: Cents; byName?: string }>;
+  payments: Array<{ paymentId: string; method: PaymentMethod; tender?: string; amountCents: Cents; confirmed: boolean; shiftId?: string; checkId?: string; tenderedCents?: Cents; byName?: string }>;
   stage: OrderStage;
   /** Time the order was first fully paid (confirmed). */
   paidAt?: number;
@@ -202,7 +219,7 @@ export function reduceOrder(orderId: string, events: readonly OrderEvent[]): Ord
   for (const e of mine) {
     if (e.type === "OrderOpened") {
       if (state) continue; // first open wins
-      state = { orderId, fulfilment: e.fulfilment, channelId: e.channelId, channelName: e.channelName, serviceCharge: e.serviceCharge, source: e.source ?? "pos", customerName: e.customerName, customerPhone: e.customerPhone, memberId: e.memberId, scheduledFor: e.scheduledFor, fireAt: e.fireAt, ...(e.onTab ? { onTab: true } : {}), spot: e.spot, ...(Number.isInteger(e.pax) && (e.pax as number) > 0 ? { pax: e.pax } : {}), queueNumber: e.queueNumber, openedAt: e.ts, lines: [], payments: [], stage: "open" };
+      state = { orderId, fulfilment: e.fulfilment, channelId: e.channelId, channelName: e.channelName, serviceCharge: e.serviceCharge, ...(typeof e.taxOn === "boolean" ? { taxOn: e.taxOn } : {}), source: e.source ?? "pos", customerName: e.customerName, customerPhone: e.customerPhone, memberId: e.memberId, scheduledFor: e.scheduledFor, fireAt: e.fireAt, ...(e.onTab ? { onTab: true } : {}), spot: e.spot, ...(Number.isInteger(e.pax) && (e.pax as number) > 0 ? { pax: e.pax } : {}), queueNumber: e.queueNumber, openedAt: e.ts, lines: [], payments: [], stage: "open" };
       continue;
     }
     if (!state) continue; // events that arrived before the open are applied once it exists on the next replay
@@ -220,7 +237,7 @@ export function reduceOrder(orderId: string, events: readonly OrderEvent[]): Ord
       }
       case "PaymentRecorded": {
         if (state.payments.some((p) => p.paymentId === e.paymentId)) break;
-        state.payments.push({ paymentId: e.paymentId, method: e.method, amountCents: e.amountCents, confirmed: e.confirmed, ...(e.shiftId ? { shiftId: e.shiftId } : {}), ...(e.checkId ? { checkId: e.checkId } : {}), ...(e.byName ? { byName: String(e.byName).slice(0, 60) } : {}), ...(e.tenderedCents && e.tenderedCents > e.amountCents ? { tenderedCents: Math.round(e.tenderedCents) } : {}) });
+        state.payments.push({ paymentId: e.paymentId, method: e.method, ...(recordedTender(e.tender) ? { tender: e.tender } : {}), amountCents: e.amountCents, confirmed: e.confirmed, ...(e.shiftId ? { shiftId: e.shiftId } : {}), ...(e.checkId ? { checkId: e.checkId } : {}), ...(e.byName ? { byName: String(e.byName).slice(0, 60) } : {}), ...(e.tenderedCents && e.tenderedCents > e.amountCents ? { tenderedCents: Math.round(e.tenderedCents) } : {}) });
         break;
       }
       case "PaymentConfirmed": {
@@ -262,6 +279,10 @@ export function reduceOrder(orderId: string, events: readonly OrderEvent[]): Ord
         if (note) state.note = note; else delete state.note;
         break;
       }
+      case "TaxRemovalSet":
+        if (e.removed) state.taxRemoved = { reason: String(e.reason ?? "").slice(0, 120), ...(e.byName ? { byName: e.byName } : {}), ...(e.approvedByName ? { approvedByName: e.approvedByName } : {}), at: e.ts };
+        else delete state.taxRemoved;
+        break;
       case "DiscountRemoved":
         if (state.discounts) state.discounts = state.discounts.filter((d) => d.id !== e.discountId);
         break;
@@ -318,8 +339,19 @@ export function reduceOrder(orderId: string, events: readonly OrderEvent[]): Ord
         (state.tableChanges ??= []).push({ ...(state.spot ? { from: state.spot } : {}), to: e.to, at: e.ts });
         state.spot = e.to;
         break;
+      case "MemberAttached":
+        if (typeof e.memberId === "string" && e.memberId) state.memberId = e.memberId.slice(0, 64); else delete state.memberId;
+        break;
+      case "LinesReady":
+        for (const l of state.lines) if (Array.isArray(e.lineIds) && e.lineIds.includes(l.lineId)) l.readyAt ??= e.ts;
+        break;
+      case "LinesServed":
+        for (const l of state.lines) if (Array.isArray(e.lineIds) && e.lineIds.includes(l.lineId)) { l.readyAt ??= e.ts; l.servedAt ??= e.ts; }
+        break;
       case "StageSet":
         state.stage = e.stage;
+        // The whole order marked ready (or handed over) covers every line the kitchen had by then; a course fired later starts afresh.
+        if (e.stage === "ready" || e.stage === "completed") for (const l of state.lines) if (l.qty > 0 && lineFired(state, l)) { l.readyAt ??= e.ts; if (e.stage === "completed") l.servedAt ??= e.ts; }
         if (e.stage === "ready") state.readyAt ??= e.ts;
         if (e.stage === "completed" || e.stage === "cancelled") state.closedAt ??= e.ts;
         break;
@@ -340,7 +372,7 @@ export function reduceAll(events: readonly OrderEvent[]): OrderState[] {
 
 export function orderTotals(state: OrderState, config: BusinessConfig): PriceResult {
   const points = state.pointsRedeemed ? { balance: state.pointsRedeemed, requested: state.pointsRedeemed } : null;
-  const input = { lines: state.lines, fulfilment: state.fulfilment, serviceCharge: state.serviceCharge, points, coupon: state.coupon ?? null, discountCents: staffDiscountCents(state.lines, state.discounts ?? []).totalCents, config: config.pricing };
+  const input = { lines: state.lines, fulfilment: state.fulfilment, serviceCharge: state.serviceCharge, points, coupon: state.coupon ?? null, discountCents: staffDiscountCents(state.lines, state.discounts ?? []).totalCents, ...(state.taxRemoved ? { taxRemoved: true } : {}), config: state.taxOn === undefined || state.taxOn === config.pricing.gstOn ? config.pricing : { ...config.pricing, gstOn: state.taxOn } };
   const plain = priceOrder(input);
   // A fee on the whole order: a percentage is of the items left after discounts.
   const fee = state.fees?.length ? feeCentsOf(state.fees, plain.subtotal - plain.couponDiscount - plain.discountCents) : 0;
@@ -386,6 +418,15 @@ export function checkStanding(state: OrderState, checkId: string): { totalCents:
   if (!c) return null;
   const paid = state.payments.filter((p) => p.checkId === checkId && p.confirmed).reduce((n, p) => n + p.amountCents, 0);
   return { totalCents: c.totalCents, paidCents: paid, dueCents: Math.max(0, c.totalCents - paid) };
+}
+
+/**
+ * What the kitchen still has to make on an order, what is made and waiting to go out, and what has gone. Only lines the kitchen has been
+ * given count: a held line or a course not yet fired is none of these. A cancelled or voided order has nothing to make.
+ */
+export function kitchenLines(state: OrderState): { toMake: OrderLine[]; ready: OrderLine[]; served: OrderLine[] } {
+  const live = state.voided || state.stage === "cancelled" ? [] : state.lines.filter((l) => l.qty > 0 && lineFired(state, l));
+  return { toMake: live.filter((l) => !l.readyAt), ready: live.filter((l) => l.readyAt && !l.servedAt), served: live.filter((l) => l.servedAt) };
 }
 
 export const COURSE_NAMES: Record<number, string> = { 1: "Starter", 2: "Main", 3: "Dessert" };

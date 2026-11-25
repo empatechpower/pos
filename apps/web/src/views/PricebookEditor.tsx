@@ -19,6 +19,8 @@ export function PricebookEditor({ catalog, bookId }: { catalog: Catalog; bookId:
   const staff = useStaff();
   const book = catalog.pricebooks.find((b) => b.id === bookId);
   const [price, setPrice] = useState<Record<string, string>>({});
+  /** Member prices as typed. Empty = members pay the normal price. */
+  const [member, setMember] = useState<Record<string, string>>({});
   const [off, setOff] = useState<Record<string, boolean>>({});
   const [find, setFind] = useState("");
   const [cat, setCat] = useState("");
@@ -35,8 +37,12 @@ export function PricebookEditor({ catalog, bookId }: { catalog: Catalog; bookId:
   const isOff = (id: string) => off[id] ?? !!book.off?.includes(id);
   const priceChanged = (id: string) => price[id] !== undefined && parsePrice(price[id]!) !== (book.prices[id] ?? null);
   const offChanged = (id: string) => off[id] !== undefined && off[id] !== !!book.off?.includes(id);
-  const changedIds = catalog.products.map((p) => p.id).filter((id) => priceChanged(id) || offChanged(id));
-  const badIds = catalog.products.map((p) => p.id).filter((id) => price[id] !== undefined && parsePrice(price[id]!) === "bad");
+  const currentMember = (id: string) => (book.memberPrices?.[id] === undefined ? "" : (book.memberPrices[id]! / 100).toFixed(2));
+  const memberChanged = (id: string) => member[id] !== undefined && parsePrice(member[id]!) !== (book.memberPrices?.[id] ?? null);
+  /** A member price needs a price beside it, and is never above it. */
+  const memberBad = (id: string) => { if (member[id] === undefined) return false; const mp = parsePrice(member[id]!); if (mp === "bad") return true; if (mp === null) return false; const pr = price[id] !== undefined ? parsePrice(price[id]!) : book.prices[id] ?? null; return typeof pr !== "number" || mp > pr; };
+  const changedIds = catalog.products.map((p) => p.id).filter((id) => priceChanged(id) || offChanged(id) || memberChanged(id));
+  const badIds = catalog.products.map((p) => p.id).filter((id) => (price[id] !== undefined && parsePrice(price[id]!) === "bad") || memberBad(id));
 
   const rows = catalog.products.filter((p) => (!cat || p.category === cat) && (!find.trim() || `${p.name} ${p.altName ?? ""}`.toLowerCase().includes(find.trim().toLowerCase())) && (!onlyChanged || changedIds.includes(p.id)));
 
@@ -46,11 +52,13 @@ export function PricebookEditor({ catalog, bookId }: { catalog: Catalog; bookId:
     setMsg(null);
     const prices: Record<string, number | null> = {};
     const offs: Record<string, boolean> = {};
+    const members: Record<string, number | null> = {};
     for (const id of changedIds) {
+      if (memberChanged(id)) members[id] = parsePrice(member[id]!) as number | null;
       if (priceChanged(id)) prices[id] = parsePrice(price[id]!) as number | null;
       if (offChanged(id)) offs[id] = off[id]!;
     }
-    const res = await fetch(`/api/catalog/pricebooks/${book!.id}/bulk`, { method: "POST", headers: { "content-type": "application/json", ...authHeader() }, body: JSON.stringify({ prices, off: offs }) }).catch(() => null);
+    const res = await fetch(`/api/catalog/pricebooks/${book!.id}/bulk`, { method: "POST", headers: { "content-type": "application/json", ...authHeader() }, body: JSON.stringify({ prices, off: offs, ...(Object.keys(members).length ? { memberPrices: members } : {}) }) }).catch(() => null);
     setBusy(false);
     if (!res) return setMsg({ ok: false, text: "Could not reach the server. Nothing was saved." });
     if (res.status === 401) {
@@ -63,6 +71,7 @@ export function PricebookEditor({ catalog, bookId }: { catalog: Catalog; bookId:
     }
     setMsg({ ok: true, text: `Saved ${changedIds.length} change${changedIds.length === 1 ? "" : "s"} in ${book!.name}. It is live now.` });
     setPrice({});
+    setMember({});
     setOff({});
     window.dispatchEvent(new Event("pos:catalog-refresh"));
   }
@@ -70,7 +79,7 @@ export function PricebookEditor({ catalog, bookId }: { catalog: Catalog; bookId:
   return (
     <div className="credit prices wide editor">
       <h2>Edit {book.name}</h2>
-      <p className="muted">Change prices or switch items off, then press <b>Save changes</b>. A price of 0 sells the item for free. An empty price means it isn't sold in this pricebook. <b>Off</b> hides it from online ordering and greys it out on the till; the price is kept.</p>
+      <p className="muted">Change prices or switch items off, then press <b>Save changes</b>. A <b>Member</b> price is what an attached member pays at the till; leave it empty for the normal price, and it can never be above the price. A price of 0 sells the item for free. An empty price means it isn't sold in this pricebook. <b>Off</b> hides it from online ordering and greys it out on the till; the price is kept.</p>
       {msg && <div className={`flash ${msg.ok ? "" : "warn"}`}>{msg.text}</div>}
       <div className="row" style={{ gap: 8, flexWrap: "wrap" }}>
         <input className="findbox" placeholder={`Search ${catalog.products.length} items`} value={find} onChange={(e) => setFind(e.target.value)} aria-label="Search items" style={{ flex: 1, minWidth: 160 }} />
@@ -83,7 +92,7 @@ export function PricebookEditor({ catalog, bookId }: { catalog: Catalog; bookId:
       <div className="editor-bar">
         <span>{changedIds.length ? <b>{changedIds.length} change{changedIds.length === 1 ? "" : "s"} not saved</b> : "No changes yet"}{badIds.length ? <span className="muted"> · {badIds.length} price{badIds.length === 1 ? " needs" : "s need"} fixing</span> : null}</span>
         <span>
-          {changedIds.length > 0 && <button className="secondary sm" onClick={() => { setPrice({}); setOff({}); }}>Undo all</button>}{" "}
+          {changedIds.length > 0 && <button className="secondary sm" onClick={() => { setPrice({}); setMember({}); setOff({}); }}>Undo all</button>}{" "}
           <button className="primary sm" disabled={busy || !changedIds.length || badIds.length > 0} onClick={() => void save()}>{busy ? "Saving…" : "Save changes"}</button>
         </span>
       </div>
@@ -105,6 +114,16 @@ export function PricebookEditor({ catalog, bookId }: { catalog: Catalog; bookId:
                 aria-label={`Price for ${p.name}`}
                 aria-invalid={bad}
                 style={bad ? { borderColor: "#c0392b" } : { width: 90 }}
+              />
+              <span className="muted" title="What a member pays. Leave empty for the normal price.">Member</span>
+              <input
+                inputMode="decimal"
+                value={member[p.id] ?? currentMember(p.id)}
+                placeholder="same"
+                onChange={(e) => setMember((d) => ({ ...d, [p.id]: e.target.value }))}
+                aria-label={`Member price for ${p.name}`}
+                aria-invalid={memberBad(p.id)}
+                style={memberBad(p.id) ? { borderColor: "#c0392b", width: 80 } : { width: 80 }}
               />
               <button className={isOff(p.id) ? "secondary sm" : "primary sm"} aria-pressed={!isOff(p.id)} onClick={() => setOff((o) => ({ ...o, [p.id]: !isOff(p.id) }))} title={isOff(p.id) ? "Off: hidden online, greyed out on the till. Press to switch on." : "On: sold. Press to switch off."}>{isOff(p.id) ? "Off" : "On"}</button>
               {book.prices[p.id] !== undefined && !changed && <span className="muted cur">{formatMoney(book.prices[p.id]!)}</span>}

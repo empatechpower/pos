@@ -2,7 +2,7 @@ import cors from "@fastify/cors";
 import Fastify, { type FastifyReply, type FastifyRequest } from "fastify";
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
-import { type BuilderSpec, guestCheck, plainText, receipt, type OrderState, type PrintContext, commissionOf, tabPaymentReceipt, type ProductStock, validateProductStock, isTimeZone, validCoordinates, validateOutletOverride, validateWindows, type MenuWindows, confirmedPaid, hourly, isFullyPaid, productMix, summarize, menuFor, newId, orderTotals, reduceAll, reduceOrder, shopStatus, type BusinessConfig, type ChannelKind, type OptionGroup, type OrderEvent } from "@pos/core";
+import { withTaxPack, isTaxCountry, TAX_PACKS, DEFAULT_COUNTRY, type BuilderSpec, guestCheck, plainText, receipt, type OrderState, type PrintContext, commissionOf, tabPaymentReceipt, type ProductStock, validateProductStock, isTimeZone, validCoordinates, validateOutletOverride, validateWindows, type MenuWindows, confirmedPaid, hourly, isFullyPaid, productMix, summarize, menuFor, newId, orderTotals, reduceAll, reduceOrder, shopStatus, type BusinessConfig, type ChannelKind, type OptionGroup, type OrderEvent } from "@pos/core";
 import { CASHIER_TOPUP_LIMIT_CENTS, audit, checkStaffPin, authenticate, authenticateAgent, can, createAgent, createConnectCode, redeemConnectCode, createStaff, listAgents, login, loginByPhone, logout, normalisePhone, setStaffPhone, recentAudit, revokeAgent, type Permission, type Role, type Staff } from "./auth.js";
 import type { CatalogStore, ChangeResult, PgCatalogStore } from "./catalog.js";
 import type { Db } from "./db/pool.js";
@@ -88,6 +88,28 @@ export async function buildApp({ config, store, db, catalog, catalogAdmin, print
 
   if (db) await ensureDefaultOutlet(db, merchantId, config.outletName, config.outletName);
 
+  /** Tax follows the country of the outlet (standing rule 1): the country's pack is written into the pricing rules at start and whenever the outlet is saved. */
+  const outletTax = new Map<string, { country: string; gstOn: boolean | null }>();
+  async function applyOutletTax(): Promise<void> {
+    const all = db ? await listOutlets(db, merchantId) : [];
+    outletTax.clear();
+    for (const o of all) outletTax.set(o.id, { country: o.country, gstOn: o.gstOn });
+    const p = withTaxPack(config.pricing, outletTax.get(config.outletName)?.country);
+    delete config.pricing.rounding;
+    Object.assign(config.pricing, p);
+  }
+  await applyOutletTax();
+  /**
+   * The shop's rules as one outlet trades by them: its country's tax pack, and whether it charges tax at all (its own answer, or the brand's
+   * switch when it has none). Everything else is the brand's. An order keeps the answer it was opened with (`taxOn`), so it never reprices.
+   */
+  function configFor(outletId: string | null | undefined): BusinessConfig {
+    const o = outletId ? outletTax.get(outletId) : undefined;
+    if (!o) return config;
+    const pricing = withTaxPack(config.pricing, o.country);
+    return { ...config, pricing: { ...pricing, gstOn: o.gstOn ?? config.pricing.gstOn } };
+  }
+
   const streams = new Set<(s: StoredEvent[]) => void>();
 
   /**
@@ -103,7 +125,12 @@ export async function buildApp({ config, store, db, catalog, catalogAdmin, print
 
   app.get("/api/auth/mode", async () => ({ deviceRequired: !!db }));
 
-  app.get("/api/config", async () => config);
+  /** A till asks with its device token and gets its own outlet's rules (tax differs by outlet); anyone else gets the brand's. */
+  app.get("/api/config", async (req) => {
+    const token = deviceToken(req);
+    const device = db && token ? await authenticateDevice(db, token).catch(() => null) : null;
+    return device && device.merchantId === merchantId ? configFor(device.outletId) : config;
+  });
   /**
    * The whole catalog, so a device can price any channel with no network. Public on purpose (the
    * customer ordering app needs it); it holds menu and prices only. The version doubles as an ETag.
@@ -137,9 +164,12 @@ export async function buildApp({ config, store, db, catalog, catalogAdmin, print
    */
   async function printCtxFor(order: OrderState, outletId?: string): Promise<PrintContext> {
     const ctx: PrintContext = { merchantName: config.name, outletName: config.outletName, now: Date.now() };
-    const gst = process.env.GST_REG_NO?.trim();
+    // The outlet's own registration numbers come first (set in the back office); GST_REG_NO and BUSINESS_UEN on the server are the fallback.
+    const profile = db && outletId ? (await listOutlets(db, merchantId).catch(() => [])).find((o) => o.id === outletId) : undefined;
+    const gst = profile?.gstRegNo ?? process.env.GST_REG_NO?.trim();
     if (gst) ctx.gstRegNo = gst;
-    if (process.env.BUSINESS_UEN?.trim()) ctx.uen = process.env.BUSINESS_UEN.trim();
+    const uen = profile?.uen ?? process.env.BUSINESS_UEN?.trim();
+    if (uen) ctx.uen = uen;
     if (process.env.CUSTOMER_SERVICE?.trim()) ctx.customerService = process.env.CUSTOMER_SERVICE.trim();
     if (!db) return ctx;
     try {
@@ -213,8 +243,25 @@ export async function buildApp({ config, store, db, catalog, catalogAdmin, print
 
   /** Store events, tell live screens, queue whatever now needs printing. Used for tills and for customers' orders alike. */
   async function ingest(events: OrderEvent[], outletId?: string): Promise<StoredEvent[]> {
+    // Tax can only be taken off an order where the country's tax pack allows it; anything else is dropped here, whatever the till sent.
+    events = events.filter((e) => !(e.type === "TaxRemovalSet" && e.removed && !(config.pricing.taxRemovable && config.pricing.gstOn)));
+    // A member attached at the till must be a real member of this shop; otherwise the event is dropped. The order is then theirs: it shows
+    // in their history, earns points when paid, and gives points back if it is cancelled.
+    if (events.some((e) => e.type === "MemberAttached")) {
+      const kept: OrderEvent[] = [];
+      for (const e of events) {
+        if (e.type !== "MemberAttached" || !e.memberId) { kept.push(e); continue; }
+        const m = members && /^[0-9a-f-]{36}$/i.test(e.memberId) ? await members.byId(e.memberId).catch(() => null) : null;
+        if (!m) continue;
+        await members!.linkOrder(e.orderId, m.id, 0);
+        kept.push(e);
+      }
+      events = kept;
+    }
     const added = await store.append(events, outletId);
     if (added.length) for (const push of streams) push(added);
+    // Points spent at the till are remembered against the order, so cancelling it gives them back.
+    if (db) for (const a of added) if (a.event.type === "PointsRedeemed" && a.event.points > 0) await db.query("UPDATE member_orders SET points_redeemed = GREATEST(points_redeemed, $3) WHERE order_id=$1 AND merchant_id=$2", [a.event.orderId, merchantId, Math.round(a.event.points)]).catch(() => undefined);
     const touched = [...new Set(added.map((a) => a.event.orderId))];
     // A cancelled order gives its promo code use back.
     for (const a of added) if (db && a.event.type === "StageSet" && a.event.stage === "cancelled") await releasePromo(db, merchantId, a.event.orderId).catch(() => undefined);
@@ -223,6 +270,7 @@ export async function buildApp({ config, store, db, catalog, catalogAdmin, print
       const e = a.event as unknown as Record<string, unknown>;
       if (e.type === "DiscountApplied" || e.type === "DiscountRemoved" || e.type === "LinePriceOverridden") await audit(db, merchantId, null, `order.${e.type === "DiscountApplied" ? "discount" : e.type === "DiscountRemoved" ? "discount_removed" : "price_override"}`, { orderId: e.orderId, scope: e.scope, kind: e.kind, value: e.value, unitCents: e.unitCents, reason: e.reason, by: e.byName, approvedBy: e.approvedByName, deviceId: e.deviceId }).catch(() => undefined);
     }
+    if (db) for (const a of added) if (a.event.type === "TaxRemovalSet") await audit(db, merchantId, null, a.event.removed ? "order.tax_removed" : "order.tax_restored", { orderId: a.event.orderId, reason: a.event.reason, by: a.event.byName, approvedBy: a.event.approvedByName }).catch(() => undefined);
     if (added.length && print) await queuePrints(touched);
     if (added.length && db) await reconcileStock(touched);
     if (added.length && members) await settleMemberOrders(touched);
@@ -691,7 +739,7 @@ export async function buildApp({ config, store, db, catalog, catalogAdmin, print
    * Create or change an outlet. Adding an outlet, moving it between franchises and switching it off are for the brand owner;
    * a manager of an outlet (or of its franchise) can update its name, address, phone and opening hours.
    */
-  app.put<{ Params: { id: string }; Body: { name?: string; franchiseId?: string | null; address?: string | null; phone?: string | null; hours?: string | null; active?: boolean; serviceMode?: string | null; prepMinutes?: number | null; latitude?: number | null; longitude?: number | null } }>("/api/outlets/:id", { preHandler: needs("device.manage") }, async (req, reply) => {
+  app.put<{ Params: { id: string }; Body: { name?: string; franchiseId?: string | null; address?: string | null; phone?: string | null; hours?: string | null; active?: boolean; serviceMode?: string | null; prepMinutes?: number | null; latitude?: number | null; longitude?: number | null; country?: string; gstRegNo?: string | null; uen?: string | null; gstOn?: boolean | null } }>("/api/outlets/:id", { preHandler: needs("device.manage") }, async (req, reply) => {
     const visible = await visibleOutletIds(db, merchantId, req.staff!);
     const id = req.params.id;
     const b = req.body ?? {};
@@ -717,8 +765,19 @@ export async function buildApp({ config, store, db, catalog, catalogAdmin, print
     if (sentCoords && !((b.latitude === null && b.longitude === null) || validCoordinates(b.latitude, b.longitude))) return reply.code(400).send({ error: "latitude is -90 to 90 and longitude -180 to 180; send both, or both null to clear" });
     const latitude = sentCoords ? b.latitude ?? null : existing?.latitude ?? null;
     const longitude = sentCoords ? b.longitude ?? null : existing?.longitude ?? null;
-    await upsertOutlet(db, merchantId, { id, name, franchiseId, address: text(b.address, 200), phone: text(b.phone, 40), hours: text(b.hours, 120), active, serviceMode, prepMinutes, latitude, longitude });
-    await audit(db, merchantId, req.staff!.id, "outlet.save", { id, name, franchiseId, serviceMode, prepMinutes, created: !existing });
+    // Where the outlet is and its tax registration are the brand owner's to set: they decide the tax charged and whether a receipt is a tax invoice.
+    if (b.country !== undefined && !isTaxCountry(b.country)) return reply.code(400).send({ error: "unknown_country", message: `Tax is set up for: ${Object.values(TAX_PACKS).map((p) => p.countryName).join(", ")}.` });
+    if (b.gstOn !== undefined && b.gstOn !== null && typeof b.gstOn !== "boolean") return reply.code(400).send({ error: "gstOn is true, false, or null to follow the brand" });
+    const gstOn = b.gstOn === undefined ? existing?.gstOn ?? null : b.gstOn;
+    const reg = (v: unknown) => { const t = text(v, 24); return t && /^[A-Za-z0-9-]+$/.test(t) ? t.toUpperCase() : t === null ? null : undefined; };
+    const country = b.country ?? existing?.country ?? DEFAULT_COUNTRY;
+    const gstRegNo = b.gstRegNo === undefined ? existing?.gstRegNo ?? null : reg(b.gstRegNo);
+    const uen = b.uen === undefined ? existing?.uen ?? null : reg(b.uen);
+    if (gstRegNo === undefined || uen === undefined) return reply.code(400).send({ error: "bad_registration", message: "A registration number is letters, digits and dashes only." });
+    if (visible !== null && existing && (country !== existing.country || gstRegNo !== existing.gstRegNo || uen !== existing.uen || gstOn !== existing.gstOn)) return reply.code(403).send({ error: "brand_only", message: "Only the brand owner can change an outlet's country, its tax, or its registration numbers." });
+    await upsertOutlet(db, merchantId, { id, name, franchiseId, address: text(b.address, 200), phone: text(b.phone, 40), hours: text(b.hours, 120), active, serviceMode, prepMinutes, latitude, longitude, country, gstRegNo, uen, gstOn });
+    await audit(db, merchantId, req.staff!.id, "outlet.save", { id, name, franchiseId, serviceMode, prepMinutes, country, gstRegNo, uen, gstOn, created: !existing });
+    await applyOutletTax();
     return { ok: true };
   });
 
@@ -799,7 +858,7 @@ export async function buildApp({ config, store, db, catalog, catalogAdmin, print
 
   // ---- options the owner can switch: service charge and tax ------------------------------------
 
-  app.get("/api/settings", { preHandler: needs("wallet.read") }, async () => ({ ...optionsOf(config), serviceRate: config.pricing.serviceRate, gstRate: config.pricing.gstRate }));
+  app.get("/api/settings", { preHandler: needs("wallet.read") }, async () => ({ ...optionsOf(config), serviceRate: config.pricing.serviceRate, gstRate: config.pricing.gstRate, taxName: config.pricing.taxName ?? "GST", country: config.pricing.country ?? DEFAULT_COUNTRY }));
   app.put<{ Body: Partial<Record<(typeof OPTION_KEYS)[number], boolean>> }>("/api/settings", { preHandler: needs("staff.manage") }, async (req, reply) => {
     if ((await visibleOutletIds(db, merchantId, req.staff!)) !== null) return reply.code(403).send({ error: "brand_only" });
     const b = (req.body ?? {}) as Record<string, unknown>;
@@ -812,7 +871,7 @@ export async function buildApp({ config, store, db, catalog, catalogAdmin, print
       changed[k] = b[k] as boolean;
     }
     await audit(db, merchantId, req.staff!.id, "settings.save", changed);
-    return { ...optionsOf(config), serviceRate: config.pricing.serviceRate, gstRate: config.pricing.gstRate };
+    return { ...optionsOf(config), serviceRate: config.pricing.serviceRate, gstRate: config.pricing.gstRate, taxName: config.pricing.taxName ?? "GST", country: config.pricing.country ?? DEFAULT_COUNTRY };
   });
 
   app.get("/api/settings/kiosk", { preHandler: needs("wallet.read") }, async () => loadKiosk(db, merchantId));
@@ -895,7 +954,7 @@ export async function buildApp({ config, store, db, catalog, catalogAdmin, print
 
   registerDisplay(app, { db, merchantId, needsDevice });
   registerPromoAdmin(app, { db, merchantId, needs });
-  const tabs = new TabService({ db, merchantId, config, eventsForOrder: (id) => store.eventsForOrder(id), members, ingest, now, loadCatalog: () => catalog.load(), alert: (text) => { void (app as unknown as { notifyManagers?: (t: string, all?: boolean) => Promise<void> }).notifyManagers?.(text, true)?.catch(() => undefined); } });
+  const tabs = new TabService({ db, merchantId, config, configFor, eventsForOrder: (id) => store.eventsForOrder(id), members, ingest, now, loadCatalog: () => catalog.load(), alert: (text) => { void (app as unknown as { notifyManagers?: (t: string, all?: boolean) => Promise<void> }).notifyManagers?.(text, true)?.catch(() => undefined); } });
   // Every completed tab payment prints its own receipt: the lines and components as quoted, who paid, who recorded it, and what is left on the tab.
   if (print) {
     tabs.onPaymentCompleted = async (paymentId) => {
@@ -913,7 +972,7 @@ export async function buildApp({ config, store, db, catalog, catalogAdmin, print
   registerMailboxes(app, { db, merchantId, needs, imapFactory, now });
   registerDiscountPolicy(app, { db, merchantId, needs });
   registerOrderTrail(app, { db, merchantId, store, needs });
-  registerShop(app, { db, config, store, catalog, catalogAdmin, brand: new BrandStore(db, merchantId), ingest, members, needs, integrations, now, tabs, alertMailbox, alertWatchMs, imapFactory });
+  registerShop(app, { db, config, configFor, store, catalog, catalogAdmin, brand: new BrandStore(db, merchantId), ingest, members, needs, integrations, now, tabs, alertMailbox, alertWatchMs, imapFactory });
 
   // ---- the Telegram bot for managing prices ---------------------------------------------------
 
@@ -1061,12 +1120,13 @@ export async function buildApp({ config, store, db, catalog, catalogAdmin, print
     });
 
     /** Edit many items in one pricebook at once: { prices: { itemId: cents | null }, off: { itemId: true | false } }. All or nothing. */
-    app.post<{ Params: { id: string }; Body: { prices?: Record<string, number | null>; off?: Record<string, boolean> } }>("/api/catalog/pricebooks/:id/bulk", manage, async (req, reply) => {
-      const { prices, off } = req.body ?? {};
-      if ((!prices && !off) || Object.keys(prices ?? {}).length + Object.keys(off ?? {}).length > 2000) return bad(reply, "send prices and/or off, up to 2000 changes");
+    app.post<{ Params: { id: string }; Body: { prices?: Record<string, number | null>; off?: Record<string, boolean>; memberPrices?: Record<string, number | null> } }>("/api/catalog/pricebooks/:id/bulk", manage, async (req, reply) => {
+      const { prices, off, memberPrices } = req.body ?? {};
+      if ((!prices && !off && !memberPrices) || Object.keys(prices ?? {}).length + Object.keys(off ?? {}).length + Object.keys(memberPrices ?? {}).length > 2000) return bad(reply, "send prices, memberPrices and/or off, up to 2000 changes");
+      for (const v of Object.values(memberPrices ?? {})) if (v !== null && !isCents(v)) return bad(reply, "every member price must be a whole number of cents, 0 or more, or null to remove");
       for (const v of Object.values(prices ?? {})) if (v !== null && !isCents(v)) return bad(reply, "every price must be a whole number of cents, 0 or more, or null to remove");
       for (const v of Object.values(off ?? {})) if (typeof v !== "boolean") return bad(reply, "off values must be true or false");
-      return changed(req, reply, "pricebook.bulk", () => cat.bulkUpdate(req.params.id, { prices, off }));
+      return changed(req, reply, "pricebook.bulk", () => cat.bulkUpdate(req.params.id, { prices, off, memberPrices }));
     });
 
     /** A new pricebook that copies this one (every price and switch), with a new channel of the same name pointed at it. */
@@ -1577,6 +1637,42 @@ export async function buildApp({ config, store, db, catalog, catalogAdmin, print
         if (credit > 0) await topUp(db, { merchantId, customerId: r.member.id, amountCents: credit, idempotencyKey: `open:${r.member.id}`, deviceId: req.device!.id, outletId: config.outletName, staffId: req.staff!.id, note: "Opening credit" });
       }
       return { created: r.created, member: { id: r.member.id, name: r.member.name, email: r.member.email, phone: r.member.phone }, creditCents: await balanceOf(db, merchantId, r.member.id) };
+    });
+
+    /** One member as the till shows them: who they are, their credit and points, and their last orders (customer history at the POS). */
+    app.get<{ Params: { id: string } }>("/api/members/:id/summary", { preHandler: needs("wallet.read") }, async (req, reply) => {
+      const m = /^[0-9a-f-]{36}$/i.test(req.params.id) ? await members.byId(req.params.id) : null;
+      if (!m) return reply.code(404).send({ error: "member_not_found" });
+      const recent = [];
+      for (const r of await members.orderIds(m.id, 8)) {
+        const o = reduceOrder(r.orderId, await store.eventsForOrder(r.orderId));
+        if (!o || !o.lines.some((l) => l.qty > 0)) continue;
+        const live = o.lines.filter((l) => l.qty > 0);
+        recent.push({ orderId: o.orderId, at: o.paidAt ?? o.openedAt, totalCents: orderTotals(o, config).total, status: o.voided ? "voided" : o.stage === "cancelled" ? "cancelled" : isFullyPaid(o, config) ? "paid" : "open", items: live.slice(0, 4).map((l) => `${l.qty}× ${l.name}`).join(", ") + (live.length > 4 ? ` +${live.length - 4} more` : ""), where: o.channelName ?? o.fulfilment });
+      }
+      return {
+        member: { id: m.id, name: m.name, phone: m.phone, email: m.email, points: m.pointsBalance, creditCents: await balanceOf(db, merchantId, m.id) },
+        rewards: { pointsEnabled: config.rewards.pointsEnabled, minPointsRedeem: config.pricing.minPointsRedeem },
+        recent,
+      };
+    });
+
+    /**
+     * Points as payment at the till: taken from the member's balance for one order, once (the order's id is the key, so a retry never takes
+     * them twice). The till then writes the redemption onto the order. Refused when the programme is off or the balance is short.
+     */
+    app.post<{ Params: { id: string }; Body: { points?: number; orderId?: string } }>("/api/members/:id/redeem", { preHandler: needs("wallet.spend") }, async (req, reply) => {
+      if (!config.rewards.pointsEnabled) return reply.code(409).send({ error: "points_off", message: "The points programme is switched off." });
+      const pts = req.body?.points, orderId = String(req.body?.orderId ?? "");
+      if (!Number.isSafeInteger(pts) || (pts as number) <= 0 || !orderId || orderId.length > 64) return reply.code(400).send({ error: "points (a whole number above zero) and orderId are required" });
+      const m = /^[0-9a-f-]{36}$/i.test(req.params.id) ? await members.byId(req.params.id) : null;
+      if (!m) return reply.code(404).send({ error: "member_not_found" });
+      await members.linkOrder(orderId, m.id, 0);
+      const r = await members.post(m.id, "redeem", -(pts as number), `redeem:${orderId}`, { orderId });
+      if (!r) return reply.code(409).send({ error: "not_enough_points", points: (await members.byId(m.id))?.pointsBalance ?? 0 });
+      await db.query("UPDATE member_orders SET points_redeemed = GREATEST(points_redeemed, $3) WHERE order_id=$1 AND merchant_id=$2", [orderId, merchantId, pts]);
+      await audit(db, merchantId, req.staff!.id, "member.redeem", { memberId: m.id, orderId, points: pts });
+      return { ok: true, points: r.balance, replayed: r.replayed };
     });
 
     /**

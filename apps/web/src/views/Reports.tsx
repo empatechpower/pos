@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
-import { confirmedPaid, formatMoney, hourly, isFullyPaid, optionLines, orderTotals, productMix, reportWeekday, staffSales, summarize, type BusinessConfig, type Catalog, type OrderState } from "@pos/core";
+import { confirmedPaid, formatMoney, hourly, isFullyPaid, optionLines, orderTotals, productMix, reportWeekday, staffSales, summarize, type BusinessConfig, type Catalog, type OrderState, paymentKey, paymentLabel } from "@pos/core";
 import { staffFetch } from "../auth";
 import { logView } from "../orderViews";
 import { useOrders } from "../hooks";
@@ -10,7 +10,7 @@ const dayKey = (ms: number) => new Date(ms).toLocaleDateString("en-CA", { timeZo
 const timeOf = (ms: number) => new Date(ms).toLocaleTimeString("en-GB", { hour: "2-digit", minute: "2-digit", timeZone: TZ });
 const hourOf = (ms: number) => Number(new Date(ms).toLocaleTimeString("en-GB", { hour: "2-digit", hour12: false, timeZone: TZ }).slice(0, 2));
 const METHOD: Record<string, string> = { cash: "Cash", card: "Card", paynow: "PayNow", credit: "Credit" };
-const methodName = (m: string) => METHOD[m] ?? m;
+const methodName = (m: string) => METHOD[m] ?? paymentLabel(m);
 const pct = (n: number) => `${n.toFixed(1)}%`;
 
 interface CreditRow { id: string; name: string | null; phone: string | null; openingCents: number; topupsCents: number; spentCents: number; refundsCents: number; adjustmentsCents: number; balanceCents: number }
@@ -158,7 +158,7 @@ export function Reports({ config, catalog }: { config: BusinessConfig; catalog?:
               </>); })()}
               <tr><td><b>Total</b></td><td className="r"><b>{formatMoney(r.total)}</b></td></tr>
             </tbody></table>
-            <p className="muted">Paid {formatMoney(confirmedPaid(r.o))}{r.o.payments.filter((p) => p.confirmed).length ? ` · ${r.o.payments.filter((p) => p.confirmed).map((p) => `${methodName(p.method)} ${formatMoney(p.amountCents)}`).join(" + ")}` : ""}</p>
+            <p className="muted">Paid {formatMoney(confirmedPaid(r.o))}{r.o.payments.filter((p) => p.confirmed).length ? ` · ${r.o.payments.filter((p) => p.confirmed).map((p) => `${methodName(paymentKey(p))} ${formatMoney(p.amountCents)}`).join(" + ")}` : ""}</p>
           </div>
         );
     } else if (top.kind === "product") {

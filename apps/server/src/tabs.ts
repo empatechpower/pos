@@ -31,6 +31,8 @@ export interface TabDeps {
   db: Db;
   merchantId: string;
   config: BusinessConfig;
+  /** The rules as one outlet trades by them (its tax). */
+  configFor?: (outletId: string | null | undefined) => BusinessConfig;
   eventsForOrder: (orderId: string) => Promise<OrderEvent[]>;
   members?: MemberStore;
   /** The catalogue, for items a staff member adds to a tab. */
@@ -220,7 +222,7 @@ export class TabService {
       ...(shares.get(l.lineId)?.length ? { sharedWith: shares.get(l.lineId)! } : {}),
     })));
     const first = rounds.find((r) => r.order);
-    const opts: TabOpts = { serviceCharge: first?.order?.serviceCharge !== false, pricing: this.d.config.pricing };
+    const opts: TabOpts = { serviceCharge: first?.order?.serviceCharge !== false, pricing: first?.order?.taxOn === undefined || first.order.taxOn === this.d.config.pricing.gstOn ? this.d.config.pricing : { ...this.d.config.pricing, gstOn: first.order.taxOn } };
     const counted = payments.filter((p) => p.status === "reserved" || p.status === "completed" || p.status === "unknown");
     const coupons = (await q.query("SELECT id, participant_id, title, amount_cents, min_spend_cents FROM tab_coupons WHERE tab_id=$1 AND removed_at IS NULL ORDER BY applied_at", [tabId])).rows.map((c) => ({ id: c.id as string, participantId: c.participant_id as string, title: c.title as string, amountCents: c.amount_cents as number, minSpendCents: c.min_spend_cents as number }));
     return { tab, people, rounds, payments, claims, shares, lines: toLines(rounds), payableLines: toLines(rounds.filter((r) => !r.locked)), opts, allocs: counted.map((p) => p.alloc), coupons, couponCents: coupons.reduce((n, c) => n + c.amountCents, 0) };
@@ -941,14 +943,14 @@ export class TabService {
     const cat = await this.d.loadCatalog();
     const channel = cat.channels.find((c) => c.kind === "dine_in" && c.active);
     if (!channel) fail(400, "no_dine_in_channel");
-    const quote = quoteOrder(cat, this.d.config, { outletId: t.outletId, channelId: channel!.id }, items.map((i) => ({ productId: String(i.productId), qty: Number(i.qty) })));
+    const quote = quoteOrder(cat, this.d.configFor?.(t.outletId) ?? this.d.config, { outletId: t.outletId, channelId: channel!.id }, items.map((i) => ({ productId: String(i.productId), qty: Number(i.qty) })));
     if (!quote.ok) return fail(400, quote.error, { productId: quote.productId });
     const orderId = newId();
     const ts = this.now();
     let seq = 0;
     const mk = (extra: object) => ({ id: newId(), orderId, deviceId: "shop", ts, seq: ++seq, ...extra }) as unknown as OrderEvent;
     await this.d.ingest([
-      mk({ type: "OrderOpened", fulfilment: quote.fulfilment, channelId: quote.channel.id, channelName: quote.channel.name, serviceCharge: quote.channel.serviceCharge, source: "online", customerName: "Staff", spot: t.spot ?? undefined, onTab: true }),
+      mk({ type: "OrderOpened", fulfilment: quote.fulfilment, channelId: quote.channel.id, channelName: quote.channel.name, serviceCharge: quote.channel.serviceCharge, taxOn: (this.d.configFor?.(t.outletId) ?? this.d.config).pricing.gstOn, source: "online", customerName: "Staff", spot: t.spot ?? undefined, onTab: true }),
       ...quote.lines.map((l) => mk({ type: "ItemAdded", lineId: newId(), productId: l.productId, name: l.name, unitCents: l.unitCents, qty: l.qty, pointsExempt: l.pointsExempt, bcrs: l.bcrs, ...(l.taxInclusive !== undefined ? { taxInclusive: l.taxInclusive } : {}), ...(l.taxGroup ? { taxGroup: l.taxGroup } : {}), options: l.options.length ? l.options : undefined, ...(l.build ? { build: l.build } : {}) })),
       mk({ type: "OrderAccepted" }),
     ], t.outletId);

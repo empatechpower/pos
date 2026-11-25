@@ -1,3 +1,4 @@
+import { deviceRole } from "../device";
 import { go } from "../nav";
 import { useState } from "react";
 import { currentStaff, signIn, signOut, useStaff } from "../auth";
@@ -74,7 +75,7 @@ export function Login({ online, problem }: { online: boolean; problem?: string |
       // Home (the Dashboard) after practice, and after every sign-in unless the shop switched it off.
       const afterTraining = takeAfterTraining();
       await loadTillSettings();
-      go(afterTraining || tillSettings().dashboard ? "/dashboard" : "/pos");
+      go(!afterTraining && deviceRole() === "kitchen" ? "/kitchen" : afterTraining || tillSettings().dashboard ? "/dashboard" : "/pos"); // a device set up as the kitchen display opens there
     } else {
       setMsg(r.reason === "locked" ? "Too many wrong PINs. This account is locked for a few minutes." : r.reason === "invalid" ? "Wrong name or PIN." : "Could not reach the server. Sign-in needs a connection.");
     }

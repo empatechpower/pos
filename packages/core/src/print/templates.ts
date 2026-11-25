@@ -2,6 +2,7 @@ import type { BusinessConfig } from "../config.js";
 import type { OrderLine, OrderState } from "../events.js";
 import { confirmedPaid, orderTotals } from "../events.js";
 import { formatMoney } from "../money.js";
+import { recordedTender } from "../tenders.js";
 import { optionLines } from "../options.js";
 import { buildTicketLines } from "../builder.js";
 import type { Block, Doc, Label } from "./doc.js";
@@ -81,17 +82,23 @@ export function receipt(order: OrderState, config: BusinessConfig, ctx: PrintCon
   if (t.pointsDiscount) b.push({ t: "cols", left: "Points", right: `${money(t.pointsDiscount)}-` });
   if (t.service) b.push({ t: "cols", left: `Service charge (${Math.round(config.pricing.serviceRate * 100)}%)`, right: money(t.service) });
   if (t.fee) b.push({ t: "cols", left: "Service fee", right: money(t.fee) });
-  if (t.gst) b.push({ t: "cols", left: "GST", right: money(t.gst) });
-  b.push({ t: "rule", ch: "=" }, { t: "cols", left: gstOn ? "Total (SGD) INCL. GST" : "Total (SGD)", right: money(t.total), bold: true });
-  if (gstOn) {
+  const tax = config.pricing.taxName ?? "GST";
+  if (t.gst) b.push({ t: "cols", left: tax, right: money(t.gst) });
+  if (t.taxRemoved) b.push({ t: "cols", left: `${tax} removed`, right: t.taxRemoved.offTotal ? `${money(t.taxRemoved.offTotal)}-` : "" });
+  // Rounding by the country's rule is its own line, so the total can be checked against the lines above it.
+  if (t.rounding) b.push({ t: "cols", left: "Rounding", right: t.rounding < 0 ? `${money(-t.rounding)}-` : money(t.rounding) });
+  b.push({ t: "rule", ch: "=" }, { t: "cols", left: gstOn && !t.taxRemoved ? `Total (SGD) INCL. ${tax}` : "Total (SGD)", right: money(t.total), bold: true });
+  if (gstOn && !t.taxRemoved) {
+    // With the tax engine on, the amount is what the engine charged (added on top, or inside the prices). A registered shop whose engine is
+    // off still shows the tax held in the total, less the deposit, which is never taxed.
     const rate = Math.round(config.pricing.gstRate * 100);
-    b.push({ t: "cols", left: "GST AMT", right: money(Math.round(((t.total - t.bcrs) * rate) / (100 + rate))) });
+    b.push({ t: "cols", left: `${tax} AMT`, right: money(config.pricing.gstOn ? t.gst + t.taxIncluded : Math.round(((t.total - t.bcrs) * rate) / (100 + rate))) });
   }
   // What was paid: a split bill lists each check with its payments; cash shows what was handed over and the change.
   const paid = order.payments.filter((x) => x.confirmed && !x.paymentId.startsWith("refund:"));
   const checkNo = new Map((order.split?.checks ?? []).map((c) => [c.id, c.no]));
   for (const p of paid) {
-    const label = METHOD[p.method] ?? p.method;
+    const label = recordedTender(p.tender)?.label ?? METHOD[p.method] ?? p.method;
     b.push({ t: "cols", left: p.checkId && checkNo.has(p.checkId) ? `Check ${String(checkNo.get(p.checkId)).padStart(2, "0")} ${label}` : label, right: money(p.amountCents) });
     if (p.tenderedCents) b.push({ t: "cols", left: "  Cash tendered", right: money(p.tenderedCents) }, { t: "cols", left: "  Change", right: money(p.tenderedCents - p.amountCents) });
   }

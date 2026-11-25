@@ -8,14 +8,15 @@ function details(l: BagLine): Array<{ text: string; amount?: string; strong?: bo
   for (const o of l.options) out.push({ text: optionLines([o])[0]!, amount: o.priceCents ? `+${formatMoney(o.priceCents * (o.qty || 1))}` : undefined });
   if (l.override) out.push({ text: `Price ${formatMoney(l.unitCents)} → ${formatMoney(l.override.unitCents)} · ${l.override.reason}` });
   for (const d of l.discounts ?? []) out.push({ text: `${d.kind === "percent" ? `${d.value}% off` : `${formatMoney(d.value)} off`} · ${d.reason}` });
+  if (l.memberPriced && !l.override) out.push({ text: `Member price (usual ${formatMoney(l.unitCents + (l.item.priceCents - (l.item.memberPriceCents ?? l.item.priceCents)))})` });
   if (l.note) out.push({ text: `Note: ${l.note}`, strong: true });
   return out;
 }
 
-function Line({ l, collapsed, onToggle, onEdit, onQty, onRemove, bin, setBin, swipeRemoves }: { l: BagLine; collapsed: boolean; onToggle: () => void; onEdit: () => void; onQty: (d: number) => void; onRemove: () => void; bin: boolean; setBin: (open: boolean) => void; swipeRemoves: boolean }) {
+function Line({ l, kitchen, collapsed, onToggle, onEdit, onQty, onRemove, bin, setBin, swipeRemoves }: { l: BagLine; /** Where a sent line is in the kitchen. */ kitchen?: "ready" | "served"; collapsed: boolean; onToggle: () => void; onEdit: () => void; onQty: (d: number) => void; onRemove: () => void; bin: boolean; setBin: (open: boolean) => void; swipeRemoves: boolean }) {
   const det = details(l);
   // What the prototype puts on the grey line under the details; ours adds "sent", the seat and "Held".
-  const meta = [l.sent ? "✓ sent" : "", l.course ? COURSE_NAMES[l.course] ?? `Course ${l.course}` : "", l.seat ? `Seat ${l.seat}` : "", l.channelName ?? "", l.hold ? "Held" : ""].filter(Boolean);
+  const meta = [l.sent ? (kitchen === "served" ? "✓ served" : kitchen === "ready" ? "● ready to serve" : "✓ sent") : "", l.course ? COURSE_NAMES[l.course] ?? `Course ${l.course}` : "", l.seat ? `Seat ${l.seat}` : "", l.channelName ?? "", l.hold ? "Held" : ""].filter(Boolean);
   const more = det.length > 0 || meta.length > 0;
   const open = more && !collapsed;
   const tap = useRef<{ at: number; timer: number | null }>({ at: 0, timer: null });
@@ -78,6 +79,8 @@ export function TicketPanel(p: {
   channelName: string; title: string; subline: string; shiftChip: ReactNode; bag: BagLine[]; flash: string | null;
   onDining: () => void; onNew: () => void; onQty: (key: string, d: number) => void; onEdit: (key: string) => void; onRemove: (key: string) => void;
   lineRemove?: "bin" | "swipe";
+  /** Kitchen progress of sent lines, by the order's line id. */
+  kitchen?: Record<string, "ready" | "served">;
   totals: ReactNode; strip: ReactNode; extra?: ReactNode; open: boolean; onCloseSheet: () => void;
 }) {
   const [folded, setFolded] = useState<Set<string>>(new Set());
@@ -98,7 +101,7 @@ export function TicketPanel(p: {
       <div className="tickethead"><span>Name</span><span>Qty</span><span>Each</span><span>Total</span></div>
       <div id="lines" className={`lines ${p.lineRemove === "swipe" ? "" : "binmode"}`}>
         {p.bag.length === 0 ? <div className="empty"><b>＋</b><strong>Your order starts here</strong><span>Tap an item to add it to the ticket</span></div> : p.bag.map((l) => (
-          <Line key={l.key} l={l} collapsed={folded.has(l.key)} onToggle={() => toggle(l.key)} onEdit={() => p.onEdit(l.key)} onQty={(d) => p.onQty(l.key, d)} onRemove={() => { setBin(null); p.onRemove(l.key); }} swipeRemoves={p.lineRemove === "swipe"} bin={bin === l.key} setBin={(o) => setBin(o ? l.key : null)} />
+          <Line key={l.key} l={l} kitchen={l.sent ? p.kitchen?.[l.sent.lineId] : undefined} collapsed={folded.has(l.key)} onToggle={() => toggle(l.key)} onEdit={() => p.onEdit(l.key)} onQty={(d) => p.onQty(l.key, d)} onRemove={() => { setBin(null); p.onRemove(l.key); }} swipeRemoves={p.lineRemove === "swipe"} bin={bin === l.key} setBin={(o) => setBin(o ? l.key : null)} />
         ))}
       </div>
       <div className="billfooter">

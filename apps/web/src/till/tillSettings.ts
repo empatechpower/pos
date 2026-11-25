@@ -1,27 +1,35 @@
 import { useSyncExternalStore } from "react";
+import { RECORDED_TENDERS } from "@pos/core";
 import { staffFetch } from "../auth";
 import type { MenuLayout } from "./layout";
 
 /** The shop-wide till settings a manager arranges: action buttons, payment options, the Dashboard switch and the standard menu layout. */
 export interface TillSettings {
   actions: { order: string[]; hidden: string[] };
-  tenders: { order: string[]; hidden: string[] };
+  tenders: { order: string[]; hidden: string[]; shown?: string[] };
   dashboard: boolean;
   /** How a ticket line is removed by sliding it: show a bin button to tap, or remove it at once. */
   lineRemove: "bin" | "swipe";
   layout: MenuLayout | null;
+  /** Kitchen stations: each makes the items of its categories. */
+  stations?: KitchenStation[];
 }
-export const DEFAULT_TILL: TillSettings = { actions: { order: [], hidden: [] }, tenders: { order: [], hidden: [] }, dashboard: true, lineRemove: "bin", layout: null };
+export interface KitchenStation { id: string; name: string; categories: string[] }
+export const DEFAULT_TILL: TillSettings = { actions: { order: [], hidden: [] }, tenders: { order: [], hidden: [], shown: [] }, dashboard: true, lineRemove: "bin", layout: null };
 
 /** Every action button the till knows, in its natural order. The settings screen lists these; Pay is always pinned and not one of them. */
 export const ACTION_POOL: Array<{ id: string; label: string; note?: string }> = [
   { id: "cancel", label: "Cancel Order" }, { id: "hold", label: "Hold Order" }, { id: "send", label: "Send Order", note: "Shops that pay after ordering" },
   { id: "qty", label: "Quantity" }, { id: "tables", label: "Table Map", note: "Shops with table service" }, { id: "fire", label: "Fire Course", note: "Shows when a course is waiting" },
-  { id: "discount", label: "Discount Order" }, { id: "fee", label: "Service Fee" }, { id: "extra", label: "Add Extra Item", note: "Managers" }, { id: "dining", label: "Dining Option" }, { id: "note", label: "Order Note" }, { id: "guests", label: "Guest Count" },
+  { id: "discount", label: "Discount Order" }, { id: "tax", label: "Add/Remove Tax", note: "Only where the country's tax rules allow it" }, { id: "fee", label: "Service Fee" }, { id: "extra", label: "Add Extra Item", note: "Managers" }, { id: "dining", label: "Dining Option" }, { id: "note", label: "Order Note" }, { id: "guests", label: "Guest Count" },
   { id: "bill", label: "Guest Check", note: "Shows on an open table" }, { id: "held", label: "Held Orders" }, { id: "member", label: "Member" },
   { id: "drawer", label: "Open Cash Drawer" }, { id: "tabs", label: "Open Tabs", note: "Shops that pay after ordering" },
 ];
-export const TENDER_POOL: Array<{ id: string; label: string }> = [{ id: "cash", label: "Cash" }, { id: "credit", label: "Member credit" }, { id: "qr", label: "PayNow QR" }];
+export const TENDER_POOL: Array<{ id: string; label: string; note?: string; optional?: boolean }> = [
+  { id: "cash", label: "Cash" }, { id: "credit", label: "Member credit" }, { id: "qr", label: "PayNow QR" },
+  // Recorded tenders: the money is taken elsewhere (a card terminal, a cheque) and the cashier confirms it.
+  ...RECORDED_TENDERS.map((t) => ({ id: t.id, label: t.label, note: "Recorded only: taken outside the till", ...(t.optional ? { optional: true } : {}) })),
+];
 
 const KEY = "pos.till";
 let current: TillSettings = (() => { try { return { ...DEFAULT_TILL, ...(JSON.parse(localStorage.getItem(KEY) ?? "{}") as Partial<TillSettings>) }; } catch { return DEFAULT_TILL; } })();
@@ -41,11 +49,14 @@ export const useTillSettings = (): TillSettings => { useSyncExternalStore((fn) =
 export const tillSettings = (): TillSettings => current;
 
 /** Put things in the manager's order (anything not mentioned keeps its natural place after the ones that are) and drop the hidden ones. */
-export function arrange<T extends { id: string }>(all: T[], pref: { order: string[]; hidden: string[] }): T[] {
+export type ArrangePref = { order: string[]; hidden: string[]; /** Optional items a manager switched on (they stay off until then). */ shown?: string[] };
+/** Whether an item is left off: hidden by a manager, or optional and never switched on. */
+export const isHidden = (x: { id: string; optional?: boolean }, pref: ArrangePref): boolean => pref.hidden.includes(x.id) || (!!x.optional && !(pref.shown ?? []).includes(x.id));
+export function arrange<T extends { id: string; optional?: boolean }>(all: T[], pref: ArrangePref): T[] {
   const rank = (id: string) => { const i = pref.order.indexOf(id); return i < 0 ? pref.order.length + all.findIndex((x) => x.id === id) : i; };
-  return all.filter((x) => !pref.hidden.includes(x.id)).sort((a, b) => rank(a.id) - rank(b.id));
+  return all.filter((x) => !isHidden(x, pref)).sort((a, b) => rank(a.id) - rank(b.id));
 }
 /** The list as the settings screen shows it: every item (hidden ones too) in the current order. */
-export function arrangeAll<T extends { id: string }>(all: T[], pref: { order: string[]; hidden: string[] }): T[] {
-  return arrange(all, { order: pref.order, hidden: [] });
+export function arrangeAll<T extends { id: string }>(all: T[], pref: ArrangePref): T[] {
+  return arrange(all.map((x) => ({ ...x, optional: false })), { order: pref.order, hidden: [] }).map((x) => all.find((y) => y.id === x.id)!);
 }

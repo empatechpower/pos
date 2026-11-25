@@ -28,6 +28,12 @@ const set = (patch: Partial<DeviceState>) => {
 };
 
 export const getDeviceState = () => state;
+
+/** What this device is for (decision Q11: the kitchen display is the same app, switched by a setting on the device). Kept on the device. */
+export type DeviceRole = "till" | "kitchen";
+const LS_ROLE = "pos.deviceRole";
+export const deviceRole = (): DeviceRole => (localStorage.getItem(LS_ROLE) === "kitchen" ? "kitchen" : "till");
+export const setDeviceRole = (r: DeviceRole) => { try { localStorage.setItem(LS_ROLE, r); } catch { /* not kept */ } };
 export const useDevice = (): DeviceState =>
   useSyncExternalStore(
     (fn) => {

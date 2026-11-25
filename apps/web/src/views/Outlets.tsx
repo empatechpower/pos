@@ -1,9 +1,9 @@
 import { useCallback, useEffect, useState } from "react";
-import { formatMoney } from "@pos/core";
+import { DEFAULT_COUNTRY, TAX_PACKS, formatMoney } from "@pos/core";
 import { staffFetch } from "../auth";
 
 interface Franchise { id: string; name: string; active: boolean }
-interface Outlet { id: string; name: string; franchiseId: string | null; address: string | null; phone: string | null; hours: string | null; active: boolean; serviceMode: "qsr" | "tsr" | null; prepMinutes?: number | null; latitude?: number | null; longitude?: number | null }
+interface Outlet { id: string; name: string; franchiseId: string | null; address: string | null; phone: string | null; hours: string | null; active: boolean; serviceMode: "qsr" | "tsr" | null; prepMinutes?: number | null; latitude?: number | null; longitude?: number | null; country?: string; gstRegNo?: string | null; uen?: string | null; gstOn?: boolean | null }
 interface Summary { orders: number; netCents: number; netToAccountForCents: number; discountsCents: number; voided: { orders: number } }
 interface Row { outletId: string; name: string; franchiseId: string | null; summary: Summary }
 interface Info { brand: { id: string; name: string }; scope: { franchiseId: string | null; outletId: string | null; brandWide: boolean }; franchises: Franchise[]; outlets: Outlet[] }
@@ -25,7 +25,7 @@ export function Outlets() {
   const [editing, setEditing] = useState<Outlet | null>(null);
   const [isNew, setIsNew] = useState(false);
   const [fr, setFr] = useState({ id: "", name: "" });
-  const [opts, setOpts] = useState<{ serviceChargeOn: boolean; gstOn: boolean; stackable: boolean; pointsItemsEligibleOnly: boolean; pointsDeductService: boolean; pointsDeductTax: boolean; pointsDeductDeposit: boolean; serviceRate: number; gstRate: number } | null>(null);
+  const [opts, setOpts] = useState<{ serviceChargeOn: boolean; gstOn: boolean; stackable: boolean; pointsItemsEligibleOnly: boolean; pointsDeductService: boolean; pointsDeductTax: boolean; pointsDeductDeposit: boolean; serviceRate: number; gstRate: number; taxName?: string } | null>(null);
   const [kiosk, setKiosk] = useState<{ idleMinutes: number; signinBlock: boolean; chips: { earn: boolean; rate: boolean; stamps: boolean } } | null>(null);
 
   const load = useCallback(async () => {
@@ -118,6 +118,27 @@ export function Outlets() {
           <label className="cust"><span>Address</span><input value={editing.address ?? ""} onChange={(e) => setEditing({ ...editing, address: e.target.value })} /></label>
           <label className="cust"><span>Phone</span><input value={editing.phone ?? ""} onChange={(e) => setEditing({ ...editing, phone: e.target.value })} inputMode="tel" /></label>
           <label className="cust"><span>Opening hours</span><input value={editing.hours ?? ""} onChange={(e) => setEditing({ ...editing, hours: e.target.value })} placeholder="e.g. Daily 8am-9pm" /></label>
+          {brandWide && (
+            <>
+              <label className="cust"><span>Country</span>
+                <select value={editing.country ?? DEFAULT_COUNTRY} onChange={(e) => setEditing({ ...editing, country: e.target.value })}>
+                  {Object.values(TAX_PACKS).map((p) => <option key={p.country} value={p.country}>{p.countryName} · {p.taxName} {Math.round(p.rate * 1000) / 10}%</option>)}
+                </select>
+              </label>
+              <p className="muted">Tax follows the country the outlet is in. The rate cannot be changed here.</p>
+              <label className="cust"><span>GST registration no.</span><input value={editing.gstRegNo ?? ""} maxLength={24} onChange={(e) => setEditing({ ...editing, gstRegNo: e.target.value })} placeholder="Leave empty if not GST registered" /></label>
+              <label className="cust"><span>Business no. (UEN)</span><input value={editing.uen ?? ""} maxLength={24} onChange={(e) => setEditing({ ...editing, uen: e.target.value })} /></label>
+              <p className="muted">With a GST registration number, this outlet's receipts print as a TAX Invoice with both numbers.</p>
+              <label className="cust"><span>Charges tax</span>
+                <select value={editing.gstOn == null ? "" : editing.gstOn ? "yes" : "no"} onChange={(e) => setEditing({ ...editing, gstOn: e.target.value === "" ? null : e.target.value === "yes" })}>
+                  <option value="">Follows the brand's setting ({opts?.gstOn ? "on" : "off"})</option>
+                  <option value="yes">Yes, this outlet charges tax</option>
+                  <option value="no">No, this outlet charges no tax</option>
+                </select>
+              </label>
+              <p className="muted">Applies to orders opened from now on. Orders already open keep what they were opened with.</p>
+            </>
+          )}
           <label className="cust"><span>Service mode</span>
             <select value={editing.serviceMode ?? ""} onChange={(e) => setEditing({ ...editing, serviceMode: (e.target.value || null) as Outlet["serviceMode"] })}>
               <option value="">Not chosen (follows the server's table list)</option>
@@ -146,7 +167,7 @@ export function Outlets() {
           <p className="muted">Customers see the address, phone and hours under Help &amp; support.</p>
           <div style={{ display: "flex", gap: 8 }}>
             <button className="primary" disabled={!editing.name.trim() || (isNew && !editing.id)} onClick={async () => {
-              const body = brandWide ? { name: editing.name, address: editing.address, phone: editing.phone, hours: editing.hours, franchiseId: editing.franchiseId, active: editing.active, serviceMode: editing.serviceMode, prepMinutes: editing.prepMinutes ?? null, latitude: editing.latitude ?? null, longitude: editing.longitude ?? null } : { name: editing.name, address: editing.address, phone: editing.phone, hours: editing.hours, serviceMode: editing.serviceMode, prepMinutes: editing.prepMinutes ?? null, latitude: editing.latitude ?? null, longitude: editing.longitude ?? null };
+              const body = brandWide ? { name: editing.name, address: editing.address, phone: editing.phone, hours: editing.hours, franchiseId: editing.franchiseId, active: editing.active, country: editing.country ?? DEFAULT_COUNTRY, gstRegNo: editing.gstRegNo?.trim() || null, uen: editing.uen?.trim() || null, gstOn: editing.gstOn ?? null, serviceMode: editing.serviceMode, prepMinutes: editing.prepMinutes ?? null, latitude: editing.latitude ?? null, longitude: editing.longitude ?? null } : { name: editing.name, address: editing.address, phone: editing.phone, hours: editing.hours, serviceMode: editing.serviceMode, prepMinutes: editing.prepMinutes ?? null, latitude: editing.latitude ?? null, longitude: editing.longitude ?? null };
               if (await save(`/api/outlets/${encodeURIComponent(editing.id)}`, body, "Saved.")) setEditing(null);
             }}>Save</button>
             <button className="secondary" onClick={() => setEditing(null)}>Cancel</button>
@@ -159,7 +180,7 @@ export function Outlets() {
           <h3>Charges</h3>
           <p className="muted">Off by default. Most quick-service shops have neither; turn them on only if you charge them.</p>
           <label className="inline"><input type="checkbox" checked={opts.serviceChargeOn} onChange={(e) => void setOption({ serviceChargeOn: e.target.checked })} /> Service charge ({Math.round(opts.serviceRate * 1000) / 10}%, dine-in only)</label>
-          <label className="inline" style={{ marginTop: 6 }}><input type="checkbox" checked={opts.gstOn} onChange={(e) => void setOption({ gstOn: e.target.checked })} /> Tax (GST {Math.round(opts.gstRate * 1000) / 10}%)</label>
+          <label className="inline" style={{ marginTop: 6 }}><input type="checkbox" checked={opts.gstOn} onChange={(e) => void setOption({ gstOn: e.target.checked })} /> Tax ({opts.taxName ?? "GST"} {Math.round(opts.gstRate * 1000) / 10}%, set by the outlet's country)</label>
           <p className="muted" style={{ margin: "10px 0 4px" }}>Promotions and points</p>
           <label className="inline"><input type="checkbox" checked={opts.stackable} onChange={(e) => void setOption({ stackable: e.target.checked })} /> A coupon and points can be used on the same order</label>
           <label className="inline" style={{ marginTop: 6 }}><input type="checkbox" checked={opts.pointsItemsEligibleOnly} onChange={(e) => void setOption({ pointsItemsEligibleOnly: e.target.checked })} /> Points pay only for items that earn points</label>

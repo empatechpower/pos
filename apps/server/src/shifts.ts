@@ -34,9 +34,12 @@ export interface ShiftReport {
 /** Everything one shift took, worked out from the events that carry its id (payments from the till, refunds from the server). */
 export async function shiftReport(db: Db, merchantId: string, s: ShiftRow): Promise<ShiftReport> {
   const pay = (await db.query(
-    `SELECT body->>'method' AS method, body->>'type' AS type, SUM((body->>'amountCents')::bigint) AS cents
-       FROM events WHERE merchant_id=$1 AND body->>'shiftId'=$2 AND body->>'type' IN ('PaymentRecorded','RefundRecorded')
-        AND (body->>'type'='RefundRecorded' OR (body->>'confirmed')::boolean IS TRUE)
+    // A payment taken as a named tender (debit, check, gift card...) is its own row; a refund is filed under the tender of the payment it gives back.
+    `SELECT COALESCE(CASE WHEN e.body->>'type'='PaymentRecorded' THEN e.body->>'tender'
+                          ELSE (SELECT p.body->>'tender' FROM events p WHERE p.merchant_id=e.merchant_id AND p.order_id=e.order_id AND p.body->>'type'='PaymentRecorded' AND p.body->>'paymentId'=e.body->>'paymentId' LIMIT 1) END,
+                     e.body->>'method') AS method, e.body->>'type' AS type, SUM((e.body->>'amountCents')::bigint) AS cents
+       FROM events e WHERE e.merchant_id=$1 AND e.body->>'shiftId'=$2 AND e.body->>'type' IN ('PaymentRecorded','RefundRecorded')
+        AND (e.body->>'type'='RefundRecorded' OR (e.body->>'confirmed')::boolean IS TRUE)
       GROUP BY 1,2`, [merchantId, s.id])).rows;
   const orders = Number((await db.query(`SELECT COUNT(DISTINCT order_id) AS n FROM events WHERE merchant_id=$1 AND body->>'shiftId'=$2 AND body->>'type'='PaymentRecorded'`, [merchantId, s.id])).rows[0].n);
   const methods = [...new Set(pay.map((r) => r.method as string))].sort();

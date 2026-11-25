@@ -139,7 +139,7 @@ export function OptionSheet({ name, description, photoUrl, baseCents, groups, in
           <div className="opt-foot kq">
             <div className="opt-tillprice"><b>{formatMoney(total)}</b>{missing && <small>Select {missing}</small>}</div>
             <button className="opt-cancel" onClick={onClose}>Cancel</button>
-            <button className="opt-cta" disabled={!r.ok} onClick={() => r.ok && onAdd(sel, note, 1)}>Add · {formatMoney(total)}</button>
+            <button className="opt-cta" disabled={!r.ok} onClick={() => r.ok && onAdd(sel, note, 1)}>{initial ? "Save" : "Add"} · {formatMoney(total)}</button>
           </div>
         ) : kiosk ? (
           <div className="opt-foot kq">

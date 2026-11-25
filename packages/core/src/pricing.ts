@@ -1,4 +1,5 @@
 import { type Cents, percentOf } from "./money.js";
+import { roundTotal, type RoundingRule } from "./taxPacks.js";
 
 /**
  * Price engine. Ported from the Bailey & Patch prototype rules (all in integer cents).
@@ -30,6 +31,11 @@ export interface PricingConfig {
   taxInclusive?: boolean;
   /** Tax groups beyond the default GST rate: id -> { name, rate }. A line names its group; a line with none uses `gstRate` as "GST". */
   taxGroups?: Record<string, { name: string; rate: number }>;
+  /** From the outlet's country tax pack (taxPacks.ts), never set by hand: the country, what the tax is called, how totals are rounded, and whether staff may take the tax off an order. */
+  country?: string;
+  taxName?: string;
+  rounding?: RoundingRule;
+  taxRemovable?: boolean;
 }
 
 export const DEFAULT_PRICING: PricingConfig = {
@@ -79,6 +85,8 @@ export interface PriceInput {
   /** A fee staff added to the whole order (already worked out in cents). It is charged like the service charge: after discounts, and taxed with it. */
   feeCents?: Cents;
   points?: PointsInput | null;
+  /** Staff took the tax off this order (Add/Remove Tax): none is added, and the tax inside tax-inclusive prices comes off the total. */
+  taxRemoved?: boolean;
   config?: PricingConfig;
 }
 
@@ -103,6 +111,10 @@ export interface PriceResult {
   taxIncluded: Cents;
   /** Every tax, per group, said plainly: charged on top (`added`, part of `gst`) or already inside the prices (`included`). */
   taxes: TaxLine[];
+  /** Tax taken off the order by staff: what would have been charged, and the part of it that was inside the prices and so came off the total. Only set when tax was removed. */
+  taxRemoved?: { cents: Cents; offTotal: Cents; name: string };
+  /** What rounding the total added (positive) or took off (negative), by the country's rule. Only set when it is not zero. */
+  rounding?: Cents;
 }
 
 export interface TaxLine {
@@ -149,7 +161,7 @@ function taxOf(lines: PricedLine[], subtotal: Cents, service: Cents, discount: C
     const base = Math.max(0, b.gross - d) + sv;
     const g = b.group === DEFAULT_TAX_GROUP ? undefined : cfg.taxGroups?.[b.group];
     const rate = g?.rate ?? cfg.gstRate;
-    const name = g?.name ?? "GST";
+    const name = g?.name ?? cfg.taxName ?? "GST";
     const cents = b.inclusive ? Math.round((base * rate) / (1 + rate)) : percentOf(base, rate);
     if (b.inclusive) included += cents;
     else added += cents;
@@ -162,7 +174,7 @@ function taxOf(lines: PricedLine[], subtotal: Cents, service: Cents, discount: C
 
 /** What a receipt or the checkout shows, in order, with the basis said plainly: "Taxes (included)" is inside the total, "GST" is added to it. */
 export interface TotalsLine {
-  key: "subtotal" | "coupon" | "discount" | "service" | "fee" | "tax_added" | "tax_included" | "deposit" | "points" | "total";
+  key: "subtotal" | "coupon" | "discount" | "service" | "fee" | "tax_added" | "tax_included" | "tax_removed" | "deposit" | "points" | "rounding" | "total";
   label: string;
   cents: Cents;
   /** Money taken off (a coupon or points). */
@@ -181,8 +193,10 @@ export function totalsLines(r: PriceResult): TotalsLine[] {
   if (r.service > 0) out.push({ key: "service", label: "Service charge", cents: r.service });
   if (r.fee > 0) out.push({ key: "fee", label: "Service fee", cents: r.fee });
   for (const t of r.taxes) out.push({ key: t.basis === "added" ? "tax_added" : "tax_included", label: t.basis === "added" ? t.name : `${t.name} (included)`, cents: t.cents, group: t.group, rate: t.rate });
+  if (r.taxRemoved) out.push({ key: "tax_removed", label: `${r.taxRemoved.name} removed`, cents: r.taxRemoved.offTotal, negative: true });
   if (r.bcrs > 0) out.push({ key: "deposit", label: "Deposit", cents: r.bcrs, taxable: false });
   if (r.pointsDiscount > 0) out.push({ key: "points", label: "Points", cents: r.pointsDiscount, negative: true });
+  if (r.rounding) out.push({ key: "rounding", label: "Rounding", cents: Math.abs(r.rounding), ...(r.rounding < 0 ? { negative: true } : {}) });
   out.push({ key: "total", label: "Total", cents: r.total });
   return out;
 }
@@ -217,12 +231,16 @@ export function priceOrder(input: PriceInput): PriceResult {
   // GST is never charged on the deposit. For points, it is fixed on the full items + service.
   const taxDiscount = points ? 0 : allDiscount;
   const fee = Math.max(0, Math.round(input.feeCents ?? 0));
-  const { added: gst, taxes, included: taxIncluded } = taxOf(lines, subtotal, service + fee, taxDiscount, cfg);
+  const worked = taxOf(lines, subtotal, service + fee, taxDiscount, cfg);
+  // Tax taken off by staff: nothing is added, and what was inside tax-inclusive prices comes off the total.
+  const removed = !!input.taxRemoved && cfg.gstOn && worked.added + worked.included > 0;
+  const { added: gst, taxes, included: taxIncluded } = removed ? { added: 0, taxes: [] as TaxLine[], included: 0 } : worked;
+  const taxOffTotal = removed ? worked.included : 0;
 
   let pointsUsed = 0;
   let pointsDiscount = 0;
   if (points) {
-    const taxPart = cfg.gstOn ? percentOf(subtotal + service, cfg.gstRate) : 0;
+    const taxPart = cfg.gstOn && !removed ? percentOf(subtotal + service, cfg.gstRate) : 0;
     const deductibleBase =
       (cfg.pointsDeduct.items === "eligible" ? subtotal - exempt : subtotal) +
       (cfg.pointsDeduct.service ? service : 0) +
@@ -239,7 +257,8 @@ export function priceOrder(input: PriceInput): PriceResult {
     }
   }
 
-  const total = Math.max(0, subtotal + service + fee + gst + bcrs - allDiscount - pointsDiscount);
+  const exact = Math.max(0, subtotal + service + fee + gst + bcrs - allDiscount - pointsDiscount - taxOffTotal);
+  const total = roundTotal(exact, cfg.rounding);
   return {
     subtotal,
     service,
@@ -255,6 +274,8 @@ export function priceOrder(input: PriceInput): PriceResult {
     couponIneligible: coupon ? !couponEligible : undefined,
     taxIncluded,
     taxes,
+    ...(removed ? { taxRemoved: { cents: worked.added + worked.included, offTotal: taxOffTotal, name: worked.taxes[0]?.name ?? cfg.taxName ?? "GST" } } : {}),
+    ...(total !== exact ? { rounding: total - exact } : {}),
   };
 }
 

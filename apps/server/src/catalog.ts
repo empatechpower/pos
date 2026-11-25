@@ -88,7 +88,7 @@ export class PgCatalogStore implements CatalogStore {
       q.query("SELECT version, default_pricebook_id FROM catalog_meta WHERE merchant_id=$1", [m]),
       q.query("SELECT id,name,category,sold_out,points_exempt,description,alt_name,options,image_version,bcrs,names,builder,tax_inclusive,tax_group,stock FROM products WHERE merchant_id=$1 ORDER BY sort", [m]),
       q.query("SELECT id,name,missing FROM pricebooks WHERE merchant_id=$1 ORDER BY name", [m]),
-      q.query("SELECT pricebook_id, product_id, price_cents FROM pricebook_prices WHERE merchant_id=$1", [m]),
+      q.query("SELECT pricebook_id, product_id, price_cents, member_price_cents FROM pricebook_prices WHERE merchant_id=$1", [m]),
       q.query("SELECT id,name,kind,service_charge,active,commission_rate_pct FROM channels WHERE merchant_id=$1 ORDER BY sort", [m]),
       q.query("SELECT pricebook_id, outlet_id, channel_id FROM pricebook_assignments WHERE merchant_id=$1", [m]),
       q.query("SELECT pricebook_id, product_id FROM pricebook_off WHERE merchant_id=$1", [m]),
@@ -105,9 +105,11 @@ export class PgCatalogStore implements CatalogStore {
     for (const r of offs.rows) offBy.set(r.pricebook_id as string, [...(offBy.get(r.pricebook_id as string) ?? []), r.product_id as string]);
     if (!meta.rows[0]) throw new Error("catalog not initialised");
     const pb = new Map<string, Record<string, number>>(books.rows.map((b) => [b.id as string, {}]));
+    const memberBy = new Map<string, Record<string, number>>();
     for (const r of prices.rows) {
       const book = pb.get(r.pricebook_id as string);
       if (book) book[r.product_id as string] = Number(r.price_cents);
+      if (book && r.member_price_cents !== null && r.member_price_cents !== undefined) { const mb = memberBy.get(r.pricebook_id as string) ?? {}; mb[r.product_id as string] = Number(r.member_price_cents); memberBy.set(r.pricebook_id as string, mb); }
     }
     return {
       version: Number(meta.rows[0].version),
@@ -131,7 +133,7 @@ export class PgCatalogStore implements CatalogStore {
           ...(p.stock ? { stock: p.stock as ProductStock } : {}),
         }),
       ),
-      pricebooks: books.rows.map((b) => ({ id: b.id, name: b.name, missing: b.missing, prices: pb.get(b.id)!, ...(offBy.get(b.id)?.length ? { off: offBy.get(b.id)! } : {}) })),
+      pricebooks: books.rows.map((b) => ({ id: b.id, name: b.name, missing: b.missing, prices: pb.get(b.id)!, ...(offBy.get(b.id)?.length ? { off: offBy.get(b.id)! } : {}), ...(memberBy.get(b.id) ? { memberPrices: memberBy.get(b.id)! } : {}) })),
       channels: channels.rows.map((c): Channel => ({ id: c.id, name: c.name, kind: c.kind as ChannelKind, serviceCharge: c.service_charge, active: c.active, ...(c.commission_rate_pct !== null && c.commission_rate_pct !== undefined ? { commission: { ratePct: Number(c.commission_rate_pct) } } : {}) })),
       assignments: assigns.rows.map((a): PricebookAssignment => ({ pricebookId: a.pricebook_id, outletId: a.outlet_id ?? undefined, channelId: a.channel_id ?? undefined })),
       ...(zoneRows.rows.length
@@ -212,7 +214,7 @@ export class PgCatalogStore implements CatalogStore {
    * Change many items in one pricebook in one step: a price in cents (0 is a real price), null to remove the price, and/or
    * on or off. Either everything is applied or nothing is.
    */
-  bulkUpdate(pricebookId: string, edits: { prices?: Record<string, number | null>; off?: Record<string, boolean> }) {
+  bulkUpdate(pricebookId: string, edits: { prices?: Record<string, number | null>; off?: Record<string, boolean>; memberPrices?: Record<string, number | null> }) {
     return this.change(async (c) => {
       const m = this.merchantId;
       if (!(await c.query("SELECT 1 FROM pricebooks WHERE merchant_id=$1 AND id=$2", [m, pricebookId])).rowCount) throw new ChangeError("pricebook not found");
@@ -232,6 +234,16 @@ export class PgCatalogStore implements CatalogStore {
           );
           priced++;
         }
+      }
+      // A member price sits on an item that has a price here, and is never above it (it only ever lowers what a member pays).
+      for (const [pid, cents] of Object.entries(edits.memberPrices ?? {})) {
+        if (!known.has(pid)) throw new ChangeError(`unknown item ${pid}`);
+        const row = await c.query("SELECT price_cents FROM pricebook_prices WHERE merchant_id=$1 AND pricebook_id=$2 AND product_id=$3", [m, pricebookId, pid]);
+        if (cents === null) { await c.query("UPDATE pricebook_prices SET member_price_cents=NULL WHERE merchant_id=$1 AND pricebook_id=$2 AND product_id=$3", [m, pricebookId, pid]); continue; }
+        if (!row.rows[0]) throw new ChangeError(`give ${pid} a price before a member price`);
+        if (!Number.isSafeInteger(cents) || cents < 0 || cents > Number(row.rows[0].price_cents)) throw new ChangeError(`the member price for ${pid} must be between 0 and its price`);
+        await c.query("UPDATE pricebook_prices SET member_price_cents=$4 WHERE merchant_id=$1 AND pricebook_id=$2 AND product_id=$3", [m, pricebookId, pid, cents]);
+        priced++;
       }
       for (const [pid, off] of Object.entries(edits.off ?? {})) {
         if (!known.has(pid)) throw new ChangeError(`unknown item ${pid}`);
@@ -256,7 +268,7 @@ export class PgCatalogStore implements CatalogStore {
       if (!src.rows[0]) throw new ChangeError("pricebook to copy not found");
       const id = shortId("pb");
       await c.query("INSERT INTO pricebooks (merchant_id,id,name,missing) VALUES ($1,$2,$3,$4)", [m, id, name, src.rows[0].missing]);
-      const prices = await c.query("INSERT INTO pricebook_prices (merchant_id,pricebook_id,product_id,price_cents) SELECT merchant_id, $3, product_id, price_cents FROM pricebook_prices WHERE merchant_id=$1 AND pricebook_id=$2", [m, from, id]);
+      const prices = await c.query("INSERT INTO pricebook_prices (merchant_id,pricebook_id,product_id,price_cents,member_price_cents) SELECT merchant_id, $3, product_id, price_cents, member_price_cents FROM pricebook_prices WHERE merchant_id=$1 AND pricebook_id=$2", [m, from, id]);
       await c.query("INSERT INTO pricebook_off (merchant_id,pricebook_id,product_id) SELECT merchant_id, $3, product_id FROM pricebook_off WHERE merchant_id=$1 AND pricebook_id=$2", [m, from, id]);
       // The channel to copy: the one that uses the source book, else a dine-in channel, else any.
       const srcChannel = (

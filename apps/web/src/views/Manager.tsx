@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { confirmedPaid, formatMoney, isFullyPaid, orderTotals, type BusinessConfig, type Catalog, type OrderState } from "@pos/core";
+import { confirmedPaid, formatMoney, isFullyPaid, orderTotals, type BusinessConfig, type Catalog, type OrderState, paymentKey, paymentLabel } from "@pos/core";
 import { queryParams } from "../nav";
 import { staffFetch, useStaff } from "../auth";
 import { useOrders } from "../hooks";
@@ -14,7 +14,7 @@ const timeOf = (ms: number) => new Date(ms).toLocaleTimeString("en-GB", { hour: 
 const dateOf = (ms: number) => new Date(ms).toLocaleDateString("en-GB", { day: "2-digit", month: "short", timeZone: TZ });
 const STAGE: Record<string, string> = { open: "New", preparing: "Preparing", ready: "Ready", completed: "Collected", cancelled: "Cancelled" };
 const METHOD: Record<string, string> = { cash: "Cash", card: "Card", paynow: "PayNow", credit: "Credit" };
-const methodName = (m: string) => METHOD[m] ?? m;
+const methodName = (m: string) => METHOD[m] ?? paymentLabel(m);
 const newKey = () => (globalThis.crypto?.randomUUID ? globalThis.crypto.randomUUID() : `${Date.now()}-${Math.random()}`);
 
 /** Staff page for the shop: every order and payment, and the members' points and prepaid credit. No till. */
@@ -70,7 +70,7 @@ function Transactions({ config }: { config: BusinessConfig }) {
   const unpaid = live.filter((o) => !isFullyPaid(o, config));
   const owed = unpaid.reduce((n, o) => n + Math.max(0, totalOf(o) - confirmedPaid(o)), 0);
   const byMethod = new Map<string, number>();
-  for (const o of live) for (const p of o.payments) if (p.confirmed) byMethod.set(p.method, (byMethod.get(p.method) ?? 0) + p.amountCents);
+  for (const o of live) for (const p of o.payments) if (p.confirmed) byMethod.set(paymentKey(p), (byMethod.get(paymentKey(p)) ?? 0) + p.amountCents);
   const cancelled = shown.length - live.length;
 
   const printState = usePrintStatus(shown.map((o) => o.orderId), true);
@@ -106,7 +106,7 @@ function Transactions({ config }: { config: BusinessConfig }) {
         const total = totalOf(o);
         const paid = confirmedPaid(o);
         const state = o.stage === "cancelled" ? "Cancelled" : isFullyPaid(o, config) ? "Paid" : paid > 0 ? `Part paid ${formatMoney(paid)}` : "Unpaid";
-        const methods = [...new Set(o.payments.filter((p) => p.confirmed).map((p) => methodName(p.method)))].join(" + ");
+        const methods = [...new Set(o.payments.filter((p) => p.confirmed).map((p) => methodName(paymentKey(p))))].join(" + ");
         const items = o.lines.filter((l) => l.qty > 0).reduce((n, l) => n + l.qty, 0);
         return (
           <div className="tab" key={o.orderId}>

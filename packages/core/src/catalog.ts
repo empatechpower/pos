@@ -61,6 +61,8 @@ export interface Pricebook {
   missing: "show" | "hide";
   /** Products switched off in this book: hidden from online ordering, greyed out on the till. They keep their price here. A price of 0 is a real price: that item is sellable. */
   off?: string[];
+  /** productId → what a member pays here, for items that have a member price. It only ever lowers the price. */
+  memberPrices?: Record<string, Cents>;
 }
 
 export type Fulfilment = "dine_in" | "takeaway" | "delivery";
@@ -161,6 +163,8 @@ export function pricebookChain(catalog: Catalog, ctx: PriceContext): Pricebook[]
 export interface ResolvedPrice {
   priceCents: Cents;
   pricebookId: string;
+  /** What a member pays, when the item has a member price below the price everyone pays right now (a promotion can already be lower). */
+  memberPriceCents?: Cents;
   /** Set when a promotional override set this price. */
   overrideId?: string;
 }
@@ -176,7 +180,9 @@ export function resolvePrice(catalog: Catalog, productId: string, ctx: PriceCont
     if (o.productId !== productId || (o.pricebookId && o.pricebookId !== book.id) || at < o.startsAt || at >= o.endsAt) continue;
     if (!promo || o.startsAt > promo.startsAt) promo = o;
   }
-  return promo ? { priceCents: promo.priceCents, pricebookId: book.id, overrideId: promo.id } : { priceCents: book.prices[productId]!, pricebookId: book.id };
+  const open = promo ? promo.priceCents : book.prices[productId]!;
+  const mp = book.memberPrices?.[productId];
+  return { priceCents: open, pricebookId: book.id, ...(promo ? { overrideId: promo.id } : {}), ...(mp !== undefined && mp < open ? { memberPriceCents: mp } : {}) };
 }
 
 /** Products shown on the menu but not orderable here: no price in the winning book, and the book says "show". */
@@ -197,6 +203,8 @@ export function greyedFor(catalog: Catalog, ctx: PriceContext): Product[] {
 export interface MenuEntry extends Product {
   priceCents: Cents;
   pricebookId: string;
+  /** What a member pays here, when that is less than the price. */
+  memberPriceCents?: Cents;
 }
 
 /** Everything sellable in this context, with its price. */
@@ -208,6 +216,9 @@ export function menuFor(catalog: Catalog, ctx: PriceContext): MenuEntry[] {
   }
   return out;
 }
+
+/** What one unit of a menu item costs before options: the member price for a member when there is one, else the price everyone pays. */
+export const basePriceFor = (m: { priceCents: Cents; memberPriceCents?: Cents }, member: boolean): Cents => (member && m.memberPriceCents !== undefined ? m.memberPriceCents : m.priceCents);
 
 export const channelById = (catalog: Catalog, id: string): Channel | undefined => catalog.channels.find((c) => c.id === id);
 

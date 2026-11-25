@@ -9,6 +9,8 @@ export interface BagLine {
   options: ChosenOption[];
   /** One unit, options included. */
   unitCents: number;
+  /** Priced at the item's member price, because a member is attached to the order. */
+  memberPriced?: boolean;
   /** A price set by hand for this line (the list price stays in `unitCents`), and discounts given on it. */
   override?: { unitCents: number; reason: string; approver?: { id: string; name: string } };
   discounts?: Array<{ id: string; kind: "percent" | "amount"; value: number; reason: string; approver?: { id: string; name: string }; existing?: boolean }>;
@@ -33,7 +35,11 @@ export type BillDiscount = { id: string; kind: "percent" | "amount"; value: numb
 export const effUnit = (b: BagLine) => b.override?.unitCents ?? b.unitCents;
 
 /** An order put aside ("held") so another can be taken; it comes back exactly as it was. */
+/** The tax taken off an order at the till (Add/Remove Tax), with why. `existing` = already written to the order. */
+export interface TaxOff { reason: string; existing?: boolean }
+
 export interface HeldOrder {
+  taxOff?: TaxOff | null;
   id: string;
   savedAt: number;
   bag: BagLine[];

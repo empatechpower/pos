@@ -2,6 +2,7 @@ import type { Cents } from "./money.js";
 import type { BusinessConfig } from "./config.js";
 import { confirmedPaid, orderTotals, type OrderState } from "./events.js";
 import { staffDiscountCents } from "./discounts.js";
+import { paymentKey } from "./tenders.js";
 
 /** Singapore day and hour of a timestamp. Reports are read in the outlet's own time. */
 const TZ = "Asia/Singapore";
@@ -62,8 +63,9 @@ export function summarize(all: readonly OrderState[], config: BusinessConfig): S
     if (paid < t.total) s.unpaidOrders++;
     for (const p of o.payments) {
       if (!p.confirmed) continue;
-      const x = pay.get(p.method) ?? { cents: 0, count: 0 };
-      x.cents += p.amountCents; x.count++; pay.set(p.method, x);
+      const k = paymentKey(p); // a named tender (debit, check...) is its own row; anything else goes by its money kind
+      const x = pay.get(k) ?? { cents: 0, count: 0 };
+      x.cents += p.amountCents; x.count++; pay.set(k, x);
     }
   }
   s.discountsCents = s.couponCents + s.manualCents + s.pointsCents;
@@ -162,7 +164,7 @@ export function staffSales(all: readonly OrderState[], config: BusinessConfig, s
       const r = row(p.byName ?? (p.shiftId ? shiftStaff(p.shiftId) : undefined) ?? "Not recorded");
       r.payments++;
       r.takenCents += p.amountCents;
-      r.byMethod[p.method] = (r.byMethod[p.method] ?? 0) + p.amountCents;
+      r.byMethod[paymentKey(p)] = (r.byMethod[paymentKey(p)] ?? 0) + p.amountCents;
       paidBy.add(r.name);
     }
     for (const n of paidBy) row(n).orders++;

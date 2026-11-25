@@ -1,5 +1,5 @@
 import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
-import { COURSE_NAMES, formatMoney, reduceOrder, type OrderEvent } from "@pos/core";
+import { COURSE_NAMES, formatMoney, recordedTender, reduceOrder, type OrderEvent } from "@pos/core";
 import { audit, type Permission } from "./auth.js";
 import type { Db } from "./db/pool.js";
 import type { EventStore } from "./store.js";
@@ -19,13 +19,16 @@ export function eventTrail(events: readonly OrderEvent[], deviceName: (id: strin
       case "OrderOpened": add("opened", x.source === "online" ? "Order placed online" : "Order opened", x.source === "online" ? "Customer" : dev); break;
       case "ItemAdded": add("item", `Added ${x.qty} × ${x.name}${x.channelName ? ` (${x.channelName})` : ""}${x.hold ? " · held" : ""}`); break;
       case "ItemQtySet": add("item", x.qty === 0 ? "Removed an item" : `Changed an item's quantity to ${x.qty}`); break;
-      case "PaymentRecorded": add("payment", `Payment ${formatMoney(x.amountCents)} by ${METHOD[x.method] ?? x.method}${x.confirmed ? "" : " (waiting for confirmation)"}${x.note ? ` · ${x.note}` : ""}`); break;
+      case "PaymentRecorded": add("payment", `Payment ${formatMoney(x.amountCents)} by ${recordedTender(x.tender)?.label.toLowerCase() ?? METHOD[x.method] ?? x.method}${x.confirmed ? "" : " (waiting for confirmation)"}${x.note ? ` · ${x.note}` : ""}`); break;
       case "PaymentConfirmed": add("payment", "Payment confirmed"); break;
       case "RefundRecorded": add("refund", `Refunded ${formatMoney(x.amountCents)} ${METHOD[x.method] ?? x.method} · ${x.reason}`, `${x.approvedByName} (approved)`); break;
       case "OrderVoided": add("void", `Order voided · ${x.reason}`, `${x.approvedByName} (approved)`); break;
       case "DiscountApplied": add("discount", `Discount ${x.kind === "percent" ? `${x.value}%` : formatMoney(x.value)} on ${x.scope === "bill" ? "the bill" : "an item"} · ${x.reason}`, `${x.byName ?? dev}${x.approvedByName ? `, approved by ${x.approvedByName}` : ""}`); break;
       case "DiscountRemoved": add("discount", "Discount removed", x.byName ?? dev); break;
       case "LinePriceOverridden": add("price", `Price set to ${formatMoney(x.unitCents)} · ${x.reason}`, `${x.byName ?? dev}${x.approvedByName ? `, approved by ${x.approvedByName}` : ""}`); break;
+      case "TaxRemovalSet": add("tax", x.removed ? `Tax removed · ${x.reason}` : "Tax put back", `${x.byName ?? dev}${x.approvedByName ? `, approved by ${x.approvedByName}` : ""}`); break;
+      case "LinesReady": add("kitchen", `Kitchen finished ${x.lineIds?.length ?? 0} item${x.lineIds?.length === 1 ? "" : "s"}${x.station ? ` · ${x.station}` : ""}`, x.byName ?? dev); break;
+      case "LinesServed": add("kitchen", `Served ${x.lineIds?.length ?? 0} item${x.lineIds?.length === 1 ? "" : "s"}`, x.byName ?? dev); break;
       case "OrderNoted": add("note", x.note ? `Order note: ${x.note}` : "Order note removed", x.byName ?? dev); break;
       case "StageSet": add("stage", x.stage === "cancelled" ? "Order cancelled" : `Marked ${x.stage}`); break;
       case "OrderAccepted": add("stage", "Order accepted"); break;

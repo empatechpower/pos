@@ -29,6 +29,8 @@ export const SHOP_DEVICE = "shop";
 interface ShopDeps {
   db: Db;
   config: BusinessConfig;
+  /** The rules as one outlet trades by them (its tax). */
+  configFor?: (outletId: string | null | undefined) => BusinessConfig;
   store: EventStore;
   catalog: CatalogStore;
   /** Present with a database: serves item photos. */
@@ -115,6 +117,7 @@ const clean = (s: unknown, max: number): string | undefined => {
 
 export function registerShop(app: FastifyInstance, d: ShopDeps) {
   const merchantId = d.config.businessId;
+  const cfgOf = (outletId: string | null | undefined): BusinessConfig => d.configFor?.(outletId) ?? d.config;
   const integ: Integrations = d.integrations ?? { publicUrl: "" };
   const showCodes = process.env.NODE_ENV !== "production";
   // Ordering is open to anyone, so it is limited. Many customers share one public address (the venue's Wi-Fi), so a signed-in member
@@ -704,7 +707,7 @@ export function registerShop(app: FastifyInstance, d: ShopDeps) {
     // A typed promo code is judged here, again, whatever the app showed: on the items subtotal, before service charge, tax and deposits.
     let promo: Extract<PromoVerdict, { ok: true }> | null = null;
     if (typeof b.promoCode === "string" && b.promoCode.trim()) {
-      const base = quoteOrder(cat, d.config, { outletId: outlet.id, channelId: b.channelId }, items, null, null);
+      const base = quoteOrder(cat, cfgOf(outlet.id), { outletId: outlet.id, channelId: b.channelId }, items, null, null);
       if (!base.ok) return reply.code(400).send({ error: base.error, productId: base.productId, ...(base.validation ? { validation: base.validation } : {}) });
       const verdict = await judgePromo(d.db, merchantId, b.promoCode, { now: nowMs, subtotalCents: base.priced.subtotal, memberId: member?.id ?? null });
       if (!verdict.ok) return reply.code(400).send({ error: "promo_rejected", reason: verdict.reason, ...(verdict.shortfallCents !== undefined ? { shortfallCents: verdict.shortfallCents, minSpendCents: verdict.minSpendCents } : {}) });
@@ -713,7 +716,7 @@ export function registerShop(app: FastifyInstance, d: ShopDeps) {
       promo = verdict;
     }
     const discountIn = coupon || promo ? { amountCents: (coupon?.amountCents ?? 0) + (promo?.discountCents ?? 0), minSpendCents: coupon?.minSpendCents ?? 0 } : null;
-    const quote = quoteOrder(cat, d.config, { outletId: outlet.id, channelId: b.channelId }, items, pointsAsk, discountIn);
+    const quote = quoteOrder(cat, cfgOf(outlet.id), { outletId: outlet.id, channelId: b.channelId }, items, pointsAsk, discountIn);
     if (!quote.ok) return reply.code(400).send({ error: quote.error, productId: quote.productId, ...(quote.validation ? { validation: quote.validation } : {}) });
     // Stock: the whole order is covered or none of it is taken (never a partial deduction). The stock of each ingredient and linked part is counted once.
     const short = shortfalls(orderConsumption(cat, quote.lines), stockNow);
@@ -803,6 +806,7 @@ export function registerShop(app: FastifyInstance, d: ShopDeps) {
         channelId: quote.channel.id,
         channelName: quote.channel.name,
         serviceCharge: quote.channel.serviceCharge,
+        taxOn: cfgOf(outlet.id).pricing.gstOn,
         source: "online",
         customerName: clean(b.customerName, 40) ?? member?.name ?? undefined,
         customerPhone: phone ?? member?.phone ?? undefined,
@@ -928,7 +932,7 @@ export function registerShop(app: FastifyInstance, d: ShopDeps) {
     if (!p) return { state: "unavailable" as const };
     const a = availabilityOf(p, v.wins.windows, v.nowMs, v.wins.timeZone);
     if (a.state === "AVAILABLE_LATER") return { state: "available_later" as const, ...(a.nextOpeningAt !== undefined ? { nextOpeningAt: a.nextOpeningAt } : {}) };
-    const q = quoteOrder(v.cat, d.config, { outletId: v.outlet.id, channelId }, [{ productId: l.productId, qty: l.qty, note: l.note, build: l.build, options: l.options }]);
+    const q = quoteOrder(v.cat, cfgOf(v.outlet.id), { outletId: v.outlet.id, channelId }, [{ productId: l.productId, qty: l.qty, note: l.note, build: l.build, options: l.options }]);
     if (!q.ok) return { state: q.error === "build_invalid" ? ("build_invalid" as const) : ("unavailable" as const), error: q.error, ...(q.validation ? { validation: q.validation } : {}) };
     const line = q.lines[0]!;
     return { state: "ok" as const, unitCents: line.unitCents, lineCents: line.unitCents * line.qty, selections: line.build?.selections, options: line.options };
@@ -944,7 +948,7 @@ export function registerShop(app: FastifyInstance, d: ShopDeps) {
     const lines = await loadCart(owner, v.outlet.id);
     const judged = lines.map((l) => ({ lineId: l.lineId, productId: l.productId, qty: l.qty, note: l.note, build: l.build, options: l.options, storedBuild: l.snapshot, ...judgeLine(v, channelId, l) }));
     const good = lines.filter((_, i) => judged[i]!.state === "ok");
-    const q = good.length ? quoteOrder(v.cat, d.config, { outletId: v.outlet.id, channelId }, good.map((l) => ({ productId: l.productId, qty: l.qty, note: l.note, build: l.build, options: l.options }))) : null;
+    const q = good.length ? quoteOrder(v.cat, cfgOf(v.outlet.id), { outletId: v.outlet.id, channelId }, good.map((l) => ({ productId: l.productId, qty: l.qty, note: l.note, build: l.build, options: l.options }))) : null;
     const others = ((await d.db.query("SELECT outlet_id, lines FROM shop_carts WHERE merchant_id=$1 AND owner=$2 AND outlet_id <> $3", [merchantId, owner, v.outlet.id])).rows as Array<{ outlet_id: string; lines: CartLine[] }>).filter((r) => r.lines.length).map((r) => ({ outletId: r.outlet_id, lineCount: r.lines.length }));
     return {
       outletId: v.outlet.id, channelId, lines: judged,
@@ -1075,7 +1079,7 @@ export function registerShop(app: FastifyInstance, d: ShopDeps) {
     const v = await outletView(b.outletId);
     const member = members ? await members.fromToken(bearer(req)) : null;
     const items = b.items.map((i) => ({ productId: String(i?.productId ?? ""), qty: Number(i?.qty), note: cleanNote(i?.note), build: cleanBuild(i?.build), options: (Array.isArray(i?.options) ? i.options.slice(0, 40) : []).map((o) => ({ groupId: String(o?.groupId ?? ""), choiceId: String(o?.choiceId ?? ""), qty: o?.qty === undefined ? undefined : Number(o.qty) })) }));
-    const base = quoteOrder(v.cat, d.config, { outletId: v.outlet.id, channelId: defaultChannel(v.cat, b.channelId) }, items, null, null);
+    const base = quoteOrder(v.cat, cfgOf(v.outlet.id), { outletId: v.outlet.id, channelId: defaultChannel(v.cat, b.channelId) }, items, null, null);
     if (!base.ok) return reply.code(400).send({ error: base.error, productId: base.productId });
     const verdict = await judgePromo(d.db, merchantId, b.code, { now: v.nowMs, subtotalCents: base.priced.subtotal, memberId: member?.id ?? null });
     if (!verdict.ok) return { ok: false, reason: verdict.reason, basis: PROMO_BASIS, ...(verdict.shortfallCents !== undefined ? { minSpendCents: verdict.minSpendCents, shortfallCents: verdict.shortfallCents } : {}) };

@@ -39,7 +39,7 @@ export async function refreshReference(): Promise<{ config: BusinessConfig; cata
   try {
     const cached = cachedCatalog();
     const [c, k] = await Promise.all([
-      fetch("/api/config"),
+      fetch("/api/config", { headers: deviceHeader() }), // with the device's token, so a till gets its own outlet's tax
       fetch("/api/catalog", { headers: cached ? { "if-none-match": `"v${cached.version}"` } : {} }),
     ]);
     if (!c.ok) return null;

@@ -175,7 +175,7 @@ export function App() {
         ) : !catalog.channels.some((c) => c.active) ? (
           <div className="empty"><h2>No channels are switched on</h2><p>A manager needs to switch on at least one channel under Prices.</p></div>
         ) : route === "kitchen" ? (
-          <Kitchen config={config} />
+          <Kitchen config={config} catalog={catalog} />
         ) : route === "online" ? (
           <Online config={config} online={connected} />
         ) : route === "printers" ? (
@@ -183,7 +183,7 @@ export function App() {
         ) : route === "dashboard" ? (
           <Dashboard config={config} />
         ) : route === "settings" ? (
-          <Settings />
+          <Settings catalog={catalog} />
         ) : route === "manager" ? (
           <Manager config={config} catalog={catalog} />
         ) : route === "tabs" ? (

@@ -10,7 +10,14 @@ export interface Outlet { id: string; name: string; franchiseId: string | null; 
   prepMinutes: number | null;
   /** Where the outlet is. Both or neither; with them, customers can sort outlets by distance. */
   latitude: number | null;
-  longitude: number | null }
+  longitude: number | null;
+  /** The country the outlet is in (ISO code). It chooses the tax pack; nothing overrides it. */
+  country: string;
+  /** GST registration number and business number (UEN), printed on the receipt. With a GST number the receipt is a tax invoice. */
+  gstRegNo: string | null;
+  uen: string | null;
+  /** Whether this outlet charges tax; null = it follows the brand's switch. */
+  gstOn: boolean | null }
 
 const ID = /^[A-Za-z0-9][A-Za-z0-9 _.-]{0,39}$/;
 export const validId = (s: unknown): s is string => typeof s === "string" && ID.test(s);
@@ -22,6 +29,8 @@ const toOutlet = (r: Record<string, unknown>): Outlet => ({
   prepMinutes: r.prep_minutes === null || r.prep_minutes === undefined ? null : Number(r.prep_minutes),
   latitude: r.latitude === null || r.latitude === undefined ? null : Number(r.latitude),
   longitude: r.longitude === null || r.longitude === undefined ? null : Number(r.longitude),
+  country: typeof r.country === "string" && r.country ? r.country : "SG",
+  gstRegNo: (r.gst_reg_no as string | null) ?? null, uen: (r.uen as string | null) ?? null, gstOn: typeof r.gst_on === "boolean" ? r.gst_on : null,
 });
 
 /** The outlet this server has always run becomes the first outlet. Safe to call at every start. */
@@ -47,11 +56,11 @@ export async function upsertFranchise(db: Db, merchantId: string, f: { id: strin
 }
 
 /** A franchise that does not exist is refused by the foreign key; callers check first for a friendly message. */
-export async function upsertOutlet(db: Db, merchantId: string, o: { id: string; name: string; franchiseId?: string | null; address?: string | null; phone?: string | null; hours?: string | null; active?: boolean; serviceMode?: "qsr" | "tsr" | null; prepMinutes?: number | null; latitude?: number | null; longitude?: number | null }): Promise<void> {
+export async function upsertOutlet(db: Db, merchantId: string, o: { id: string; name: string; franchiseId?: string | null; address?: string | null; phone?: string | null; hours?: string | null; active?: boolean; serviceMode?: "qsr" | "tsr" | null; prepMinutes?: number | null; latitude?: number | null; longitude?: number | null; country?: string; gstRegNo?: string | null; uen?: string | null; gstOn?: boolean | null }): Promise<void> {
   await db.query(
-    `INSERT INTO outlets (merchant_id, id, name, franchise_id, address, phone, hours, active, service_mode, prep_minutes, latitude, longitude) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12)
-     ON CONFLICT (merchant_id, id) DO UPDATE SET name=EXCLUDED.name, franchise_id=EXCLUDED.franchise_id, address=EXCLUDED.address, phone=EXCLUDED.phone, hours=EXCLUDED.hours, active=EXCLUDED.active, service_mode=COALESCE(EXCLUDED.service_mode, outlets.service_mode), prep_minutes=EXCLUDED.prep_minutes, latitude=EXCLUDED.latitude, longitude=EXCLUDED.longitude`,
-    [merchantId, o.id, o.name, o.franchiseId ?? null, o.address ?? null, o.phone ?? null, o.hours ?? null, o.active ?? true, o.serviceMode ?? null, o.prepMinutes ?? null, o.latitude ?? null, o.longitude ?? null],
+    `INSERT INTO outlets (merchant_id, id, name, franchise_id, address, phone, hours, active, service_mode, prep_minutes, latitude, longitude, country, gst_reg_no, uen, gst_on) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16)
+     ON CONFLICT (merchant_id, id) DO UPDATE SET name=EXCLUDED.name, franchise_id=EXCLUDED.franchise_id, address=EXCLUDED.address, phone=EXCLUDED.phone, hours=EXCLUDED.hours, active=EXCLUDED.active, service_mode=COALESCE(EXCLUDED.service_mode, outlets.service_mode), prep_minutes=EXCLUDED.prep_minutes, latitude=EXCLUDED.latitude, longitude=EXCLUDED.longitude, country=EXCLUDED.country, gst_reg_no=EXCLUDED.gst_reg_no, uen=EXCLUDED.uen, gst_on=EXCLUDED.gst_on`,
+    [merchantId, o.id, o.name, o.franchiseId ?? null, o.address ?? null, o.phone ?? null, o.hours ?? null, o.active ?? true, o.serviceMode ?? null, o.prepMinutes ?? null, o.latitude ?? null, o.longitude ?? null, o.country ?? "SG", o.gstRegNo ?? null, o.uen ?? null, o.gstOn ?? null],
   );
 }
 

@@ -12,13 +12,29 @@ export type LayoutCell = { k: "item"; id: string } | { k: "category"; name: stri
 export interface MenuLayout { pages: Array<{ name: string; cells: LayoutCell[] }> }
 export interface TillSettings {
   actions: { order: string[]; hidden: string[] };
-  tenders: { order: string[]; hidden: string[] };
+  tenders: { order: string[]; hidden: string[]; /** Optional tenders (debit, check, gift card...) a manager switched on. */ shown?: string[] };
   dashboard: boolean;
   /** How a ticket line is removed by sliding it: show a bin button to tap, or remove it at once. */
   lineRemove: "bin" | "swipe";
   layout: MenuLayout | null;
+  /** Kitchen stations (hot kitchen, bar...): each makes the items of its categories. The kitchen display can show one station's work. */
+  stations?: KitchenStation[];
 }
+export interface KitchenStation { id: string; name: string; categories: string[] }
 export const PAGE_CELLS = 25;
+
+/** Up to 8 stations, each a name and the menu categories it makes. Null when the shape is wrong. */
+export function cleanStations(v: unknown): KitchenStation[] | null {
+  if (!Array.isArray(v) || v.length > 8) return null;
+  const out: KitchenStation[] = [];
+  for (const x of v as Array<Partial<KitchenStation>>) {
+    const id = typeof x?.id === "string" && /^[a-z0-9_-]{1,30}$/i.test(x.id) ? x.id : null;
+    const name = typeof x?.name === "string" ? x.name.trim().slice(0, 30) : "";
+    if (!id || !name || out.some((o) => o.id === id) || !Array.isArray(x.categories) || x.categories.length > 80 || !x.categories.every((c) => typeof c === "string" && c.length > 0 && c.length <= 60)) return null;
+    out.push({ id, name, categories: [...new Set(x.categories)] });
+  }
+  return out;
+}
 export const DEFAULT_TILL: TillSettings = { actions: { order: [], hidden: [] }, tenders: { order: [], hidden: [] }, dashboard: true, lineRemove: "bin", layout: null };
 
 const ids = (v: unknown, max = 40): string[] | null => (Array.isArray(v) && v.length <= max && v.every((x) => typeof x === "string" && /^[a-z0-9_-]{1,30}$/i.test(x)) ? [...new Set(v as string[])] : null);
@@ -50,10 +66,11 @@ export async function loadTill(db: Db, merchantId: string): Promise<TillSettings
   const v = (r.rows[0]?.value ?? {}) as Partial<TillSettings>;
   return {
     actions: { order: ids(v.actions?.order) ?? [], hidden: ids(v.actions?.hidden) ?? [] },
-    tenders: { order: ids(v.tenders?.order, 12) ?? [], hidden: ids(v.tenders?.hidden, 12) ?? [] },
+    tenders: { order: ids(v.tenders?.order, 12) ?? [], hidden: ids(v.tenders?.hidden, 12) ?? [], shown: ids((v.tenders as { shown?: unknown } | undefined)?.shown, 12) ?? [] },
     dashboard: v.dashboard !== false,
     lineRemove: v.lineRemove === "swipe" ? "swipe" : "bin",
     layout: v.layout ? cleanLayout(v.layout) : null,
+    stations: cleanStations(v.stations ?? []) ?? [],
   };
 }
 
@@ -62,9 +79,10 @@ export function mergeTill(cur: TillSettings, b: Partial<Record<keyof TillSetting
   const next = { ...cur };
   const part = (v: unknown, max: number) => { const o = (v ?? {}) as { order?: unknown; hidden?: unknown }; const order = ids(o.order, max), hidden = ids(o.hidden, max); return order && hidden ? { order, hidden } : null; };
   if (b.actions !== undefined) { const a = part(b.actions, 40); if (!a) return null; next.actions = a; }
-  if (b.tenders !== undefined) { const t = part(b.tenders, 12); if (!t) return null; next.tenders = t; }
+  if (b.tenders !== undefined) { const t = part(b.tenders, 12); if (!t) return null; const shown = ids((b.tenders as { shown?: unknown }).shown ?? [], 12); if (!shown) return null; next.tenders = { ...t, shown }; }
   if (b.dashboard !== undefined) next.dashboard = !!b.dashboard;
   if (b.lineRemove !== undefined) { if (b.lineRemove !== "bin" && b.lineRemove !== "swipe") return null; next.lineRemove = b.lineRemove; }
+  if (b.stations !== undefined) { const st = cleanStations(b.stations); if (!st) return null; next.stations = st; }
   if (b.layout !== undefined) { if (b.layout === null) next.layout = null; else { const l = cleanLayout(b.layout); if (!l) return null; next.layout = l; } }
   return next;
 }

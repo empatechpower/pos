@@ -1,8 +1,10 @@
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
+import type { Catalog } from "@pos/core";
+import { deviceRole, setDeviceRole } from "../device";
 import { go } from "../nav";
 import { staffFetch, useStaff } from "../auth";
 import { TEXT_SCALE, setPref, usePrefs } from "../prefs";
-import { ACTION_POOL, TENDER_POOL, arrangeAll, loadTillSettings, saveTill, useTillSettings, type TillSettings } from "../till/tillSettings";
+import { ACTION_POOL, TENDER_POOL, arrangeAll, isHidden, loadTillSettings, saveTill, useTillSettings, type ArrangePref, type KitchenStation, type TillSettings } from "../till/tillSettings";
 import { appVersion, checkForUpdate, useUpdatePending } from "../pwaUpdate";
 import { FloorPanel } from "./FloorPanel";
 import { ShiftsPanel } from "./ShiftsPanel";
@@ -45,17 +47,22 @@ function PhoneSignIn() {
   );
 }
 
-function Arrange({ title, help, pool, pref, onChange }: { title: string; help: string; pool: Array<{ id: string; label: string; note?: string }>; pref: TillSettings["actions"]; onChange: (p: TillSettings["actions"]) => void }) {
+function Arrange({ title, help, pool, pref, onChange }: { title: string; help: string; pool: Array<{ id: string; label: string; note?: string; optional?: boolean }>; pref: ArrangePref; onChange: (p: ArrangePref) => void }) {
   const rows = arrangeAll(pool, pref);
-  const move = (i: number, d: number) => { const ids = rows.map((r) => r.id); const j = i + d; if (j < 0 || j >= ids.length) return; [ids[i], ids[j]] = [ids[j]!, ids[i]!]; onChange({ order: ids, hidden: pref.hidden }); };
-  const toggle = (id: string) => onChange({ order: rows.map((r) => r.id), hidden: pref.hidden.includes(id) ? pref.hidden.filter((x) => x !== id) : [...pref.hidden, id] });
+  const move = (i: number, d: number) => { const ids = rows.map((r) => r.id); const j = i + d; if (j < 0 || j >= ids.length) return; [ids[i], ids[j]] = [ids[j]!, ids[i]!]; onChange({ ...pref, order: ids }); };
+  // An optional item (a tender most shops do not use) is off until switched on; the rest are on until hidden.
+  const toggle = (r: { id: string; optional?: boolean }) => {
+    const order = rows.map((x) => x.id), shown = pref.shown ?? [];
+    if (r.optional) onChange({ ...pref, order, hidden: pref.hidden.filter((x) => x !== r.id), shown: isHidden(r, pref) ? [...shown.filter((x) => x !== r.id), r.id] : shown.filter((x) => x !== r.id) });
+    else onChange({ ...pref, order, hidden: pref.hidden.includes(r.id) ? pref.hidden.filter((x) => x !== r.id) : [...pref.hidden, r.id] });
+  };
   return (
     <section className="e2e-card" style={{ marginTop: 16 }}>
       <h3>{title}</h3>
       <p className="muted">{help}</p>
       {rows.map((r, i) => (
         <div className="arr-row" key={r.id}>
-          <label><input type="checkbox" aria-label={`Show ${r.label}`} checked={!pref.hidden.includes(r.id)} onChange={() => toggle(r.id)} /> {r.label}{r.note ? <span className="muted"> · {r.note}</span> : null}</label>
+          <label><input type="checkbox" aria-label={`Show ${r.label}`} checked={!isHidden(r, pref)} onChange={() => toggle(r)} /> {r.label}{r.note ? <span className="muted"> · {r.note}</span> : null}</label>
           <button className="secondary sm" aria-label={`Move ${r.label} up`} disabled={i === 0} onClick={() => move(i, -1)}>▲</button>
           <button className="secondary sm" aria-label={`Move ${r.label} down`} disabled={i === rows.length - 1} onClick={() => move(i, 1)}>▼</button>
         </div>
@@ -68,7 +75,35 @@ function Arrange({ title, help, pool, pref, onChange }: { title: string; help: s
  * Settings as a full screen with a rail (Q18): Station (this person's own choices), Selling (what the shop's till shows and how it behaves),
  * Menu & prices, Training and About. Sections that change the shop's setup are for managers.
  */
-export function Settings() {
+/** Kitchen stations: a name and the menu categories it makes. The kitchen display can then show one station's work. */
+function StationsEditor({ stations, categories, onSave }: { stations: KitchenStation[]; categories: string[]; onSave: (s: KitchenStation[]) => void }) {
+  const [name, setName] = useState("");
+  const takenBy = (c: string, except: string) => stations.find((s) => s.id !== except && s.categories.includes(c))?.name;
+  return (
+    <section className="e2e-card" style={{ marginTop: 16 }}>
+      <h3>Kitchen stations</h3>
+      <p className="muted">Where each kind of item is made (hot kitchen, bar, pass). On the kitchen display, a station sees only its own items. With no stations, the display shows everything on one screen.</p>
+      {stations.map((s) => (
+        <div key={s.id} style={{ borderTop: "1px solid var(--line)", padding: "10px 0" }}>
+          <div className="row"><strong style={{ flex: 1 }}>{s.name}</strong><button className="secondary sm" aria-label={`Remove station ${s.name}`} onClick={() => onSave(stations.filter((x) => x.id !== s.id))}>Remove</button></div>
+          <div className="row" style={{ flexWrap: "wrap", gap: 10 }}>
+            {categories.map((c) => { const other = takenBy(c, s.id); return (
+              <label key={c} title={other ? `Made at ${other}` : undefined}><input type="checkbox" aria-label={`${s.name} makes ${c}`} checked={s.categories.includes(c)} disabled={!!other} onChange={(e) => onSave(stations.map((x) => (x.id === s.id ? { ...x, categories: e.target.checked ? [...x.categories, c] : x.categories.filter((y) => y !== c) } : x)))} /> {c}{other ? <span className="muted"> ({other})</span> : null}</label>
+            ); })}
+          </div>
+        </div>
+      ))}
+      {stations.length < 8 && (
+        <div className="row" style={{ marginTop: 8 }}>
+          <input aria-label="New station name" placeholder="e.g. Bar" maxLength={30} value={name} onChange={(e) => setName(e.target.value)} />
+          <button className="secondary sm" disabled={!name.trim() || stations.some((s) => s.name.toLowerCase() === name.trim().toLowerCase())} onClick={() => { onSave([...stations, { id: `st-${Date.now().toString(36)}`, name: name.trim(), categories: [] }]); setName(""); }}>Add station</button>
+        </div>
+      )}
+    </section>
+  );
+}
+
+export function Settings({ catalog }: { catalog?: Catalog | null } = {}) {
   const staff = useStaff();
   const prefs = usePrefs();
   const till = useTillSettings();
@@ -77,6 +112,8 @@ export function Settings() {
   const [msg, setMsg] = useState("");
   const [checking, setChecking] = useState(false);
   const [letter, setLetter] = useState(getDeviceCode());
+  const [role, setRole] = useState(deviceRole());
+  const categories = useMemo(() => [...new Set((catalog?.products ?? []).map((p) => p.category))].sort(), [catalog]);
   useEffect(() => { void loadTillSettings(); }, [staff?.code]);
   if (!staff) return <div className="credit"><h2>Settings</h2><p className="muted">Sign in to change settings. <a href="/login">Sign in</a></p></div>;
   const manager = staff.role !== "cashier";
@@ -98,6 +135,9 @@ export function Settings() {
             <div className="row">{(["compact", "standard", "large", "xl"] as const).map((k) => <button key={k} className={prefs.textSize === k ? "primary sm" : "secondary sm"} aria-pressed={prefs.textSize === k} onClick={() => void setPref("textSize", k)}>{k === "xl" ? "Extra large" : k[0]!.toUpperCase() + k.slice(1)} · {Math.round(TEXT_SCALE[k] * 100)}%</button>)}</div>
             <h3>Menu panel</h3>
             <div className="row">{(["left", "right"] as const).map((s) => <button key={s} className={prefs.menuSide === s ? "primary sm" : "secondary sm"} aria-pressed={prefs.menuSide === s} onClick={() => void setPref("menuSide", s)}>{s === "left" ? "Left" : "Right"}</button>)}</div>
+            <h3>This device</h3>
+            <p className="muted">A kitchen display is this same app on a screen in the kitchen: it opens on the kitchen's orders after sign-in.</p>
+            <div className="row">{(["till", "kitchen"] as const).map((r) => <button key={r} className={role === r ? "primary sm" : "secondary sm"} aria-pressed={role === r} onClick={() => { setDeviceRole(r); setRole(r); setMsg(r === "kitchen" ? "This device is now a kitchen display." : "This device is now a till."); }}>{r === "till" ? "Till" : "Kitchen display"}</button>)}{role === "kitchen" && <button className="secondary sm" onClick={() => go("/kitchen")}>Open the kitchen display</button>}</div>
             <h3>This till's letter</h3>
             <p className="muted">Each till has its own letter so queue numbers never clash when tills are offline.</p>
             <div className="row">{["A", "B", "C", "D"].map((c) => <button key={c} className={letter === c ? "primary sm" : "secondary sm"} aria-pressed={letter === c} onClick={() => { setDeviceCode(c); setLetter(c); }}>{c}</button>)}</div>
@@ -121,6 +161,7 @@ export function Settings() {
               </label>
             </section>
             <Arrange title="Order actions" help="Which buttons show on the till's action strip, and in what order. Pay is always there." pool={ACTION_POOL} pref={till.actions} onChange={(p) => void save({ actions: p })} />
+            <StationsEditor stations={till.stations ?? []} categories={categories} onSave={(s) => void save({ stations: s })} />
             <Arrange title="Payment options" help="Which ways to pay show on the payment panel, and in what order." pool={TENDER_POOL} pref={till.tenders} onChange={(p) => void save({ tenders: p })} />
             <FloorPanel />
             <ShiftsPanel />
