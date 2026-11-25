@@ -193,6 +193,42 @@ export function registerShifts(app: FastifyInstance, d: { db: Db; merchantId: st
     return shiftReport(db, merchantId, s);
   });
 
+  /** A drawer count in the middle of a shift. The count is kept; the answer says what the till expected, and the difference. */
+  app.post<{ Params: { id: string }; Body: { countedCents?: number; denominations?: Record<string, number> } }>("/api/shifts/:id/count", { preHandler: needs("wallet.spend") }, async (req, reply) => {
+    const s = await mineOrManager(req, reply, req.params.id);
+    if (!s) return;
+    if (s.closedAt) return reply.code(409).send({ error: "shift_closed" });
+    const counted = Number(req.body?.countedCents);
+    if (!Number.isSafeInteger(counted) || counted < 0 || counted > 100_000_000) return reply.code(400).send({ error: "amount_not_allowed" });
+    const expected = (await shiftReport(db, merchantId, s)).expectedCashCents;
+    await db.query("INSERT INTO drawer_counts (shift_id, counted_cents, expected_cents, denominations, staff_name) VALUES ($1,$2,$3,$4::jsonb,$5)", [s.id, counted, expected, JSON.stringify(cleanDenoms(req.body?.denominations)), req.staff!.name]);
+    await audit(db, merchantId, req.staff!.id, "shift.count", { shiftId: s.id, countedCents: counted, expectedCents: expected });
+    return { countedCents: counted, expectedCents: expected, varianceCents: counted - expected };
+  });
+
+  /** Everything that moved cash in this shift's drawer, oldest first: cash sales and refunds, cash in and out, and drawer counts. */
+  app.get<{ Params: { id: string } }>("/api/shifts/:id/history", { preHandler: needs("wallet.spend") }, async (req, reply) => {
+    const s = await mineOrManager(req, reply, req.params.id);
+    if (!s) return;
+    const rows: Array<{ at: number; what: string; amountCents: number | null; by: string }> = [];
+    const pay = (await db.query(
+      `SELECT e.type, e.body, e.created_at,
+              (SELECT o.body->>'queueNumber' FROM events o WHERE o.merchant_id=e.merchant_id AND o.order_id=e.order_id AND o.type='OrderOpened' LIMIT 1) AS queue
+         FROM events e WHERE e.merchant_id=$1 AND e.body->>'shiftId'=$2 AND e.body->>'method'='cash'
+          AND (e.type='RefundRecorded' OR (e.type='PaymentRecorded' AND (e.body->>'confirmed')::boolean IS TRUE))`, [merchantId, s.id])).rows;
+    for (const r of pay) {
+      const cents = Number(r.body.amountCents) || 0;
+      const refund = r.type === "RefundRecorded";
+      rows.push({ at: Number(r.body.ts) > 1e11 ? Number(r.body.ts) : new Date(r.created_at).getTime(), what: `${refund ? "Cash refund" : "Cash sale"}${r.queue ? ` · Order ${r.queue}` : ""}`, amountCents: refund ? -cents : cents, by: String(r.body.byName ?? r.body.approvedBy ?? s.staffName) });
+    }
+    for (const m of (await db.query("SELECT kind, amount_cents, reason, staff_name, created_at FROM cash_moves WHERE shift_id=$1", [s.id])).rows)
+      rows.push({ at: new Date(m.created_at).getTime(), what: `${m.kind === "in" ? "Cash in" : "Cash out"} · ${m.reason}`, amountCents: m.kind === "in" ? m.amount_cents : -m.amount_cents, by: m.staff_name });
+    for (const c of (await db.query("SELECT counted_cents, expected_cents, staff_name, created_at FROM drawer_counts WHERE shift_id=$1", [s.id])).rows)
+      rows.push({ at: new Date(c.created_at).getTime(), what: `Drawer count · counted ${(c.counted_cents / 100).toFixed(2)}, expected ${(c.expected_cents / 100).toFixed(2)}`, amountCents: null, by: c.staff_name });
+    rows.sort((a, b) => a.at - b.at);
+    return { openingFloatCents: s.openingFloatCents, openedAt: s.openedAt, rows };
+  });
+
   /** The orders a cashier has to answer for before this shift can close. */
   app.get<{ Params: { id: string } }>("/api/shifts/:id/open-orders", { preHandler: needs("wallet.spend") }, async (req, reply) => {
     const s = await mineOrManager(req, reply, req.params.id);

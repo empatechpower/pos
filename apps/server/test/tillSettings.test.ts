@@ -42,6 +42,14 @@ describe("till settings and menu layouts", () => {
   afterAll(async () => { await app?.close(); await stop?.(); });
 
   const page = (name: string, cells: any[] = []) => ({ name, cells: [...cells, ...Array(25 - cells.length).fill(null)] });
+  it("Cancel, Hold and Send can sit on the menu grid as tiles; an unknown action is refused", async () => {
+    const m = (await call("/api/auth/login", { body: { code: "M1", pin: "222222" } })).json.token;
+    const ok = await call("/api/settings/till", { bearer: m, method: "PUT", body: { layout: { pages: [page("TOP MENU", [{ k: "fn", id: "send" }, { k: "fn", id: "hold" }, { k: "fn", id: "cancel" }])] } } });
+    expect(ok.status).toBe(200);
+    expect(ok.json.layout.pages[0].cells.slice(0, 3)).toEqual([{ k: "fn", id: "send" }, { k: "fn", id: "hold" }, { k: "fn", id: "cancel" }]);
+    expect((await call("/api/settings/till", { bearer: m, method: "PUT", body: { layout: { pages: [page("TOP MENU", [{ k: "fn", id: "refund" }])] } } })).status).toBe(400);
+    await call("/api/settings/till", { bearer: m, method: "PUT", body: { layout: null } });
+  });
   it("a manager chooses whether sliding a line removes it at once; the default is a bin button, and nonsense is refused", async () => {
     const m = (await call("/api/auth/login", { body: { code: "M1", pin: "222222" } })).json.token;
     expect((await call("/api/settings/till", { bearer: m })).json.lineRemove).toBe("bin");

@@ -173,7 +173,7 @@
 .t-closesheet { display: none; border: 0; background: none; font-size: 1.3em; color: #1689b6; cursor: pointer; text-align: left; padding: .2em .9em 0; }
 
 /* in the till, the page chrome around it is blue too */
-.shell.till-route main { padding: 0; display: flex; flex-direction: column; min-height: 0; }
+.shell.till-route > main { padding: 0; display: flex; flex-direction: column; min-height: 0; }
 .shell.till-route { height: 100dvh; min-height: 0; }
 .shell.till-route .top { background: linear-gradient(#36b3d2, #0089bc); border-bottom: 0; color: #fff; box-shadow: 0 1px 4px #00334d44; }
 .shell.till-route .top .brand span { color: #d6eef7; }

@@ -7,7 +7,8 @@ import type { Db } from "./db/pool.js";
  * show and in what order, whether sign-in lands on the Dashboard, and the shop's standard menu layout. A person's own layout is kept with their
  * preferences and wins over the shop's.
  */
-export type LayoutCell = { k: "item"; id: string } | { k: "category"; name: string } | { k: "discount" } | null;
+/** "fn" is an order action placed on the menu grid: cancel, hold or send the order. */
+export type LayoutCell = { k: "item"; id: string } | { k: "category"; name: string } | { k: "discount" } | { k: "fn"; id: "cancel" | "hold" | "send" } | null;
 export interface MenuLayout { pages: Array<{ name: string; cells: LayoutCell[] }> }
 export interface TillSettings {
   actions: { order: string[]; hidden: string[] };
@@ -36,6 +37,7 @@ export function cleanLayout(v: unknown): MenuLayout | null {
       else if (c.k === "item" && typeof c.id === "string" && c.id.length > 0 && c.id.length <= 80) cells.push({ k: "item", id: c.id });
       else if (c.k === "category" && typeof c.name === "string" && c.name.trim() && c.name.length <= 60) cells.push({ k: "category", name: c.name });
       else if (c.k === "discount") cells.push({ k: "discount" });
+      else if (c.k === "fn" && (c.id === "cancel" || c.id === "hold" || c.id === "send")) cells.push({ k: "fn", id: c.id });
       else return null;
     }
     out.push({ name, cells });

@@ -37,47 +37,48 @@ export function ActionStrip({ actions, everything, pref, canArrange, onArrange, 
   });
   const off = (everything ?? []).filter((a) => hidden.includes(a.id));
 
+  const face = (a: Action) => (a.id === "qty" && a.badge ? a.badge : <>{a.icon}{a.badge ? <i className="abadge">{a.badge}</i> : null}</>);
+  // The markup and class names are the prototype's own (proto-reference/index.html, actionStripHTML and render).
   if (arranging) {
     return (
-      <div className="t-strip arranging">
-        <div className="t-arrbar">
-          <b>Arrange actions</b><span className="t-arrhint">{sel ? "Now tap the one to swap with." : "Tap one action, then another, to swap places."}</span>
-          <span className="t-spacer" />
-          <button className="t-ghost" onClick={() => setAdding((v) => !v)}>＋ Add action</button>
-          <button className="t-primary" onClick={() => { setArranging(false); setSel(null); setAdding(false); }}>Done</button>
+      <div className="actionstrip arranging">
+        <div className="actionbar"><span>Arrange actions</span><span className="sp" /><button onClick={() => setAdding((v) => !v)}>+ Add action</button><button className="primary" onClick={() => { setArranging(false); setSel(null); setAdding(false); }}>Done</button></div>
+        {adding && <div className="actionadd">{off.length === 0 ? <span className="muted">All actions are already on the strip.</span> : off.map((a) => <button key={a.id} onClick={() => { commit([...ids, a.id], hidden.filter((h) => h !== a.id)); setAdding(false); }}>{a.icon} {a.label}</button>)}</div>}
+        <div className="actionpages">
+          <div className="actionpage arrange">
+            {actions.map((a) => (
+              <div className={`action ${sel === a.id ? "sel" : ""}`} key={a.id}>
+                <button onClick={() => tap(a)} aria-label={a.label}>{face(a)}</button>
+                <span>{a.label}</span>
+                <button className="actx" aria-label={`Remove ${a.label}`} onClick={(e) => { e.stopPropagation(); commit(ids.filter((x) => x !== a.id), [...hidden, a.id]); setSel(null); }}>×</button>
+              </div>
+            ))}
+          </div>
         </div>
-        {adding && <div className="t-arradd">{off.length === 0 ? <span className="t-muted">Every action is already on the strip.</span> : off.map((a) => <button key={a.id} className="t-ghost" onClick={() => { commit([...ids, a.id], hidden.filter((h) => h !== a.id)); setAdding(false); }}>{a.icon} {a.label}</button>)}</div>}
-        <div className="t-arrgrid">
-          {actions.map((a) => (
-            <div className={`t-action ${sel === a.id ? "sel" : ""}`} key={a.id}>
-              <button onClick={() => tap(a)} aria-label={a.label}>{a.icon}</button>
-              <span>{a.label}</span>
-              <button className="t-actx" aria-label={`Remove ${a.label}`} onClick={(e) => { e.stopPropagation(); commit(ids.filter((x) => x !== a.id), [...hidden, a.id]); setSel(null); }}>×</button>
-            </div>
-          ))}
-        </div>
+        <div className="action payaction"><button className="pay" disabled aria-label={payLabel}>$</button><span>Pay</span></div>
       </div>
     );
   }
 
   const pages: Action[][] = [];
   for (let i = 0; i < actions.length; i += 4) pages.push(actions.slice(i, i + 4));
+  if (!pages.length) pages.push([]);
   return (
-    <div className="t-strip">
-      <div className="t-actionpages">
+    <div className="actionstrip">
+      <div className="actionpages">
         {pages.map((pg, i) => (
-          <div className="t-actionpage" key={i}>
+          <div className="actionpage" key={i}>
             {pg.map((a) => (
-              <div className="t-action" key={a.id}>
-                <button onClick={() => tap(a)} disabled={a.disabled} title={a.title} aria-label={a.label} {...holdProps(a)}>{a.icon}{a.badge ? <i className="t-abadge">{a.badge}</i> : null}</button>
+              <div className="action" key={a.id}>
+                <button onClick={() => tap(a)} disabled={a.disabled} title={a.title} aria-label={a.label} {...holdProps(a)}>{face(a)}</button>
                 <span>{a.label}</span>
               </div>
             ))}
           </div>
         ))}
       </div>
-      <div className="t-action t-payaction">
-        <button className="t-pay" onClick={onPay} disabled={payDisabled} aria-label={payLabel}>$</button>
+      <div className="action payaction">
+        <button className="pay" onClick={onPay} disabled={payDisabled} aria-label={payLabel}>$</button>
         <span>Pay</span>
       </div>
     </div>

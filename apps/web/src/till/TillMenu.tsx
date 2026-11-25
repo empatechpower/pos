@@ -1,5 +1,8 @@
 import { useEffect, useMemo, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 import type { MenuEntry } from "@pos/core";
+import { ProtoDialog } from "../proto/ProtoDialog";
+import { FN_TILES, type FnId } from "./layout";
 import { PAGE, blankPage, cellsOfLayout, layoutFromAuto, pageCount, pageName, pageOf, standardCells, type Cell, type LayoutCell, type MenuLayout } from "./layout";
 
 export interface LayoutEditing {
@@ -22,7 +25,7 @@ export interface LayoutEditing {
  * Press and hold a tile (or use the pencil) to edit the layout: tap a tile, then a cell, to move it; add items, categories or the Discount tile;
  * name and add pages. It is saved as the person's own layout, or, for a manager, as the shop's standard one.
  */
-export function TillMenu({ menu, qtyOf, onAdd, onDiscount, editing }: { menu: MenuEntry[]; qtyOf: (id: string) => number; onAdd: (m: MenuEntry) => void; onDiscount: () => void; editing?: LayoutEditing }) {
+export function TillMenu({ menu, qtyOf, onAdd, onDiscount, onFn, editing }: { menu: MenuEntry[]; qtyOf: (id: string) => number; onAdd: (m: MenuEntry) => void; onDiscount: () => void; /** Cancel, Hold or Send placed on the grid as a tile. */ onFn?: (id: FnId) => void; editing?: LayoutEditing }) {
   const [page, setPage] = useState(0);
   const [category, setCategory] = useState<string | null>(null);
   const [searching, setSearching] = useState(false);
@@ -30,17 +33,27 @@ export function TillMenu({ menu, qtyOf, onAdd, onDiscount, editing }: { menu: Me
   const swipe = useRef<number | null>(null);
   const press = useRef<number | null>(null);
   /** A long press must not also count as a tap on the tile when the finger lifts. */
-  const held = useRef(false);
-  const unlessHeld = (fn: () => void) => () => { if (held.current) { held.current = false; return; } fn(); };
+  const held = useRef(0);
+  const unlessHeld = (fn: () => void) => () => { if (Date.now() < held.current) return; fn(); };
   const [draft, setDraft] = useState<MenuLayout | null>(null);
   const [sel, setSel] = useState<number | null>(null);
   const [picker, setPicker] = useState<null | "item" | "category">(null);
+  /** The empty cell that was tapped, so the chosen tile lands there. */
+  const [placeAt, setPlaceAt] = useState<number | null>(null);
   const [pickQuery, setPickQuery] = useState("");
   const [msg, setMsg] = useState("");
   const [named, setNamed] = useState<string | null>(null);
   /** A long press on an item asks what to do (managers): manage the item, or edit the layout. */
   const [choice, setChoice] = useState<MenuEntry | null>(null);
   const editMode = draft !== null;
+  // As in the prototype: while editing, the app carries "edit" (dashed tiles) and the instructions sit over the top of the ticket.
+  const [bill, setBill] = useState<Element | null>(null);
+  useEffect(() => {
+    const app = document.querySelector(".proto .app");
+    setBill(editMode ? document.querySelector(".proto .bill") : null);
+    app?.classList.toggle("edit", editMode);
+    return () => { app?.classList.remove("edit"); };
+  }, [editMode]);
 
   const startEdit = () => { if (!editing) return; setDraft(JSON.parse(JSON.stringify(editing.layout ?? layoutFromAuto(menu))) as MenuLayout); setSel(null); setCategory(null); setSearching(false); setQuery(""); setMsg(""); };
   useEffect(() => { if (editing?.startRequest) startEdit(); }, [editing?.startRequest]); // eslint-disable-line react-hooks/exhaustive-deps
@@ -62,7 +75,6 @@ export function TillMenu({ menu, qtyOf, onAdd, onDiscount, editing }: { menu: Me
 
   const goto = (i: number) => { setSel(null); setPage(Math.max(0, Math.min(pages - 1, i))); };
   const close = () => { setSearching(false); setQuery(""); };
-  const tab = (label: string, on: boolean, click: () => void, key: string) => <button key={key} className={`t-pill ${on ? "on" : ""}`} onClick={click}>{label}</button>;
 
   // ---- editing ----
   const edit = (fn: (l: MenuLayout) => void) => setDraft((d) => { if (!d) return d; const c = JSON.parse(JSON.stringify(d)) as MenuLayout; fn(c); return c; });
@@ -74,10 +86,11 @@ export function TillMenu({ menu, qtyOf, onAdd, onDiscount, editing }: { menu: Me
     setSel(null);
   };
   const place = (c: LayoutCell) => {
-    const i = draft!.pages[at]!.cells.findIndex((x) => x === null);
+    const free = draft!.pages[at]!.cells.findIndex((x) => x === null);
+    const i = placeAt !== null && draft!.pages[at]!.cells[placeAt] === null ? placeAt : free;
     if (i < 0) return setMsg("This page is full. Add a page, or remove a tile.");
     edit((l) => { l.pages[at]!.cells[i] = c; });
-    setPicker(null); setPickQuery(""); setMsg("");
+    setPicker(null); setPickQuery(""); setMsg(""); setPlaceAt(null);
   };
   const removeSel = () => { if (sel === null) return; edit((l) => { l.pages[at]!.cells[sel] = null; }); setSel(null); };
   const addPage = () => { edit((l) => { if (l.pages.length < 12) l.pages.push(blankPage(`Page ${l.pages.length + 1}`)); }); if (draft && draft.pages.length < 12) setPage(draft.pages.length); };
@@ -91,106 +104,115 @@ export function TillMenu({ menu, qtyOf, onAdd, onDiscount, editing }: { menu: Me
   const pickList = (picker === "item" ? menu.filter((m) => m.name.toLowerCase().includes(pickQuery.trim().toLowerCase())) : []).slice(0, 40);
   const cats = [...new Set(menu.map((m) => m.category))].filter((c) => c.toLowerCase().includes(pickQuery.trim().toLowerCase()));
 
+  // The markup and class names are the prototype's own (proto-reference/index.html: render, tabsHTML, tileHTML), styled by its stylesheet.
+  const tab = (label: string, on: boolean, click: () => void, key: string) => <button key={key} className={on ? "selected" : ""} onClick={click}>{label}</button>;
   return (
-    <section className={`t-menu ${editMode ? "t-editing" : ""}`} aria-label="Menu">
-      <div className="t-menuhead">
-        <button className="t-round" aria-label="Search items" onClick={() => (searching ? close() : setSearching(true))}>⌕</button>
+    <section className="catalog" id="catalog" aria-label="Menu">
+      <div className="menuheading pagetabs">
+        <button className="searchbtn" aria-label="Search items" onClick={() => (searching ? close() : setSearching(true))}>⌕</button>
         {searching ? (
           <>
-            <input className="t-search" autoFocus aria-label="Search items" placeholder="Search items" value={query} onChange={(e) => { setQuery(e.target.value); setPage(0); }} />
-            <button className="t-round" aria-label="Close search" onClick={close}>✕</button>
+            <input id="search" className="menusearch open" autoFocus aria-label="Search items" placeholder="Search items" value={query} onChange={(e) => { setQuery(e.target.value); setPage(0); }} />
+            <button className="searchx" aria-label="Close search" onClick={close}>✕</button>
           </>
         ) : (
-          <div className="t-pages">
+          <div className="pageslider">
             {category ? (
               <>
                 {tab("TOP MENU", false, () => { setCategory(null); setPage(0); }, "top")}
                 {tab(category.toUpperCase(), true, () => undefined, "cat")}
                 {pages > 1 && Array.from({ length: pages }, (_, i) => tab(String(i + 1), at === i, () => goto(i), `p${i}`))}
               </>
-            ) : useLayout ? shown!.map((p, i) => tab(p.name.toUpperCase(), at === i, () => (editMode && at === i ? setNamed(p.name) : goto(i)), `p${i}`)) : Array.from({ length: pages }, (_, i) => tab(pageName(i), at === i, () => goto(i), `p${i}`))}
-            {editMode && <button className="t-pill" onClick={addPage}>＋ Page</button>}
+            ) : useLayout ? shown!.map((p, i) => tab(`${p.name}${editMode && at === i ? " ✎" : ""}`, at === i, () => (editMode && at === i ? setNamed(p.name) : goto(i)), `p${i}`)) : Array.from({ length: pages }, (_, i) => tab(pageName(i), at === i, () => goto(i), `p${i}`))}
+            {editMode && <button onClick={addPage}>+ Page</button>}
           </div>
         )}
-        {editing && !editMode && !searching && !category && <button className="t-round" aria-label="Edit layout" title="Edit the menu layout" onClick={startEdit}>✎</button>}
       </div>
-      {editMode && (
-        <div className="t-edbar" role="toolbar" aria-label="Edit layout">
-          <span className="t-banner">{sel === null ? "Tap a tile, then the cell to move it to." : "Now tap the cell to move it to (a tile there swaps)."}</span>
-          <button onClick={() => { setPicker("item"); setPickQuery(""); }}>＋ Item</button>
-          <button onClick={() => { setPicker("category"); setPickQuery(""); }}>＋ Category</button>
-          <button onClick={() => place({ k: "discount" })}>＋ Discount</button>
-          <button disabled={sel === null} onClick={removeSel}>Remove tile</button>
-          <button onClick={dropPage}>Delete page</button>
-        </div>
-      )}
+      {editMode && bill && createPortal(
+        <div className="editnote editnote-ticket" role="toolbar" aria-label="Edit layout">
+          <div><strong>Item layout setup</strong><br />{sel === null ? "Tap a tile, then the cell to move it to · Tap the × to remove a tile · Tap an empty cell to add one" : "Now tap the cell to move it to (a tile there swaps)."}<br />{editing?.canEditShop ? "Done saves your personal layout · Save for everyone sets the shop's standard" : "Editing your personal layout"}{msg && <><br /><span role="alert">{msg}</span></>}
+            <div className="editacts">
+              <button onClick={dropPage}>Delete page</button>
+              <button onClick={() => { setDraft(null); setSel(null); setPicker(null); }}>Cancel</button>
+              {editing?.hasOwn && <button onClick={async () => { const e = await editing.onResetMine(); if (e) setMsg(e); else { setDraft(null); } }}>Use the shop's layout</button>}
+              {editing?.canEditShop && <button onClick={() => void save(true)}>Save for everyone</button>}
+            </div>
+          </div>
+          <button className="primary" onClick={() => void save(false)}>Done</button>
+        </div>, bill)}
       <div
-        className="t-grid"
+        className={`grid ${editMode ? "editing" : ""}`}
+        id="grid"
         onPointerDown={(e) => {
-          held.current = false;
           swipe.current = e.clientX;
-          const tile = (e.target as HTMLElement).closest(".t-tile") as HTMLElement | null;
+          const tile = (e.target as HTMLElement).closest(".tile") as HTMLElement | null;
           if (editing && !editMode && tile) {
             const cell = tiles[Number(tile.dataset.i)];
-            if (cell?.kind === "item" && editing.onManageItem) press.current = window.setTimeout(() => { press.current = null; swipe.current = null; held.current = true; setChoice(cell.item); }, 700);
-            else if (!category && !query) press.current = window.setTimeout(() => { press.current = null; swipe.current = null; held.current = true; startEdit(); }, 700);
+            if (cell?.kind === "item" && editing.onManageItem) press.current = window.setTimeout(() => { press.current = null; swipe.current = null; held.current = Date.now() + 900; setChoice(cell.item); }, 700);
+            else if (!category && !query) press.current = window.setTimeout(() => { press.current = null; swipe.current = null; held.current = Date.now() + 900; startEdit(); }, 700);
           }
         }}
         onPointerMove={(e) => { if (press.current && Math.abs(e.clientX - (swipe.current ?? e.clientX)) > 12) { window.clearTimeout(press.current); press.current = null; } }}
         onPointerUp={(e) => { if (press.current) { window.clearTimeout(press.current); press.current = null; } const s = swipe.current; swipe.current = null; if (s !== null && Math.abs(e.clientX - s) > 70) goto(at + (e.clientX < s ? 1 : -1)); }}
       >
         {tiles.map((c, i) => {
-          if (editMode) {
-            const label = !c ? "" : c.kind === "item" ? c.item.name : c.kind === "category" ? c.name : "Discount";
-            return <button key={i} className={`t-tile ${c ? "" : "t-blank"} ${sel === i ? "t-sel" : ""} ${c?.kind === "category" ? "t-cat" : c?.kind === "discount" ? "t-fn" : ""}`} aria-label={c ? `Move ${label}` : "Empty cell"} onClick={() => tapCell(i)}>{c ? <strong className="t-name">{label}</strong> : <span className="t-plus">{sel !== null ? "↓" : ""}</span>}</button>;
-          }
-          if (!c) return <div key={i} className="t-tile t-blank" aria-hidden />;
-          if (c.kind === "category") return <button key={i} className="t-tile t-cat" onClick={unlessHeld(() => { setCategory(c.name); setPage(0); })}><strong>{c.name}</strong><span>▦</span><small>Category</small></button>;
-          if (c.kind === "discount") return <button key={i} className="t-tile t-fn" onClick={unlessHeld(onDiscount)}><strong>Discount</strong><span>%</span><small>Discount an order</small></button>;
+          const x = editMode && c ? <span className="tilex" role="button" aria-label="Remove this button" onPointerDown={(e) => e.stopPropagation()} onClick={(e) => { e.stopPropagation(); edit((l) => { l.pages[at]!.cells[i] = null; }); setSel(null); }}>×</span> : null;
+          const onTile = (fn: () => void) => unlessHeld(editMode ? () => tapCell(i) : fn);
+          const outline = editMode && sel === i ? { boxShadow: "0 0 0 0.1875em #ffbf47" } : undefined;
+          if (!c) return editMode ? <button key={i} data-i={i} className="tile blank" aria-label="Add tile to empty cell" onClick={() => (sel === null ? (setPlaceAt(i), setPicker("item"), setPickQuery("")) : tapCell(i))}>+</button> : <div key={i} className="tile spacer" aria-hidden />;
+          if (c.kind === "category") return <button key={i} data-i={i} className="tile categorytile" style={outline} onClick={onTile(() => { setCategory(c.name); setPage(0); })}><strong>{c.name}</strong><span className="tdesc">▦</span><small>Category</small>{x}</button>;
+          if (c.kind === "discount") return <button key={i} data-i={i} className="tile shortcut" style={outline} onClick={onTile(onDiscount)}><strong>Discount</strong><span className="tdesc">%</span><small>Discount an order</small>{x}</button>;
+          if (c.kind === "fn") { const [name, icon, hint] = FN_TILES[c.id]; return <button key={i} data-i={i} className="tile shortcut" style={outline} onClick={onTile(() => onFn?.(c.id))}><strong>{name}</strong><span className="tdesc">{icon}</span><small>{hint}</small>{x}</button>; }
           const m = c.item;
-          const q = qtyOf(m.id);
+          const q = editMode ? 0 : qtyOf(m.id);
           const photo = m.imageVersion ? `/api/products/${m.id}/image?v=${m.imageVersion}` : null;
+          const badge = q > 0 ? <span className="qtybadge">{q}</span> : null;
+          if (photo) return (
+            <button key={i} data-i={i} className={`tile photo${q ? " inorder" : ""}${m.soldOut ? " soldout" : ""}`} style={outline} onClick={onTile(() => onAdd(m))}>
+              <img src={photo} alt="" loading="lazy" onError={(e) => e.currentTarget.remove()} />
+              <span className="tilefoot"><strong>{m.name}</strong></span>
+              {m.soldOut && <span className="soldribbon">Sold out</span>}{badge}{x}
+            </button>
+          );
           return (
-            <button key={i} data-i={i} className={`t-tile ${photo ? "t-photo" : ""} ${q ? "t-in" : ""} ${m.soldOut ? "t-sold" : ""}`} disabled={m.soldOut} onClick={unlessHeld(() => onAdd(m))}>
-              {photo && <img src={photo} alt="" loading="lazy" onError={(e) => e.currentTarget.remove()} />}
-              <strong className="t-name">{m.name}</strong>
-              {q > 0 && <span className="t-badge">{q}</span>}
-              {m.soldOut && <span className="t-ribbon">Sold out</span>}
+            <button key={i} data-i={i} className={`tile${q ? " inorder" : ""}${m.soldOut ? " soldout" : ""}`} style={outline} onClick={onTile(() => onAdd(m))}>
+              <strong>{m.name}</strong>{badge}
+              <span><small>{m.options?.length ? "Options available" : m.category}</small></span>
+              {m.soldOut && <span className="soldribbon">Sold out</span>}{x}
             </button>
           );
         })}
       </div>
-      {pages > 1 && !query && !editMode && <div className="t-dots" aria-hidden>{Array.from({ length: pages }, (_, i) => <i key={i} className={i === at ? "on" : ""} />)}</div>}
-      {editMode && (
-        <div className="t-edfoot">
-          {msg && <span className="t-err" role="alert">{msg}</span>}
-          <button className="t-ghost" onClick={() => { setDraft(null); setSel(null); setPicker(null); }}>Cancel</button>
-          {editing?.hasOwn && <button className="t-ghost" onClick={async () => { const e = await editing.onResetMine(); if (e) setMsg(e); else { setDraft(null); } }}>Use the shop's layout</button>}
-          {editing?.canEditShop && <button className="t-ghost" onClick={() => void save(true)}>Save for everyone</button>}
-          <button className="t-primary" onClick={() => void save(false)}>Done (my layout)</button>
-        </div>
-      )}
       {picker && (
-        <div className="t-picker" role="dialog" aria-label={picker === "item" ? "Add an item" : "Add a category"}>
-          <div className="t-pickhead"><input autoFocus placeholder={picker === "item" ? "Search items" : "Search categories"} value={pickQuery} onChange={(e) => setPickQuery(e.target.value)} /><button className="t-ghost" onClick={() => setPicker(null)}>Close</button></div>
-          <div className="t-picklist">
-            {picker === "item" ? pickList.map((m) => <button key={m.id} onClick={() => place({ k: "item", id: m.id })}>{m.name}<small>{m.category}</small></button>) : cats.map((c) => <button key={c} onClick={() => place({ k: "category", name: c })}>{c}</button>)}
+        <ProtoDialog title="Place a tile" onClose={() => { setPicker(null); setPlaceAt(null); }}>
+          <div className="choices">
+            <button className={picker === "item" ? "selected" : ""} onClick={() => { setPicker("item"); setPickQuery(""); }}>Item</button>
+            <button className={picker === "category" ? "selected" : ""} onClick={() => { setPicker("category"); setPickQuery(""); }}>Category</button>
+            <button onClick={() => place({ k: "discount" })}>Discount</button>
+            {(Object.keys(FN_TILES) as FnId[]).map((id) => <button key={id} onClick={() => place({ k: "fn", id })}>{FN_TILES[id][0]}</button>)}
           </div>
-        </div>
+          <label className="field">Search<input autoFocus placeholder={picker === "item" ? "Search items" : "Search categories"} value={pickQuery} onChange={(e) => setPickQuery(e.target.value)} /></label>
+          <div className="checklist">
+            {picker === "item" ? pickList.map((m) => <button key={m.id} onClick={() => place({ k: "item", id: m.id })}>{m.name} <small>{m.category}</small></button>) : cats.map((c) => <button key={c} onClick={() => place({ k: "category", name: c })}>{c}</button>)}
+          </div>
+          <div className="actions"><button onClick={() => { setPicker(null); setPlaceAt(null); }}>Cancel</button></div>
+        </ProtoDialog>
       )}
       {choice && (
-        <div className="t-picker" role="dialog" aria-label={`${choice.name}`}>
-          <div className="t-picklist">
-            <button onClick={() => { const m = choice; setChoice(null); editing?.onManageItem?.(m); }}>Manage item<small>{choice.name}</small></button>
+        <ProtoDialog title="What do you want to do?" onClose={() => setChoice(null)}>
+          <p className="muted" style={{ marginBottom: "0.75em" }}>{choice.name}</p>
+          <div style={{ display: "flex", flexDirection: "column", gap: "0.5em" }}>
+            <button className="primary" onClick={() => { const m = choice; setChoice(null); editing?.onManageItem?.(m); }}>Manage item</button>
             <button onClick={() => { setChoice(null); startEdit(); }}>Edit layout</button>
             <button onClick={() => setChoice(null)}>Cancel</button>
           </div>
-        </div>
+        </ProtoDialog>
       )}
       {named !== null && (
-        <div className="t-picker" role="dialog" aria-label="Rename page">
-          <div className="t-pickhead"><input autoFocus maxLength={24} value={named} onChange={(e) => setNamed(e.target.value)} aria-label="Page name" /><button className="t-primary" disabled={!named.trim()} onClick={() => { edit((l) => { l.pages[at]!.name = named.trim(); }); setNamed(null); }}>Rename</button><button className="t-ghost" onClick={() => setNamed(null)}>Cancel</button></div>
-        </div>
+        <ProtoDialog title="Rename page" onClose={() => setNamed(null)}>
+          <label className="field">Page name<input autoFocus maxLength={24} value={named} onChange={(e) => setNamed(e.target.value)} aria-label="Page name" /></label>
+          <div className="actions"><button onClick={() => setNamed(null)}>Cancel</button><button className="primary" disabled={!named.trim()} onClick={() => { edit((l) => { l.pages[at]!.name = named.trim(); }); setNamed(null); }}>Save</button></div>
+        </ProtoDialog>
       )}
     </section>
   );

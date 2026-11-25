@@ -2,7 +2,7 @@ import { useEffect, useState } from "react";
 import { formatMoney } from "@pos/core";
 import { useStaff } from "../auth";
 import { isTraining } from "../training";
-import { cashMove, closeShift, loadShiftRequired, openOrders, openShift, shiftReport, syncShift, useShift, useShiftSettings, type OpenOrder, type ShiftReport } from "../shift";
+import { cashMove, closeShift, drawerCount, drawerHistory, type DrawerHistory, loadShiftRequired, openOrders, openShift, shiftReport, syncShift, useShift, useShiftSettings, type OpenOrder, type ShiftReport } from "../shift";
 import { CountEntry, countCents, countDenoms, emptyCount, type CountValue } from "./CountEntry";
 
 const METHOD: Record<string, string> = { cash: "Cash", credit: "Member credit", card: "Card", paynow: "PayNow" };
@@ -35,7 +35,10 @@ export function ShiftBar() {
   const staff = useStaff();
   const shift = useShift();
   const { required } = useShiftSettings();
-  const [panel, setPanel] = useState<"" | "cash" | "close" | "report">("");
+  const [panel, setPanel] = useState<"" | "cash" | "close" | "report" | "count" | "history">("");
+  const [midCount, setMidCount] = useState<CountValue>(emptyCount());
+  const [counted2, setCounted2] = useState<null | { countedCents: number; expectedCents: number; varianceCents: number }>(null);
+  const [history, setHistory] = useState<DrawerHistory | null>(null);
   const [step, setStep] = useState<"orders" | "count">("count");
   const [open, setOpen] = useState<OpenOrder[]>([]);
   const [left, setLeft] = useState<Set<string>>(new Set());
@@ -75,6 +78,18 @@ export function ShiftBar() {
   async function showReport() {
     if (!shift) return;
     setMsg(""); setPanel("report"); setReport(await shiftReport(shift.id));
+  }
+  async function doCount() {
+    if (!shift) return;
+    setBusy(true); setMsg("");
+    const r = await drawerCount(shift.id, countCents(midCount), countDenoms(midCount));
+    setBusy(false);
+    if (typeof r === "string") return setMsg(r);
+    setCounted2(r); setMidCount(emptyCount());
+  }
+  async function showHistory() {
+    if (!shift) return;
+    setMsg(""); setPanel("history"); setHistory(null); setHistory(await drawerHistory(shift.id));
   }
   /** Closing starts with the orders still open: each is answered for before the count. */
   async function startClose() {
@@ -127,7 +142,9 @@ export function ShiftBar() {
       <div className="row" style={{ alignItems: "center", gap: 8, flexWrap: "wrap" }}>
         <span style={{ flex: 1 }}><b>Drawer {shift.drawer}</b> <span className="muted">· {shift.staffName} · since {hm(shift.openedAt)} · float {formatMoney(shift.openingFloatCents)}</span></span>
         <button className="secondary sm" onClick={() => { setPanel(panel === "cash" ? "" : "cash"); setMsg(""); }}>Cash in / out</button>
-        <button className="secondary sm" onClick={() => void showReport()}>Report</button>
+        <button className="secondary sm" onClick={() => { setPanel(panel === "count" ? "" : "count"); setCounted2(null); setMsg(""); }}>Drawer count</button>
+        <button className="secondary sm" onClick={() => void (panel === "history" ? setPanel("") : showHistory())}>Drawer history</button>
+        <button className="secondary sm" onClick={() => void showReport()}>X report</button>
         <button className="secondary sm" onClick={() => void (panel === "close" ? setPanel("") : startClose())}>Close shift</button>
       </div>
       {msg && <div className="flash" role="status">{msg}</div>}
@@ -169,6 +186,35 @@ export function ShiftBar() {
             </div>
           )}
           <button className="primary sm" disabled={busy || (needApproval && (!mgrCode.trim() || !mgrPin))} onClick={() => void close()}>{needApproval ? "Approve and close" : "Count and close"}</button>
+        </div>
+      )}
+      {panel === "count" && (
+        <div className="editor">
+          {counted2 ? (
+            <div className="rep-lines" role="status">
+              <div className="row"><span>Counted</span><b>{formatMoney(counted2.countedCents)}</b></div>
+              <div className="row"><span>Expected</span><b>{formatMoney(counted2.expectedCents)}</b></div>
+              <div className="row"><span>{counted2.varianceCents === 0 ? "Balanced" : counted2.varianceCents < 0 ? "Short" : "Over"}</span><b>{formatMoney(Math.abs(counted2.varianceCents))}</b></div>
+              <button className="secondary sm" onClick={() => { setCounted2(null); setPanel(""); }}>Done</button>
+            </div>
+          ) : (
+            <>
+              <p className="muted">Count the cash in the drawer now. The shift stays open; the till then shows what it expected.</p>
+              <CountEntry value={midCount} onChange={setMidCount} />
+              <button className="primary sm" disabled={busy} onClick={() => void doCount()}>Compare</button>
+            </>
+          )}
+        </div>
+      )}
+      {panel === "history" && (
+        <div className="editor" aria-label="Drawer history">
+          {!history ? <p className="muted">Loading…</p> : (
+            <div className="rep-lines">
+              <div className="row"><span>{hm(history.openedAt)} · Opening float</span><b>{formatMoney(history.openingFloatCents)}</b></div>
+              {history.rows.length === 0 && <p className="muted">No drawer activity yet.</p>}
+              {history.rows.map((h, i) => <div className="row" key={i}><span>{hm(h.at)} · {h.what}<br /><small className="muted">{h.by}</small></span><b>{h.amountCents === null ? "—" : `${h.amountCents < 0 ? "−" : "+"}${formatMoney(Math.abs(h.amountCents))}`}</b></div>)}
+            </div>
+          )}
         </div>
       )}
       {panel === "report" && report && <ShiftReportView r={report} final={!!report.shift.closedAt} />}

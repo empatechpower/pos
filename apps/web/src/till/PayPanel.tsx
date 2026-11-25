@@ -22,32 +22,35 @@ export function PayPanel({ totalCents, title, venue, tenders, busy, onBack, onDo
     setValue((v) => ((v.split(".")[1] ?? "").length < 2 && v.length < 10 ? (v === "0" ? k : v + k) : v));
   };
   const cur = tenders.find((t) => t.id === tender);
+  // The markup and class names are the prototype's own (proto-reference/index.html, payPanelHTML): it takes the catalogue's place.
   return (
-    <section className="t-pay-panel" aria-label="Payment">
-      <div className="t-payhead"><strong>Payment · {title}</strong>{venue && <span>{venue}</span>}</div>
-      <div className="t-figures">
-        <div>Balance Due<strong>{formatMoney(totalCents)}</strong></div>
-        <div>Amount Tendered<strong>{tender === "cash" ? formatMoney(valid ? received : 0) : formatMoney(totalCents)}</strong></div>
-        <div>Change<strong className="chg">{tender === "cash" ? formatMoney(cashOk ? Math.max(0, received - totalCents) : 0) : formatMoney(0)}</strong></div>
-      </div>
-      {tender === "cash" ? (
-        <>
-          <label className="t-cashin">Received<input inputMode="decimal" autoComplete="off" placeholder="0.00" aria-label="Amount received" value={value} onChange={(e) => setValue(e.target.value)} /></label>
-          <div className="t-keypad">
-            {["1", "2", "3", "$5", "4", "5", "6", "$10", "7", "8", "9", "$50", "C", "0", ".", "⌫"].map((k) => <button key={k} className={k.startsWith("$") ? "quick" : ""} onClick={() => key(k)}>{k}</button>)}
-          </div>
-          <p className="t-hint" role="status">{!value ? "Enter the amount received." : !valid ? "Enter a valid amount." : cashOk ? (received >= totalCents ? `Change due: ${formatMoney(received - totalCents)}` : `Part payment: ${formatMoney(totalCents - received)} will still be due`) : `Still due: ${formatMoney(totalCents - received)}`}</p>
-        </>
-      ) : (
-        <div className="t-tendercard">{tender === "credit" ? "Member credit" : tender === "qr" ? "PayNow QR" : "Card / PayNow (practice)"}<small>{cur?.why ?? (tender === "qr" ? "A QR for the exact amount is shown next." : tender === "credit" ? "The member's credit is charged when you press Done." : "")}</small></div>
-      )}
-      <div className="t-payfixed">
-        <div className="t-paybottom">
-          <div className="t-tenders">{tenders.map((t) => <button key={t.id} className={t.id === tender ? "on" : ""} disabled={t.disabled} title={t.why} onClick={() => setTender(t.id)}>{t.label}</button>)}</div>
-          <button className="t-done" disabled={busy || (tender === "cash" ? !cashOk : !!cur?.disabled)} onClick={() => onDone(tender, tender === "cash" ? received : totalCents)} aria-label="Complete payment">Done</button>
+    <section className="catalog" id="catalog" aria-label="Payment">
+      <div className="paypanel">
+        <div className="paypanel-head"><strong>Payment · {title}</strong>{venue && <span className="muted">{venue}</span>}</div>
+        <div className="payfigures">
+          <div>Balance Due<strong>{formatMoney(totalCents)}</strong></div>
+          <div>Amount Tendered<strong className="amount">{tender === "cash" ? formatMoney(valid ? received : 0) : formatMoney(totalCents)}</strong></div>
+          <div>Change<strong className="change">{tender === "cash" ? formatMoney(cashOk ? Math.max(0, received - totalCents) : 0) : formatMoney(0)}</strong></div>
         </div>
-        <div className="t-payfoot"><button className="t-ghost" onClick={onBack}>← Back / Cancel</button>{onSplit && <button className="t-ghost" onClick={onSplit}>Split Bill</button>}</div>
-
+        {tender === "cash" ? (
+          <>
+            <label className="cash-entry">Received<input id="cash" type="text" inputMode="decimal" autoComplete="off" placeholder="0.00" aria-label="Amount received" value={value} onChange={(e) => setValue(e.target.value)} /></label>
+            <div className="cashpad">
+              {["1", "2", "3", "$5", "4", "5", "6", "$10", "7", "8", "9", "$50", "C", "0", ".", "⌫"].map((k) => <button key={k} className={k.startsWith("$") ? "quick" : ""} onClick={() => key(k)}>{k}</button>)}
+            </div>
+            <p className="error" role="status">{!value ? "Enter the amount received." : !valid ? "Enter a valid amount, with up to two decimal places." : cashOk ? (received >= totalCents ? `Change due: ${formatMoney(received - totalCents)}` : `Part payment — ${formatMoney(totalCents - received)} will still be due on this check.`) : `Still due: ${formatMoney(Math.max(0, totalCents - received))}`}</p>
+          </>
+        ) : (
+          <>
+            <div className="tender-card">{tender === "credit" ? "Member credit" : tender === "qr" ? "PayNow QR" : "Card / PayNow (practice)"} payment</div>
+            <p className="connectionnote">{cur?.why ?? (tender === "qr" ? "A QR for the exact amount is shown next." : tender === "credit" ? "The member's credit is charged when you press Done." : "Practice only: no money moves.")}</p>
+          </>
+        )}
+        <div className="payment-bottom">
+          <div className="choices">{tenders.map((t) => <button key={t.id} className={t.id === tender ? "selected" : ""} disabled={t.disabled} title={t.why} onClick={() => setTender(t.id)}>{t.label}</button>)}</div>
+          <button className="primary donepay" disabled={busy || (tender === "cash" ? !cashOk : !!cur?.disabled)} onClick={() => onDone(tender, tender === "cash" ? received : totalCents)} aria-label="Complete payment">Done</button>
+        </div>
+        <div className="actions"><button onClick={onBack}>← Back / Cancel</button>{onSplit && <button onClick={onSplit}>Split Bill</button>}</div>
       </div>
     </section>
   );

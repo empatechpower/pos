@@ -1,0 +1,15 @@
+/* Ours, on top of the prototype's stylesheet (proto.css is generated: do not put anything there). Only what the prototype has no markup for. */
+/* A header on a screen that has not been ported yet: the wrapper must not behave like the prototype's page. */
+.proto.protohead { height: auto; min-height: 0; overflow: visible; background: none; }
+.proto header .syncpill { background: #0d3b52; border-color: #ffffff55; }
+/* A count on an action (held orders, open tabs): the prototype only shows a number for Quantity. */
+.proto .action .abadge { position: absolute; top: calc(-0.25 * var(--u)); right: calc(50% - 1.9 * var(--u)); min-width: calc(1.1 * var(--u)); height: calc(1.1 * var(--u)); border-radius: 999px; background: #d33; color: #fff; font-size: calc(0.6 * var(--u)); font-style: normal; font-weight: 700; display: grid; place-items: center; padding: 0 calc(0.2 * var(--u)); }
+/* Remove links inside the totals (a fee or a bill discount): plain text, not a prototype button. */
+.proto .totals .unlink { color: #1689b6; text-decoration: underline; cursor: pointer; margin-left: calc(0.4 * var(--u)); }
+.proto .billfooter .ordernote { font-size: calc(0.6875 * var(--u)); color: #4d6d80; margin-bottom: calc(0.25 * var(--u)); }
+/* The add-action list in arrange mode (the prototype uses a dialog). */
+.proto .actionadd { flex: 1 1 100%; display: flex; flex-wrap: wrap; gap: calc(0.375 * var(--u)); margin-bottom: calc(0.375 * var(--u)); }
+.proto .actionadd button { min-height: calc(2 * var(--u)); padding: calc(0.25 * var(--u)) calc(0.75 * var(--u)); font-size: calc(0.75 * var(--u)); }
+/* Layout editing: our extra choices (delete page, cancel, the shop's layout) under the prototype's instructions. */
+.proto .editnote .editacts { display: flex; flex-wrap: wrap; gap: calc(0.375 * var(--u)); margin-top: calc(0.5 * var(--u)); }
+.proto .editnote .editacts button { min-height: calc(2 * var(--u)); padding: calc(0.25 * var(--u)) calc(0.75 * var(--u)); font-size: calc(0.75 * var(--u)); }

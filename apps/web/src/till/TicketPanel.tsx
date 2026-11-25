@@ -14,7 +14,9 @@ function details(l: BagLine): Array<{ text: string; amount?: string; strong?: bo
 
 function Line({ l, collapsed, onToggle, onEdit, onQty, onRemove, bin, setBin, swipeRemoves }: { l: BagLine; collapsed: boolean; onToggle: () => void; onEdit: () => void; onQty: (d: number) => void; onRemove: () => void; bin: boolean; setBin: (open: boolean) => void; swipeRemoves: boolean }) {
   const det = details(l);
-  const more = det.length > 0;
+  // What the prototype puts on the grey line under the details; ours adds "sent", the seat and "Held".
+  const meta = [l.sent ? "✓ sent" : "", l.course ? COURSE_NAMES[l.course] ?? `Course ${l.course}` : "", l.seat ? `Seat ${l.seat}` : "", l.channelName ?? "", l.hold ? "Held" : ""].filter(Boolean);
+  const more = det.length > 0 || meta.length > 0;
   const open = more && !collapsed;
   const tap = useRef<{ at: number; timer: number | null }>({ at: 0, timer: null });
   const drag = useRef<{ x: number; y: number; moved: boolean; dx: number } | null>(null);
@@ -22,6 +24,7 @@ function Line({ l, collapsed, onToggle, onEdit, onQty, onRemove, bin, setBin, sw
 
   function click() {
     if (drag.current?.moved) return;
+    if (bin) return setBin(false);
     if (!more) return onEdit();
     // On a line with details a quick second tap folds or unfolds them; a single tap opens the line.
     const now = Date.now();
@@ -29,52 +32,48 @@ function Line({ l, collapsed, onToggle, onEdit, onQty, onRemove, bin, setBin, sw
     tap.current.at = now;
     tap.current.timer = window.setTimeout(() => { tap.current.timer = null; onEdit(); }, 300);
   }
+  const shift = swipeRemoves ? slide : bin ? -64 : 0;
   return (
-    <div className="t-linewrap">
-      {!swipeRemoves && <button className="t-bin" aria-label={`Remove ${l.item.name}`} onClick={onRemove}>🗑</button>}
+    <div className="linewrap">
       <div
-        className={`t-line ${bin ? "binopen" : ""}`}
+        className={`line ${bin ? "binopen" : ""}`}
         role="button"
         tabIndex={0}
         aria-label={`Edit ${l.item.name}`}
+        style={shift ? { transform: `translateX(${shift}px)`, transition: swipeRemoves ? "none" : "transform .15s" } : undefined}
         onKeyDown={(e) => { if (e.key === "Enter") onEdit(); }}
         onClick={click}
-        onPointerDown={(e) => { if (l.sent || (e.target as HTMLElement).closest("button,.t-name")) return; drag.current = { x: e.clientX, y: e.clientY, moved: false, dx: 0 }; }}
+        onPointerDown={(e) => { if (l.sent || (e.target as HTMLElement).closest("button,.lname")) return; drag.current = { x: e.clientX, y: e.clientY, moved: false, dx: 0 }; }}
         onPointerMove={(e) => { const d = drag.current; if (!d) return; const dx = e.clientX - d.x; if (Math.abs(dx) > 12 && Math.abs(dx) > Math.abs(e.clientY - d.y)) { d.moved = true; d.dx = dx; if (swipeRemoves) setSlide(Math.min(0, dx)); else setBin(dx < -40); } }}
         onPointerUp={() => { const d = drag.current; if (swipeRemoves && d?.moved) { if (d.dx <= -72) onRemove(); setSlide(0); } window.setTimeout(() => { drag.current = null; }, 0); }}
-        style={swipeRemoves && slide ? { transform: `translateX(${slide}px)`, transition: "none" } : undefined}
       >
-        <div className="t-row">
-          <h3 className="t-namecell">
-            <span className="t-name">{l.item.name}</span>
-            {more && <button className="t-more" aria-label={open ? "Hide details" : "Show details"} onClick={(e) => { e.stopPropagation(); onToggle(); }}>{open ? "▴" : "▾"}</button>}
+        <div className="ticketrow">
+          <h3 className="lnamecell">
+            <span className="lname">{l.item.name}</span>
+            {more && <button className="lmore" aria-label={open ? "Collapse details" : "Expand details"} onClick={(e) => { e.stopPropagation(); onToggle(); }}>{open ? "▴" : "▾"}</button>}
           </h3>
-          <div className="t-qty">
+          <div className="qtycell">
             <b>{l.qty}</b>
-            <span className="t-stack">
-              <button aria-label="More" disabled={!!l.sent} onClick={(e) => { e.stopPropagation(); onQty(1); }}>+</button>
-              <button aria-label="Fewer" disabled={!!l.sent} onClick={(e) => { e.stopPropagation(); onQty(-1); }}>−</button>
-            </span>
+            <div className="qtycontrols">
+              <button aria-label="Increase quantity" disabled={!!l.sent} onClick={(e) => { e.stopPropagation(); onQty(1); }}><span>+</span></button>
+              <button aria-label="Decrease quantity" disabled={!!l.sent} onClick={(e) => { e.stopPropagation(); onQty(-1); }}><span>−</span></button>
+            </div>
           </div>
-          <span className="t-each">{formatMoney(effUnit(l))}</span>
-          <span className="t-amt">{formatMoney(effUnit(l) * l.qty)}</span>
+          <span>{formatMoney(effUnit(l))}</span>
+          <span>{formatMoney(effUnit(l) * l.qty)}</span>
         </div>
-        {(l.sent || l.course || l.seat || l.channelName || l.hold) && (
-          <div className="t-tags">
-            {l.sent && <small className="t-tag sent" title="Already sent">✓ sent</small>}
-            {l.course ? <small className="t-tag">{COURSE_NAMES[l.course] ?? `Course ${l.course}`}</small> : null}
-            {l.seat ? <small className="t-tag">Seat {l.seat}</small> : null}
-            {l.channelName ? <small className="t-tag">{l.channelName}</small> : null}
-            {l.hold ? <small className="t-tag held">Held</small> : null}
-          </div>
-        )}
-        {open && det.map((d, i) => <div key={i} className="t-detail" style={d.strong ? { fontWeight: 700 } : undefined}><span>{d.text}</span>{d.amount && <span>{d.amount}</span>}</div>)}
+        {open && det.map((d, i) => <div key={i} className="ldetail" style={d.strong ? { fontWeight: 700 } : undefined}><span className="ld-name">{d.text}</span>{d.amount && <span className="ld-amt">{d.amount}</span>}</div>)}
+        {open && meta.length > 0 && <div className="ldetail meta"><span className="ld-name">{meta.join(" · ")}</span></div>}
       </div>
+      <button className="binbtn" aria-label={`Remove ${l.item.name}`} onClick={onRemove}>🗑</button>
     </div>
   );
 }
 
-/** The ticket: who and where, the lines (one each, details open until folded), the totals, and the action strip with Pay. */
+/**
+ * The ticket: who and where, the lines (one each, details open until folded), the totals, and the action strip with Pay.
+ * The markup and class names are the prototype's own (proto-reference/index.html, render and lineHTML), styled by its stylesheet.
+ */
 export function TicketPanel(p: {
   channelName: string; title: string; subline: string; shiftChip: ReactNode; bag: BagLine[]; flash: string | null;
   onDining: () => void; onNew: () => void; onQty: (key: string, d: number) => void; onEdit: (key: string) => void; onRemove: (key: string) => void;
@@ -85,30 +84,30 @@ export function TicketPanel(p: {
   const [bin, setBin] = useState<string | null>(null);
   const toggle = (k: string) => setFolded((s) => { const n = new Set(s); if (n.has(k)) n.delete(k); else n.add(k); return n; });
   return (
-    <aside className={`t-ticket ${p.open ? "open" : ""}`} aria-label="Order">
-      <button className="t-closesheet" onClick={p.onCloseSheet} aria-label="Close order sheet">⌄</button>
-      <div className="t-tickethead">
-        <div className="t-titlerow">
-          <button className="t-chip" onClick={p.onDining} title="Dining option: tap to change">{p.channelName} ▾</button>
+    <aside className={`bill ${p.open ? "open" : ""}`} aria-label="Order">
+      <div className="billtop">
+        <div className="billtitle">
+          <button className="closebill" onClick={p.onCloseSheet} aria-label="Close bill">⌄</button>
+          <button className="chanchip" onClick={p.onDining} title="Dining option — tap to change">{p.channelName} ▾</button>
           <h2>{p.title}</h2>
-          <button className="t-round t-new" onClick={p.onNew} aria-label="New order">＋</button>
+          <button className="primary newcircle" onClick={p.onNew} aria-label="New order">+</button>
+          <small>{p.subline}</small>
         </div>
-        <div className="t-sub">{p.subline}</div>
-        <div className="t-chips">{p.shiftChip}</div>
-        {p.flash && <div className="t-flash" role="status">{p.flash}</div>}
+        <div className="orderinfo">{p.shiftChip}</div>
       </div>
-      <div className="t-cols"><span>Name</span><span>Qty</span><span>Each</span><span>Total</span></div>
-      <div className="t-lines">
-        {p.bag.length === 0 ? <div className="t-empty"><b>＋</b><strong>Your order starts here</strong><span>Tap an item to add it to the ticket</span></div> : p.bag.map((l) => (
+      <div className="tickethead"><span>Name</span><span>Qty</span><span>Each</span><span>Total</span></div>
+      <div id="lines" className={`lines ${p.lineRemove === "swipe" ? "" : "binmode"}`}>
+        {p.bag.length === 0 ? <div className="empty"><b>＋</b><strong>Your order starts here</strong><span>Tap an item to add it to the ticket</span></div> : p.bag.map((l) => (
           <Line key={l.key} l={l} collapsed={folded.has(l.key)} onToggle={() => toggle(l.key)} onEdit={() => p.onEdit(l.key)} onQty={(d) => p.onQty(l.key, d)} onRemove={() => { setBin(null); p.onRemove(l.key); }} swipeRemoves={p.lineRemove === "swipe"} bin={bin === l.key} setBin={(o) => setBin(o ? l.key : null)} />
         ))}
       </div>
-      {p.extra}
-      <div className="t-foot">
+      <div className="billfooter">
+        {p.extra}
         {p.totals}
         {p.strip}
-        <p className="t-hint">Tap a line to edit it · Double-tap to fold its details</p>
+        <p className="hint">Tap line to edit · Double-tap line to fold its details</p>
       </div>
+      {p.flash && <div className="notice" role="status">{p.flash}</div>}
     </aside>
   );
 }

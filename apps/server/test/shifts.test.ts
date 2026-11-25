@@ -94,6 +94,23 @@ describe("shifts, floats and drawers", () => {
     expect(r.tenders[0]).toMatchObject({ method: "cash", refundsCents: 150, netCents: a.totalCents - 150 });
     expect(r.expectedCashCents).toBe(5000 + a.totalCents - 150 - 100 + 50);
     (c1 as any).expected = r.expectedCashCents;
+
+    // A count in the middle of the shift is kept and answered with what the till expected.
+    const cnt = await call(`/api/shifts/${c1.id}/count`, { bearer: tok.C1, body: { countedCents: r.expectedCashCents - 20, denominations: { "1000": 2 } } });
+    expect(cnt.json).toEqual({ countedCents: r.expectedCashCents - 20, expectedCents: r.expectedCashCents, varianceCents: -20 });
+    expect((await call(`/api/shifts/${c1.id}/count`, { bearer: tok.C1, body: { countedCents: -1 } })).status).toBe(400);
+    expect((await call(`/api/shifts/${c1.id}/count`, { bearer: tok.C2, body: { countedCents: 0 } })).status).toBe(403);
+
+    // The drawer history lists only what touched this drawer's cash: the cash sale, the refund, cash in and out, the count. PayNow is not there.
+    const h = (await call(`/api/shifts/${c1.id}/history`, { bearer: tok.C1 })).json;
+    const whats = h.rows.map((x: any) => x.what.split(" · ")[0]);
+    expect(whats.filter((w: string) => w === "Cash sale")).toHaveLength(1);
+    expect(whats).toEqual(expect.arrayContaining(["Cash sale", "Cash refund", "Cash in", "Cash out"]));
+    expect(h.rows.some((x: any) => x.what.startsWith("Drawer count"))).toBe(true);
+    expect(h.rows.find((x: any) => x.what.startsWith("Cash refund")).amountCents).toBe(-150);
+    expect(h.rows.find((x: any) => x.what.startsWith("Cash out")).amountCents).toBe(-100);
+    expect(h.openingFloatCents).toBe(5000);
+    expect((await call(`/api/shifts/${c1.id}/history`, { bearer: tok.C2 })).status).toBe(403);
   });
 
   it("only the owner of a shift or a manager sees or changes it", async () => {

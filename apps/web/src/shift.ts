@@ -62,6 +62,18 @@ export async function shiftReport(id: string): Promise<ShiftReport | null> {
   return "res" in r && r.res.ok ? ((await r.res.json()) as ShiftReport) : null;
 }
 
+/** Count the drawer in the middle of a shift: the count is kept, and the till answers with what it expected. */
+export async function drawerCount(id: string, countedCents: number, denominations: Record<string, number>): Promise<{ countedCents: number; expectedCents: number; varianceCents: number } | string> {
+  const r = await staffFetch(`/api/shifts/${id}/count`, { method: "POST", body: { countedCents, denominations } });
+  if (!("res" in r)) return r.problem;
+  return r.res.ok ? ((await r.res.json()) as { countedCents: number; expectedCents: number; varianceCents: number }) : "That count was not kept. Check the amount and try again.";
+}
+export interface DrawerHistory { openingFloatCents: number; openedAt: number; rows: Array<{ at: number; what: string; amountCents: number | null; by: string }> }
+export async function drawerHistory(id: string): Promise<DrawerHistory | null> {
+  const r = await staffFetch(`/api/shifts/${id}/history`);
+  return "res" in r && r.res.ok ? ((await r.res.json()) as DrawerHistory) : null;
+}
+
 export interface OpenOrder { orderId: string; queueNumber: string | null; totalCents: number; paidCents: number; source: string; channel: string | null; openedAt: number }
 export async function openOrders(id: string): Promise<OpenOrder[]> {
   const r = await staffFetch(`/api/shifts/${id}/open-orders`);

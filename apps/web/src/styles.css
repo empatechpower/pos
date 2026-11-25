@@ -39,8 +39,8 @@ button:disabled { opacity: .45; cursor: not-allowed; }
 .pill.ok i { background: var(--ok); }
 .pill.off { border-color: var(--orange); }
 .pill.off i { background: var(--orange); }
-main { flex: 1; padding: 14px 16px; }
-.empty { text-align: center; padding: 80px 16px; color: var(--text-2); }
+.shell > main { flex: 1; padding: 14px 16px; }
+.empty:not(.proto *) { text-align: center; padding: 80px 16px; color: var(--text-2); }
 
 /* POS */
 .pos { display: grid; grid-template-columns: 1fr 360px; gap: 16px; align-items: start; }
@@ -49,7 +49,7 @@ main { flex: 1; padding: 14px 16px; }
 .chips { display: flex; gap: 8px; overflow-x: auto; padding-bottom: 10px; }
 .chip { padding: 8px 16px; border-radius: 999px; border: 1px solid var(--line); background: #fff; white-space: nowrap; }
 .chip.on { background: var(--orange); border-color: var(--orange); color: #fff; }
-.grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 10px; }
+.grid:not(.proto *) { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 10px; }
 .item { text-align: left; min-height: 92px; padding: 12px; border-radius: var(--radius); border: 1px solid var(--line); background: #fff; display: flex; flex-direction: column; justify-content: space-between; gap: 8px; }
 .item:active:not(:disabled) { background: var(--selected); border-color: var(--orange); }
 .item .n { font-weight: 500; font-size: 14px; line-height: 1.25; }
@@ -59,18 +59,18 @@ main { flex: 1; padding: 14px 16px; }
 .seg button { flex: 1; border: 0; background: transparent; padding: 8px; border-radius: 10px; font-weight: 500; color: var(--text-2); }
 .seg button.on { background: #fff; color: var(--text); box-shadow: 0 1px 3px rgba(0,0,0,.08); }
 .spot { padding: 9px; border-radius: 10px; border: 1px solid var(--line); background: #fff; }
-.lines { min-height: 90px; max-height: 280px; overflow: auto; display: flex; flex-direction: column; gap: 8px; }
-.line { display: grid; grid-template-columns: 1fr auto 64px; gap: 8px; align-items: center; font-size: 14px; }
-.line .amt { text-align: right; font-weight: 500; }
+.lines:not(.proto *) { min-height: 90px; max-height: 280px; overflow: auto; display: flex; flex-direction: column; gap: 8px; }
+.line:not(.proto *) { display: grid; grid-template-columns: 1fr auto 64px; gap: 8px; align-items: center; font-size: 14px; }
+.line:not(.proto *) .amt { text-align: right; font-weight: 500; }
 .step { display: inline-flex; align-items: center; gap: 8px; }
 .step button { width: 28px; height: 28px; border-radius: 50%; border: 1px solid var(--line); background: #fff; }
-.totals { margin: 0; display: flex; flex-direction: column; gap: 4px; font-size: 14px; border-top: 1px dashed var(--line); padding-top: 10px; }
-.totals div { display: flex; justify-content: space-between; }
-.totals dt { color: var(--text-2); }
-.totals dd { margin: 0; }
-.totals .grand { font-size: 18px; font-weight: 700; padding-top: 6px; }
-.totals .grand dt { color: var(--text); }
-.pay { display: flex; flex-direction: column; gap: 8px; }
+.totals:not(.proto *) { margin: 0; display: flex; flex-direction: column; gap: 4px; font-size: 14px; border-top: 1px dashed var(--line); padding-top: 10px; }
+.totals:not(.proto *) div { display: flex; justify-content: space-between; }
+.totals:not(.proto *) dt { color: var(--text-2); }
+.totals:not(.proto *) dd { margin: 0; }
+.totals:not(.proto *) .grand { font-size: 18px; font-weight: 700; padding-top: 6px; }
+.totals:not(.proto *) .grand dt { color: var(--text); }
+.pay:not(.proto *) { display: flex; flex-direction: column; gap: 8px; }
 .primary { background: var(--red); color: #fff; border: 0; border-radius: 14px; padding: 14px; font-weight: 600; }
 .primary.sm { padding: 8px 14px; border-radius: 10px; }
 .secondary { background: #fff; border: 1.5px solid var(--orange); color: var(--orange); border-radius: 14px; padding: 12px; font-weight: 600; }
@@ -306,7 +306,7 @@ main { flex: 1; padding: 14px 16px; }
 .opt-cta { flex: 1; padding: 16px; border-radius: 999px; border: 0; background: var(--o-main); color: var(--o-main-ink); font-weight: 700; font-size: 17px; }
 .opt-cta:disabled { opacity: .5; }
 .optline { display: block; font-size: 12px; font-weight: 400; color: var(--text-2); }
-.line .nm { display: flex; flex-direction: column; }
+.line:not(.proto *) .nm { display: flex; flex-direction: column; }
 .findbox { width: 100%; margin-bottom: 6px; }
 .logo-preview.wide { height: 40px; width: 90px; object-fit: cover; }
 .brandbox { display: flex; flex-direction: column; gap: 10px; }

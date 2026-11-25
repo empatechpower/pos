@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import QRCode from "qrcode";
 import {
   confirmedPaid,
@@ -68,9 +68,11 @@ interface PosProps {
   online: boolean;
   customerId: string;
   setCustomerId: (id: string) => void;
+  /** The till header (the bare <header>), which the order screen places inside the prototype's ".app". */
+  header?: ReactNode;
 }
 
-export function Pos({ config, catalog, online, customerId, setCustomerId }: PosProps) {
+export function Pos({ config, catalog, online, customerId, setCustomerId, header }: PosProps) {
   const orders = useOrders();
   // The order being built stays on the device: a lock, a reload or a different cashier signing in finds it where it was.
   const [saved] = useState(() => { try { return JSON.parse(localStorage.getItem(isTraining() ? "pos.bag.practice" : "pos.bag") ?? "null") as { bag: BagLine[]; billDiscounts: BillDiscount[]; orderNote: string; orderId?: string; fees?: TillFee[] } | null; } catch { return null; } });
@@ -656,22 +658,23 @@ export function Pos({ config, catalog, online, customerId, setCustomerId }: PosP
   const actions = arrange([...allActions].sort((a, b) => poolRank(a.id) - poolRank(b.id)), till.actions);
 
   const row = (k: string, v: string, neg = false) => <div className="row"><span>{k}</span><span>{neg ? "−" : ""}{v}</span></div>;
+  // The markup and class names are the prototype's own (totalsHTML).
   const totals = (
-    <div className="t-totals">
-      <div>
+    <div className="totals">
+      <div className="totals-details">
         {row("Sub Total", formatMoney(priced.subtotal))}
         {row("Discounts", formatMoney(priced.discountCents), priced.discountCents > 0)}
         {priced.fee > 0 && row("Service fee", formatMoney(priced.fee))}
         {priced.service > 0 && row(`Service charge (${Math.round(config.pricing.serviceRate * 100)}%)`, formatMoney(priced.service))}
         {priced.gst > 0 && row("GST", formatMoney(priced.gst))}
-        {priced.bcrs > 0 && row("BCRS deposit", formatMoney(priced.bcrs))}
-        {fees.map((f) => <div className="row" key={f.id}><small>{f.label} · {f.kind === "percent" ? `${f.value}%` : formatMoney(f.value)}</small><button className="t-link" onClick={() => setFees((cur) => cur.filter((x) => x.id !== f.id))}>remove</button></div>)}
-        {billDiscounts.map((d) => <div className="row" key={d.id}><small>{d.kind === "percent" ? `${d.value}% off bill` : `${formatMoney(d.value)} off bill`} · {d.reason}</small><button className="t-link" onClick={() => setBillDiscounts((cur) => cur.filter((x) => x.id !== d.id))}>remove</button></div>)}
+        {priced.bcrs > 0 && row("BCRS deposits", formatMoney(priced.bcrs))}
+        {fees.map((f) => <div className="row" key={f.id}><span>{f.label} · {f.kind === "percent" ? `${f.value}%` : formatMoney(f.value)}</span><span className="unlink" role="button" tabIndex={0} onClick={() => setFees((cur) => cur.filter((x) => x.id !== f.id))}>remove</span></div>)}
+        {billDiscounts.map((d) => <div className="row" key={d.id}><span>{d.kind === "percent" ? `${d.value}% off bill` : `${formatMoney(d.value)} off bill`} · {d.reason}</span><span className="unlink" role="button" tabIndex={0} onClick={() => setBillDiscounts((cur) => cur.filter((x) => x.id !== d.id))}>remove</span></div>)}
       </div>
-      <div className="major">
+      <div className="totals-major">
         <div className="row total"><span>TOTAL</span><strong>{formatMoney(priced.total)}</strong></div>
         {paidSoFar > 0 && <div className="row"><span>{linked?.split ? "Paid on checks" : "Paid"}</span><span>{formatMoney(paidSoFar)}</span></div>}
-        <div className="row bal"><span>Balance Due</span><strong>{formatMoney(due)}</strong></div>
+        <div className="row balance"><span>Balance Due</span><strong>{formatMoney(due)}</strong></div>
       </div>
     </div>
   );
@@ -679,15 +682,17 @@ export function Pos({ config, catalog, online, customerId, setCustomerId }: PosP
   const nextQueue = !orderId && config.modules.queue ? formatQueueNumber(getDeviceCode(), nextQueueCounter(getDeviceCode(), orders.filter((o) => o.openedAt >= startOfDay()).map((o) => o.queueNumber ?? ""))) : undefined;
   const chips = (
     <>
-      {mustOpenShift && <button className="warn" onClick={() => setDialog("shift")}>Open your shift</button>}
-      {dineIn && <button onClick={() => setDialog("table")}>{spot || "Choose table"}</button>}
+      {mustOpenShift && <button className="selected" onClick={() => setDialog("shift")}>Open your shift</button>}
+      {dineIn && <button onClick={() => setDialog("table")}>{spot || "Select table"}</button>}
       {dineIn && <button onClick={() => setDialog("guests")}>{pax} guest{pax === 1 ? "" : "s"}</button>}
-      <button onClick={() => setDialog("customer")}>{customerId ? `👤 ···· ${customerId.slice(-4)}${balance !== null ? ` · ${formatMoney(balance)}` : ""}` : "👤 Member"}</button>
+      <button className={customerId ? "selected" : ""} aria-label="Attach member" onClick={() => setDialog("customer")}>{customerId ? `👤 ···· ${customerId.slice(-4)}${balance !== null ? ` · ${formatMoney(balance)}` : ""}` : "👤 Member"}</button>
     </>
   );
   const strip = <ActionStrip actions={actions} everything={arrangeAll([...allActions].sort((a, b) => poolRank(a.id) - poolRank(b.id)), till.actions)} pref={till.actions} canArrange={staff?.role === "manager" || staff?.role === "owner"} onArrange={(next) => void saveTill({ actions: next })} payLabel={`Pay ${formatMoney(priced.total)}`} onPay={() => { setSheetOpen(false); if (linked?.split) setView("checks"); else setPayView(true); }} payDisabled={!bag.length} />;
 
   return (
+    <>
+    {view !== "order" && header && <div className="proto protohead">{header}</div>}
     <div className={`till ${prefs.menuSide === "left" ? "menu-left" : ""}`} style={{ "--t-scale": TEXT_SCALE[prefs.textSize] } as React.CSSProperties}>
       {view === "tables" ? (
         <div className="t-fullview">
@@ -714,7 +719,10 @@ export function Pos({ config, catalog, online, customerId, setCustomerId }: PosP
         </div>
       ) : null}
       {view === "order" && (
-      <>
+      <div className="proto">
+      <div className={`app ${prefs.menuSide === "left" ? "menu-left" : ""}`}>
+      {header}
+      <main className="workspace">
       <TicketPanel
         lineRemove={till.lineRemove}
         channelName={channel.name} title={linked ? (linked.queueNumber ? `Order ${linked.queueNumber}` : linked.spot ?? "Order") : nextQueue ? `Order ${nextQueue}` : "New order"} open={sheetOpen} onCloseSheet={() => setSheetOpen(false)}
@@ -723,9 +731,8 @@ export function Pos({ config, catalog, online, customerId, setCustomerId }: PosP
         onDining={() => (orderId ? notify("This order was already sent. The dining option can no longer change.") : setDialog("dining"))} onNew={newOrder}
         onQty={(k, d) => change(k, d)} onEdit={(k) => { setLineKey(k); setDialog("line"); }} onRemove={(k) => { if (bag.find((l) => l.key === k)?.sent) return notify("Already sent to the kitchen. A manager voids it from Orders."); setBag((cur) => cur.filter((l) => l.key !== k)); }}
         totals={totals} strip={strip}
-        extra={orderNote ? <p className="t-muted" style={{ margin: ".3em .9em" }}><b>Order note:</b> {orderNote}</p> : undefined}
+        extra={orderNote ? <p className="ordernote"><b>Order note:</b> {orderNote}</p> : undefined}
       />
-      <div className="t-main">
         {payView && bag.length ? (
           <PayPanel
             totalCents={payCheckId && checkDue ? checkDue.dueCents : due}
@@ -739,11 +746,13 @@ export function Pos({ config, catalog, online, customerId, setCustomerId }: PosP
         ) : (
           <TillMenu
             editing={staff ? { layout: prefs.layout ?? till.layout, hasOwn: !!prefs.layout, canEditShop: staff.role !== "cashier", startRequest: editLayoutAt, onSaveMine: (l) => setLayout(l), onResetMine: () => setLayout(null), onSaveShop: (l) => saveTill({ layout: l }), ...(staff.role !== "cashier" ? { onManageItem: (m: MenuEntry) => setManaging(m) } : {}) } : undefined}
+            onFn={(id) => { if (!bag.length) return notify("The order is empty."); if (id === "cancel") cancelOrder(); else if (id === "hold") holdCurrent(); else if (prepay) notify("This shop is paid up front: use Pay."); else void sendOrder(); }}
             menu={menu} qtyOf={qtyOf} onAdd={(m) => (m.soldOut ? undefined : add(m))} onDiscount={() => (staff && bag.length ? setSheet({ scope: "bill" }) : notify(staff ? "Add an item first." : "Sign in to give a discount."))} />
         )}
+      </main>
+      <button className="mobilebar" onClick={() => setSheetOpen(true)}><span>View order · {itemCount} item{itemCount === 1 ? "" : "s"}</span><strong>{formatMoney(priced.total)} ↑</strong></button>
       </div>
-      <button className="t-mobilebar" onClick={() => setSheetOpen(true)}><span>View order · {itemCount} item{itemCount === 1 ? "" : "s"}</span><strong>{formatMoney(priced.total)} ↑</strong></button>
-      </>
+      </div>
       )}
 
       {dialog === "dining" && <DiningDialog channels={channels.map((c) => ({ id: c.id, name: c.name }))} current={channelId} onPick={(id) => setChosenChannel(id)} onClose={() => setDialog(null)} />}
@@ -975,6 +984,7 @@ export function Pos({ config, catalog, online, customerId, setCustomerId }: PosP
         />
       )}
     </div>
+    </>
   );
 }
 
