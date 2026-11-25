@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { staffFetch, useStaff } from "../auth";
+import { hasPerm, staffFetch, useStaff } from "../auth";
 import { isTraining } from "../training";
 
 interface Entry { at: number; kind: string; text: string; who: string }
@@ -10,7 +10,7 @@ export function OrderTrail({ orderId }: { orderId: string }) {
   const staff = useStaff();
   const [entries, setEntries] = useState<Entry[] | null>(null);
   const [msg, setMsg] = useState("");
-  if (!staff || staff.role === "cashier" || isTraining()) return null;
+  if (!hasPerm(staff, "audit.read") || isTraining()) return null;
   async function load() {
     setMsg("");
     const r = await staffFetch(`/api/orders/${encodeURIComponent(orderId)}/trail`);

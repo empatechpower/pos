@@ -1,6 +1,6 @@
 import { useEffect, useState, useSyncExternalStore } from "react";
 import { reduceAll, type BusinessConfig, type Catalog, type OrderState } from "@pos/core";
-import { staffFetch, useStaff } from "./auth";
+import { hasPerm, staffFetch, useStaff } from "./auth";
 import { allEvents, pendingCount, subscribe } from "./db";
 import { cachedCatalog, cachedConfig, getSyncStatus, refreshReference, subscribeSync } from "./sync";
 
@@ -72,7 +72,7 @@ export function useFailedPrintJobs(): number {
   const staff = useStaff();
   const [n, setN] = useState(0);
   useEffect(() => {
-    if (!staff || staff.role === "cashier") return setN(0);
+    if (!hasPerm(staff, "print.manage")) return setN(0);
     let alive = true;
     const load = async () => {
       let total = 0;

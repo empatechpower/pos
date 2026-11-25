@@ -6,7 +6,7 @@ import { FloorPanel } from "./FloorPanel";
 import { DiscountPolicyPanel } from "./DiscountPolicyPanel";
 import { TrainingPanel } from "./TrainingPanel";
 import { useEffect, useState } from "react";
-import { authHeader, useStaff } from "../auth";
+import { hasPerm, authHeader, useStaff } from "../auth";
 
 interface Row {
   id: string;
@@ -53,7 +53,7 @@ export function Devices() {
   }, [staff]);
 
   if (!staff) return <div className="credit"><h2>Devices</h2><p className="muted">Sign in as a manager or owner to manage devices. <a href="/login">Sign in</a></p></div>;
-  if (staff.role === "cashier") return <div className="credit"><h2>Devices</h2><p className="muted">Only managers and owners can manage devices.</p></div>;
+  if (!hasPerm(staff, "device.manage")) return <div className="credit"><h2>Devices</h2><p className="muted">Only managers and owners can manage devices.</p></div>;
 
   const outletName = (id?: string) => outlets.find((o) => o.id === id)?.name ?? id ?? "";
   async function makeCode(deviceId?: string, testing = false, forOutlet?: string) {

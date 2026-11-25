@@ -1,7 +1,7 @@
 import { createHash, randomBytes, randomInt } from "node:crypto";
 import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
 import { formatMoney, type Catalog, type ChannelKind, type Product } from "@pos/core";
-import { audit, can, createStaff, rolePermissions, startSessionFor, type Permission } from "./auth.js";
+import { audit, can, createStaff, permissionsOf, startSessionFor, type Permission } from "./auth.js";
 import { punch } from "./timeclock.js";
 import type { PgCatalogStore } from "./catalog.js";
 import type { Db } from "./db/pool.js";
@@ -827,7 +827,7 @@ export function registerTelegram(app: FastifyInstance, d: TelegramDeps): void {
     const session = await startSessionFor(d.db, d.merchantId, used.rows[0].staff_id, "telegram-till");
     if (!session) return reply.code(403).send({ state: "not_allowed" });
     const s = session.staff;
-    return { state: "approved", token: session.token, expiresAt: session.expiresAt, staff: { name: s.name, code: s.code, role: s.role, franchiseId: s.franchiseId ?? null, outletId: s.outletId ?? null, phoneHint: s.phoneHint ?? null, permissions: rolePermissions(s.role) } };
+    return { state: "approved", token: session.token, expiresAt: session.expiresAt, staff: { name: s.name, code: s.code, role: s.role, franchiseId: s.franchiseId ?? null, outletId: s.outletId ?? null, phoneHint: s.phoneHint ?? null, permissions: permissionsOf(s) } };
   });
 
   // Anyone signed in can link their own Telegram (it is what lets them sign in at a till by QR); the bot still only runs the menu for managers and owners.

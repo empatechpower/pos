@@ -6,7 +6,7 @@ import { StockPanel } from "./StockPanel";
 import { PromoPanel } from "./PromoPanel";
 import { ZonesPanel } from "./ZonesPanel";
 import { PromoPricesPanel } from "./PromoPricesPanel";
-import { authHeader, staffFetch, useStaff } from "../auth";
+import { hasPerm, authHeader, staffFetch, useStaff } from "../auth";
 import { markDeviceRejected } from "../device";
 
 const KINDS: Array<[ChannelKind, string]> = [
@@ -50,7 +50,7 @@ export function Prices({ catalog, outletId }: { catalog: Catalog; outletId: stri
     void fetch("/api/brand").then(async (r) => r.ok && setBrand((await r.json()) as Brand));
   }, []);
 
-  if (!staff || staff.role === "cashier")
+  if (!staff || !hasPerm(staff, "catalog.manage"))
     return (
       <div className="credit">
         <h2>Prices</h2>

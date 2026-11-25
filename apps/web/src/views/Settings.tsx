@@ -2,7 +2,7 @@ import { useEffect, useMemo, useState } from "react";
 import type { Catalog } from "@pos/core";
 import { deviceRole, setDeviceRole } from "../device";
 import { go } from "../nav";
-import { staffFetch, useStaff } from "../auth";
+import { hasPerm, staffFetch, useStaff } from "../auth";
 import { TEXT_SCALE, setPref, usePrefs } from "../prefs";
 import { ACTION_POOL, TENDER_POOL, actionsPref, tendersPref, arrangeAll, isHidden, loadTillSettings, saveTill, useTillSettings, type ArrangePref, type CustomAction, type CustomTender, type KitchenStation, type TillSettings } from "../till/tillSettings";
 import { appVersion, checkForUpdate, useUpdatePending } from "../pwaUpdate";
@@ -109,7 +109,58 @@ function PermissionsCard() {
           ))}
         </tbody>
       </table>
+      <OnePerson options={v.options} roles={v.roles} />
     </section>
+  );
+}
+
+/** One person who differs from their role: for each permission, follow the role, always allow, or never allow. */
+function OnePerson({ options, roles }: { options: Array<{ id: string; label: string }>; roles: { cashier: string[]; manager: string[] } }) {
+  type Person = { id: string; name: string; role: string; active: boolean; allow: string[]; deny: string[] };
+  const [people, setPeople] = useState<Person[]>([]);
+  const [id, setId] = useState("");
+  const [msg, setMsg] = useState("");
+  const load = async () => { const r = await staffFetch("/api/staff"); if ("res" in r && r.res.ok) setPeople(((await r.res.json()) as { staff: Person[] }).staff.filter((p) => p.active && (p.role === "cashier" || p.role === "manager"))); };
+  useEffect(() => { void load(); }, []);
+  const who = people.find((p) => p.id === id);
+  const set = async (perm: string, how: "role" | "allow" | "deny") => {
+    if (!who) return;
+    const allow = who.allow.filter((x) => x !== perm), deny = who.deny.filter((x) => x !== perm);
+    if (how === "allow") allow.push(perm);
+    if (how === "deny") deny.push(perm);
+    const r = await staffFetch(`/api/staff/${who.id}/permissions`, { method: "PUT", body: { allow, deny } });
+    if (!("res" in r)) return setMsg(r.problem);
+    if (!r.res.ok) return setMsg(r.res.status === 403 ? "Only the owner can change what a person may do." : "That was not saved.");
+    setMsg(`Saved for ${who.name}. It applies the next time they sign in.`);
+    void load();
+  };
+  const changed = (p: Person) => p.allow.length + p.deny.length;
+  return (
+    <div style={{ marginTop: 18 }}>
+      <h3>One person different from their role</h3>
+      <p className="muted">For a senior cashier who may refund, or a new manager who may not yet change prices. Everything not set here follows the person's role above.</p>
+      <label className="field">Person
+        <select aria-label="Person" value={id} onChange={(e) => { setId(e.target.value); setMsg(""); }}>
+          <option value="">Choose a person…</option>
+          {people.map((p) => <option key={p.id} value={p.id}>{p.name} · {p.role}{changed(p) ? ` · ${changed(p)} of their own` : ""}</option>)}
+        </select>
+      </label>
+      {msg && <p className="flash" role="status">{msg}</p>}
+      {who && options.map((o) => {
+        const how = who.deny.includes(o.id) ? "deny" : who.allow.includes(o.id) ? "allow" : "role";
+        const byRole = (roles[who.role as "cashier" | "manager"] ?? []).includes(o.id);
+        return (
+          <div className="arr-row" key={o.id}>
+            <label style={{ flex: 1 }}>{o.label}</label>
+            <select aria-label={`${who.name}: ${o.label}`} value={how} onChange={(e) => void set(o.id, e.target.value as "role" | "allow" | "deny")}>
+              <option value="role">As their role ({byRole ? "yes" : "no"})</option>
+              <option value="allow">Always yes</option>
+              <option value="deny">Always no</option>
+            </select>
+          </div>
+        );
+      })}
+    </div>
   );
 }
 
@@ -229,8 +280,10 @@ export function Settings({ catalog }: { catalog?: Catalog | null } = {}) {
   useEffect(() => { void loadTillSettings(); }, [staff?.code]);
   if (!staff) return <div className="credit"><h2>Settings</h2><p className="muted">Sign in to change settings. <a href="/login">Sign in</a></p></div>;
   const manager = staff.role !== "cashier";
+  // Each section opens for whoever the shop allows to do what it holds (the owner's choices under "What staff may do").
+  const maySell = hasPerm(staff, "device.manage"), mayMenu = hasPerm(staff, "catalog.manage");
   const save = async (patch: Partial<TillSettings>) => { const e = await saveTill(patch); setMsg(e ?? "Saved."); };
-  const sections: Array<[Section, string, boolean]> = [["station", "Station", true], ["selling", "Selling", manager], ["menu", "Menu & prices", manager], ["training", "Training", manager], ["about", "About", true]];
+  const sections: Array<[Section, string, boolean]> = [["station", "Station", true], ["selling", "Selling", maySell], ["menu", "Menu & prices", mayMenu], ["training", "Training", manager], ["about", "About", true]];
 
   return (
     <div className="settings">
@@ -260,7 +313,7 @@ export function Settings({ catalog }: { catalog?: Catalog | null } = {}) {
             <div className="row"><button className="secondary sm" onClick={() => go("/pos")}>Go to the till</button>{prefs.layout && <button className="secondary sm" onClick={() => void setLayout(null).then((e) => setMsg(e ?? "Back to the shop's layout."))}>Use the shop's layout</button>}</div>
           </>
         )}
-        {section === "selling" && manager && (
+        {section === "selling" && maySell && (
           <>
             <h2>Selling</h2>
             <section className="e2e-card">
@@ -295,7 +348,7 @@ export function Settings({ catalog }: { catalog?: Catalog | null } = {}) {
             <PaynowPanel />
           </>
         )}
-        {section === "menu" && manager && (
+        {section === "menu" && mayMenu && (
           <>
             <h2>Menu & prices</h2>
             <p className="muted">Items, prices, dining options and the printers that take the orders.</p>

@@ -21,7 +21,10 @@ export function DiscountSheet({ target, onApply, onClose }: { target: { scope: "
   const [policy, setPolicy] = useState<DiscountPolicy>(cachedPolicy());
   const [kind, setKind] = useState<"percent" | "amount" | "price">("percent");
   const [val, setVal] = useState("");
-  const [why, setWhy] = useState<string>(DISCOUNT_REASONS[0]);
+  // The shop's own reasons when it has set some, else the built-in list; "Other" (typed) is always last.
+  const reasons: string[] = policy.reasons?.length ? [...policy.reasons, "Other"] : [...DISCOUNT_REASONS];
+  const [picked, setWhy] = useState<string>("");
+  const why = reasons.includes(picked) ? picked : reasons[0]!;
   const [other, setOther] = useState("");
   const [code, setCode] = useState("");
   const [pin, setPin] = useState("");
@@ -64,7 +67,7 @@ export function DiscountSheet({ target, onApply, onClose }: { target: { scope: "
         </label>
         {kind !== "price" && val !== "" && <p className="muted">Takes off {formatMoney(off)} of {formatMoney(base)}.</p>}
         <label className="field">Why
-          <select value={why} onChange={(e) => setWhy(e.target.value)}>{DISCOUNT_REASONS.map((r) => <option key={r}>{r}</option>)}</select>
+          <select aria-label="Reason" value={why} onChange={(e) => setWhy(e.target.value)}>{reasons.map((r) => <option key={r}>{r}</option>)}</select>
         </label>
         {why === "Other" && <label className="field">Say why<input maxLength={120} value={other} onChange={(e) => setOther(e.target.value)} /></label>}
         {approval && (

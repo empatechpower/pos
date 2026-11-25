@@ -69,3 +69,12 @@ describe("handing an order over", () => {
     expect(findOrderByCode(all, "x", ctx)).toBeNull();
   });
 });
+
+describe("taking over an order", () => {
+  it("is on the order's record and changes nothing about the order", () => {
+    const before = reduceOrder("o", open())!;
+    const after = reduceOrder("o", [...open(), ev({ type: "OrderTakenOver", from: "Olive", byName: "Cat" })])!;
+    expect(after.lines).toEqual(before.lines);
+    expect(after.stage).toBe(before.stage);
+  });
+});

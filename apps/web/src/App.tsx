@@ -2,7 +2,7 @@ import { useEffect, useState } from "react";
 import { getDeviceCode, setDeviceCode } from "./db";
 import { usePending, useReference, useSyncStatus } from "./hooks";
 import { startSync, syncNow } from "./sync";
-import { authHeader, useStaff } from "./auth";
+import { hasPerm, authHeader, useStaff } from "./auth";
 import { useFailedPrintJobs, useNewOnlineOrders } from "./hooks";
 import { needsEnrollment, useDevice } from "./device";
 import { Credit } from "./views/Credit";
@@ -134,7 +134,7 @@ export function App() {
           {device.required && staff && <a href="/manager" className={route === "manager" ? "on" : ""}>Manager</a>}
           <a href="/online" className={route === "online" ? "on" : ""}>Online{newOnline > 0 ? <b className="dot">{newOnline}</b> : null}</a>
           {/* Printers, Prices and Devices live under Settings > Menu & prices; Printers shows here only when a print job has failed. */}
-          {staff && staff.role !== "cashier" && catalog && failedJobs > 0 && <a href="/printers" className={route === "printers" ? "on" : ""}>Printers<b className="dot">{failedJobs}</b></a>}
+          {hasPerm(staff, "print.manage") && catalog && failedJobs > 0 && <a href="/printers" className={route === "printers" ? "on" : ""}>Printers<b className="dot">{failedJobs}</b></a>}
           {staff && <a href="/settings" className={(route as string) === "settings" ? "on" : ""}>Settings</a>}
         </nav>
         <div className="right">

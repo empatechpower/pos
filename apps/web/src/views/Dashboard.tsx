@@ -1,6 +1,6 @@
 import { confirmedPaid, formatMoney, orderTotals, type BusinessConfig } from "@pos/core";
 import { go } from "../nav";
-import { useStaff } from "../auth";
+import { hasPerm, useStaff } from "../auth";
 import { useOrders } from "../hooks";
 import { useShift } from "../shift";
 import { isTraining } from "../training";
@@ -43,7 +43,7 @@ export function Dashboard({ config }: { config: BusinessConfig }) {
         {tile("Orders", "☰", "/orders", `${open.length} open`)}
         {tableService && tile("Table Map", "▦", "/pos?view=tables", `${seated.length} seated`)}
         {tile("Drawer & Shift", "▭", "/pos?dialog=shift", shift ? `On Drawer ${shift.drawer}` : "Open your shift")}
-        {staff.role !== "cashier" && tile("Reports", "▥", "/manager")}
+        {hasPerm(staff, "audit.read") && tile("Reports", "▥", "/manager")}
         {tile("Settings", "⚙", "/settings")}
         {(till.customActions ?? []).filter((a) => a.where !== "strip").map((a) => <button key={a.id} className="dash-tile" style={{ borderColor: a.color }} onClick={() => openCustomAction(a)}><i style={{ color: a.color }}>{a.icon}</i><strong>{a.label}</strong><small>Opens in a new tab</small></button>)}
       </div>

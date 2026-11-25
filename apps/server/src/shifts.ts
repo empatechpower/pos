@@ -1,7 +1,7 @@
 import { randomUUID } from "node:crypto";
 import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
 import { confirmedPaid, orderTotals, reduceAll, type BusinessConfig } from "@pos/core";
-import { audit, can, checkStaffPin, type Permission, type Staff } from "./auth.js";
+import { audit, canDo, checkStaffPin, type Permission, type Staff } from "./auth.js";
 import type { EventStore } from "./store.js";
 import type { Db } from "./db/pool.js";
 
@@ -115,7 +115,7 @@ export async function loadShiftSettings(db: Db | null, merchantId: string): Prom
  */
 export function registerShifts(app: FastifyInstance, d: { db: Db; merchantId: string; store: EventStore; config: BusinessConfig; needs: (p: Permission) => (req: FastifyRequest, reply: FastifyReply) => Promise<unknown> }) {
   const { db, merchantId, store, config, needs } = d;
-  const isManager = (s: Staff) => can(s.role, "shift.approve");
+  const isManager = (s: Staff) => canDo(s, "shift.approve");
 
   app.get("/api/settings/shifts", { preHandler: needs("wallet.read") }, async () => loadShiftSettings(db, merchantId));
   app.put<{ Body: Partial<ShiftSettings> }>("/api/settings/shifts", { preHandler: needs("device.manage") }, async (req, reply) => {
@@ -274,7 +274,7 @@ export function registerShifts(app: FastifyInstance, d: { db: Db; merchantId: st
         if (!b.approverCode || !b.approverPin) return reply.code(428).send({ error: "manager_approval_needed", varianceCents: variance });
         const v = await checkStaffPin(db, merchantId, String(b.approverCode).trim(), String(b.approverPin));
         if (!v.ok) return reply.code(v.reason === "locked" ? 423 : 422).send({ error: v.reason === "locked" ? "approver_locked" : "approval_refused" });
-        if (!can(v.row.role, "shift.approve")) return reply.code(422).send({ error: "approver_cannot_approve" });
+        if (!canDo(v.row, "shift.approve")) return reply.code(422).send({ error: "approver_cannot_approve" });
         approvedBy = v.row.name;
       }
     }

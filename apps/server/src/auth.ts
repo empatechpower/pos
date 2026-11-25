@@ -40,6 +40,30 @@ export const PERMISSION_OPTIONS: Array<{ id: Permission; label: string; help: st
 ];
 const ALWAYS: Permission[] = ["wallet.read", "wallet.spend"];
 
+/**
+ * What one person may do: their role's permissions, plus what they were given on top, less what was taken away from them. The owner is
+ * never changed, selling is never taken away, and managing staff is never given. Takes a staff object or a raw staff row.
+ */
+type Who = { role: Role; permAllow?: readonly string[]; permDeny?: readonly string[]; perm_allow?: readonly string[] | null; perm_deny?: readonly string[] | null };
+const GIVABLE = () => PERMISSION_OPTIONS.map((o) => o.id);
+export function permissionsOf(s: Who): Permission[] {
+  const base = rolePermissions(s.role);
+  if (s.role === "owner" || s.role === "agent") return base;
+  const allow = (s.permAllow ?? s.perm_allow ?? []).filter((p): p is Permission => GIVABLE().includes(p as Permission));
+  const deny = new Set((s.permDeny ?? s.perm_deny ?? []).filter((p) => !ALWAYS.includes(p as Permission)));
+  return [...new Set([...base, ...allow])].filter((p) => !deny.has(p));
+}
+export const canDo = (s: Who, p: Permission): boolean => permissionsOf(s).includes(p);
+/** Tidy a person's own differences: only permissions that can be given or taken, and never the same one in both lists (taking away wins). */
+export function cleanOverrides(allow: unknown, deny: unknown): { allow: Permission[]; deny: Permission[] } | null {
+  const list = (v: unknown) => (Array.isArray(v) && v.length <= 40 && v.every((x) => typeof x === "string") ? [...new Set(v as string[])] : null);
+  const a = list(allow ?? []), d = list(deny ?? []);
+  if (!a || !d) return null;
+  const ok = GIVABLE();
+  const denyOut = d.filter((p): p is Permission => ok.includes(p as Permission));
+  return { allow: a.filter((p): p is Permission => ok.includes(p as Permission) && !denyOut.includes(p as Permission)), deny: denyOut };
+}
+
 /** Set what a role may do. Only the options offered for that role count; anything else in the list is ignored. */
 export function setRolePermissions(role: "cashier" | "manager", perms: readonly string[]): Permission[] {
   const allowed = PERMISSION_OPTIONS.filter((o) => o.roles.includes(role)).map((o) => o.id);
@@ -77,6 +101,9 @@ export interface Staff {
   outletId?: string | null;
   /** The sign-in phone number with the middle hidden, like "+65 •••• 1111", for the staff buttons on the sign-in screen. */
   phoneHint?: string | null;
+  /** This person's own differences from their role: permissions given on top of it, and taken away from it. */
+  permAllow?: Permission[];
+  permDeny?: Permission[];
 }
 
 // ---- PIN hashing ------------------------------------------------------------------------------
@@ -159,6 +186,8 @@ const toStaff = (r: Record<string, unknown>): Staff => ({
   franchiseId: (r.franchise_id as string | null) ?? null,
   outletId: (r.outlet_id as string | null) ?? null,
   phoneHint: phoneHint(r.phone),
+  ...(Array.isArray(r.perm_allow) && r.perm_allow.length ? { permAllow: r.perm_allow as Permission[] } : {}),
+  ...(Array.isArray(r.perm_deny) && r.perm_deny.length ? { permDeny: r.perm_deny as Permission[] } : {}),
 });
 
 // ---- login / sessions -------------------------------------------------------------------------

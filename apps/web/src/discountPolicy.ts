@@ -2,7 +2,7 @@ import { staffFetch } from "./auth";
 import { isTraining } from "./training";
 
 /** What a cashier may do alone before a manager has to approve. Kept so the till still knows it offline. */
-export interface DiscountPolicy { cashierMaxPercent: number; cashierMaxAmountCents: number; overrideNeedsManager: boolean }
+export interface DiscountPolicy { cashierMaxPercent: number; cashierMaxAmountCents: number; overrideNeedsManager: boolean; /** The shop's own reasons for a discount; missing = the built-in list. */ reasons?: string[] }
 const LS = "pos.discountPolicy";
 const FALLBACK: DiscountPolicy = { cashierMaxPercent: 10, cashierMaxAmountCents: 500, overrideNeedsManager: true };
 

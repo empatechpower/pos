@@ -817,6 +817,7 @@ function KioskMenu({ info, menu, categoryNames, options, channelId, setChannelId
                           {hi > lo ? <span className="k-from">{tx("From")}</span> : null}
                           <span className="k-p">{formatMoney(lo)}</span>
                         </span>
+                        {m.listPriceCents !== undefined && <span className="k-bcrs" title={tx("Member price")}>{tx("Member price")} · <s>{formatMoney(m.listPriceCents)}</s></span>}
                         {deposit && <span className="k-bcrs">+10c {tx("deposit")}</span>}
                         {n > 0 ? <span className="k-cstep" onClick={(e) => e.stopPropagation()}><button aria-label="−" onClick={() => lessOf(m)}>−</button><span>{n}</span><button className="plus" aria-label="+" onClick={() => addQuick(m, 1)}>+</button></span> : <button className="k-add" aria-label={tx("Add")} onClick={(e) => { e.stopPropagation(); addQuick(m, 1); }}>+</button>}
                       </div>

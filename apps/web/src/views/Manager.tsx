@@ -32,15 +32,15 @@ export function Manager({ config, catalog }: { config: BusinessConfig; catalog?:
           <div className="seg" style={{ margin: "4px 0 12px" }}>
             <button className={tab === "orders" ? "on" : ""} aria-pressed={tab === "orders"} onClick={() => setTab("orders")}>Transactions</button>
             <button className={tab === "members" ? "on" : ""} aria-pressed={tab === "members"} onClick={() => setTab("members")}>Members</button>
-            {staff.role !== "cashier" && <button className={tab === "reports" ? "on" : ""} aria-pressed={tab === "reports"} onClick={() => setTab("reports")}>Reports</button>}
-            {staff.role !== "cashier" && <button className={tab === "outlets" ? "on" : ""} aria-pressed={tab === "outlets"} onClick={() => setTab("outlets")}>Outlets</button>}
+            {hasPerm(staff, "audit.read") && <button className={tab === "reports" ? "on" : ""} aria-pressed={tab === "reports"} onClick={() => setTab("reports")}>Reports</button>}
+            {hasPerm(staff, "device.manage") && <button className={tab === "outlets" ? "on" : ""} aria-pressed={tab === "outlets"} onClick={() => setTab("outlets")}>Outlets</button>}
             {hasPerm(staff, "audit.read") && <button className={tab === "time" ? "on" : ""} aria-pressed={tab === "time"} onClick={() => setTab("time")}>Timesheet</button>}
-            {staff.role !== "cashier" && <button className={tab === "books" ? "on" : ""} aria-pressed={tab === "books"} onClick={() => setTab("books")}>Books</button>}
+            {hasPerm(staff, "audit.read") && <button className={tab === "books" ? "on" : ""} aria-pressed={tab === "books"} onClick={() => setTab("books")}>Books</button>}
             {staff.role === "owner" && <button className={tab === "agents" ? "on" : ""} aria-pressed={tab === "agents"} onClick={() => setTab("agents")}>Agents</button>}
-            {staff.role !== "cashier" && <button className={tab === "telegram" ? "on" : ""} aria-pressed={tab === "telegram"} onClick={() => setTab("telegram")}>Telegram</button>}
+            {hasPerm(staff, "catalog.manage") && <button className={tab === "telegram" ? "on" : ""} aria-pressed={tab === "telegram"} onClick={() => setTab("telegram")}>Telegram</button>}
           </div>
           <PendingSignIns signedIn />
-          {tab === "orders" ? <Transactions config={config} /> : tab === "reports" ? <Reports config={config} catalog={catalog} /> : tab === "outlets" ? <Outlets /> : tab === "time" ? <Timesheet config={config} /> : tab === "agents" ? <AgentsPanel /> : tab === "books" ? <Books /> : tab === "telegram" ? <TelegramPanel /> : <Members canAdjustPoints={staff.role !== "cashier"} canImport={staff.role !== "cashier"} rewardsOn={config.rewards.pointsEnabled} />}
+          {tab === "orders" ? <Transactions config={config} /> : tab === "reports" ? <Reports config={config} catalog={catalog} /> : tab === "outlets" ? <Outlets /> : tab === "time" ? <Timesheet config={config} /> : tab === "agents" ? <AgentsPanel /> : tab === "books" ? <Books /> : tab === "telegram" ? <TelegramPanel /> : <Members canAdjustPoints={hasPerm(staff, "wallet.refund")} canImport={hasPerm(staff, "wallet.refund")} rewardsOn={config.rewards.pointsEnabled} />}
         </>
       )}
     </div>

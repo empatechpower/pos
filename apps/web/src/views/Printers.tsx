@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState } from "react";
 import type { Catalog } from "@pos/core";
-import { staffFetch, useStaff } from "../auth";
+import { hasPerm, staffFetch, useStaff } from "../auth";
 
 interface Printer {
   id: string;
@@ -75,13 +75,13 @@ export function Printers({ catalog }: { catalog: Catalog }) {
   }, []);
 
   useEffect(() => {
-    if (!staff || staff.role === "cashier") return;
+    if (!hasPerm(staff, "print.manage")) return;
     void load();
     const t = window.setInterval(() => void load(), 5000);
     return () => window.clearInterval(t);
   }, [staff, load]);
 
-  if (!staff || staff.role === "cashier")
+  if (!staff || !hasPerm(staff, "print.manage"))
     return (
       <div className="credit">
         <h2>Printers</h2>

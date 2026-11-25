@@ -1,6 +1,6 @@
 import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
 import type { Db } from "./db/pool.js";
-import { audit, checkStaffPin, type Permission } from "./auth.js";
+import { audit, checkStaffPin, cleanOverrides, permissionsOf, type Permission } from "./auth.js";
 import { outletAllowed, visibleOutletIds } from "./tenant.js";
 
 /**
@@ -124,8 +124,20 @@ export function registerTimeclock(app: FastifyInstance, d: { db: Db; merchantId:
   /** The people who work here, for the timesheet and for giving out cards. A card's number is never sent back whole. */
   app.get("/api/staff", { preHandler: needs("audit.read") }, async (req) => {
     const visible = await visibleOutletIds(db, merchantId, req.staff!);
-    const r = await db.query("SELECT id, code, name, role, active, outlet_id, card_id FROM staff WHERE merchant_id=$1 AND role <> 'agent' ORDER BY name", [merchantId]);
-    return { staff: r.rows.filter((s) => visible === null || (s.outlet_id && visible.includes(s.outlet_id))).map((s) => ({ id: s.id as string, code: s.code as string, name: s.name as string, role: s.role as string, active: s.active as boolean, card: s.card_id ? `···${String(s.card_id).slice(-4)}` : null })) };
+    const r = await db.query("SELECT id, code, name, role, active, outlet_id, card_id, perm_allow, perm_deny FROM staff WHERE merchant_id=$1 AND role <> 'agent' ORDER BY name", [merchantId]);
+    return { staff: r.rows.filter((s) => visible === null || (s.outlet_id && visible.includes(s.outlet_id))).map((s) => ({ id: s.id as string, code: s.code as string, name: s.name as string, role: s.role as string, active: s.active as boolean, card: s.card_id ? `···${String(s.card_id).slice(-4)}` : null, allow: (s.perm_allow ?? []) as string[], deny: (s.perm_deny ?? []) as string[], permissions: permissionsOf(s) })) };
+  });
+  /** One person differing from their role: what they are given on top of it, and what is taken away. The owner's own login cannot be changed. */
+  app.put<{ Params: { id: string }; Body: { allow?: unknown; deny?: unknown } }>("/api/staff/:id/permissions", { preHandler: needs("staff.manage") }, async (req, reply) => {
+    if (!/^[0-9a-f-]{36}$/i.test(req.params.id)) return reply.code(404).send({ error: "staff_not_found" });
+    const c = cleanOverrides(req.body?.allow, req.body?.deny);
+    if (!c) return reply.code(400).send({ error: "allow and deny are lists of permission names" });
+    const who = (await db.query("SELECT role, name FROM staff WHERE merchant_id=$1 AND id=$2", [merchantId, req.params.id])).rows[0];
+    if (!who) return reply.code(404).send({ error: "staff_not_found" });
+    if (who.role === "owner" || who.role === "agent") return reply.code(400).send({ error: "role_is_fixed", message: "An owner always has everything; an agent's permissions are fixed." });
+    await db.query("UPDATE staff SET perm_allow=$3, perm_deny=$4 WHERE merchant_id=$1 AND id=$2", [merchantId, req.params.id, c.allow, c.deny]);
+    await audit(db, merchantId, req.staff!.id, "staff.permissions", { staffId: req.params.id, allow: c.allow, deny: c.deny });
+    return { ok: true, allow: c.allow, deny: c.deny, permissions: permissionsOf({ role: who.role, permAllow: c.allow, permDeny: c.deny }) };
   });
   app.put<{ Params: { id: string }; Body: { card?: string | null } }>("/api/staff/:id/card", { preHandler: needs("staff.manage") }, async (req, reply) => {
     if (!/^[0-9a-f-]{36}$/i.test(req.params.id)) return reply.code(404).send({ error: "staff_not_found" });

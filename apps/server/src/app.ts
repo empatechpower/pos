@@ -3,7 +3,7 @@ import Fastify, { type FastifyReply, type FastifyRequest } from "fastify";
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { withTaxPack, isTaxCountry, TAX_PACKS, DEFAULT_COUNTRY, type BuilderSpec, guestCheck, plainText, receipt, type OrderState, type PrintContext, commissionOf, tabPaymentReceipt, type ProductStock, validateProductStock, isTimeZone, validCoordinates, validateOutletOverride, validateWindows, type MenuWindows, confirmedPaid, hourly, isFullyPaid, productMix, summarize, menuFor, newId, orderTotals, reduceAll, reduceOrder, shopStatus, type BusinessConfig, type ChannelKind, type OptionGroup, type OrderEvent } from "@pos/core";
-import { PERMISSION_OPTIONS, loadRolePermissions, rolePermissions, saveRolePermissions, setRolePermissions, CASHIER_TOPUP_LIMIT_CENTS, audit, checkStaffPin, authenticate, authenticateAgent, can, createAgent, createConnectCode, redeemConnectCode, createStaff, listAgents, login, loginByPhone, logout, normalisePhone, setStaffPhone, recentAudit, revokeAgent, type Permission, type Role, type Staff } from "./auth.js";
+import { canDo, permissionsOf, PERMISSION_OPTIONS, loadRolePermissions, rolePermissions, saveRolePermissions, setRolePermissions, CASHIER_TOPUP_LIMIT_CENTS, audit, checkStaffPin, authenticate, authenticateAgent, can, createAgent, createConnectCode, redeemConnectCode, createStaff, listAgents, login, loginByPhone, logout, normalisePhone, setStaffPhone, recentAudit, revokeAgent, type Permission, type Role, type Staff } from "./auth.js";
 import type { CatalogStore, ChangeResult, PgCatalogStore } from "./catalog.js";
 import type { Db } from "./db/pool.js";
 import { adjustTo, balanceOf, creditBlockedFor, creditExemptIds, creditFrozen, refund, setCreditExempt, setCreditFrozen, spend, topUp } from "./ledger.js";
@@ -346,7 +346,7 @@ export async function buildApp({ config, store, db, catalog, catalogAdmin, print
     if (denied) return denied;
     const staff = await authenticate(db, bearer(req));
     if (!staff || staff.merchantId !== merchantId) return reply.code(401).send({ error: "sign_in_required" });
-    if (!can(staff.role, permission)) return reply.code(403).send({ error: "not_allowed", needs: permission });
+    if (!canDo(staff, permission)) return reply.code(403).send({ error: "not_allowed", needs: permission });
     req.staff = staff;
   };
 
@@ -364,7 +364,7 @@ export async function buildApp({ config, store, db, catalog, catalogAdmin, print
       if (r.reason === "invalid") loginFailures.fail(who);
       return reply.code(r.reason === "locked" ? 429 : 401).send({ error: r.reason });
     }
-    return { token: r.token, expiresAt: r.expiresAt, staff: { name: r.staff.name, code: r.staff.code, role: r.staff.role, franchiseId: r.staff.franchiseId ?? null, outletId: r.staff.outletId ?? null, phoneHint: r.staff.phoneHint ?? null, permissions: rolePermissions(r.staff.role) } };
+    return { token: r.token, expiresAt: r.expiresAt, staff: { name: r.staff.name, code: r.staff.code, role: r.staff.role, franchiseId: r.staff.franchiseId ?? null, outletId: r.staff.outletId ?? null, phoneHint: r.staff.phoneHint ?? null, permissions: permissionsOf(r.staff) } };
   });
 
   // ---- a person's own colour for the staff screens (Q&A F-2); anyone who has not chosen follows the merchant's theme ------------------
@@ -410,7 +410,7 @@ export async function buildApp({ config, store, db, catalog, catalogAdmin, print
     return { prefs: cleanPrefs(row?.prefs) };
   });
 
-  app.get("/api/auth/me", { preHandler: needs("wallet.read") }, async (req) => ({ name: req.staff!.name, code: req.staff!.code, role: req.staff!.role, franchiseId: req.staff!.franchiseId ?? null, outletId: req.staff!.outletId ?? null, permissions: rolePermissions(req.staff!.role) }));
+  app.get("/api/auth/me", { preHandler: needs("wallet.read") }, async (req) => ({ name: req.staff!.name, code: req.staff!.code, role: req.staff!.role, franchiseId: req.staff!.franchiseId ?? null, outletId: req.staff!.outletId ?? null, permissions: permissionsOf(req.staff!) }));
 
   // ---- what cashiers and managers may do: the owner's choice ----
   if (db) await loadRolePermissions(db, merchantId);
@@ -589,12 +589,12 @@ export async function buildApp({ config, store, db, catalog, catalogAdmin, print
 
   type Approval = { ok: true; id: string; name: string } | { ok: false; status: number; error: string };
   const approvalFor = async (staff: Staff, body: { approverCode?: string; approverPin?: string }): Promise<Approval> => {
-    if (can(staff.role, "order.refund")) return { ok: true, id: staff.id, name: staff.name };
+    if (canDo(staff, "order.refund")) return { ok: true, id: staff.id, name: staff.name };
     if (!body.approverCode || !body.approverPin) return { ok: false, status: 428, error: "manager_approval_needed" };
     if (!db) return { ok: false, status: 503, error: "needs_a_database" };
     const v = await checkStaffPin(db, merchantId, String(body.approverCode).trim(), String(body.approverPin));
     if (!v.ok) return { ok: false, status: v.reason === "locked" ? 423 : 422, error: v.reason === "locked" ? "approver_locked" : "approval_refused" };
-    if (!can(v.row.role, "order.refund")) return { ok: false, status: 422, error: "approver_cannot_approve" };
+    if (!canDo(v.row, "order.refund")) return { ok: false, status: 422, error: "approver_cannot_approve" };
     return { ok: true, id: v.row.id, name: v.row.name };
   };
   const reasonOf = (b: { reason?: unknown }) => (typeof b.reason === "string" ? b.reason.trim().slice(0, 200) : "");

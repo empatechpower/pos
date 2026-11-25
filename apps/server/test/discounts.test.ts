@@ -51,6 +51,16 @@ describe("discount rules and approvals", () => {
   }, 120_000);
   afterAll(async () => { await app?.close(); await stop?.(); });
 
+  it("the shop keeps its own list of discount reasons: tidied, kept when the limits change, and cleared by an empty list", async () => {
+    const put = (body: object) => call("/api/settings/discounts", { bearer: tok.M1, method: "PUT", body: { cashierMaxPercent: 10, cashierMaxAmountCents: 500, ...body } });
+    const set = await put({ reasons: ["  Staff meal ", "Birthday", "birthday", "", "Other", "Opening week"] });
+    expect(set.json.reasons).toEqual(["Staff meal", "Birthday", "Opening week"]); // blanks, repeats and "Other" (always offered) dropped
+    expect((await call("/api/settings/discounts", { bearer: tok.C1 })).json.reasons).toEqual(["Staff meal", "Birthday", "Opening week"]);
+    expect((await put({})).json.reasons).toEqual(["Staff meal", "Birthday", "Opening week"]); // changing the limits leaves the list alone
+    expect((await put({ reasons: "anything" })).status).toBe(400);
+    expect((await put({ reasons: [] })).json.reasons).toBeUndefined(); // back to the built-in list
+  });
+
   it("starts with sensible limits a cashier may use alone, and only a manager changes them", async () => {
     expect((await call("/api/settings/discounts", { bearer: tok.C1 })).json).toEqual({ cashierMaxPercent: 10, cashierMaxAmountCents: 500, overrideNeedsManager: true });
     expect((await call("/api/settings/discounts", { bearer: tok.C1, method: "PUT", body: { cashierMaxPercent: 50, cashierMaxAmountCents: 0 } })).status).toBe(403);

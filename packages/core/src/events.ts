@@ -88,6 +88,8 @@ export type OrderEventBody =
   | { type: "DiscountRemoved"; discountId: string; byName?: string }
   /** A note on the whole order for the kitchen and the guest check ("allergy: nuts", "birthday"). The latest one wins; empty clears it. */
   | { type: "OrderNoted"; note: string; byName?: string }
+  /** Someone signed in at a till that held another person's order and carried it on. For the order's trail only; it changes nothing on the order. */
+  | { type: "OrderTakenOver"; from: string; byName?: string }
   /** The order was handed to whoever came for it (a delivery rider, the customer): who took it, and any reference they gave (a rider's card or id, the platform's order number). */
   | { type: "OrderHandedOver"; to: string; ref?: string; byName?: string }
   /** Staff attached a member to the order at the till (empty = taken off again). The server checks the member exists before it keeps this. */

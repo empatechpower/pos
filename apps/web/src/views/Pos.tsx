@@ -36,7 +36,7 @@ import {
   type PaymentMethod,
   type OrderState,
 } from "@pos/core";
-import { staffFetch, useStaff } from "../auth";
+import { hasPerm, staffFetch, useStaff } from "../auth";
 import { allEvents, deviceId, getDeviceCode, record } from "../db";
 import { useOrders } from "../hooks";
 import { OptionSheet } from "./OptionSheet";
@@ -307,6 +307,8 @@ export function Pos({ config, catalog, online, customerId, setCustomerId, header
       if (owner && owner.code !== staff.code) {
         notify(`You took over ${owner.name}'s order.`);
         if (!isTraining()) void staffFetch("/api/auth/takeover", { body: { from: owner.name, orderId, items: bag.length } });
+        // An order already sent has its own trail: the takeover is written there too (a new, unsent order has no trail yet).
+        if (orderId) void record(orderId, { type: "OrderTakenOver", from: owner.name, byName: staff.name });
       }
       if (!owner || owner.code !== staff.code) localStorage.setItem(KEY, JSON.stringify({ code: staff.code, name: staff.name }));
     } catch { /* storage not available: nothing to note */ }
@@ -590,6 +592,8 @@ export function Pos({ config, catalog, online, customerId, setCustomerId, header
   // ---- the order on screen: holding, recalling, opening a table's bill ----
   const dineChannel = channels.find((c) => c.kind === "dine_in");
   /** Table service: postpay shops with a dine-in channel get the Table Map, open bills and courses. */
+  // What this person may do on the till, as the shop set it for their role: approve a price set by hand, and change the shop's set-up.
+  const mayApprove = hasPerm(staff, "discount.approve"), maySetUp = hasPerm(staff, "device.manage");
   /** Retail: a shop that sells by scanning. No tables, no kitchen; a scan anywhere on the selling screen adds the item. */
   const retail = config.serviceMode === "retail";
   const tableService = !prepay && !!dineChannel && !retail;
@@ -838,10 +842,10 @@ export function Pos({ config, catalog, online, customerId, setCustomerId, header
     ...(tableService ? [{ id: "tables", label: "Table Map", icon: "▦", onClick: goTables }] : []),
     ...(tableService && floor.courses && fire ? [{ id: "fire", label: `Fire Course (${fire.index} of ${fire.of})`, icon: "🔥", onClick: () => void fireNextCourse(linked!, staff?.name).then(() => notify(`${COURSE_NAMES[fire.course] ?? "Course"} fired.`)) }] : []),
     { id: "fee", label: "Service Fee", icon: "＋", onClick: () => setDialog("fee"), disabled: !staff || !bag.length, title: !staff ? "Sign in to add a fee" : undefined },
-    { id: "extra", label: "Add Extra Item", icon: "＋", onClick: () => setDialog("extra"), disabled: !staff || staff.role === "cashier" || !!linked?.split, title: !staff ? "Sign in first" : staff.role === "cashier" ? "A manager adds extra items" : undefined },
+    { id: "extra", label: "Add Extra Item", icon: "＋", onClick: () => setDialog("extra"), disabled: !staff || !mayApprove || !!linked?.split, title: !staff ? "Sign in first" : !mayApprove ? "A manager adds extra items" : undefined },
     { id: "discount", label: "Discount Order", icon: "%", onClick: () => setSheet({ scope: "bill" }), disabled: !staff || !bag.length, title: !staff ? "Sign in to give a discount" : undefined },
     // Add/Remove Tax shows only where the country's tax pack lets staff take the tax off, and the shop charges tax at all.
-    ...(config.pricing.taxRemovable && config.pricing.gstOn ? [{ id: "tax", label: taxOff ? "Add Tax" : "Remove Tax", icon: "§", onClick: () => setDialog("tax" as const), disabled: !staff || staff.role === "cashier" || !bag.length || !!linked?.split, title: !staff ? "Sign in first" : staff.role === "cashier" ? "A manager takes the tax off" : undefined }] : []),
+    ...(config.pricing.taxRemovable && config.pricing.gstOn ? [{ id: "tax", label: taxOff ? "Add Tax" : "Remove Tax", icon: "§", onClick: () => setDialog("tax" as const), disabled: !staff || !mayApprove || !bag.length || !!linked?.split, title: !staff ? "Sign in first" : !mayApprove ? "A manager takes the tax off" : undefined }] : []),
     { id: "dining", label: "Dining Option", icon: "⑂", onClick: () => (orderId ? notify("This order was already sent. The dining option can no longer change.") : setDialog("dining")) },
     { id: "note", label: "Order Note", icon: "✎", onClick: () => setNoteFor({ scope: "order" }), disabled: !bag.length },
     { id: "guests", label: "Guest Count", icon: "👥", onClick: () => setDialog("guests"), disabled: !dineIn },
@@ -876,7 +880,7 @@ export function Pos({ config, catalog, online, customerId, setCustomerId, header
         {coupon && priced.couponIneligible && <div className="row"><span>Coupon {coupon.code}: needs {formatMoney(coupon.minSpendCents)} of items</span><span className="unlink" role="button" tabIndex={0} onClick={() => setCoupon(null)}>remove</span></div>}
         {priced.pointsDiscount > 0 && row(`Points (${priced.pointsUsed})`, `−${formatMoney(priced.pointsDiscount)}`)}
         {priced.gst > 0 && row(config.pricing.taxName ?? "GST", formatMoney(priced.gst))}
-        {priced.taxRemoved && <div className="row"><span>{priced.taxRemoved.name} removed{priced.taxRemoved.offTotal ? ` · −${formatMoney(priced.taxRemoved.offTotal)}` : ""} · {taxOff?.reason}</span>{!linked?.split && staff && staff.role !== "cashier" && <span className="unlink" role="button" tabIndex={0} onClick={() => setTaxOff(null)}>add back</span>}</div>}
+        {priced.taxRemoved && <div className="row"><span>{priced.taxRemoved.name} removed{priced.taxRemoved.offTotal ? ` · −${formatMoney(priced.taxRemoved.offTotal)}` : ""} · {taxOff?.reason}</span>{!linked?.split && mayApprove && <span className="unlink" role="button" tabIndex={0} onClick={() => setTaxOff(null)}>add back</span>}</div>}
         {priced.rounding ? row("Rounding", `${priced.rounding < 0 ? "−" : ""}${formatMoney(Math.abs(priced.rounding))}`) : null}
         {priced.bcrs > 0 && row("BCRS deposits", formatMoney(priced.bcrs))}
         {fees.map((f) => <div className="row" key={f.id}><span>{f.label} · {f.kind === "percent" ? `${f.value}%` : formatMoney(f.value)}</span><span className="unlink" role="button" tabIndex={0} onClick={() => setFees((cur) => cur.filter((x) => x.id !== f.id))}>remove</span></div>)}
@@ -899,7 +903,7 @@ export function Pos({ config, catalog, online, customerId, setCustomerId, header
       <button className={customerId ? "selected" : ""} aria-label="Attach member" onClick={() => setDialog("customer")}>{customerId ? `👤 ${memberInfo ? memberInfo.member.name?.split(" ")[0] || `···· ${(memberInfo.member.phone ?? "").slice(-4)}` : `···· ${customerId.slice(-4)}`}${balance !== null ? ` · ${formatMoney(balance)}` : ""}${memberInfo?.rewards.pointsEnabled ? ` · ${memberInfo.member.points} pts` : ""}` : "👤 Member"}</button>
     </>
   );
-  const strip = <ActionStrip actions={actions} everything={arrangeAll([...allActions].sort((a, b) => poolRank(a.id) - poolRank(b.id)), actionsPref(till))} pref={actionsPref(till)} canArrange={staff?.role === "manager" || staff?.role === "owner"} onArrange={(next) => void saveTill(till.thisTill?.actions ? { thisTill: { ...till.thisTill, actions: next } } : { actions: next })} payLabel={`Pay ${formatMoney(priced.total)}`} onPay={() => { setSheetOpen(false); if (linked?.split) setView("checks"); else setPayView(true); }} payDisabled={!bag.length} />;
+  const strip = <ActionStrip actions={actions} everything={arrangeAll([...allActions].sort((a, b) => poolRank(a.id) - poolRank(b.id)), actionsPref(till))} pref={actionsPref(till)} canArrange={maySetUp} onArrange={(next) => void saveTill(till.thisTill?.actions ? { thisTill: { ...till.thisTill, actions: next } } : { actions: next })} payLabel={`Pay ${formatMoney(priced.total)}`} onPay={() => { setSheetOpen(false); if (linked?.split) setView("checks"); else setPayView(true); }} payDisabled={!bag.length} />;
 
   return (
     <>
@@ -915,7 +919,7 @@ export function Pos({ config, catalog, online, customerId, setCustomerId, header
             onFire={async (o) => { if (await fireNextCourse(o, staff?.name)) notify("Course fired."); }}
             onBill={async (o) => { await askForBill(o, staff?.name); notify("Guest check requested."); }}
             onBack={() => setView("order")}
-            staffName={staff?.name} canArrange={staff?.role === "manager" || staff?.role === "owner"} onSaveFloor={saveFloor}
+            staffName={staff?.name} canArrange={maySetUp} onSaveFloor={saveFloor}
           />
         </div>
       ) : view === "checks" && linked?.split ? (
@@ -958,7 +962,7 @@ export function Pos({ config, catalog, online, customerId, setCustomerId, header
           />
         ) : (
           <TillMenu
-            editing={staff ? { layout: prefs.layout ?? till.layout, hasOwn: !!prefs.layout, canEditShop: staff.role !== "cashier", startRequest: editLayoutAt, onSaveMine: (l) => setLayout(l), onResetMine: () => setLayout(null), onSaveShop: (l) => saveTill({ layout: l }), ...(staff.role !== "cashier" ? { onManageItem: (m: MenuEntry) => setManaging(m) } : {}) } : undefined}
+            editing={staff ? { layout: prefs.layout ?? till.layout, hasOwn: !!prefs.layout, canEditShop: maySetUp, startRequest: editLayoutAt, onSaveMine: (l) => setLayout(l), onResetMine: () => setLayout(null), onSaveShop: (l) => saveTill({ layout: l }), ...(hasPerm(staff, "catalog.manage") ? { onManageItem: (m: MenuEntry) => setManaging(m) } : {}) } : undefined}
             onFn={(id) => { if (!bag.length) return notify("The order is empty."); if (id === "cancel") cancelOrder(); else if (id === "hold") holdCurrent(); else if (prepay) notify("This shop is paid up front: use Pay."); else void sendOrder(); }}
             menu={menu} qtyOf={qtyOf} onAdd={(m) => (m.soldOut ? undefined : add(m))} onDiscount={() => (staff && bag.length ? setSheet({ scope: "bill" }) : notify(staff ? "Add an item first." : "Sign in to give a discount."))} />
         )}
@@ -989,7 +993,7 @@ export function Pos({ config, catalog, online, customerId, setCustomerId, header
       {dialog === "fee" && <FeeDialog fees={fees} onAdd={(kind, value, label) => setFees((cur) => [...cur, { id: newId(), kind, value, label }])} onRemove={(id) => setFees((cur) => cur.filter((f) => f.id !== id))} onClose={() => setDialog(null)} />}
       {dialog === "settings" && <TillSettings onClose={() => setDialog(null)} onEditLayout={staff ? () => { setDialog(null); setView("order"); setEditLayoutAt((n) => n + 1); } : undefined} />}
       {dialog === "shift" && <Modal title="Shift and drawer" wide onClose={() => setDialog(null)}><ShiftBar /></Modal>}
-      {dialog === "reports" && <ReportsDialog orders={orders} config={config} categoryOf={(id) => catalog.products.find((x) => x.id === id)?.category ?? ""} manager={!!staff && staff.role !== "cashier"} onShift={() => setDialog("shift")} onClose={() => setDialog(null)} />}
+      {dialog === "reports" && <ReportsDialog orders={orders} config={config} categoryOf={(id) => catalog.products.find((x) => x.id === id)?.category ?? ""} manager={hasPerm(staff, "audit.read")} onShift={() => setDialog("shift")} onClose={() => setDialog(null)} />}
       {dialog === "table" && (
         <Modal title="Table" onClose={() => setDialog(null)}>
           {tableNames(floor).map((t) => { const i = tableInfo(t, orders, held, config, floor, Date.now()); return <button key={t} className={`t-radio ${spot === t ? "on" : ""}`} disabled={i.state !== "available" && spot !== t} onClick={() => (linked ? void changeTable(t) : (setSpot(t), setDialog(null)))}><i>{spot === t ? "◉" : "○"}</i> {t}{i.state !== "available" && spot !== t ? " · in use" : ""}</button>; })}

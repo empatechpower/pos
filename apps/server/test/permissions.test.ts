@@ -113,3 +113,47 @@ describe("what staff may do", () => {
     expect(saved.manager).not.toContain("device.manage");
   });
 });
+
+describe("one person different from their role", () => {
+  let catId = "", maxId = "", ownId = "";
+  const person = async (id: string) => ((await call("/api/staff", { staff: owner })).json.staff as any[]).find((x) => x.id === id);
+  it("starts from the role: put the roles back, and find the people", async () => {
+    await call("/api/settings/permissions", { method: "PUT", body: { cashier: ["wallet.topup", "print.reprint"], manager: ["wallet.topup", "print.reprint", "audit.read", "catalog.manage", "wallet.refund", "device.manage", "print.manage", "order.refund", "discount.approve", "shift.approve"] }, staff: owner });
+    const list = (await call("/api/staff", { staff: owner })).json.staff as any[];
+    catId = list.find((x) => x.code === "CAT").id; maxId = list.find((x) => x.code === "MGR").id; ownId = list.find((x) => x.code === "OWN").id;
+    expect((await person(catId)).permissions).not.toContain("order.refund");
+  });
+  it("Cat alone is allowed to refund: she needs no manager, and another cashier still would", async () => {
+    await createStaff(db, { merchantId: "bp", code: "DAN", name: "Dan", role: "cashier", pin: "4444" });
+    const dan = (await login("DAN", "4444")).token as string;
+    expect((await call(`/api/staff/${catId}/permissions`, { method: "PUT", body: { allow: ["order.refund"] }, staff: mgr })).status).toBe(403); // only the owner
+    const set = await call(`/api/staff/${catId}/permissions`, { method: "PUT", body: { allow: ["order.refund", "staff.manage", "nonsense"], deny: [] }, staff: owner });
+    expect(set.json.allow).toEqual(["order.refund"]); // managing staff can never be given, and unknown names are dropped
+    expect(set.json.permissions).toContain("order.refund");
+    await paidOrder("pp-1");
+    expect((await call("/api/orders/pp-1/refund", { body: { paymentId: "pp-1-pay", amountCents: 100, reason: "spill", refundId: "pr1" }, staff: cashier })).status).toBe(200); // her open session is allowed at once
+    expect((await call("/api/orders/pp-1/refund", { body: { paymentId: "pp-1-pay", amountCents: 100, reason: "spill", refundId: "pr2" }, staff: dan })).status).toBe(428);
+    expect((await login("CAT", "3333")).staff.permissions).toContain("order.refund");
+    // and her code and PIN now approve a refund for someone else
+    expect((await call("/api/orders/pp-1/refund", { body: { paymentId: "pp-1-pay", amountCents: 100, reason: "spill", refundId: "pr2", approverCode: "CAT", approverPin: "3333" }, staff: dan })).status).toBe(200);
+  });
+  it("Max alone is stopped from setting up outlets, while other managers are not; selling cannot be taken away", async () => {
+    const set = await call(`/api/staff/${maxId}/permissions`, { method: "PUT", body: { deny: ["device.manage", "wallet.spend"] }, staff: owner });
+    expect(set.json.deny).toEqual(["device.manage"]);
+    expect(set.json.permissions).toContain("wallet.spend");
+    expect((await call("/api/outlets/EV", { method: "PUT", body: { name: "EV" }, staff: mgr })).status).toBe(403);
+    expect((await call("/api/reports/credit", { staff: mgr })).status).toBe(200);
+    expect((await person(maxId)).deny).toEqual(["device.manage"]);
+  });
+  it("the same permission in both lists is taken away, and an owner's login cannot be changed", async () => {
+    const both = await call(`/api/staff/${catId}/permissions`, { method: "PUT", body: { allow: ["order.refund", "audit.read"], deny: ["order.refund"] }, staff: owner });
+    expect(both.json).toMatchObject({ allow: ["audit.read"], deny: ["order.refund"] });
+    expect(both.json.permissions).not.toContain("order.refund");
+    expect((await call(`/api/staff/${ownId}/permissions`, { method: "PUT", body: { deny: ["audit.read"] }, staff: owner })).status).toBe(400);
+    expect((await call(`/api/staff/${catId}/permissions`, { method: "PUT", body: { allow: "all" }, staff: owner })).status).toBe(400);
+    await call(`/api/staff/${catId}/permissions`, { method: "PUT", body: { allow: [], deny: [] }, staff: owner });
+    await call(`/api/staff/${maxId}/permissions`, { method: "PUT", body: { allow: [], deny: [] }, staff: owner });
+    expect((await person(catId)).permissions).toEqual(expect.arrayContaining(["wallet.read", "wallet.spend", "wallet.topup", "print.reprint"]));
+  });
+});
+
