@@ -44,6 +44,7 @@ import { NoteSheet } from "./NoteSheet";
 import "../till/till.css";
 import { effUnit, type BagLine, type BillDiscount, type HeldOrder, type TillFee } from "../till/types";
 import { TicketPanel } from "../till/TicketPanel";
+import { ReportsDialog } from "../till/ReportsDialog";
 import { TillMenu } from "../till/TillMenu";
 import { ActionStrip, type Action } from "../till/ActionStrip";
 import { PayPanel, type Tender, type TenderOption } from "../till/PayPanel";
@@ -52,7 +53,7 @@ import { ManageItem } from "../till/ManageItem";
 import { CustomerDialog, DiningDialog, DoneDialog, ExtraItemDialog, FeeDialog, GuestsDialog, HeldDialog, QuantityDialog, TillSettings } from "../till/Dialogs";
 import { TEXT_SCALE, loadPrefs, setLayout, usePrefs } from "../prefs";
 import { arrange, arrangeAll, loadTillSettings, saveTill, useTillSettings, ACTION_POOL } from "../till/tillSettings";
-import { queryParams } from "../nav";
+import { onRouteChange, queryParams } from "../nav";
 import { isTraining } from "../training";
 import { loadFloor, saveFloor, tableNames, useFloor } from "../floor";
 import { TableMap } from "../till/TableMap";
@@ -105,7 +106,7 @@ export function Pos({ config, catalog, online, customerId, setCustomerId, header
   const [managing, setManaging] = useState<MenuEntry | null>(null);
   const [pax, setPax] = useState(1);
   const [payView, setPayView] = useState(false);
-  const [dialog, setDialog] = useState<null | "dining" | "guests" | "qty" | "held" | "customer" | "settings" | "tabs" | "shift" | "table" | "line" | "seat" | "fee" | "extra">(null);
+  const [dialog, setDialog] = useState<null | "dining" | "guests" | "qty" | "held" | "customer" | "settings" | "tabs" | "shift" | "table" | "line" | "seat" | "fee" | "extra" | "reports">(null);
   const [lineKey, setLineKey] = useState<string | null>(null);
   const [pendingQty, setPendingQty] = useState(1);
   const [sheetOpen, setSheetOpen] = useState(false);
@@ -523,11 +524,22 @@ export function Pos({ config, catalog, online, customerId, setCustomerId, header
     parkCurrent(); resetOrder(); loadOrder(o);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [orders]);
-  useEffect(() => { if (queryParams().get("dialog") === "shift") setDialog("shift"); }, []);
+  // The header's Drawer, Reports and Table Map buttons work by address (/pos?dialog=shift): act on it at first load, and whenever it changes while the till is open.
+  const navTables = useRef<() => void>(() => undefined);
+  useEffect(() => {
+    const act = (first: boolean) => {
+      const q = queryParams(), d = q.get("dialog");
+      if (d === "shift" || d === "reports") setDialog(d);
+      if (!first && q.get("view") === "tables") navTables.current();
+    };
+    act(true);
+    return onRouteChange(() => act(false));
+  }, []);
   function goTables() {
     // The bill on screen goes back to the map: unsent items stay with the table as a draft.
     parkCurrent(); resetOrder(); setView("tables");
   }
+  navTables.current = goTables;
   const changeTable = async (name: string) => {
     const info = tableInfo(name, orders, held, config, floor, Date.now());
     if (info.state !== "available") return notify(`${name} already has an order. Use Merge tables on the Table Map.`);
@@ -771,6 +783,7 @@ export function Pos({ config, catalog, online, customerId, setCustomerId, header
       {dialog === "fee" && <FeeDialog fees={fees} onAdd={(kind, value, label) => setFees((cur) => [...cur, { id: newId(), kind, value, label }])} onRemove={(id) => setFees((cur) => cur.filter((f) => f.id !== id))} onClose={() => setDialog(null)} />}
       {dialog === "settings" && <TillSettings onClose={() => setDialog(null)} onEditLayout={staff ? () => { setDialog(null); setView("order"); setEditLayoutAt((n) => n + 1); } : undefined} />}
       {dialog === "shift" && <Modal title="Shift and drawer" wide onClose={() => setDialog(null)}><ShiftBar /></Modal>}
+      {dialog === "reports" && <ReportsDialog orders={orders} config={config} categoryOf={(id) => catalog.products.find((x) => x.id === id)?.category ?? ""} manager={!!staff && staff.role !== "cashier"} onShift={() => setDialog("shift")} onClose={() => setDialog(null)} />}
       {dialog === "table" && (
         <Modal title="Table" onClose={() => setDialog(null)}>
           {tableNames(floor).map((t) => { const i = tableInfo(t, orders, held, config, floor, Date.now()); return <button key={t} className={`t-radio ${spot === t ? "on" : ""}`} disabled={i.state !== "available" && spot !== t} onClick={() => (linked ? void changeTable(t) : (setSpot(t), setDialog(null)))}><i>{spot === t ? "◉" : "○"}</i> {t}{i.state !== "available" && spot !== t ? " · in use" : ""}</button>; })}

@@ -33,7 +33,7 @@ export function TillHeader({ route, config, connected, pending, newOnline, hasTa
             {route !== "pos" && <button onClick={() => go("/pos")}>Order</button>}
             <button onClick={() => go("/orders")}>Orders{open ? ` (${open})` : ""}</button>
             <button onClick={() => go("/pos?dialog=shift")}>Drawer</button>
-            {staff.role !== "cashier" && <button onClick={() => go("/manager?tab=reports")}>Reports</button>}
+            <button onClick={() => go("/pos?dialog=reports")}>Reports</button>
             {till.dashboard && <button onClick={() => go("/dashboard")}>Home</button>}
             {hasTables && <button onClick={() => go("/pos?view=tables")}>Table Map</button>}
             {newOnline > 0 && <button onClick={() => go("/online")}>Online ({newOnline})</button>}
