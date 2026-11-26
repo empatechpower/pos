@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useState } from "react";
+import { askText } from "../proto/confirm";
 import { formatMoney } from "@pos/core";
 import { staffFetch, useStaff } from "../auth";
 
@@ -44,7 +45,7 @@ export function Tabs() {
       <div className="row"><button className="secondary sm" onClick={() => void (async () => { const r = await staffFetch("/api/tabs", { method: "POST", body: {} }); if ("res" in r && r.res.ok) { const j = (await r.res.json()) as { code: string }; setMsg(`Bar tab opened. Tell the customers the code: ${j.code}`); void load(); } else setMsg("problem" in r ? r.problem : "Could not open a bar tab. Is the tab switched on for this outlet?"); })()}>Open a bar tab</button></div>
       {exceptions.map((e) => (
         <div className="flash warn" key={e.id} role="alert">{e.kind === "duplicate_payment" ? "Possible double payment" : "A payment succeeded that the tab had released"}{e.table ? ` · ${e.table}` : ""} · {formatMoney(e.amountCents)}. {e.detail}
-          <button className="secondary sm" style={{ marginLeft: 8 }} onClick={() => { const resolution = window.prompt("How was it resolved (for example, refunded on the provider dashboard)?"); if (resolution) void act(`/api/tabs/exceptions/${e.id}/resolve`, { resolution }, "Resolved."); }}>Resolve</button></div>
+          <button className="secondary sm" style={{ marginLeft: 8 }} onClick={async () => { const resolution = await askText({ title: "Resolve", message: "How was it resolved (for example, refunded on the provider dashboard)?", label: "What was done", ok: "Resolve" }); if (resolution) void act(`/api/tabs/exceptions/${e.id}/resolve`, { resolution }, "Resolved."); }}>Resolve</button></div>
       ))}
       {tabs.length === 0 && <p className="muted">No open tabs.</p>}
       {tabs.map((t) => (
@@ -58,8 +59,8 @@ export function Tabs() {
             <button className={t.locked ? "primary sm" : "secondary sm"} onClick={() => void act(`/api/tabs/${t.id}/release`, {}, "Payment released.")}>{t.locked ? "Release payment" : "Release new rounds"}</button>
             <button className="secondary sm" onClick={() => setOpen(open === t.id ? null : t.id)}>{open === t.id ? "Hide payments" : "Payments"}</button>
             <button className="secondary sm" onClick={() => setAddFor(addFor === t.id ? null : t.id)}>Add items</button>
-            <button className="secondary sm" onClick={() => { const to = window.prompt(`Move ${t.spot ?? "this tab"} to which table?`, ""); if (to?.trim()) void act(`/api/tabs/${t.id}/move`, { spot: to.trim() }, `Moved to ${to.trim()}.`); }}>Move table</button>
-            <button className="secondary sm" onClick={() => { const reason = window.prompt("Close this tab without it being fully paid. Why?"); if (reason) void act(`/api/tabs/${t.id}/close`, { reason }, "Tab closed."); }}>Close tab</button>
+            <button className="secondary sm" onClick={async () => { const to = await askText({ title: "Move table", message: `Move ${t.spot ?? "this tab"} to which table?`, label: "Table", ok: "Move" }); if (to?.trim()) void act(`/api/tabs/${t.id}/move`, { spot: to.trim() }, `Moved to ${to.trim()}.`); }}>Move table</button>
+            <button className="secondary sm" onClick={async () => { const reason = await askText({ title: "Close tab", message: "Close this tab without it being fully paid. Why?", label: "Reason", ok: "Close tab", cancel: "Keep open" }); if (reason) void act(`/api/tabs/${t.id}/close`, { reason }, "Tab closed."); }}>Close tab</button>
           </div>
           {addFor === t.id && (
             <div className="row" style={{ marginTop: 6 }}>
@@ -76,8 +77,8 @@ export function Tabs() {
                   <span style={{ flex: 1 }}>{p.payer.name}{p.for ? ` for ${p.for.name}` : ""} · {p.method}{p.staffRecorded ? " · staff" : ""} · {p.status}</span>
                   <b>{formatMoney(p.amountCents)}</b>
                   {p.status === "reserved" && <button className="primary sm" onClick={() => void act(`/api/tabs/payments/${p.id}/confirm`, {}, "Payment confirmed.")}>Confirm paid</button>}
-                  {p.status === "unknown" && <button className="secondary sm" onClick={() => { const reference = window.prompt("Record the manual payment's trace or reference number. If the card payment later succeeds, you will be told so it can be refunded."); if (reference) void act(`/api/tabs/payments/${p.id}/manual`, { reference }, "Recorded as a manual payment."); }}>Record manually</button>}
-                  {p.status === "completed" && <button className="secondary sm" onClick={() => { const amount = window.prompt(`Refund how much (S$, up to ${formatMoney(p.amountCents)})?`); const reason = amount ? window.prompt("Why?") : null; if (amount && reason) void act(`/api/tabs/payments/${p.id}/refund`, { amountCents: Math.round(Number(amount) * 100), reason }, "Refund recorded. Rewards it earned were reversed."); }}>Refund</button>}
+                  {p.status === "unknown" && <button className="secondary sm" onClick={async () => { const reference = await askText({ title: "Record manually", message: "Record the manual payment's trace or reference number. If the card payment later succeeds, you will be told so it can be refunded.", label: "Trace or reference number", ok: "Record" }); if (reference) void act(`/api/tabs/payments/${p.id}/manual`, { reference }, "Recorded as a manual payment."); }}>Record manually</button>}
+                  {p.status === "completed" && <button className="secondary sm" onClick={async () => { const amount = await askText({ title: "Refund", message: `Refund how much (S$, up to ${formatMoney(p.amountCents)})?`, label: "Amount (S$)", inputMode: "decimal", ok: "Next" }); const reason = amount ? await askText({ title: "Refund", message: `Refunding S$${amount}. Why?`, label: "Reason", ok: "Refund" }) : null; if (amount && reason) void act(`/api/tabs/payments/${p.id}/refund`, { amountCents: Math.round(Number(amount) * 100), reason }, "Refund recorded. Rewards it earned were reversed."); }}>Refund</button>}
                 </div>
               ))}
               {t.remainingCents > 0 && !t.locked && detail.people.length > 0 && (

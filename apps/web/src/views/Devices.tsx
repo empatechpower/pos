@@ -1,4 +1,5 @@
 import { DisplayLink } from "./DisplayLink";
+import { askConfirm } from "../proto/confirm";
 import { PaynowPanel } from "./PaynowPanel";
 import { UnassignedPanel } from "./UnassignedPanel";
 import { ShiftsPanel } from "./ShiftsPanel";
@@ -66,7 +67,7 @@ export function Devices() {
   }
 
   async function revoke(r: Row) {
-    if (!window.confirm(`Remove "${r.name}"? It will stop syncing straight away.`)) return;
+    if (!(await askConfirm({ title: "Remove this device?", message: `Remove "${r.name}"? It will stop syncing straight away.`, ok: "Remove", cancel: "Keep" }))) return;
     const res = await fetch(`/api/devices/${r.id}/revoke`, { method: "POST", headers: authHeader() }).catch(() => null);
     setMsg(res?.ok ? `${r.name} removed.` : "Could not remove that device (you can't remove the one you're using).");
     void load();

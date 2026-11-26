@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useState } from "react";
+import { askText } from "../proto/confirm";
 import type { Catalog, Product, ProductStock } from "@pos/core";
 import { staffFetch } from "../auth";
 
@@ -27,7 +28,7 @@ export function StockPanel({ catalog, outletId, onChanged }: { catalog: Catalog;
     if ("res" in r && r.res.ok) { setMsg(`${newName} added.`); setNewId(""); setNewName(""); void load(); } else setMsg("problem" in r ? r.problem : "Could not add it. The code is lowercase letters, digits and dashes.");
   }
   async function move(i: Item, reason: "receive" | "waste" | "count") {
-    const ask = window.prompt(reason === "receive" ? `How many ${i.unit} of ${i.name} arrived?` : reason === "waste" ? `How many ${i.unit} of ${i.name} were wasted?` : `Counted: how many ${i.unit} of ${i.name} are on the shelf?`);
+    const ask = await askText({ title: reason === "receive" ? "Stock received" : reason === "waste" ? "Stock wasted" : "Stock count", message: reason === "receive" ? `How many ${i.unit} of ${i.name} arrived?` : reason === "waste" ? `How many ${i.unit} of ${i.name} were wasted?` : `Counted: how many ${i.unit} of ${i.name} are on the shelf?`, label: `Quantity (${i.unit})`, inputMode: "decimal", ok: "Save" });
     if (ask === null || ask.trim() === "") return;
     const qty = Number(ask);
     const r = await staffFetch(`/api/inventory/${encodeURIComponent(i.id)}/movements`, { method: "POST", body: { outletId, reason, qty } });

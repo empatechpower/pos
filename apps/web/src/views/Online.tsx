@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { askConfirm } from "../proto/confirm";
 import { formatMoney, newId, optionLines, orderTotals, confirmedPaid, type BusinessConfig } from "@pos/core";
 import { staffFetch, useStaff } from "../auth";
 import { record, deviceId } from "../db";
@@ -35,7 +36,7 @@ export function Online({ config, online }: { config: BusinessConfig; online: boo
   }
 
   async function reject(id: string, q?: string) {
-    if (!window.confirm(`Turn down order ${q ?? ""}? The customer will see it as cancelled.`)) return;
+    if (!(await askConfirm({ title: "Turn down this order?", message: `Turn down order ${q ?? ""}? The customer will see it as cancelled.`, ok: "Turn down", cancel: "Keep order" }))) return;
     await record(id, { type: "StageSet", stage: "cancelled" });
   }
 

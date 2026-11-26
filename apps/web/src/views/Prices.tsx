@@ -1,4 +1,5 @@
 import { LANGS } from "../shopI18n";
+import { askConfirm, askText } from "../proto/confirm";
 import { useEffect, useState } from "react";
 import { brandColoursFromPixels, formatMoney, isCombo, type Catalog, type ChannelKind, type OptionGroup } from "@pos/core";
 import { OptionsEditor } from "./OptionsEditor";
@@ -254,14 +255,14 @@ export function Prices({ catalog, outletId }: { catalog: Catalog; outletId: stri
         const clean = (m: Record<string, string>) => Object.fromEntries(Object.entries(m).map(([k, v]) => [k, v.trim()]).filter(([, v]) => v));
         const namesNow = clean(renaming.names);
         const namesChanged = JSON.stringify(Object.entries(namesNow).sort()) !== JSON.stringify(Object.entries(clean(p.names ?? {})).sort());
-        const save = () => {
+        const save = async () => {
           if (!name) return;
           setRenaming(null);
           // Container deposit (BCRS): a name that says BCRS switches the deposit ON; a rename that drops "BCRS" while it is ON asks first
           // (the rename always saves; the deposit goes OFF only if confirmed, and a manual OFF is never switched back on by a rename).
           let bcrsPatch: { bcrs?: boolean } = {};
           if (!/bcrs/i.test(p.name) && /bcrs/i.test(name) && !p.bcrs) bcrsPatch = { bcrs: true };
-          if (/bcrs/i.test(p.name) && !/bcrs/i.test(name) && p.bcrs && window.confirm("The name no longer says BCRS. Turn the container deposit OFF for this item?")) bcrsPatch = { bcrs: false };
+          if (/bcrs/i.test(p.name) && !/bcrs/i.test(name) && p.bcrs && (await askConfirm({ title: "Container deposit", message: "The name no longer says BCRS. Turn the container deposit OFF for this item?", ok: "Turn it off", cancel: "Keep it on" }))) bcrsPatch = { bcrs: false };
           if (name !== p.name || namesChanged) void send("POST", "products", { id: p.id, name, category: p.category, pointsExempt: p.pointsExempt, soldOut: p.soldOut, ...bcrsPatch, ...(namesChanged ? { names: namesNow } : {}) }, name !== p.name ? `Renamed to ${name}.` : "Names saved.");
         };
         return (
@@ -324,8 +325,8 @@ export function Prices({ catalog, outletId }: { catalog: Catalog; outletId: stri
         <select aria-label="Kind of new channel" value={newKind} onChange={(e) => setNewKind(e.target.value as ChannelKind)}>
           {KINDS.map(([k, l]) => <option key={k} value={k}>{l}</option>)}
         </select>
-        <button className="secondary sm" onClick={() => {
-          const name = window.prompt("Name of the new channel (e.g. FoodPanda, Movie Event)");
+        <button className="secondary sm" onClick={async () => {
+          const name = await askText({ title: "New channel", message: "Name of the new channel (e.g. FoodPanda, Movie Event)", label: "Channel name", ok: "Add channel" });
           if (name?.trim()) void send("POST", "channels", { name, kind: newKind, serviceCharge: newKind === "dine_in", active: true }, `${name} added.`);
         }}>Add a channel</button>
       </div>

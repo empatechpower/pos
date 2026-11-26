@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useState } from "react";
+import { askConfirm } from "../proto/confirm";
 import QRCode from "qrcode";
 import { staffFetch } from "../auth";
 import { MailboxesPanel, useMailboxes } from "./MailboxesPanel";
@@ -53,7 +54,7 @@ export function PaynowPanel() {
     else setMsg(((await r.res.json().catch(() => ({}))) as { error?: string }).error ?? "Could not save.");
   }
   async function reset() {
-    if (!window.confirm("Take this outlet’s own PayNow away? It will use the shop’s PayNow again.")) return;
+    if (!(await askConfirm({ title: "Remove this outlet’s PayNow?", message: "Take this outlet’s own PayNow away? It will use the shop’s PayNow again.", ok: "Remove", cancel: "Keep" }))) return;
     const r = await staffFetch(`/api/settings/paynow?outlet=${encodeURIComponent(outlet)}`, { method: "PUT", body: { reset: true } });
     if ("res" in r && r.res.ok) { setMsg("This outlet uses the shop’s PayNow again."); void load(); }
   }

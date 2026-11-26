@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useState } from "react";
+import { askText } from "../proto/confirm";
 import { formatMoney } from "@pos/core";
 import { staffFetch } from "../auth";
 
@@ -36,7 +37,7 @@ export function UnassignedPanel() {
     else setMsg("That order can no longer take this payment. It may already be paid or cancelled.");
   }
   async function dismiss(row: Row) {
-    const note = window.prompt("What happened to this payment? (for example: refunded to the customer)", "refunded");
+    const note = await askText({ title: "Payment dealt with", message: "What happened to this payment? (for example: refunded to the customer)", label: "Note", initial: "refunded", ok: "Save" });
     if (note === null) return;
     const r = await staffFetch(`/api/payments/paynow/unassigned/${encodeURIComponent(row.bankRef)}/dismiss`, { method: "POST", body: { note } });
     if ("res" in r && r.res.ok) { setMsg("Marked as settled."); void load(); }

@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { tellNotice } from "./proto/confirm";
 import { ConfirmHost } from "./proto/confirm";
 import "./backoffice.css";
 import { getDeviceCode, setDeviceCode } from "./db";
@@ -148,7 +149,7 @@ export function App() {
               <span className="lbl">Colour</span>
               <input type="color" aria-label="My colour" value={theme.own ?? theme.shop ?? "#ea7016"} onChange={async (e) => {
                 const r = await fetch("/api/auth/theme", { method: "PUT", headers: { "content-type": "application/json", ...authHeader() }, body: JSON.stringify({ primary: e.target.value }) });
-                if (r.ok) theme.setOwn(e.target.value.toUpperCase()); else window.alert(((await r.json().catch(() => ({}))) as { message?: string }).message ?? "That colour was not saved.");
+                if (r.ok) theme.setOwn(e.target.value.toUpperCase()); else void tellNotice({ title: "Colour not saved", message: ((await r.json().catch(() => ({}))) as { message?: string }).message ?? "That colour was not saved." });
               }} />
               {theme.own && <button className="secondary sm" onClick={async () => { await fetch("/api/auth/theme", { method: "PUT", headers: { "content-type": "application/json", ...authHeader() }, body: JSON.stringify({ primary: null }) }); theme.setOwn(null); }}>Reset</button>}
             </label>

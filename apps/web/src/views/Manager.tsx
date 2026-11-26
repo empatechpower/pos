@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
+import { askConfirm } from "../proto/confirm";
 import { confirmedPaid, formatMoney, isFullyPaid, orderTotals, type BusinessConfig, type Catalog, type OrderState, paymentKey, paymentLabel } from "@pos/core";
 import { queryParams } from "../nav";
 import { hasPerm, staffFetch, useStaff } from "../auth";
@@ -488,7 +489,7 @@ function TelegramPanel() {
     setCode((await r.res.json()) as { code: string; minutes: number; bot: string | null });
   }
   async function unlink(id: string) {
-    if (!confirm("Disconnect this Telegram account? It will no longer be able to change prices.")) return;
+    if (!(await askConfirm({ title: "Disconnect Telegram?", message: "Disconnect this Telegram account? It will no longer be able to change prices.", ok: "Disconnect", cancel: "Keep" }))) return;
     const r = await staffFetch(`/api/telegram/links/${id}`, { method: "DELETE" });
     if ("problem" in r) return setMsg(r.problem);
     void load();
@@ -681,7 +682,7 @@ function AgentsPanel() {
     setConnect((await r.res.json()) as { code: string; expiresAt: string });
   };
   const revoke = async (id: string, n: string) => {
-    if (!window.confirm(`Stop "${n}" from signing in? Its key will no longer work.`)) return;
+    if (!(await askConfirm({ title: "Stop this agent?", message: `Stop "${n}" from signing in? Its key will no longer work.`, ok: "Stop", cancel: "Keep" }))) return;
     const r = await staffFetch(`/api/agents/${id}`, { method: "DELETE" });
     if ("res" in r && r.res.ok) void load();
   };
