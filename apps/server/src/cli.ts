@@ -1,6 +1,8 @@
 /**
  * Create the first staff account (or any later one) straight from the terminal:
- *   DATABASE_URL=... npx tsx src/cli.ts create-staff <code> <name> <cashier|manager|owner> <pin>
+ *   DATABASE_URL=... npx tsx src/cli.ts create-staff <code> <name> <cashier|manager|owner> <pin> [phone]
+ *   DATABASE_URL=... npx tsx src/cli.ts staff-phone <code> <phone|none>
+ * (phone is the number that person signs in with, with its country code, e.g. +6591234567)
  *   DATABASE_URL=... npx tsx src/cli.ts enrollment-code [OUTLET-ID] [testing|reviewer]
  *   DATABASE_URL=... npx tsx src/cli.ts revoke-enrollment-codes OUTLET-ID
  *   DATABASE_URL=... SECRETS_KEY=... MAILBOX_PASSWORD=... npx tsx src/cli.ts add-mailbox "<name>" <imap-server> <email-address> [port]
@@ -11,7 +13,7 @@
  * prints a one-time code for the very first device. Later codes come from a manager on an enrolled device.
  */
 import { PRESETS } from "@pos/core";
-import { createStaff, type Role } from "./auth.js";
+import { createStaff, setStaffPhone, type Role } from "./auth.js";
 import { createEnrollmentCode, revokeEnrollmentCodes } from "./devices.js";
 import { createPool, migrate } from "./db/pool.js";
 import { ensureDefaultOutlet } from "./tenant.js";
@@ -19,7 +21,7 @@ import { ensureDefaultOutlet } from "./tenant.js";
 const [cmd, code, name, role, pin] = process.argv.slice(2);
 const extra = process.argv.slice(3);
 const usage = () => {
-  console.error("usage: DATABASE_URL=... tsx src/cli.ts create-staff <code> <name> <cashier|manager|owner> <pin>\n       DATABASE_URL=... tsx src/cli.ts enrollment-code");
+  console.error("usage: DATABASE_URL=... tsx src/cli.ts create-staff <code> <name> <cashier|manager|owner> <pin> [phone]\n       DATABASE_URL=... tsx src/cli.ts staff-phone <code> <phone|none>\n       DATABASE_URL=... tsx src/cli.ts enrollment-code");
   process.exit(1);
 };
 if (!process.env.DATABASE_URL) usage();
@@ -28,9 +30,17 @@ const config = PRESETS[mode]("bailey-patch", "Bailey & Patch", "Enabling Village
 const db = createPool(process.env.DATABASE_URL!);
 await migrate(db);
 await ensureDefaultOutlet(db, config.businessId, config.outletName, config.outletName);
+const phoneSaid = (r: "ok" | "invalid" | "taken" | "unknown", who: string, phone: string | null) =>
+  r === "ok" ? (phone ? `${who} now signs in with ${phone}` : `${who} no longer has a sign-in phone number`) : r === "taken" ? `that number already belongs to someone else: ${who} was left without it` : r === "invalid" ? "that is not a phone number: give it with the country code, like +6591234567" : `no staff member has the code ${who}`;
 if (cmd === "create-staff" && code && name && role && pin) {
   const s = await createStaff(db, { merchantId: config.businessId, code, name, role: role as Role, pin });
   console.log(`created ${s.role} ${s.name} (${s.code})`);
+  const phone = process.argv[7];
+  if (phone) console.log(phoneSaid(await setStaffPhone(db, config.businessId, s.code, phone), s.code, phone));
+} else if (cmd === "staff-phone" && code && name) {
+  // code = the staff code, name = the phone number, or "none" to take it away
+  const phone = name.toLowerCase() === "none" ? null : name;
+  console.log(phoneSaid(await setStaffPhone(db, config.businessId, code, phone), code, phone));
 } else if (cmd === "enrollment-code") {
   const testing = extra.includes("testing");
   const reviewer = extra.includes("reviewer");

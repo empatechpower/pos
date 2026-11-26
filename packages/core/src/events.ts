@@ -91,7 +91,7 @@ export type OrderEventBody =
   /** A note on the whole order for the kitchen and the guest check ("allergy: nuts", "birthday"). The latest one wins; empty clears it. */
   | { type: "OrderNoted"; note: string; byName?: string }
   /** The payment was rounded by the tender's rule (cash to five cents): what that added to the total (negative when it took off). The latest one stands. */
-  | { type: "RoundingApplied"; cents: number; tender?: string; byName?: string }
+  | { type: "RoundingApplied"; cents: number; tender?: string; byName?: string; /** On a split bill: the check whose payment was rounded. The order's rounding is then the sum over its checks. */ checkId?: string }
   /** Someone signed in at a till that held another person's order and carried it on. For the order's trail only; it changes nothing on the order. */
   | { type: "OrderTakenOver"; from: string; byName?: string }
   /** The order was handed to whoever came for it (a delivery rider, the customer): who took it, and any reference they gave (a rider's card or id, the platform's order number). */
@@ -180,6 +180,8 @@ export interface OrderState {
   voided?: { reason: string; approvedBy: string; approvedByName: string; at: number };
   /** What rounding at payment added to the total (negative when it took off). */
   roundingCents?: number;
+  /** On a split bill: what rounding added to (or took off) each check, by check id. `roundingCents` is their sum. */
+  checkRounding?: Record<string, number>;
   /** Who collected the order, when it was handed over at the counter (the first handover stands; a second is ignored). */
   handover?: { to: string; ref?: string; byName?: string; at: number };
   /** Set while the tax is taken off this order (Add/Remove Tax). */
@@ -346,6 +348,8 @@ export function reduceOrder(orderId: string, events: readonly OrderEvent[]): Ord
         break;
       case "SplitCleared":
         delete state.split;
+        // Rounding kept against checks goes with them: the bill is one amount again.
+        if (state.checkRounding) { delete state.checkRounding; delete state.roundingCents; }
         break;
       case "CommissionRecorded":
         state.commission = { cents: Math.max(0, Math.round(e.cents)), ...(e.note ? { note: e.note.slice(0, 120) } : {}), at: e.ts };
@@ -361,7 +365,18 @@ export function reduceOrder(orderId: string, events: readonly OrderEvent[]): Ord
         break;
       }
       case "RoundingApplied":
-        if (Number.isInteger(e.cents) && Math.abs(e.cents) < 100) { if (e.cents) state.roundingCents = e.cents; else delete state.roundingCents; }
+        if (!Number.isInteger(e.cents) || Math.abs(e.cents) >= 100) break;
+        if (typeof e.checkId === "string" && e.checkId) {
+          // A check of a split bill: its own rounding, and the order carries the sum of them.
+          if (!state.split?.checks.some((c) => c.id === e.checkId)) break;
+          const per = { ...(state.checkRounding ?? {}) };
+          if (e.cents) per[e.checkId] = e.cents; else delete per[e.checkId];
+          const sum = Object.values(per).reduce((n, c) => n + c, 0);
+          if (Object.keys(per).length) state.checkRounding = per; else delete state.checkRounding;
+          if (sum) state.roundingCents = sum; else delete state.roundingCents;
+          break;
+        }
+        if (e.cents) state.roundingCents = e.cents; else delete state.roundingCents;
         break;
       case "MemberAttached":
         if (typeof e.memberId === "string" && e.memberId) state.memberId = e.memberId.slice(0, 64); else delete state.memberId;
@@ -443,11 +458,15 @@ export function nextCourse(state: OrderState): number | undefined {
 }
 
 /** What a check of a split bill has taken, and what is still owed on it. */
-export function checkStanding(state: OrderState, checkId: string): { totalCents: Cents; paidCents: Cents; dueCents: Cents } | null {
+export function checkStanding(state: OrderState, checkId: string): { totalCents: Cents; paidCents: Cents; dueCents: Cents; /** What is still owed before any rounding: the amount a new payment rounds from. */ exactDueCents: Cents; roundingCents: Cents } | null {
   const c = state.split?.checks.find((x) => x.id === checkId);
   if (!c) return null;
   const paid = state.payments.filter((p) => p.checkId === checkId && p.confirmed).reduce((n, p) => n + p.amountCents, 0);
-  return { totalCents: c.totalCents, paidCents: paid, dueCents: Math.max(0, c.totalCents - paid) };
+  const rounding = state.checkRounding?.[checkId] ?? 0;
+  const total = Math.max(0, c.totalCents + rounding);
+  const due = Math.max(0, total - paid);
+  // A check settled by a rounded-down payment owes nothing, though it took less than its unrounded amount.
+  return { totalCents: total, paidCents: paid, dueCents: due, exactDueCents: due === 0 ? 0 : Math.max(0, c.totalCents - paid), roundingCents: rounding };
 }
 
 /**

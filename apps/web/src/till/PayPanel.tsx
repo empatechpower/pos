@@ -15,8 +15,9 @@ export function PayPanel({ totalCents, title, venue, tenders, busy, onBack, onDo
   /** The trace or reference number from the card terminal or the customer's payment screen, for a payment the till only records. */
   const [reference, setReference] = useState("");
   const recorded = !!recordedTender(tender) || tender.startsWith("ct-");
-  // What is asked for with this tender: rounded by the outlet's rule for it (cash to five cents, say), never for a part payment.
-  const step = !partial ? rounding?.[tender] ?? 0 : 0;
+  // What is asked for with this tender: rounded by the outlet's rule for it (cash to five cents, say). On a check of a split bill the amount
+  // given here is what the check still owes before rounding, so each check rounds on its own.
+  const step = rounding?.[tender] ?? 0;
   const exactCents = totalCents;
   totalCents = step >= 2 ? roundTotal(exactCents, { stepCents: step, mode: "nearest" }) : exactCents;
   const received = Math.round(Number(value || 0) * 100);

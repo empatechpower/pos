@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
+import { askConfirm } from "../proto/confirm";
 import type { Catalog } from "@pos/core";
 import { deviceRole, setDeviceRole } from "../device";
 import { go } from "../nav";
@@ -464,7 +465,7 @@ export function Settings({ catalog }: { catalog?: Catalog | null } = {}) {
             <h3>Menu & prices</h3>
             <p className="muted">Items, prices, dining options and the printers that take the orders.</p>
             <div className="settingsgroup"><button onClick={() => go("/prices")}>Prices and menu</button><button onClick={() => go("/printers")}>Printers</button><button onClick={() => go("/devices")}>Devices</button></div>
-            {till.layout && <><h3>Shop menu layout</h3><p className="muted">The shop has its own standard layout. People who have not made their own see it.</p><button onClick={() => { if (window.confirm("Go back to the automatic layout for everyone who has no layout of their own?")) void save({ layout: null }); }}>Reset to automatic</button></>}
+            {till.layout && <><h3>Shop menu layout</h3><p className="muted">The shop has its own standard layout. People who have not made their own see it.</p><button onClick={async () => { if (await askConfirm({ title: "Reset the shop layout?", message: "Go back to the automatic layout for everyone who has no layout of their own?", ok: "Reset to automatic", cancel: "Keep layout" })) void save({ layout: null }); }}>Reset to automatic</button></>}
           </>
         )}
         {section === "training" && manager && <div className="setours"><TrainingPanel /></div>}

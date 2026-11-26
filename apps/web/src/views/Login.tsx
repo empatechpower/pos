@@ -105,7 +105,12 @@ export function Login({ online, problem }: { online: boolean; problem?: string |
     setPin("");
     if (r.ok) await landed();
     else {
-      setMsg(r.reason === "locked" ? "Too many wrong PINs. This account is locked for a few minutes." : r.reason === "invalid" ? "Wrong name or PIN." : "Could not reach the server. Sign-in needs a connection.");
+      setMsg(r.reason === "locked" ? "Too many wrong PINs. This account is locked for a few minutes."
+        : r.reason === "invalid" ? (showPhone ? "Wrong phone number or PIN." : "Wrong name or PIN.")
+        : r.reason !== "unavailable" ? "Sign-in did not go through. Try again."
+        : r.why === "device" ? "This device is not registered with the shop yet. Ask a manager for an enrollment code."
+        : r.why === "server" ? `The server is not answering properly just now (error ${r.status}). Wait a few seconds and try again.`
+        : "Could not reach the server. Check this device's Wi-Fi or data, then try again.");
     }
   }
   /** Signed in (by PIN or by Telegram): remember the person on this till and open where the shop starts. */

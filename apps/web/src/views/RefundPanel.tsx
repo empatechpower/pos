@@ -11,6 +11,7 @@ const ERRORS: Record<string, string> = {
   approval_refused: "That manager code or PIN is not right.",
   approver_locked: "That manager is locked out for a few minutes after too many wrong PINs.",
   approver_cannot_approve: "That person is not a manager.",
+  payment_not_found: "The server does not have this payment yet. Wait a few seconds for it to sync, then try again.",
   reason_required: "Say why (at least a few letters).",
   amount_not_allowed: "That is more than is left to refund on this payment.",
   already_voided: "This order has already been voided.",
@@ -25,9 +26,10 @@ const ERRORS: Record<string, string> = {
  * Giving money back on an order: refund part or all of one payment, or void the whole order. A reason is always asked for, and a manager always
  * approves: a signed-in manager does it themselves, a cashier types a manager's code and PIN. Every refund records who approved and why.
  */
-export function RefundPanel({ order: o, onDone }: { order: OrderState; onDone?: () => void }) {
+export function RefundPanel({ order: o, onDone, startOpen }: { order: OrderState; onDone?: () => void; /** Show the form at once (the till's Refund Payments dialog), not behind a "Refund or void" button. */ startOpen?: boolean }) {
   const staff = useStaff();
-  const [open, setOpen] = useState(false);
+  const [open, setOpen] = useState(!!startOpen);
+  const [voidAsk, setVoidAsk] = useState(false);
   const [pay, setPay] = useState("");
   const [amt, setAmt] = useState("");
   const [why, setWhy] = useState(REASONS[0]!);
@@ -85,9 +87,18 @@ export function RefundPanel({ order: o, onDone }: { order: OrderState; onDone?: 
           )}
           <div className="row" style={{ gap: 8, flexWrap: "wrap" }}>
             {chosen && <button className="primary sm" disabled={!ready || busy} onClick={() => void send("refund")}>Refund {formatMoney(Math.round(Number(amt || chosen.left / 100) * 100))}</button>}
-            <button className="secondary sm" disabled={!ready || busy} onClick={() => { if (window.confirm("Void this whole order and give back everything paid?")) void send("void"); }}>Void whole order</button>
-            <button className="secondary sm" onClick={() => setOpen(false)}>Cancel</button>
+            {!voidAsk && <button className="secondary sm" disabled={!ready || busy} onClick={() => setVoidAsk(true)}>Void whole order</button>}
+            {!voidAsk && <button className="secondary sm" onClick={() => setOpen(false)}>Cancel</button>}
           </div>
+          {voidAsk && (
+            <div className="flash warn" role="alertdialog" aria-label="Void this order?">
+              Void this whole order and give back everything paid? This cannot be undone.
+              <div className="row" style={{ gap: 8, marginTop: 8, justifyContent: "center" }}>
+                <button className="secondary sm" onClick={() => setVoidAsk(false)}>Keep order</button>
+                <button className="primary sm" disabled={!ready || busy} onClick={() => { setVoidAsk(false); void send("void"); }}>Void order</button>
+              </div>
+            </div>
+          )}
         </div>
       )}
     </div>

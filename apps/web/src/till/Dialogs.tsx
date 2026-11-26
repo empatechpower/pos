@@ -2,8 +2,6 @@ import { useEffect, useState, type ReactNode } from "react";
 import { formatMoney } from "@pos/core";
 import { ProtoDialog } from "../proto/ProtoDialog";
 import { staffFetch } from "../auth";
-import { setPref, usePrefs } from "../prefs";
-import { READY_LOOKS, lookOf } from "../looks";
 import type { HeldOrder } from "./types";
 
 /** A dialog in the prototype's own markup, placed over whichever till screen is showing. */
@@ -169,36 +167,6 @@ export function CustomerDialog({ current, info, usePoints, pointsWorthCents, onU
   );
 }
 
-export function TillSettings({ onClose, onEditLayout }: { onClose: () => void; onEditLayout?: () => void }) {
-  const prefs = usePrefs();
-  return (
-    <Proto title="My till settings" onClose={onClose}>
-      <h3>Menu panel</h3>
-      <p className="muted">Which side the menu sits on. Yours alone: it follows you to any till.</p>
-      <div className="choices">{(["left", "right"] as const).map((s) => <button key={s} className={prefs.menuSide === s ? "selected" : ""} onClick={() => void setPref("menuSide", s)}>{s === "left" ? "Left" : "Right"}</button>)}</div>
-      <h3>Text size</h3>
-      <p className="muted">Standard is 20% bigger than the original size.</p>
-      <div className="choices">{([["compact", "Compact"], ["standard", "Standard"], ["large", "Large"], ["xl", "Extra large"]] as const).map(([k, l]) => <button key={k} className={prefs.textSize === k ? "selected" : ""} onClick={() => void setPref("textSize", k)}>{l}</button>)}</div>
-      {READY_LOOKS.length > 1 && (
-        <>
-          <h3>Look</h3>
-          <p className="muted">The interface style you work in. Yours alone.</p>
-          <div className="choices">{READY_LOOKS.map((l) => <button key={l.id} className={lookOf(prefs.look) === l.id ? "selected" : ""} onClick={() => void setPref("look", l.id)}>{l.name}</button>)}</div>
-        </>
-      )}
-      {onEditLayout && (
-        <>
-          <h3>Menu layout</h3>
-          <p className="muted">Arrange the tiles and pages your way. You can also press and hold any tile.</p>
-          <button onClick={onEditLayout}>Edit my menu layout</button>
-        </>
-      )}
-      <p className="muted" style={{ marginTop: ".8em" }}><a href="/settings">All settings</a></p>
-      <div className="actions"><button className="primary" onClick={onClose}>Done</button></div>
-    </Proto>
-  );
-}
-
 /**
  * Payment complete, in the prototype's own markup (proto-reference/index.html, showReceipt): the receipt as it prints, with "Print modifiers",
  * Print and New Order under it. The receipt is the server's own (the same text the printer gets); until the order has reached the server, or
@@ -210,12 +178,18 @@ export function DoneDialog({ orderId, queue, changeCents, totalCents, onClose }:
   const [msg, setMsg] = useState("");
   useEffect(() => {
     if (!orderId) return;
-    let live = true, tries = 0;
+    let live = true, tries = 0, fresh = 0;
     // The order is pushed to the server in the background: ask a few times before giving up.
     const ask = async () => {
       const r = await staffFetch(`/api/orders/${orderId}/receipt${mods ? "?modifiers=1" : ""}`);
       if (!live) return;
-      if ("res" in r && r.res.ok) return setText(((await r.res.json()) as { text: string }).text);
+      if ("res" in r && r.res.ok) {
+        setText(((await r.res.json()) as { text: string }).text);
+        // The last payment may reach the server a moment after the order did (a split bill's final check, a table settled later):
+        // look again twice, so the receipt shown is the finished one.
+        if (++fresh <= 2) setTimeout(() => void ask(), fresh === 1 ? 2500 : 5000);
+        return;
+      }
       if (++tries < 5) setTimeout(() => void ask(), 1200);
     };
     void ask();

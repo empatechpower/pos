@@ -52,10 +52,40 @@ describe("courses, checks and merge in the order record", () => {
   });
   it("tracks what each check has taken", () => {
     const t = reduceOrder("o", e)!;
-    expect(checkStanding(t, "c1")).toEqual({ totalCents: 1300, paidCents: 1000, dueCents: 300 });
+    expect(checkStanding(t, "c1")).toEqual({ totalCents: 1300, paidCents: 1000, dueCents: 300, exactDueCents: 300, roundingCents: 0 });
     expect(checkStanding(t, "zz")).toBeNull();
     const cleared = reduceOrder("o", [...e, ev("o", 9, { type: "SplitCleared" })])!;
     expect(cleared.split).toBeUndefined();
+  });
+  it("rounds each check on its own, and the order's total stays the sum of its checks", () => {
+    const config = PRESETS.fastServe("b", "B", "O");
+    // one S$4.25 item, split 2.13 / 2.12; cash rounds to five cents
+    const base = [
+      ev("r", 1, { type: "OrderOpened", fulfilment: "takeaway", channelId: "take", serviceCharge: false }),
+      ev("r", 2, { type: "ItemAdded", lineId: "l1", productId: "p", name: "Set", unitCents: 425, qty: 1 }),
+      ev("r", 3, { type: "SplitCreated", method: "even", checks: [{ id: "c1", totalCents: 213 }, { id: "c2", totalCents: 212 }] }),
+    ];
+    const exact = orderTotals(reduceOrder("r", base)!, config).total;
+    // check 1 pays S$2.15 in cash (two cents up)
+    const one = reduceOrder("r", [...base, ev("r", 4, { type: "RoundingApplied", cents: 2, tender: "cash", checkId: "c1" }), ev("r", 5, { type: "PaymentRecorded", paymentId: "p1", method: "cash", amountCents: 215, confirmed: true, checkId: "c1" })])!;
+    expect(checkStanding(one, "c1")).toMatchObject({ totalCents: 215, paidCents: 215, dueCents: 0, exactDueCents: 0, roundingCents: 2 });
+    expect(checkStanding(one, "c2")).toMatchObject({ totalCents: 212, dueCents: 212, exactDueCents: 212, roundingCents: 0 });
+    expect(orderTotals(one, config).total).toBe(exact + 2);
+    // check 2 pays S$2.10 in cash (two cents down): it owes nothing, and the two roundings cancel
+    const both = reduceOrder("r", [...base, ev("r", 4, { type: "RoundingApplied", cents: 2, checkId: "c1" }), ev("r", 5, { type: "PaymentRecorded", paymentId: "p1", method: "cash", amountCents: 215, confirmed: true, checkId: "c1" }), ev("r", 6, { type: "RoundingApplied", cents: -2, checkId: "c2" }), ev("r", 7, { type: "PaymentRecorded", paymentId: "p2", method: "cash", amountCents: 210, confirmed: true, checkId: "c2" })])!;
+    expect(checkStanding(both, "c2")).toMatchObject({ totalCents: 210, paidCents: 210, dueCents: 0, exactDueCents: 0, roundingCents: -2 });
+    expect(both.roundingCents).toBeUndefined();
+    expect(orderTotals(both, config).total).toBe(exact);
+    expect(both.payments.reduce((n, p) => n + p.amountCents, 0)).toBe(orderTotals(both, config).total);
+    // a check paid by card afterwards is charged to the cent: its rounding is set back to nothing
+    const card = reduceOrder("r", [...base, ev("r", 4, { type: "RoundingApplied", cents: 2, checkId: "c1" }), ev("r", 5, { type: "RoundingApplied", cents: 0, checkId: "c1" })])!;
+    expect(checkStanding(card, "c1")).toMatchObject({ totalCents: 213, exactDueCents: 213, roundingCents: 0 });
+    expect(card.checkRounding).toBeUndefined();
+    // rounding against a check that does not exist is ignored; clearing the split takes the checks' rounding with it
+    expect(reduceOrder("r", [...base, ev("r", 4, { type: "RoundingApplied", cents: 2, checkId: "nope" })])!.roundingCents).toBeUndefined();
+    const cleared = reduceOrder("r", [...base, ev("r", 4, { type: "RoundingApplied", cents: 2, checkId: "c1" }), ev("r", 5, { type: "SplitCleared" })])!;
+    expect(cleared.roundingCents).toBeUndefined();
+    expect(orderTotals(cleared, config).total).toBe(exact);
   });
   it("a merged-away table is closed and points at the survivor", () => {
     const t = reduceOrder("o", [...e.slice(0, 3), ev("o", 9, { type: "OrderMerged", into: "x", intoSpot: "Table 9" })])!;

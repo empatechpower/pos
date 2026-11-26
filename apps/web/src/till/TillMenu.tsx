@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react";
+import { askConfirm } from "../proto/confirm";
 import { createPortal } from "react-dom";
 import type { MenuEntry } from "@pos/core";
 import { ProtoDialog } from "../proto/ProtoDialog";
@@ -94,7 +95,7 @@ export function TillMenu({ menu, qtyOf, onAdd, onDiscount, onFn, editing }: { me
   };
   const removeSel = () => { if (sel === null) return; edit((l) => { l.pages[at]!.cells[sel] = null; }); setSel(null); };
   const addPage = () => { edit((l) => { if (l.pages.length < 12) l.pages.push(blankPage(`Page ${l.pages.length + 1}`)); }); if (draft && draft.pages.length < 12) setPage(draft.pages.length); };
-  const dropPage = () => { if (!draft || draft.pages.length < 2) return setMsg("A layout needs at least one page."); if (!window.confirm(`Delete the page "${draft.pages[at]!.name}"?`)) return; edit((l) => { l.pages.splice(at, 1); }); setPage(Math.max(0, at - 1)); setSel(null); };
+  const dropPage = async () => { if (!draft || draft.pages.length < 2) return setMsg("A layout needs at least one page."); if (!(await askConfirm({ title: "Delete page?", message: `Delete the page "${draft.pages[at]!.name}"? Its tiles come off the layout; the items stay on the menu.`, ok: "Delete page", cancel: "Keep page" }))) return; edit((l) => { l.pages.splice(at, 1); }); setPage(Math.max(0, at - 1)); setSel(null); };
   const save = async (shop: boolean) => {
     if (!draft || !editing) return;
     const e = shop ? await editing.onSaveShop(draft) : await editing.onSaveMine(draft);

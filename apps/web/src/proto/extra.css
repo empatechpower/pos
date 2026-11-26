@@ -159,3 +159,26 @@
   .proto header button { padding-left: calc(0.5 * var(--u)); padding-right: calc(0.5 * var(--u)); font-size: calc(0.8125 * var(--u)); }
   .proto header .headnav { gap: calc(0.3125 * var(--u)); -webkit-mask-image: linear-gradient(to right, #000 calc(100% - 1.75 * var(--u)), transparent); mask-image: linear-gradient(to right, #000 calc(100% - 1.75 * var(--u)), transparent); padding-right: calc(1.25 * var(--u)); }
 }
+
+/* ---- Order details, the refund form and the order's history, inside one of the prototype's dialogs. The prototype has no styled version of these;
+   they keep their content and take its rows, tables and headings. (The same components keep their own look on the back-office Online page.) ---- */
+.proto .order-details { margin: 0; padding: 0; border: 0 !important; background: none; }
+.proto .order-details .od-head { align-items: center; padding-bottom: calc(0.5 * var(--u)); }
+.proto .order-details .od-title { color: #14506b; font-size: calc(1.0625 * var(--u)); font-weight: 600; }
+.proto .order-details .od-total b { color: #14506b; font-size: calc(1.5 * var(--u)); }
+.proto .order-details .od-card { background: none; border: 0; border-top: calc(0.0625 * var(--u)) solid #d5e0e6; border-radius: 0; padding: calc(0.5 * var(--u)) 0; margin: calc(0.5 * var(--u)) 0 0; }
+.proto .order-details .od-row { font-size: calc(0.8125 * var(--u)); padding: calc(0.3125 * var(--u)) 0; border-bottom: calc(0.0625 * var(--u)) dotted #c9d6dc; align-items: baseline; }
+.proto .order-details .od-row:last-child { border-bottom: 0; }
+.proto .order-details .od-k { color: #5a7182; }
+.proto .order-details .od-items { font-size: calc(0.8125 * var(--u)); margin-top: calc(0.5 * var(--u)); }
+.proto .order-details .od-items th { color: #24617d; font-weight: 600; border-bottom: calc(0.0625 * var(--u)) solid #d5e0e6; }
+.proto .order-details .od-items td { border-top: calc(0.0625 * var(--u)) dotted #c9d6dc; }
+.proto .order-details .od-sums { border-top: calc(0.0625 * var(--u)) solid #d5e0e6; }
+.proto .order-details .od-grand { font-size: calc(1 * var(--u)); color: #14506b; }
+.proto .order-details .od-due { color: #a3231f; }
+.proto .order-details .editor, .proto .refundbody .editor { border: 0; background: none; padding: calc(0.5 * var(--u)) 0 0; gap: calc(0.25 * var(--u)); }
+.proto .order-details .field, .proto .refundbody .field { flex: 1 1 calc(12 * var(--u)); font-size: calc(0.875 * var(--u)); color: #303b40; }
+.proto .order-details .field input, .proto .order-details .field select, .proto .refundbody .field input, .proto .refundbody .field select { width: 100%; }
+.proto .order-details .row, .proto .refundbody .row { gap: calc(0.625 * var(--u)); }
+.proto .refundbody .od-card { border: 0; padding: 0; background: none; margin-top: 0; }
+.proto .setours .flash.warn { background: #fdecea; color: #8f2323; text-align: center; }

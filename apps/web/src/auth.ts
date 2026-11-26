@@ -49,16 +49,31 @@ export function clearSession() {
   emit();
 }
 
-export async function signIn(who: string | { phone: string }, pin: string): Promise<{ ok: true } | { ok: false; reason: "invalid" | "locked" | "unavailable" }> {
+/**
+ * Why a sign-in did not go through, when it was not a wrong PIN: `offline` the request never got an answer (no network, or the server
+ * cannot be reached from here); `server` the server answered with an error (its status is kept, so the screen can say so); `device`
+ * this device is not registered with the shop.
+ */
+export type SignInFailure = { ok: false; reason: "invalid" | "locked" } | { ok: false; reason: "unavailable"; why: "offline" | "server" | "device"; status?: number };
+export async function signIn(who: string | { phone: string }, pin: string): Promise<{ ok: true } | SignInFailure> {
+  const body = JSON.stringify(typeof who === "string" ? { code: who, pin } : { phone: who.phone, pin });
+  const ask = () => fetch("/api/auth/login", { method: "POST", headers: { "content-type": "application/json", ...deviceHeader() }, body });
+  let res: Response;
   try {
-    const res = await fetch("/api/auth/login", { method: "POST", headers: { "content-type": "application/json", ...deviceHeader() }, body: JSON.stringify(typeof who === "string" ? { code: who, pin } : { phone: who.phone, pin }) });
+    res = await ask();
+    // A server that is restarting or waking up answers 502-504 for a few seconds: one more try before giving up.
+    if (res.status >= 502 && res.status <= 504) { await new Promise((r) => setTimeout(r, 2500)); res = await ask(); }
+  } catch {
+    try { await new Promise((r) => setTimeout(r, 1500)); res = await ask(); } catch { return { ok: false, reason: "unavailable", why: "offline" }; }
+  }
+  try {
     if (res.status === 401 && (await res.clone().json().catch(() => ({}))).error === "device_not_enrolled") {
       markDeviceRejected();
-      return { ok: false, reason: "unavailable" };
+      return { ok: false, reason: "unavailable", why: "device" };
     }
     if (res.status === 429) return { ok: false, reason: "locked" };
     if (res.status === 401) return { ok: false, reason: "invalid" };
-    if (!res.ok) return { ok: false, reason: "unavailable" };
+    if (!res.ok) return { ok: false, reason: "unavailable", why: "server", status: res.status };
     const j = (await res.json()) as { token: string; staff: StaffInfo };
     localStorage.setItem(LS_TOKEN, j.token);
     localStorage.setItem(LS_STAFF, JSON.stringify(j.staff));
@@ -66,7 +81,7 @@ export async function signIn(who: string | { phone: string }, pin: string): Prom
     emit();
     return { ok: true };
   } catch {
-    return { ok: false, reason: "unavailable" };
+    return { ok: false, reason: "unavailable", why: "server", status: res.status };
   }
 }
 

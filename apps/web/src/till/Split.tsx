@@ -141,7 +141,8 @@ export function ChecksBoard(p: {
                   ? c.shares.map((sh) => { const l = lineBy.get(sh.lineId); return l ? <div className="checkline" key={sh.lineId}><span>{l.name} × {sh.qty}{l.course ? ` · ${COURSE_NAMES[l.course] ?? ""}` : ""}</span><span>{formatMoney(l.unitCents * sh.qty)}</span></div> : null; })
                   : <div className="checkline"><span>Share of the bill</span><span></span></div>}
                 {p.order.payments.filter((x) => x.checkId === c.id && x.confirmed).map((x) => <div className="checkline paidline" key={x.paymentId}><span>Paid · {paymentLabel(paymentKey(x))}</span><span>{formatMoney(x.amountCents)}</span></div>)}
-                <div className="row checktotal"><span>TOTAL</span><strong>{formatMoney(c.totalCents)}</strong></div>
+                {st.roundingCents !== 0 && <div className="checkline"><span>Rounding</span><span>{st.roundingCents < 0 ? "−" : ""}{formatMoney(Math.abs(st.roundingCents))}</span></div>}
+                <div className="row checktotal"><span>TOTAL</span><strong>{formatMoney(st.totalCents)}</strong></div>
                 <div className="checkactions"><button onClick={() => p.onPrint(c.id)}>Print Check</button><button className="primary" disabled={paid} onClick={() => p.onPay(c.id)}>Pay Check</button></div>
               </div>
             );

@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { ConfirmHost } from "./proto/confirm";
 import "./backoffice.css";
 import { getDeviceCode, setDeviceCode } from "./db";
 import { usePending, useReference, useSyncStatus } from "./hooks";
@@ -122,6 +123,7 @@ export function App() {
   const shellStyle = { ...(staff ? theme.style : {}), ...(tillStyle ? { "--t-scale": TEXT_SCALE[prefs.textSize] } : {}) } as React.CSSProperties;
   return (
     <div className={`shell ${route === "pos" ? "till-route" : ""} ${tillStyle ? "tillshell" : ""} ${backOffice ? "backoffice" : ""}`} style={shellStyle}>
+      <ConfirmHost />
       {tillStyle && route !== "pos" && !(route === "login" && !staff) && <TillHeader route={route} config={config ?? null} connected={connected} pending={pending} newOnline={newOnline} hasTables={hasTables} onSync={() => void syncNow()} syncError={status.error} />}
       {!tillStyle && <header className="top">
         <div className="brand">

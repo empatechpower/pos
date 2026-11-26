@@ -2,7 +2,6 @@ import { useMemo, useState } from "react";
 import { confirmedPaid, formatMoney, orderTotals, type BusinessConfig, type OrderState } from "@pos/core";
 import { staffFetch, useStaff } from "../auth";
 import { useOrders } from "../hooks";
-import { RefundPanel } from "./RefundPanel";
 import { OrderDetails } from "./OrderDetails";
 import { NoteSheet } from "./NoteSheet";
 import { record } from "../db";
@@ -155,9 +154,8 @@ export function Orders({ config }: { config: BusinessConfig }) {
               <button onClick={() => setNoting(o.orderId)}>{o.note ? "Edit note" : "Note"}</button>
               <button aria-pressed={mods} className={mods ? "selected" : ""} title="Whether a receipt lists each item's choices (extras, size, spice). Off unless you turn it on." onClick={() => setMods((m) => !m)}>Print modifiers: {mods ? "On" : "Off"}</button>
             </div>
-            <div className="orddetailbody">
+            <div className="orddetailbody setours">
               <OrderDetails order={o} config={config} />
-              {staff && st !== "cancelled" && <RefundPanel order={o} />}
             </div>
             <div className="actions"><button onClick={() => setShown(null)}>Close</button></div>
           </ProtoModal>

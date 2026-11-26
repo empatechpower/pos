@@ -1,4 +1,5 @@
 import { cloneElement, isValidElement, useEffect, useMemo, useRef, useState, type ReactElement, type ReactNode } from "react";
+import { askConfirm } from "../proto/confirm";
 import { ProtoDialog, ProtoModal } from "../proto/ProtoDialog";
 import { lookOf } from "../looks";
 import QRCode from "qrcode";
@@ -58,7 +59,7 @@ import { TillMenu } from "../till/TillMenu";
 import { ActionStrip, type Action } from "../till/ActionStrip";
 import { PayPanel, type Tender, type TenderOption } from "../till/PayPanel";
 import { ManageItem } from "../till/ManageItem";
-import { CancelOrderDialog, CustomerDialog, DiningDialog, DoneDialog, ExtraItemDialog, FeeDialog, GuestsDialog, HeldDialog, QuantityDialog, TaxDialog, TillSettings, loadMember, BarcodeDialog, CouponDialog, HandoverDialog, InvoiceDialog, couponCents, type HandoverOrder, type MemberSummary, type TillCoupon } from "../till/Dialogs";
+import { CancelOrderDialog, CustomerDialog, DiningDialog, DoneDialog, ExtraItemDialog, FeeDialog, GuestsDialog, HeldDialog, QuantityDialog, TaxDialog, loadMember, BarcodeDialog, CouponDialog, HandoverDialog, InvoiceDialog, couponCents, type HandoverOrder, type MemberSummary, type TillCoupon } from "../till/Dialogs";
 import { TEXT_SCALE, loadPrefs, setLayout, usePrefs } from "../prefs";
 import { arrange, arrangeAll, loadTillSettings, openCustomAction, saveTill, useTillSettings, actionsPref, tendersPref, ACTION_POOL } from "../till/tillSettings";
 import { onRouteChange, queryParams } from "../nav";
@@ -118,7 +119,7 @@ export function Pos({ config, catalog, online, customerId, setCustomerId, header
   const [managing, setManaging] = useState<MenuEntry | null>(null);
   const [pax, setPax] = useState(1);
   const [payView, setPayView] = useState(false);
-  const [dialog, setDialog] = useState<null | "dining" | "guests" | "qty" | "held" | "customer" | "settings" | "tabs" | "shift" | "table" | "line" | "seat" | "fee" | "extra" | "reports" | "tax" | "coupon" | "barcode" | "invoice" | "handover">(null);
+  const [dialog, setDialog] = useState<null | "dining" | "guests" | "qty" | "held" | "customer" | "tabs" | "shift" | "table" | "line" | "seat" | "fee" | "extra" | "reports" | "tax" | "coupon" | "barcode" | "invoice" | "handover">(null);
   const [lineKey, setLineKey] = useState<string | null>(null);
   const [pendingQty, setPendingQty] = useState(1);
   const [sheetOpen, setSheetOpen] = useState(false);
@@ -185,7 +186,7 @@ export function Pos({ config, catalog, online, customerId, setCustomerId, header
   /** The customer is not paying by QR after all: cancel the order, or take cash instead. */
   async function closeQr(how: "cancel" | "cash" | "paynow" | "done") {
     if (!qrPay) return;
-    if (how === "paynow" && !window.confirm(`Have you seen ${formatMoney(qrPay.amountCents)} arrive in the bank account?`)) return;
+    if (how === "paynow" && !(await askConfirm({ title: "PayNow received?", message: `Have you seen ${formatMoney(qrPay.amountCents)} arrive in the bank account?`, ok: "Yes, received", cancel: "Not yet" }))) return;
     if (how === "cancel" && !qrPay.keep) await record(qrPay.orderId, { type: "StageSet", stage: "cancelled" });
     if (how === "paynow") await record(qrPay.orderId, { type: "PaymentRecorded", paymentId: newId(), method: "paynow", amountCents: qrPay.amountCents, confirmed: true });
     if (how === "cash") await record(qrPay.orderId, { type: "PaymentRecorded", paymentId: newId(), method: "cash", amountCents: qrPay.amountCents, confirmed: true });
@@ -762,10 +763,16 @@ export function Pos({ config, catalog, online, customerId, setCustomerId, header
     if (mustOpenShift) return notify("Open your shift first.");
     if (payLock.current) return;
     payLock.current = true;
-    const owed = checkDue.dueCents;
+    // Rounding by tender, per check: what is asked for is this check's remaining amount rounded by the outlet's rule for the tender (cash first).
+    // It is set again by whichever payment settles the check, so a check refunded and then paid by card is charged to the cent.
+    const exact = checkDue.exactDueCents;
+    const step = config.pricing.tenderRounding?.[t] ?? 0;
+    const owed = step >= 2 ? roundTotal(exact, { stepCents: step, mode: "nearest" }) : exact;
     const applied = t === "cash" ? Math.min(received, owed) : owed;
+    const settles = applied >= owed;
     try {
       const paymentId = newId();
+      if (settles && owed - exact !== checkDue.roundingCents) await record(linked.orderId, { type: "RoundingApplied", cents: owed - exact, tender: t, checkId: payCheckId, ...(staff ? { byName: staff.name } : {}) });
       if (t === "credit") {
         if (!customerId) return notify("Enter a customer to use credit.");
         const r = await spend(customerId, owed, `check:${paymentId}`, linked.orderId, deviceId());
@@ -779,7 +786,8 @@ export function Pos({ config, catalog, online, customerId, setCustomerId, header
         await record(linked.orderId, { type: "PaymentRecorded", paymentId, method, amountCents: applied, confirmed: t === "cash", checkId: payCheckId, ...(t === "cash" && received > applied ? { tenderedCents: received } : {}) });
         if (t !== "cash") window.setTimeout(() => void record(linked.orderId, { type: "PaymentConfirmed", paymentId }), 1500);
       }
-      const total = orderTotals(linked, config).total;
+      // The order's total moves with the rounding just kept against this check.
+      const total = orderTotals(linked, config).total + (settles ? owed - exact - checkDue.roundingCents : 0);
       const settled = paidSoFar + applied >= total;
       const change = t === "cash" ? Math.max(0, received - owed) : 0;
       setPayView(false); setPayCheckId(null);
@@ -982,7 +990,7 @@ export function Pos({ config, catalog, online, customerId, setCustomerId, header
       />
         {payView && bag.length ? (
           <PayPanel
-            totalCents={payCheckId && checkDue ? checkDue.dueCents : due}
+            totalCents={payCheckId && checkDue ? checkDue.exactDueCents : due}
             title={payCheckId && linked?.split ? `Check #${String(linked.split.checks.find((c) => c.id === payCheckId)?.no ?? 0).padStart(2, "0")}` : linked?.queueNumber ? `Order ${linked.queueNumber}` : nextQueue ? `Order ${nextQueue}` : channel.name}
             venue={`${config.name}${dineIn && spot ? ` · ${spot}` : ""}`}
             tenders={tenders} busy={paying || qrBusy} partial={!!payCheckId} rounding={config.pricing.tenderRounding}
@@ -1022,7 +1030,6 @@ export function Pos({ config, catalog, online, customerId, setCustomerId, header
       {dialog === "handover" && <HandoverDialog find={findForHandover} onHandOver={handOver} onClose={() => setDialog(null)} />}
       {dialog === "tax" && <TaxDialog name={config.pricing.taxName ?? "GST"} current={taxOff} onSet={setTaxOff} onClose={() => setDialog(null)} />}
       {dialog === "fee" && <FeeDialog fees={fees} subtotalCents={unfeed.subtotal - unfeed.couponDiscount - unfeed.discountCents} onAdd={(kind, value, label) => setFees((cur) => [...cur, { id: newId(), kind, value, label }])} onRemove={(id) => setFees((cur) => cur.filter((f) => f.id !== id))} onClose={() => setDialog(null)} />}
-      {dialog === "settings" && <TillSettings onClose={() => setDialog(null)} onEditLayout={staff ? () => { setDialog(null); setView("order"); setEditLayoutAt((n) => n + 1); } : undefined} />}
       {dialog === "shift" && <DrawerDialog onClose={() => setDialog(null)} />}
       {dialog === "reports" && <ReportsDialog orders={orders} config={config} categoryOf={(id) => catalog.products.find((x) => x.id === id)?.category ?? ""} manager={hasPerm(staff, "audit.read")} onShift={() => setDialog("shift")} onClose={() => setDialog(null)} />}
       {dialog === "table" && (
@@ -1181,7 +1188,7 @@ export function Pos({ config, catalog, online, customerId, setCustomerId, header
           </ProtoDialog>
         </div>
       )}
-      {refundOpen && linked && <ProtoModal title="Refund payments" wide onClose={() => setRefundOpen(false)}><RefundPanel order={linked} onDone={() => setRefundOpen(false)} /></ProtoModal>}
+      {refundOpen && linked && <ProtoModal title="Refund Payments" wide onClose={() => setRefundOpen(false)}><p className="muted">Refunding returns a payment to the customer and reopens that part of its check.</p><div className="setours refundbody"><RefundPanel order={linked} onDone={() => setRefundOpen(false)} startOpen /></div><div className="actions"><button onClick={() => setRefundOpen(false)}>Done</button></div></ProtoModal>}
       {done && <DoneDialog orderId={done.orderId} queue={done.queue} changeCents={done.change} totalCents={done.total} onClose={() => setDone(null)} />}
       {noteFor && (() => {
         const line = noteFor.scope === "line" ? bag.find((b) => b.key === noteFor.key) : undefined;
