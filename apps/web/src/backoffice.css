@@ -1,0 +1,35 @@
+/*
+ * The back office (Manager, Prices, Printers, Devices, Online, Credit, Tabs) in the till's look. The prototype has no back-office screens, so nothing here
+ * is copied markup: the pages keep their own layout, and this sheet swaps their palette, type, header, buttons and fields for the prototype's.
+ * The accent stays a token (--orange / --selected): a shop's brand colour, or a person's own colour, is set on the shell and still wins.
+ */
+.shell.backoffice {
+  --page: #f8fafb; --header: #ffffff; --beige: #eef4f7; --text: #303b40; --text-2: #7a878c; --orange: #078dbe; --selected: #e9f7fd; --line: #d5e0e6; --radius: 12px;
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; color: var(--text); background: var(--page);
+}
+/* The header: the till's blue band. */
+.shell.backoffice .top { background: linear-gradient(#39b5d2, #008cbb); border-bottom: 0; color: #fff; box-shadow: 0 1px 4px #00334d44; }
+.shell.backoffice .top .brand span { color: #d6eef7; }
+.shell.backoffice .top nav a { color: #eaf7fc; border: 1px solid #78c9e0; padding: 7px 14px; }
+.shell.backoffice .top nav a.on { background: #ffffff33; color: #fff; border-color: #fff; }
+.shell.backoffice .top .dev { color: #d6eef7; }
+.shell.backoffice .top .staffbtn, .shell.backoffice .top .pill, .shell.backoffice .top .secondary.sm { background: #ffffff22; color: #fff; border-color: #79c7df; }
+.shell.backoffice .top .dot { background: #fff; color: #0b6f95; }
+/* Headings. */
+.shell.backoffice h2 { color: #14506b; font-weight: 600; }
+.shell.backoffice h3 { color: #24617d; font-weight: 600; }
+/* Buttons: the prototype's pills. The main action is its blue gradient unless the shop or the person has a colour of their own. */
+.shell.backoffice .primary { background: linear-gradient(#28add0, #0086b7); color: #fff; border: 1px solid #52bad9; border-radius: 999px; padding: 12px 20px; font-weight: 500; box-shadow: 0 1px 2px #0001; }
+.shell.backoffice[style*="--orange"] .primary { background: var(--orange); border-color: var(--orange); }
+.shell.backoffice .secondary { background: #fff; border: 1px solid #cdd6d9; color: #437084; border-radius: 999px; padding: 11px 18px; font-weight: 500; box-shadow: 0 1px 2px #0001; }
+.shell.backoffice .secondary:hover:not(:disabled) { background: #eaf6fc; }
+.shell.backoffice .primary.sm, .shell.backoffice .secondary.sm { padding: 7px 14px; border-radius: 999px; }
+.shell.backoffice .secondary[aria-pressed="true"], .shell.backoffice .secondary.on { background: var(--selected); border-color: var(--orange); color: var(--orange); }
+/* Fields. */
+.shell.backoffice input:not([type="checkbox"]):not([type="radio"]):not([type="color"]):not([type="file"]), .shell.backoffice select, .shell.backoffice textarea { border: 1px solid #c7d3d9; border-radius: 12px; background: #fff; color: #354c56; }
+.shell.backoffice input:focus-visible, .shell.backoffice select:focus-visible, .shell.backoffice textarea:focus-visible { outline: 3px solid #8acfe9; outline-offset: 2px; }
+/* Cards, rows and tables. */
+.shell.backoffice .tab, .shell.backoffice .editor, .shell.backoffice .e2e-card, .shell.backoffice .od-card { border-color: #d5e0e6; border-radius: 12px; }
+.shell.backoffice table th { color: #24617d; }
+.shell.backoffice a { color: #1689b6; }
+.shell.backoffice .top a { color: #eaf7fc; }

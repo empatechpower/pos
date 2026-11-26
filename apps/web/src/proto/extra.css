@@ -22,3 +22,82 @@
 /* Payment complete: the change to hand back, above the receipt (the prototype only has it inside the receipt), and the queue number while the receipt is not available. */
 .proto .dialog .donechange { font-size: calc(1.25 * var(--u)); color: #a3231f; margin-bottom: calc(0.75 * var(--u)); }
 .proto .receipt.r7 .donequeue { font-size: calc(3 * var(--u)); line-height: 1.2; }
+/* Open your shift, as a dialog (the prototype gives it a whole screen): its denominations in two columns, as on that screen (.gate .denoms). */
+.proto .dialog.openshift { width: min(calc(46 * var(--u)), 95vw); }
+@media (min-width: 43.75rem) { .proto .dialog.openshift .denoms { grid-template-columns: 1fr 1fr; column-gap: calc(1.625 * var(--u)); } }
+/* Held orders and fees on an order: a small "Discard" / "Remove fee" beside the row (the prototype has neither). */
+.proto .dialog .heldline { display: flex; align-items: center; gap: calc(0.5 * var(--u)); }
+.proto .dialog .heldline .heldrow { flex: 1; }
+.proto .dialog .helddrop { min-height: calc(2.25 * var(--u)); padding: calc(0.25 * var(--u)) calc(0.75 * var(--u)); font-size: calc(0.8125 * var(--u)); }
+/* A warning inside a dialog that must not be missed (an expired credit, an order that is unpaid or already handed over): the prototype's error line, made to stand out. */
+.proto .dialog .error.warn { font-size: calc(0.9375 * var(--u)); font-weight: 600; color: #8a4b00; background: #fff4d6; border-radius: calc(0.5 * var(--u)); padding: calc(0.5 * var(--u)) calc(0.75 * var(--u)); }
+/* A label with a tick box on the right of a row (use points on this order). */
+.proto .dialog label.row { cursor: pointer; }
+/* A button that takes something away for good (remove an item from the ticket). */
+.proto .dialog button.danger { color: #a3231f; border-color: #e3b5b2; }
+/* "Change photo": a file picker dressed as one of the prototype's buttons. */
+.proto .dialog .filebtn { display: inline-flex; align-items: center; min-height: calc(2.75 * var(--u)); cursor: pointer; border: calc(0.0625 * var(--u)) solid #cdd6d9; border-radius: calc(1.5 * var(--u)); background: #fff; color: #437084; padding: calc(0.625 * var(--u)) calc(1.0625 * var(--u)); font-weight: 500; }
+/* A row in a dialog that holds an input beside its label (a price to change): the input keeps to its size. */
+.proto .dialog .row > input { width: calc(7 * var(--u)); }
+.proto .dialog textarea { width: 100%; margin-top: calc(0.5 * var(--u)); font: inherit; border: calc(0.0625 * var(--u)) solid #cdd6d9; border-radius: calc(0.75 * var(--u)); padding: calc(0.625 * var(--u)); }
+/* The Table Map inside the till's full-screen view: the prototype gives it the whole page under the header. */
+.proto.protohead.floorwrap { height: 100%; min-height: 100%; display: flex; flex-direction: column; background: #eef4f7; }
+.proto.floorwrap .floorcanvas { min-height: calc(22 * var(--u)); }
+/* What just happened on the map (a table cleared, a move refused): the prototype uses a passing toast. */
+.proto .floormsg { padding: calc(0.5 * var(--u)) calc(1 * var(--u)); background: #fff4d6; color: #6b4a00; font-size: calc(0.875 * var(--u)); }
+/* A table whose bill has been asked for: ours, on top of the prototype's "ordered" blue. */
+.proto .ftable.st-bill { background: #d9822b; color: #fff; }
+.proto .dot.dbill { background: #d9822b; }
+/* Arranging: tables are picked up and moved. */
+.proto .floorcanvas.arranging .ftable { cursor: grab; touch-action: none; }
+/* The app's own ".dot" (a red count badge) must not dress the prototype's legend squares. */
+.proto .legend .dot { padding: 0; min-width: 0; margin-left: 0; font-size: inherit; line-height: inherit; color: inherit; }
+/* The timers on a table take the table's own text colour. In the prototype a general rule for small text greys them out, which makes them unreadable on a coloured table. */
+.proto .ftable small { color: inherit; }
+/* The Dashboard under the app's header: the prototype gives it the rest of the page. */
+.proto.protohead.dashwrap { min-height: calc(100dvh - 4.0105 * var(--u)); display: flex; flex-direction: column; background: #eef4f7; }
+/* A screen drawn in the prototype's stylesheet fills the page under the header: the app shell's own page margin does not apply to it. */
+.shell.tillshell > main:has(> .dashwrap) { padding: 0; }
+/* Orders under the app's header, filling the page as in the prototype. */
+.proto.protohead.ordscreen { min-height: calc(100dvh - 4.0105 * var(--u)); display: flex; flex-direction: column; background: #eef4f7; }
+.shell.tillshell > main:has(> .ordscreen) { padding: 0; }
+/* An open order's row opens it on the till (as in the prototype); "Details" beside it is ours, for its history, a reprint or a note without opening it. */
+.proto .ordline { display: flex; align-items: stretch; gap: calc(0.5 * var(--u)); }
+.proto .ordline .ordrow { flex: 1; }
+.proto .ordline .orddetail { margin-bottom: calc(0.5 * var(--u)); border-radius: calc(0.75 * var(--u)); }
+.proto .dialog .ordacts { margin: calc(0.75 * var(--u)) 0; }
+.proto .dialog .ordacts button { flex: 0 1 auto; }
+/* Settings under the app's header, filling the page as in the prototype. */
+.proto.protohead.setscreen { height: calc(100dvh - 4.0105 * var(--u)); display: flex; flex-direction: column; background: #f8fafb; }
+.shell.tillshell > main:has(> .setscreen) { padding: 0; }
+/* Settings panels whose contents are still their own (Selling's cards, Training, Telegram and phone sign-in): inside the prototype's frame their rows
+   pack from the left and wrap, their cards keep an outline, and their fields stack. */
+.proto .setours .row { justify-content: flex-start; flex-wrap: wrap; align-items: center; }
+.proto .setours label.row { gap: calc(0.5 * var(--u)); cursor: pointer; }
+/* The prototype's settings are flat: a heading, then its controls. Our cards drop their box and are parted by a hairline instead. */
+.proto .setours .e2e-card, .proto .setours > div, .proto .setours > section { background: none; border: 0; border-top: calc(0.0625 * var(--u)) solid #d5e0e6; border-radius: 0; padding: calc(1.125 * var(--u)) 0 0; margin-top: calc(1.125 * var(--u)) !important; }
+.proto .setours > :first-child { border-top: 0; padding-top: 0; margin-top: calc(1.25 * var(--u)) !important; }
+.proto .setours .od-card { background: #fff; border: calc(0.0625 * var(--u)) solid #d5e0e6; border-radius: calc(0.75 * var(--u)); padding: calc(0.875 * var(--u)); margin-top: calc(0.75 * var(--u)); }
+.proto .setours .e2e-card h3:first-child { margin-top: 0; }
+.proto .setours .field { display: block; margin: calc(0.625 * var(--u)) 0; min-width: 0; }
+.proto .setours .field input, .proto .setours .field select, .proto .setours .field textarea { display: block; margin-top: calc(0.375 * var(--u)); max-width: 100%; }
+.proto .setours input, .proto .setours select { max-width: 100%; min-width: 0; }
+.proto .setours button.sm { min-height: calc(2.375 * var(--u)); padding: calc(0.375 * var(--u)) calc(0.875 * var(--u)); }
+.proto .setours table { max-width: 100%; }
+.proto .setours .flash { background: #fff4d6; color: #6b4a00; border-radius: calc(0.5 * var(--u)); padding: calc(0.5 * var(--u)) calc(0.75 * var(--u)); margin: calc(0.5 * var(--u)) 0; }
+
+/* A list that can be ticked and reordered (order actions, payment options): one compact line each, the tick beside its name, the arrows at the end. */
+.proto .setours .arr-row { display: flex; align-items: center; gap: calc(0.375 * var(--u)); padding: calc(0.25 * var(--u)) 0; border-bottom: calc(0.0625 * var(--u)) dotted #c9d6dc; }
+.proto .setours .arr-row label { flex: 1; display: flex; align-items: center; gap: calc(0.5 * var(--u)); cursor: pointer; }
+.proto .setours .arr-row button { min-height: calc(2.125 * var(--u)); width: calc(2.5 * var(--u)); padding: 0; border-radius: calc(0.5 * var(--u)); }
+/* Who may do what: the prototype's report table, with room between the two role columns. */
+.proto .setours .perm-table { width: 100%; border-collapse: collapse; }
+.proto .setours .perm-table th, .proto .setours .perm-table td { padding: calc(0.4375 * var(--u)) calc(0.75 * var(--u)); border-bottom: calc(0.0625 * var(--u)) dotted #b9c4c9; text-align: center; vertical-align: top; }
+.proto .setours .perm-table th:first-child, .proto .setours .perm-table td:first-child { text-align: left; padding-left: 0; }
+.proto .setours .perm-table th { font-size: calc(0.8125 * var(--u)); color: #24617d; white-space: nowrap; }
+/* Text boxes and plain inputs take the prototype's field look. */
+.proto .setours textarea { width: 100%; font: inherit; font-size: calc(0.875 * var(--u)); border: calc(0.0625 * var(--u)) solid #cdd6d9; border-radius: calc(0.75 * var(--u)); padding: calc(0.625 * var(--u)); background: #fff; color: #303b40; }
+.proto .setours label.inline { display: flex; align-items: center; gap: calc(0.5 * var(--u)); margin: calc(0.5 * var(--u)) 0; cursor: pointer; }
+.proto .setours small.muted, .proto .setours .muted small { font-size: calc(0.75 * var(--u)); }
+.proto .setours input[type="checkbox"], .proto .setours input[type="radio"] { min-height: 0; padding: 0; width: calc(1.125 * var(--u)); height: calc(1.125 * var(--u)); flex: none; }
+.proto .setours input[type="color"] { padding: calc(0.25 * var(--u)); width: calc(3 * var(--u)); }

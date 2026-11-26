@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import "./backoffice.css";
 import { getDeviceCode, setDeviceCode } from "./db";
 import { usePending, useReference, useSyncStatus } from "./hooks";
 import { startSync, syncNow } from "./sync";
@@ -116,9 +117,11 @@ export function App() {
   // The till screens share the prototype's header and its text scale; the back-office pages keep the wider navigation bar.
   const tillStyle = route === "pos" || route === "dashboard" || route === "orders" || route === "settings" || route === "login";
   const hasTables = !!config && config.paymentTiming === "postpay" && config.serviceMode !== "retail" && !!catalog?.channels.some((c) => c.active && c.kind === "dine_in"); // a retail outlet has no tables
+  // The staff screens outside the till. The customer-facing ones (shop, kiosk, queue, display) keep the shop's own look.
+  const backOffice = route === "manager" || route === "prices" || route === "pricebook" || route === "printers" || route === "devices" || route === "online" || route === "credit" || route === "tabs";
   const shellStyle = { ...(staff ? theme.style : {}), ...(tillStyle ? { "--t-scale": TEXT_SCALE[prefs.textSize] } : {}) } as React.CSSProperties;
   return (
-    <div className={`shell ${route === "pos" ? "till-route" : ""} ${tillStyle ? "tillshell" : ""}`} style={shellStyle}>
+    <div className={`shell ${route === "pos" ? "till-route" : ""} ${tillStyle ? "tillshell" : ""} ${backOffice ? "backoffice" : ""}`} style={shellStyle}>
       {tillStyle && route !== "pos" && !(route === "login" && !staff) && <TillHeader route={route} config={config ?? null} connected={connected} pending={pending} newOnline={newOnline} hasTables={hasTables} onSync={() => void syncNow()} syncError={status.error} />}
       {!tillStyle && <header className="top">
         <div className="brand">

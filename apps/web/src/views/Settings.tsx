@@ -15,6 +15,8 @@ import { isTraining } from "../training";
 import { getDeviceCode, setDeviceCode } from "../db";
 import { setLayout } from "../prefs";
 import { READY_LOOKS, lookOf } from "../looks";
+import { loadFloor, saveFloor, useFloor, type FloorSettings } from "../floor";
+import { loadShiftRequired, useShiftSettings, type ShiftSettings } from "../shift";
 
 type Section = "station" | "selling" | "menu" | "training" | "about";
 
@@ -316,6 +318,53 @@ function StationsEditor({ stations, categories, onSave }: { stations: KitchenSta
   );
 }
 
+/**
+ * Merchant settings, in the prototype's own markup (proto-reference/index.html, setSelling): the shop-wide switches for selling, in one group.
+ * Each saves as it is changed. The prototype's six come first, in its order; ours follow (a shift before selling, courses, the overdue time).
+ */
+function MerchantSettings({ till, save }: { till: TillSettings; save: (patch: Partial<TillSettings>) => Promise<void> }) {
+  const floor = useFloor();
+  const shifts = useShiftSettings();
+  const [lock, setLock] = useState<string | null>(null);
+  const [msg, setMsg] = useState("");
+  useEffect(() => { void loadShiftRequired(); void loadFloor(); }, []);
+  const shift = async (patch: Partial<ShiftSettings>) => {
+    const r = await staffFetch("/api/settings/shifts", { method: "PUT", body: patch });
+    setMsg("res" in r && r.res.ok ? "Saved." : "Only a manager can change this.");
+    await loadShiftRequired();
+  };
+  const table = async (patch: Partial<FloorSettings>) => setMsg((await saveFloor(patch)) ?? "Saved.");
+  const note = (t: string) => <span className="muted" style={{ display: "block", fontSize: "0.75em" }}>{t}</span>;
+  return (
+    <>
+      <h3>Merchant settings</h3>
+      {msg && <div className="floormsg" role="status">{msg}</div>}
+      <div className="settingsgroup">
+        <label className="row"><span>Dashboard after sign-in{note("Show the dashboard home screen after sign-in. Turn off to go straight to the order screen.")}</span><input type="checkbox" aria-label="Dashboard after sign-in" checked={till.dashboard} onChange={(e) => void save({ dashboard: e.target.checked })} /></label>
+        <label className="row"><span>Formal Day-End close{note("Run a Day-End close as well as each shift's own close. The button is under Shifts and drawers below.")}</span><input type="checkbox" aria-label="Formal Day-End close" checked={shifts.dayEnd} onChange={(e) => void shift({ dayEnd: e.target.checked })} /></label>
+        <label className="field">Variance at close
+          <select aria-label="Variance at close" value={shifts.variancePolicy} onChange={(e) => void shift({ variancePolicy: e.target.value as ShiftSettings["variancePolicy"] })}>
+            <option value="proceed">Close proceeds · variance on Z</option>
+            <option value="managerpin">Manager PIN for variance</option>
+            <option value="blocked">Blocked until balanced</option>
+          </select>
+        </label>
+        <label className="field">Auto-lock after (minutes, 0 = never)<input type="number" min={0} max={240} aria-label="Auto-lock after minutes" value={lock ?? String(shifts.lockMinutes)} onChange={(e) => setLock(e.target.value)} onBlur={() => { if (lock === null) return; const n = Math.min(240, Math.max(0, parseInt(lock || "0", 10) || 0)); setLock(null); if (n !== shifts.lockMinutes) void shift({ lockMinutes: n }); }} /></label>
+        <label className="field">Removing a ticket item by sliding
+          <select aria-label="Removing a ticket item by sliding" value={till.lineRemove} onChange={(e) => void save({ lineRemove: e.target.value as "bin" | "swipe" })}>
+            <option value="bin">Show a bin button · tap it to remove</option>
+            <option value="swipe">Slide all the way · removes at once</option>
+          </select>
+        </label>
+        <label className="row"><span>Allow split bill{note("Cashiers can split a bill into separate checks — evenly, manually, by item or by seat — on the payment screen.")}</span><input type="checkbox" aria-label="Allow split bill" checked={floor.splitBill} onChange={(e) => void table({ splitBill: e.target.checked })} /></label>
+        <label className="row"><span>Shift before selling{note("A shift must be open before a payment can be taken.")}</span><input type="checkbox" aria-label="Shift before selling" checked={shifts.required} onChange={(e) => void shift({ required: e.target.checked })} /></label>
+        <label className="row"><span>Serve in courses{note("Starter, Main, Dessert: Send fires the first, Fire Course sends the next.")}</span><input type="checkbox" aria-label="Serve in courses" checked={floor.courses} onChange={(e) => void table({ courses: e.target.checked })} /></label>
+        <label className="field">Flag a table as overdue after (minutes)<input type="number" min={1} max={600} aria-label="Overdue after minutes" defaultValue={floor.overdueMinutes} key={floor.overdueMinutes} onBlur={(e) => { const n = Number(e.target.value); if (n && n !== floor.overdueMinutes) void table({ overdueMinutes: n }); }} /></label>
+      </div>
+    </>
+  );
+}
+
 export function Settings({ catalog }: { catalog?: Catalog | null } = {}) {
   const staff = useStaff();
   const prefs = usePrefs();
@@ -337,54 +386,54 @@ export function Settings({ catalog }: { catalog?: Catalog | null } = {}) {
   const save = async (patch: Partial<TillSettings>) => { const e = await saveTill(patch); setMsg(e ?? "Saved."); };
   const sections: Array<[Section, string, boolean]> = [["station", "Station", true], ["selling", "Selling", maySell], ["menu", "Menu & prices", mayMenu], ["training", "Training", manager], ["about", "About", true]];
 
+  const pick = <T extends string>(options: ReadonlyArray<readonly [T, string]>, current: T, onPick: (v: T) => void) => (
+    <div className="choices" style={{ marginTop: "0.625em" }}>{options.map(([k, l]) => <button key={k} className={current === k ? "selected" : ""} aria-pressed={current === k} onClick={() => onPick(k)}>{l}</button>)}</div>
+  );
+  // The frame, the rail and the Station and About sections are the prototype's own markup (proto-reference/index.html: renderSettings, setStation, setAbout).
   return (
-    <div className="settings">
-      <nav className="settings-rail" aria-label="Settings sections">
-        {sections.filter(([, , ok]) => ok).map(([k, l]) => <button key={k} className={section === k ? "on" : ""} aria-current={section === k ? "page" : undefined} onClick={() => { setSection(k); setMsg(""); }}>{l}</button>)}
+    <div className="proto protohead setscreen">
+      <div className="setwrap">
+      <nav className="setrail" aria-label="Settings sections">
+        {sections.filter(([, , ok]) => ok).map(([k, l]) => <button key={k} className={section === k ? "selected" : ""} aria-current={section === k ? "page" : undefined} onClick={() => { setSection(k); setMsg(""); }}>{l}</button>)}
+        <button className="setback" onClick={() => (window.history.length > 1 ? window.history.back() : go("/dashboard"))}>← Back</button>
       </nav>
-      <div className="settings-body">
-        {msg && <div className="flash" role="status">{msg}</div>}
+      <main className="setmain">
+        {isTraining() && <p className="trainnote">You are in TRAINING MODE — these settings apply to the practice data only.</p>}
+        {msg && <div className="floormsg" role="status">{msg}</div>}
         {section === "station" && (
           <>
-            <h2>Station</h2>
-            <p className="muted">Your own choices. They follow you to any till.</p>
+            <h3>Menu panel: Left / Right</h3>
+            <p className="muted">Saved to your profile · {staff.name}</p>
+            {pick([["left", "Left"], ["right", "Right"]] as const, prefs.menuSide, (v) => void setPref("menuSide", v))}
             <h3>Text size</h3>
-            <div className="row">{(["compact", "standard", "large", "xl"] as const).map((k) => <button key={k} className={prefs.textSize === k ? "primary sm" : "secondary sm"} aria-pressed={prefs.textSize === k} onClick={() => void setPref("textSize", k)}>{k === "xl" ? "Extra large" : k[0]!.toUpperCase() + k.slice(1)} · {Math.round(TEXT_SCALE[k] * 100)}%</button>)}</div>
-            <h3>Menu panel</h3>
-            <div className="row">{(["left", "right"] as const).map((s) => <button key={s} className={prefs.menuSide === s ? "primary sm" : "secondary sm"} aria-pressed={prefs.menuSide === s} onClick={() => void setPref("menuSide", s)}>{s === "left" ? "Left" : "Right"}</button>)}</div>
+            <p className="muted">Saved to your sign-in — each user keeps their own size. Standard is 20% bigger than the original size.</p>
+            {pick([["compact", "Compact"], ["standard", "Standard"], ["large", "Large"], ["xl", "Extra large"]] as const, prefs.textSize, (v) => void setPref("textSize", v))}
             {READY_LOOKS.length > 1 && (
               <>
                 <h3>Look</h3>
                 <p className="muted">The interface style you work in. It changes your screens only.</p>
-                <div className="row">{READY_LOOKS.map((l) => <button key={l.id} className={lookOf(prefs.look) === l.id ? "primary sm" : "secondary sm"} aria-pressed={lookOf(prefs.look) === l.id} title={l.note} onClick={() => void setPref("look", l.id)}>{l.name}</button>)}</div>
+                {pick(READY_LOOKS.map((l) => [l.id, l.name] as const), lookOf(prefs.look), (v) => void setPref("look", v))}
               </>
             )}
-            <TelegramLink />
+            <h3>Menu layout</h3>
+            <p className="muted">{prefs.layout ? "You are using your own layout." : till.layout ? "You are using the shop's layout." : "The menu is laid out automatically."} Edit it on the till: press and hold a tile.</p>
+            <div className="settingsgroup">
+              <button onClick={() => go("/pos")}>Go to the till</button>
+              {prefs.layout && <button onClick={() => void setLayout(null).then((e) => setMsg(e ?? "Back to the shop's layout."))}>Reset my layout</button>}
+            </div>
             <h3>This device</h3>
             <p className="muted">A kitchen display is this same app on a screen in the kitchen: it opens on the kitchen's orders after sign-in.</p>
-            <div className="row">{(["till", "kitchen"] as const).map((r) => <button key={r} className={role === r ? "primary sm" : "secondary sm"} aria-pressed={role === r} onClick={() => { setDeviceRole(r); setRole(r); setMsg(r === "kitchen" ? "This device is now a kitchen display." : "This device is now a till."); }}>{r === "till" ? "Till" : "Kitchen display"}</button>)}{role === "kitchen" && <button className="secondary sm" onClick={() => go("/kitchen")}>Open the kitchen display</button>}</div>
+            {pick([["till", "Till"], ["kitchen", "Kitchen display"]] as const, role, (r) => { setDeviceRole(r); setRole(r); setMsg(r === "kitchen" ? "This device is now a kitchen display." : "This device is now a till."); })}
             <h3>This till's letter</h3>
             <p className="muted">Each till has its own letter so queue numbers never clash when tills are offline.</p>
-            <div className="row">{["A", "B", "C", "D"].map((c) => <button key={c} className={letter === c ? "primary sm" : "secondary sm"} aria-pressed={letter === c} onClick={() => { setDeviceCode(c); setLetter(c); }}>{c}</button>)}</div>
-            <PhoneSignIn />
-            <h3>Menu layout</h3>
-            <p className="muted">{prefs.layout ? "You are using your own layout." : till.layout ? "You are using the shop's layout." : "The menu is laid out automatically."} Edit it on the till: press and hold a tile, or tap the pencil.</p>
-            <div className="row"><button className="secondary sm" onClick={() => go("/pos")}>Go to the till</button>{prefs.layout && <button className="secondary sm" onClick={() => void setLayout(null).then((e) => setMsg(e ?? "Back to the shop's layout."))}>Use the shop's layout</button>}</div>
+            {pick([["A", "A"], ["B", "B"], ["C", "C"], ["D", "D"]] as const, letter as "A" | "B" | "C" | "D", (c) => { setDeviceCode(c); setLetter(c); })}
+            <div className="setours"><TelegramLink /><PhoneSignIn /></div>
           </>
         )}
         {section === "selling" && maySell && (
           <>
-            <h2>Selling</h2>
-            <section className="e2e-card">
-              <h3>After sign-in</h3>
-              <label className="row"><input type="checkbox" checked={till.dashboard} onChange={(e) => void save({ dashboard: e.target.checked })} /> Show the Dashboard after sign-in (otherwise go straight to the till)</label>
-              <label className="field">Removing a ticket item by sliding
-                <select value={till.lineRemove} onChange={(e) => void save({ lineRemove: e.target.value as "bin" | "swipe" })}>
-                  <option value="bin">Show a bin button · tap it to remove</option>
-                  <option value="swipe">Slide all the way · removes at once</option>
-                </select>
-              </label>
-            </section>
+          <MerchantSettings till={till} save={save} />
+          <div className="setours">
             <section className="e2e-card" style={{ marginTop: 16 }}>
               <h3>Lists for every till, or this till only</h3>
               <p className="muted">The two lists marked below (Order actions and Payment options) are the shop's. A till can keep its own: for example a bar till without Table Map, or a delivery counter with only GrabFood and Card.</p>
@@ -407,29 +456,33 @@ export function Settings({ catalog }: { catalog?: Catalog | null } = {}) {
             <ShiftsPanel />
             <DiscountPolicyPanel />
             <PaynowPanel />
+          </div>
           </>
         )}
         {section === "menu" && mayMenu && (
           <>
-            <h2>Menu & prices</h2>
+            <h3>Menu & prices</h3>
             <p className="muted">Items, prices, dining options and the printers that take the orders.</p>
-            <div className="row"><button className="secondary" onClick={() => go("/prices")}>Prices and menu</button><button className="secondary" onClick={() => go("/printers")}>Printers</button><button className="secondary" onClick={() => go("/devices")}>Devices</button></div>
-            {till.layout && <section className="e2e-card" style={{ marginTop: 16 }}><h3>Shop menu layout</h3><p className="muted">The shop has its own standard layout. People who have not made their own see it.</p><button className="secondary sm" onClick={() => { if (window.confirm("Go back to the automatic layout for everyone who has no layout of their own?")) void save({ layout: null }); }}>Reset to automatic</button></section>}
+            <div className="settingsgroup"><button onClick={() => go("/prices")}>Prices and menu</button><button onClick={() => go("/printers")}>Printers</button><button onClick={() => go("/devices")}>Devices</button></div>
+            {till.layout && <><h3>Shop menu layout</h3><p className="muted">The shop has its own standard layout. People who have not made their own see it.</p><button onClick={() => { if (window.confirm("Go back to the automatic layout for everyone who has no layout of their own?")) void save({ layout: null }); }}>Reset to automatic</button></>}
           </>
         )}
-        {section === "training" && manager && <><h2>Training</h2><TrainingPanel /></>}
+        {section === "training" && manager && <div className="setours"><TrainingPanel /></div>}
         {section === "about" && (
           <>
-            <h2>About</h2>
-            <p><b>Rezein POS</b> · version {appVersion()}</p>
-            {isTraining() && <p className="muted">This till is in practice mode.</p>}
-            <p className="muted">A new version never installs by itself. When one is ready a notice appears at the top of the screen and you choose when to update.</p>
-            <div className="row">
-              <button className="secondary sm" disabled={checking} onClick={async () => { setChecking(true); const ready = await checkForUpdate(); setChecking(false); setMsg(ready ? "A new version is ready. Use the notice at the top." : "You are on the latest version."); }}>{checking ? "Checking…" : "Check for updates"}</button>
-              {updateReady && <b>A new version is ready.</b>}
+            <h3>App version</h3>
+            <div className="settingsgroup">
+              <div className="row"><span>Rezein</span><strong>{appVersion()}</strong></div>
+              {isTraining() && <p className="muted">This till is in practice mode.</p>}
+              <p className="muted">Updates are never automatic. When a new version is ready, the app shows a notice and you choose when to update.</p>
+              <div className="actions">
+                {updateReady && <strong>A new version is ready.</strong>}
+                <button disabled={checking} onClick={async () => { setChecking(true); const ready = await checkForUpdate(); setChecking(false); setMsg(ready ? "A new version is ready. Use the notice at the top." : "You are on the latest version."); }}>{checking ? "Checking…" : "Check for updates"}</button>
+              </div>
             </div>
           </>
         )}
+      </main>
       </div>
     </div>
   );

@@ -18,7 +18,7 @@ import "../proto/extra.css";
  * and a button for new online orders.
  * `bare` gives just the <header> for a screen that already sits inside the prototype's ".app"; otherwise it brings its own ".proto" wrapper.
  */
-export function TillHeader({ route, config, connected, pending, newOnline, hasTables, onSync, syncError, bare }: { route: string; config: BusinessConfig | null; connected: boolean; pending: number; newOnline: number; hasTables: boolean; onSync: () => void; syncError?: string | null; bare?: boolean }) {
+export function TillHeader({ route, config, connected, pending, newOnline, hasTables, onSync, syncError, bare, showOrder }: { /** On the till itself: it is showing the Table Map or the checks, so "Order" leads back to the ticket. */ showOrder?: boolean; route: string; config: BusinessConfig | null; connected: boolean; pending: number; newOnline: number; hasTables: boolean; onSync: () => void; syncError?: string | null; bare?: boolean }) {
   const staff = useStaff();
   const orders = useOrders();
   const shift = useShift();
@@ -31,7 +31,7 @@ export function TillHeader({ route, config, connected, pending, newOnline, hasTa
         <>
           <button onClick={() => go("/settings")} aria-label="Settings">⚙</button>
           <span className="headnav">
-            {route !== "pos" && <button onClick={() => go("/pos")}>Order</button>}
+            {(route !== "pos" || showOrder) && <button onClick={() => go(route === "pos" ? "/pos?view=order" : "/pos")}>Order</button>}
             <button onClick={() => go("/orders")}>Orders{open ? ` (${open})` : ""}</button>
             <button onClick={() => go("/pos?dialog=shift")}>Drawer</button>
             <button onClick={() => go("/pos?dialog=reports")}>Reports</button>

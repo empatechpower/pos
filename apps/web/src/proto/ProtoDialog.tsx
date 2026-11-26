@@ -11,3 +11,8 @@ export function ProtoDialog({ title, extra = "", onClose, children }: { title: s
     </div>
   );
 }
+
+/** The same dialog, for use on a screen that is not itself drawn in the prototype's stylesheet: it brings the stylesheet's scope with it. `wide` is the prototype's wider dialog (.splitdialog). */
+export function ProtoModal({ title, wide, extra = "", onClose, children }: { title: string; wide?: boolean; extra?: string; onClose: () => void; children: ReactNode }) {
+  return <div className="proto protohead"><ProtoDialog title={title} extra={`${wide ? "splitdialog " : ""}${extra}`.trim()} onClose={onClose}>{children}</ProtoDialog></div>;
+}

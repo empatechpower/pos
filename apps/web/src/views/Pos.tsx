@@ -1,5 +1,5 @@
-import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
-import { ProtoDialog } from "../proto/ProtoDialog";
+import { cloneElement, isValidElement, useEffect, useMemo, useRef, useState, type ReactElement, type ReactNode } from "react";
+import { ProtoDialog, ProtoModal } from "../proto/ProtoDialog";
 import { lookOf } from "../looks";
 import QRCode from "qrcode";
 import {
@@ -47,7 +47,7 @@ import { TillOptions } from "../till/TillOptions";
 import { getBalance, spend } from "../wallet";
 import { syncNow } from "../sync";
 import { useShift, useShiftRequired } from "../shift";
-import { ShiftBar } from "./ShiftBar";
+import { DrawerDialog } from "../till/DrawerDialog";
 import { DiscountSheet, type DiscountChoice } from "./DiscountSheet";
 import { NoteSheet } from "./NoteSheet";
 import "../till/till.css";
@@ -57,9 +57,8 @@ import { ReportsDialog } from "../till/ReportsDialog";
 import { TillMenu } from "../till/TillMenu";
 import { ActionStrip, type Action } from "../till/ActionStrip";
 import { PayPanel, type Tender, type TenderOption } from "../till/PayPanel";
-import { Modal } from "../till/Modal";
 import { ManageItem } from "../till/ManageItem";
-import { CustomerDialog, DiningDialog, DoneDialog, ExtraItemDialog, FeeDialog, GuestsDialog, HeldDialog, QuantityDialog, TaxDialog, TillSettings, loadMember, BarcodeDialog, CouponDialog, HandoverDialog, InvoiceDialog, couponCents, type HandoverOrder, type MemberSummary, type TillCoupon } from "../till/Dialogs";
+import { CancelOrderDialog, CustomerDialog, DiningDialog, DoneDialog, ExtraItemDialog, FeeDialog, GuestsDialog, HeldDialog, QuantityDialog, TaxDialog, TillSettings, loadMember, BarcodeDialog, CouponDialog, HandoverDialog, InvoiceDialog, couponCents, type HandoverOrder, type MemberSummary, type TillCoupon } from "../till/Dialogs";
 import { TEXT_SCALE, loadPrefs, setLayout, usePrefs } from "../prefs";
 import { arrange, arrangeAll, loadTillSettings, openCustomAction, saveTill, useTillSettings, actionsPref, tendersPref, ACTION_POOL } from "../till/tillSettings";
 import { onRouteChange, queryParams } from "../nav";
@@ -100,6 +99,7 @@ export function Pos({ config, catalog, online, customerId, setCustomerId, header
   const [payCheckId, setPayCheckId] = useState<string | null>(null);
   const [splitOpen, setSplitOpen] = useState(false);
   const [clearAsk, setClearAsk] = useState(false);
+  const [cancelAsk, setCancelAsk] = useState(false);
   const [refundOpen, setRefundOpen] = useState(false);
   const [noteFor, setNoteFor] = useState<null | { scope: "line"; key: string } | { scope: "order" }>(null);
   useEffect(() => { try { localStorage.setItem(isTraining() ? "pos.bag.practice" : "pos.bag", JSON.stringify({ bag, billDiscounts, orderNote, orderId, fees, taxOff })); } catch { /* storage full: the order simply is not kept */ } }, [bag, billDiscounts, orderNote, orderId, fees, taxOff]);
@@ -636,12 +636,14 @@ export function Pos({ config, catalog, online, customerId, setCustomerId, header
   const heldTotal = (h: HeldOrder) => priceOrder({ lines: h.bag.map((b) => ({ name: b.item.name, unitCents: effUnit(b), qty: b.qty, pointsExempt: b.item.pointsExempt, bcrs: !!b.item.bcrs, taxInclusive: b.item.taxInclusive, taxGroup: b.item.taxGroup })), fulfilment: fulfilmentOf((channels.find((c) => c.id === h.channelId) ?? channel).kind), serviceCharge: (channels.find((c) => c.id === h.channelId) ?? channel).serviceCharge, config: config.pricing }).total;
   const cancelOrder = () => {
     if (orderId) {
-      if (bag.some((l) => !l.sent) && window.confirm("Remove the items that have not been sent yet?")) setBag((cur) => cur.filter((l) => l.sent));
-      else if (!bag.some((l) => !l.sent)) notify("This order was already sent. To cancel it, a manager voids it from Orders.");
+      if (bag.some((l) => !l.sent)) setCancelAsk(true);
+      else notify("This order was already sent. To cancel it, a manager voids it from Orders.");
       return;
     }
-    if (bag.length && window.confirm("Cancel this order and start again?")) resetOrder();
+    if (bag.length) setCancelAsk(true);
   };
+  /** "Cancel Order" in that dialog: a new order starts; on an order already sent, only its unsent items go. */
+  const doCancelOrder = () => (orderId ? setBag((cur) => cur.filter((l) => l.sent)) : resetOrder());
   /** Start a fresh order (the one on screen is parked if it has unsent items). */
   const newOrder = () => { parkCurrent(); resetOrder(); setView("order"); };
 
@@ -701,6 +703,7 @@ export function Pos({ config, catalog, online, customerId, setCustomerId, header
       const q = queryParams(), d = q.get("dialog");
       if (d === "shift" || d === "reports") setDialog(d);
       if (!first && q.get("view") === "tables") navTables.current();
+      if (!first && q.get("view") === "order") setView("order");
     };
     act(true);
     return onRouteChange(() => act(false));
@@ -934,7 +937,7 @@ export function Pos({ config, catalog, online, customerId, setCustomerId, header
 
   return (
     <>
-    {view !== "order" && header && <div className="proto protohead">{header}</div>}
+    {view !== "order" && header && <div className="proto protohead">{isValidElement(header) ? cloneElement(header as ReactElement<{ showOrder?: boolean }>, { showOrder: true }) : header}</div>}
     <div className={`till ${prefs.menuSide === "left" ? "menu-left" : ""}`} data-look={lookOf(prefs.look)} style={{ "--t-scale": TEXT_SCALE[prefs.textSize] } as React.CSSProperties}>
       {view === "tables" ? (
         <div className="t-fullview">
@@ -999,6 +1002,7 @@ export function Pos({ config, catalog, online, customerId, setCustomerId, header
       </div>
       )}
 
+      {cancelAsk && <CancelOrderDialog items={(orderId ? bag.filter((l) => !l.sent) : bag).reduce((n, l) => n + l.qty, 0)} sent={!!orderId} onConfirm={doCancelOrder} onClose={() => setCancelAsk(false)} />}
       {dialog === "dining" && <DiningDialog channels={channels.map((c) => ({ id: c.id, name: c.name }))} current={channelId} onPick={(id) => setChosenChannel(id)} onClose={() => setDialog(null)} />}
       {dialog === "guests" && <GuestsDialog current={pax} onSave={(n) => { setPax(n); if (linked && n !== linked.pax) void record(linked.orderId, { type: "GuestsChanged", pax: n, ...(staff ? { byName: staff.name } : {}) }); }} onClose={() => setDialog(null)} />}
       {dialog === "qty" && <QuantityDialog current={pendingQty} onSave={setPendingQty} onClose={() => setDialog(null)} />}
@@ -1017,80 +1021,80 @@ export function Pos({ config, catalog, online, customerId, setCustomerId, header
       {dialog === "invoice" && <InvoiceDialog title={`Invoice · ${linked?.queueNumber ? `Order ${linked.queueNumber}` : spot && channel.kind === "dine_in" ? spot : "New order"}`} lines={invoiceLines()} onClose={() => setDialog(null)} />}
       {dialog === "handover" && <HandoverDialog find={findForHandover} onHandOver={handOver} onClose={() => setDialog(null)} />}
       {dialog === "tax" && <TaxDialog name={config.pricing.taxName ?? "GST"} current={taxOff} onSet={setTaxOff} onClose={() => setDialog(null)} />}
-      {dialog === "fee" && <FeeDialog fees={fees} onAdd={(kind, value, label) => setFees((cur) => [...cur, { id: newId(), kind, value, label }])} onRemove={(id) => setFees((cur) => cur.filter((f) => f.id !== id))} onClose={() => setDialog(null)} />}
+      {dialog === "fee" && <FeeDialog fees={fees} subtotalCents={unfeed.subtotal - unfeed.couponDiscount - unfeed.discountCents} onAdd={(kind, value, label) => setFees((cur) => [...cur, { id: newId(), kind, value, label }])} onRemove={(id) => setFees((cur) => cur.filter((f) => f.id !== id))} onClose={() => setDialog(null)} />}
       {dialog === "settings" && <TillSettings onClose={() => setDialog(null)} onEditLayout={staff ? () => { setDialog(null); setView("order"); setEditLayoutAt((n) => n + 1); } : undefined} />}
-      {dialog === "shift" && <Modal title="Shift and drawer" wide onClose={() => setDialog(null)}><ShiftBar /></Modal>}
+      {dialog === "shift" && <DrawerDialog onClose={() => setDialog(null)} />}
       {dialog === "reports" && <ReportsDialog orders={orders} config={config} categoryOf={(id) => catalog.products.find((x) => x.id === id)?.category ?? ""} manager={hasPerm(staff, "audit.read")} onShift={() => setDialog("shift")} onClose={() => setDialog(null)} />}
       {dialog === "table" && (
-        <Modal title="Table" onClose={() => setDialog(null)}>
-          {tableNames(floor).map((t) => { const i = tableInfo(t, orders, held, config, floor, Date.now()); return <button key={t} className={`t-radio ${spot === t ? "on" : ""}`} disabled={i.state !== "available" && spot !== t} onClick={() => (linked ? void changeTable(t) : (setSpot(t), setDialog(null)))}><i>{spot === t ? "◉" : "○"}</i> {t}{i.state !== "available" && spot !== t ? " · in use" : ""}</button>; })}
-        </Modal>
+        <ProtoModal title="Table" onClose={() => setDialog(null)}>
+          {tableNames(floor).map((t) => { const i = tableInfo(t, orders, held, config, floor, Date.now()); return <button key={t} className={`guestrow ${spot === t ? "selected" : ""}`} disabled={i.state !== "available" && spot !== t} onClick={() => (linked ? void changeTable(t) : (setSpot(t), setDialog(null)))}>{spot === t ? "◉" : "○"} {t}{i.state !== "available" && spot !== t ? " · in use" : ""}</button>; })}
+        </ProtoModal>
       )}
       {dialog === "line" && line && (() => {
         const patch = (fn: (x: BagLine) => BagLine) => setBag((cur) => cur.map((x) => (x.key === line.key ? fn(x) : x)));
         const desc = (catalog.products.find((x) => x.id === line.item.id)?.description ?? "").trim();
         return (
-        <Modal title={line.item.name} onClose={() => setDialog(null)}>
-          {desc && <p className="t-muted">{desc}</p>}
+        <ProtoModal title={line.item.name} onClose={() => setDialog(null)}>
+          {desc && <p className="muted">{desc}</p>}
           {line.options.length > 0 && (
             <>
-              <h3 className="t-h3">Modifiers</h3>
-              <div className="t-modlist" aria-label="Modifiers">
-                {line.options.map((o, i) => <div className="t-row2" key={i}><span>{optionLines([o])[0]}</span><span>{o.priceCents ? `+${formatMoney(o.priceCents * (o.qty || 1))}` : ""}</span></div>)}
+              <h3>Modifiers</h3>
+              <div aria-label="Modifiers">
+                {line.options.map((o, i) => <div className="row" key={i}><span>{optionLines([o])[0]}</span><span>{o.priceCents * ((o.qty || 1) - (o.freeQty ?? 0)) > 0 ? `+${formatMoney(o.priceCents * ((o.qty || 1) - (o.freeQty ?? 0)))}` : ""}</span></div>)}
               </div>
             </>
           )}
-          {line.sent && <p className="t-muted">Already sent to the kitchen. It can be discounted; to take it off, a manager voids it from Orders.</p>}
+          {line.sent && <p className="muted">Already sent to the kitchen. It can be discounted; to take it off, a manager voids it from Orders.</p>}
           {!line.sent && (
-            <div className="t-row2"><span>Quantity</span><div className="t-stepper2"><button aria-label="Fewer" disabled={line.qty <= 1} onClick={() => change(line.key, -1)}>−</button><strong>{line.qty}</strong><button aria-label="More" onClick={() => change(line.key, 1)}>+</button></div></div>
+            <div className="row"><span>Quantity</span><div className="stepper"><button aria-label="Fewer" disabled={line.qty <= 1} onClick={() => change(line.key, -1)}>−</button><strong>{line.qty}</strong><button aria-label="More" onClick={() => change(line.key, 1)}>+</button></div></div>
           )}
           {!line.sent && channels.length > 1 && (
             <>
-              <h3 className="t-h3">Item channel</h3>
-              <div className="t-choices">
+              <h3>Item channel</h3>
+              <div className="choices">
                 {channels.map((c) => {
                   const sold = menuFor(catalog, { outletId: config.outletName, channelId: c.id }).some((x) => x.id === line.item.id);
-                  return <button key={c.id} className={(line.channelId ?? channelId) === c.id ? "on" : ""} disabled={!sold} title={sold ? undefined : `Not sold in ${c.name}`} onClick={() => setLineChannel(line, c.id)}>{c.name}</button>;
+                  return <button key={c.id} className={(line.channelId ?? channelId) === c.id ? "selected" : ""} disabled={!sold} title={sold ? undefined : `Not sold in ${c.name}`} onClick={() => setLineChannel(line, c.id)}>{c.name}</button>;
                 })}
               </div>
             </>
           )}
           {!line.sent && dineIn && floor.courses && (
             <>
-              <h3 className="t-h3">Course</h3>
-              <div className="t-choices">{[0, 1, 2, 3].map((c) => <button key={c} className={(line.course ?? 0) === c ? "on" : ""} onClick={() => patch((x) => ({ ...x, course: c || undefined }))}>{c ? COURSE_NAMES[c] : "None"}</button>)}</div>
+              <h3>Course</h3>
+              <div className="choices">{[0, 1, 2, 3].map((c) => <button key={c} className={(line.course ?? 0) === c ? "selected" : ""} onClick={() => patch((x) => ({ ...x, course: c || undefined }))}>{c ? COURSE_NAMES[c] : "None"}</button>)}</div>
             </>
           )}
           {!line.sent && dineIn && (
             <>
-              <h3 className="t-h3">Seat</h3>
-              <div className="t-choices">{[1, 2, 3, 4, 5, 6].map((c) => <button key={c} className={(line.seat ?? 1) === c ? "on" : ""} onClick={() => patch((x) => ({ ...x, seat: c === 1 ? undefined : c }))}>Seat {c}</button>)}</div>
-              <h3 className="t-h3">Kitchen status</h3>
-              <div className="t-choices">
-                <button className={!line.hold ? "on" : ""} onClick={() => patch((x) => ({ ...x, hold: undefined }))}>Fire</button>
-                <button className={line.hold ? "on" : ""} onClick={() => patch((x) => ({ ...x, hold: true }))}>Hold</button>
+              <h3>Seat</h3>
+              <div className="choices">{[1, 2, 3, 4, 5, 6].map((c) => <button key={c} className={(line.seat ?? 1) === c ? "selected" : ""} onClick={() => patch((x) => ({ ...x, seat: c === 1 ? undefined : c }))}>Seat {c}</button>)}</div>
+              <h3>Kitchen status</h3>
+              <div className="choices">
+                <button className={!line.hold ? "selected" : ""} onClick={() => patch((x) => ({ ...x, hold: undefined }))}>Fire</button>
+                <button className={line.hold ? "selected" : ""} onClick={() => patch((x) => ({ ...x, hold: true }))}>Hold</button>
               </div>
             </>
           )}
           {line.sent && line.hold && linked && (
-            <div className="t-choices" style={{ marginTop: ".8em" }}><button onClick={() => void record(linked.orderId, { type: "LineFired", lineId: line.sent!.lineId, ...(staff ? { byName: staff.name } : {}) }).then(() => { patch((x) => ({ ...x, hold: undefined })); notify(`${line.item.name} sent to the kitchen.`); setDialog(null); })}>Fire this item to the kitchen now</button></div>
+            <div className="choices" style={{ marginTop: ".8em" }}><button onClick={() => void record(linked.orderId, { type: "LineFired", lineId: line.sent!.lineId, ...(staff ? { byName: staff.name } : {}) }).then(() => { patch((x) => ({ ...x, hold: undefined })); notify(`${line.item.name} sent to the kitchen.`); setDialog(null); })}>Fire this item to the kitchen now</button></div>
           )}
-          <div className="t-sheetlist" style={{ marginTop: ".8em" }}>
+          <div className="settingsgroup" style={{ marginTop: ".8em" }}>
             {!line.sent && line.item.options?.length ? <button onClick={() => { setDialog(null); setEditing(line); }}>Edit modifiers</button> : null}
             {!line.sent && <button onClick={() => { setDialog(null); setNoteFor({ scope: "line", key: line.key }); }}>{line.note ? "Edit note" : "Add a note for the kitchen"}</button>}
             {staff && <button onClick={() => { setDialog(null); setSheet({ scope: "line", key: line.key }); }}>Discount or change the price</button>}
             {line.discounts?.map((d) => <button key={d.id} onClick={() => patch((x) => ({ ...x, discounts: (x.discounts ?? []).filter((y) => y.id !== d.id) }))}>Remove discount · {d.kind === "percent" ? `${d.value}%` : formatMoney(d.value)} ({d.reason})</button>)}
             {line.override && <button onClick={() => patch((x) => ({ ...x, override: undefined }))}>Undo the price change</button>}
           </div>
-          <div className="t-dact">
-            {!line.sent && <button className="t-ghost danger" onClick={() => { setBag((cur) => cur.filter((x) => x.key !== line.key)); setDialog(null); }}>Remove item</button>}
-            <button className="t-primary" onClick={() => setDialog(null)}>Done · {formatMoney(effUnit(line) * line.qty)}</button>
+          <div className="actions">
+            {!line.sent && <button className="danger" onClick={() => { setBag((cur) => cur.filter((x) => x.key !== line.key)); setDialog(null); }}>Remove item</button>}
+            <button className="primary" onClick={() => setDialog(null)}>Done · {formatMoney(effUnit(line) * line.qty)}</button>
           </div>
-        </Modal>
+        </ProtoModal>
         );
       })()}
       {dialog === "tabs" && !prepay && (
-        <Modal title="Open tabs" wide onClose={() => setDialog(null)}>
+        <ProtoModal title="Open tabs" wide onClose={() => setDialog(null)}>
         <section className="tabs">
           <h3>Open tabs</h3>
           {openTabs.map((o) => {
@@ -1159,7 +1163,7 @@ export function Pos({ config, catalog, online, customerId, setCustomerId, header
             );
           })}
         </section>
-        </Modal>
+        </ProtoModal>
       )}
       {splitOpen && (
         <SplitDialog
@@ -1177,7 +1181,7 @@ export function Pos({ config, catalog, online, customerId, setCustomerId, header
           </ProtoDialog>
         </div>
       )}
-      {refundOpen && linked && <Modal title="Refund payments" wide onClose={() => setRefundOpen(false)}><RefundPanel order={linked} onDone={() => setRefundOpen(false)} /></Modal>}
+      {refundOpen && linked && <ProtoModal title="Refund payments" wide onClose={() => setRefundOpen(false)}><RefundPanel order={linked} onDone={() => setRefundOpen(false)} /></ProtoModal>}
       {done && <DoneDialog orderId={done.orderId} queue={done.queue} changeCents={done.change} totalCents={done.total} onClose={() => setDone(null)} />}
       {noteFor && (() => {
         const line = noteFor.scope === "line" ? bag.find((b) => b.key === noteFor.key) : undefined;

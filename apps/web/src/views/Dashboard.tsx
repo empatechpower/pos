@@ -1,10 +1,9 @@
 import { confirmedPaid, formatMoney, orderTotals, type BusinessConfig } from "@pos/core";
 import { go } from "../nav";
-import { hasPerm, useStaff } from "../auth";
+import { useStaff } from "../auth";
 import { useOrders } from "../hooks";
 import { useShift } from "../shift";
 import { isTraining } from "../training";
-import { isSeatedOrder } from "../till/tableOps";
 import { openCustomAction, useTillSettings } from "../till/tillSettings";
 
 const startOfDay = () => new Date().setHours(0, 0, 0, 0);
@@ -25,28 +24,29 @@ export function Dashboard({ config }: { config: BusinessConfig }) {
   const paidToday = real.filter((o) => (o.paidAt ?? 0) >= today);
   const sales = paidToday.reduce((n, o) => n + confirmedPaid(o), 0);
   const open = real.filter((o) => o.stage !== "completed" && confirmedPaid(o) < orderTotals(o, config).total);
-  const tableService = config.paymentTiming === "postpay";
-  const seated = real.filter((o) => isSeatedOrder(o, config));
-  const tile = (label: string, icon: string, to: string, note?: string) => <button key={label} className="dash-tile" onClick={() => go(to)}><i>{icon}</i><strong>{label}</strong>{note && <small>{note}</small>}</button>;
+  const tile = (label: string, icon: string, to: string) => <button key={label} className="dashtile" onClick={() => go(to)}><span className="dashicon">{icon}</span>{label}</button>;
 
+  // The markup and class names are the prototype's own (proto-reference/index.html, renderDash), styled by its stylesheet.
   return (
-    <div className="dash">
-      {isTraining() && <h2>Practice mode</h2>}
-      <div className="dash-stats">
-        <div><small>Sales today</small><strong>{formatMoney(sales)}</strong></div>
-        <div><small>Orders paid today</small><strong>{paidToday.length}</strong></div>
-        <button className="dash-open" onClick={() => go("/orders?tab=open")}><small>Open orders</small><strong>{open.length}</strong></button>
-        <div><small>Your shift</small><strong>{shift ? `Drawer ${shift.drawer}` : "Not open"}</strong></div>
-      </div>
-      <div className="dash-tiles">
-        {tile("New Order", "＋", "/pos")}
-        {tile("Orders", "☰", "/orders", `${open.length} open`)}
-        {tableService && tile("Table Map", "▦", "/pos?view=tables", `${seated.length} seated`)}
-        {tile("Drawer & Shift", "▭", "/pos?dialog=shift", shift ? `On Drawer ${shift.drawer}` : "Open your shift")}
-        {hasPerm(staff, "audit.read") && tile("Reports", "▥", "/manager")}
-        {tile("Settings", "⚙", "/settings")}
-        {(till.customActions ?? []).filter((a) => a.where !== "strip").map((a) => <button key={a.id} className="dash-tile" style={{ borderColor: a.color }} onClick={() => openCustomAction(a)}><i style={{ color: a.color }}>{a.icon}</i><strong>{a.label}</strong><small>Opens in a new tab</small></button>)}
-      </div>
+    <div className="proto protohead dashwrap">
+      <main className="dashmain">
+        <div className="dashstats">
+          <div className="dashstat"><small>Today's sales</small><strong>{formatMoney(sales)}</strong></div>
+          <div className="dashstat"><small>Orders paid today</small><strong>{paidToday.length}</strong></div>
+          <button className="dashstat dashstatbtn" onClick={() => go("/orders?tab=open")}><small>Open orders</small><strong>{open.length}</strong></button>
+          <div className="dashstat"><small>Shift</small><strong>{shift ? `Drawer ${shift.drawer} · open` : "—"}</strong></div>
+        </div>
+        <div className="dashtiles">
+          {tile("New Order", "+", "/pos")}
+          {tile("Orders", "▤", "/orders")}
+          {config.paymentTiming === "postpay" && config.serviceMode !== "retail" && tile("Table Map", "▦", "/pos?view=tables")}
+          {tile("Reports", "▥", "/pos?dialog=reports")}
+          {tile("Drawer & Shift", "▭", "/pos?dialog=shift")}
+          {tile("Settings", "⚙", "/settings")}
+          {(till.customActions ?? []).filter((a) => a.where !== "strip").map((a) => <button key={a.id} className="dashtile" style={{ borderColor: a.color }} title="Opens in a new tab" onClick={() => openCustomAction(a)}><span className="dashicon" style={{ color: a.color }}>{a.icon}</span>{a.label}</button>)}
+        </div>
+        {isTraining() && <p className="trainnote">Training Mode — these figures come from practice data only.</p>}
+      </main>
     </div>
   );
 }

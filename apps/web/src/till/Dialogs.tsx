@@ -1,59 +1,76 @@
-import { useEffect, useState } from "react";
+import { useEffect, useState, type ReactNode } from "react";
 import { formatMoney } from "@pos/core";
-import { Modal } from "./Modal";
 import { ProtoDialog } from "../proto/ProtoDialog";
 import { staffFetch } from "../auth";
 import { setPref, usePrefs } from "../prefs";
 import { READY_LOOKS, lookOf } from "../looks";
 import type { HeldOrder } from "./types";
 
+/** A dialog in the prototype's own markup, placed over whichever till screen is showing. */
+const Proto = ({ title, extra, onClose, children }: { title: string; extra?: string; onClose: () => void; children: ReactNode }) => <div className="proto protohead"><ProtoDialog title={title} extra={extra} onClose={onClose}>{children}</ProtoDialog></div>;
+
+/** Dining (prototype: drawDining): one row per dining option, OK to apply. */
 export function DiningDialog({ channels, current, onPick, onClose }: { channels: Array<{ id: string; name: string }>; current: string; onPick: (id: string) => void; onClose: () => void }) {
   const [sel, setSel] = useState(current);
   return (
-    <Modal title="Dining" onClose={onClose}>
-      {channels.map((c) => <button key={c.id} className={`t-radio ${sel === c.id ? "on" : ""}`} onClick={() => setSel(c.id)}><i>{sel === c.id ? "◉" : "○"}</i> {c.name}</button>)}
-      <div className="t-dact"><button className="t-ghost" onClick={onClose}>Cancel</button><button className="t-primary" onClick={() => { onPick(sel); onClose(); }}>OK</button></div>
-    </Modal>
+    <Proto title="Dining" onClose={onClose}>
+      {channels.map((c) => <button key={c.id} className={`guestrow ${sel === c.id ? "selected" : ""}`} aria-pressed={sel === c.id} onClick={() => setSel(c.id)}>{sel === c.id ? "◉" : "○"} {c.name}</button>)}
+      <div className="actions"><button onClick={onClose}>Cancel</button><button className="primary" onClick={() => { onPick(sel); onClose(); }}>OK</button></div>
+    </Proto>
   );
 }
 
+/** Enter Guest Count (prototype: drawGuests): one to six as rows, or any number up to 99. */
 export function GuestsDialog({ current, onSave, onClose }: { current: number; onSave: (n: number) => void; onClose: () => void }) {
   const [n, setN] = useState(current);
-  const ok = Number.isInteger(n) && n >= 1 && n <= 99;
+  const [err, setErr] = useState("");
+  const save = () => (Number.isInteger(n) && n >= 1 && n <= 99 ? (onSave(n), onClose()) : setErr("Enter a guest count from 1 to 99."));
   return (
-    <Modal title="Enter Guest Count" onClose={onClose}>
-      {[1, 2, 3, 4, 5, 6].map((k) => <button key={k} className={`t-radio ${n === k ? "on" : ""}`} onClick={() => setN(k)}><i>{n === k ? "◉" : "○"}</i> {k} guest{k === 1 ? "" : "s"}</button>)}
-      <label className="t-field">Guest count<input type="number" inputMode="numeric" min={1} max={99} value={n} onChange={(e) => setN(Number(e.target.value))} /></label>
-      {!ok && <p className="t-err" role="alert">Enter a guest count from 1 to 99.</p>}
-      <div className="t-dact"><button className="t-ghost" onClick={onClose}>Cancel</button><button className="t-primary" disabled={!ok} onClick={() => { onSave(n); onClose(); }}>OK</button></div>
-    </Modal>
+    <Proto title="Enter Guest Count" onClose={onClose}>
+      {[1, 2, 3, 4, 5, 6].map((k) => <button key={k} className={`guestrow ${n === k ? "selected" : ""}`} aria-pressed={n === k} onClick={() => { setN(k); setErr(""); }}>{n === k ? "◉" : "○"} {k} Guest{k === 1 ? "" : "s"}</button>)}
+      <label className="field">Guest count<input type="number" inputMode="numeric" min={1} max={99} step={1} aria-label="Guest count" value={Number.isFinite(n) ? n : ""} onChange={(e) => { setN(Number(e.target.value)); setErr(""); }} /></label>
+      <div className="error" role="alert">{err}</div>
+      <div className="actions"><button onClick={onClose}>Cancel</button><button className="primary" onClick={save}>OK</button></div>
+    </Proto>
   );
 }
 
+/** Quantity (prototype: qtyDialog): for the next item added. */
 export function QuantityDialog({ current, onSave, onClose }: { current: number; onSave: (n: number) => void; onClose: () => void }) {
   const [n, setN] = useState(current);
   return (
-    <Modal title="Quantity" onClose={onClose}>
-      <p className="t-muted">Applies to the next item added, then goes back to 1.</p>
-      <div className="t-stepper"><button onClick={() => setN(Math.max(1, n - 1))}>−</button><strong>{n}</strong><button onClick={() => setN(Math.min(99, n + 1))}>+</button></div>
-      <div className="t-dact"><button className="t-ghost" onClick={onClose}>Cancel</button><button className="t-primary" onClick={() => { onSave(n); onClose(); }}>Set</button></div>
-    </Modal>
+    <Proto title="Quantity" onClose={onClose}>
+      <p className="muted">Applies to the next item added, then returns to 1.</p>
+      <div className="row"><span>Quantity</span><div className="stepper"><button aria-label="Fewer" onClick={() => setN(Math.max(1, n - 1))}>−</button><strong>{n}</strong><button aria-label="More" onClick={() => setN(Math.min(99, n + 1))}>+</button></div></div>
+      <div className="actions"><button onClick={onClose}>Cancel</button><button className="primary" onClick={() => { onSave(n); onClose(); }}>Set</button></div>
+    </Proto>
   );
 }
 
+/** Held orders (prototype: showHeld): tap one to bring it back. Discard is ours: the prototype has no way to drop a held order. */
 export function HeldDialog({ held, onRecall, onDrop, onClose, formatTotal }: { held: HeldOrder[]; onRecall: (id: string) => void; onDrop: (id: string) => void; onClose: () => void; formatTotal: (h: HeldOrder) => number }) {
   return (
-    <Modal title="Held orders" onClose={onClose}>
-      {held.length === 0 ? <p className="t-muted">No held orders.</p> : held.map((h) => (
-        <div key={h.id} className="t-heldrow">
-          <button onClick={() => { onRecall(h.id); onClose(); }}>
-            <b>{h.bag.reduce((n, l) => n + l.qty, 0)} items · {formatMoney(formatTotal(h))}</b>
-            <small>{new Date(h.savedAt).toLocaleTimeString("en-GB", { hour: "2-digit", minute: "2-digit" })}{h.spot ? ` · ${h.spot}` : ""}{h.pax > 1 ? ` · ${h.pax} guests` : ""}</small>
+    <Proto title="Held orders" onClose={onClose}>
+      {held.length === 0 ? <p className="muted">No held orders yet.</p> : held.map((h) => (
+        <div key={h.id} className="heldline">
+          <button className="heldrow" onClick={() => { onRecall(h.id); onClose(); }}>
+            <div className="row"><strong>{h.spot || "Order"}{h.pax > 1 ? ` · ${h.pax} guests` : ""}</strong><span>{formatMoney(formatTotal(h))}</span></div>
+            <small>{h.bag.reduce((n, l) => n + l.qty, 0)} items · held {new Date(h.savedAt).toLocaleTimeString("en-GB", { hour: "2-digit", minute: "2-digit" })}</small>
           </button>
-          <button className="t-ghost" onClick={() => onDrop(h.id)}>Discard</button>
+          <button className="helddrop" aria-label="Discard this held order" onClick={() => onDrop(h.id)}>Discard</button>
         </div>
       ))}
-    </Modal>
+    </Proto>
+  );
+}
+
+/** Cancel current order? (prototype: newOrder). Also asks before taking unsent items off an order that was already sent. */
+export function CancelOrderDialog({ items, sent, onConfirm, onClose }: { items: number; /** The order was already sent: only its unsent items can go. */ sent: boolean; onConfirm: () => void; onClose: () => void }) {
+  return (
+    <Proto title={sent ? "Remove unsent items?" : "Cancel current order?"} onClose={onClose}>
+      <p>{sent ? `${items} item${items === 1 ? " has" : "s have"} not been sent yet. Remove ${items === 1 ? "it" : "them"} from this order? What was already sent stays.` : `The current ticket has ${items} item${items === 1 ? "" : "s"}. Cancel it and start a new order?`}</p>
+      <div className="actions"><button onClick={onClose}>Keep order</button><button className="primary" onClick={() => { onConfirm(); onClose(); }}>{sent ? "Remove items" : "Cancel Order"}</button></div>
+    </Proto>
   );
 }
 
@@ -108,77 +125,77 @@ export function CustomerDialog({ current, info, usePoints, pointsWorthCents, onU
   if (current && info) {
     const m = info.member;
     return (
-      <Modal title="Member" onClose={onClose}>
-        <p style={{ margin: "0 0 .3em" }}><b>{m.name || "Member"}</b> <span className="t-muted">{maskPhone(m.phone)}</span></p>
-        <div className="t-row2"><span>Credit</span><b>{formatMoney(m.creditCents)}</b></div>
-        {m.creditCents > 0 && info.credit?.state === "active" && info.credit.expiresAt && <p className="t-muted">Valid until {creditDay(info.credit.expiresAt)}. Each top-up starts the time again.</p>}
-        {m.creditCents > 0 && info.credit?.state === "expired" && <p className="t-flash" role="alert">This credit expired on {creditDay(info.credit.expiresAt!)}. A top-up by {creditDay(info.credit.reinstateBy!)} brings it back.</p>}
-        {m.creditCents > 0 && info.credit?.state === "lapsed" && <p className="t-flash" role="alert">This credit expired on {creditDay(info.credit.expiresAt!)} and was not topped up in time. It can no longer be used.</p>}
-        {info.rewards.pointsEnabled && <div className="t-row2"><span>Points</span><b>{m.points.toLocaleString()}</b></div>}
+      <Proto title="Member" onClose={onClose}>
+        <p style={{ margin: "0 0 .3em" }}><b>{m.name || "Member"}</b> <span className="muted">{maskPhone(m.phone)}</span></p>
+        <div className="row"><span>Credit</span><b>{formatMoney(m.creditCents)}</b></div>
+        {m.creditCents > 0 && info.credit?.state === "active" && info.credit.expiresAt && <p className="muted">Valid until {creditDay(info.credit.expiresAt)}. Each top-up starts the time again.</p>}
+        {m.creditCents > 0 && info.credit?.state === "expired" && <p className="error warn" role="alert">This credit expired on {creditDay(info.credit.expiresAt!)}. A top-up by {creditDay(info.credit.reinstateBy!)} brings it back.</p>}
+        {m.creditCents > 0 && info.credit?.state === "lapsed" && <p className="error warn" role="alert">This credit expired on {creditDay(info.credit.expiresAt!)} and was not topped up in time. It can no longer be used.</p>}
+        {info.rewards.pointsEnabled && <div className="row"><span>Points</span><b>{m.points.toLocaleString()}</b></div>}
         {info.rewards.pointsEnabled && m.points > 0 && (
-          <label className="t-row2" style={{ cursor: "pointer" }}><span>Use points on this order{pointsWorthCents > 0 ? ` (${formatMoney(pointsWorthCents)} off)` : ""}</span><input type="checkbox" aria-label="Use points on this order" checked={usePoints} disabled={m.points < info.rewards.minPointsRedeem} onChange={(e) => onUsePoints(e.target.checked)} /></label>
+          <label className="row" style={{ cursor: "pointer" }}><span>Use points on this order{pointsWorthCents > 0 ? ` (${formatMoney(pointsWorthCents)} off)` : ""}</span><input type="checkbox" aria-label="Use points on this order" checked={usePoints} disabled={m.points < info.rewards.minPointsRedeem} onChange={(e) => onUsePoints(e.target.checked)} /></label>
         )}
-        {info.rewards.pointsEnabled && m.points > 0 && m.points < info.rewards.minPointsRedeem && <p className="t-muted">Points can be used from {info.rewards.minPointsRedeem} points.</p>}
-        <h3 className="t-h3">Last orders</h3>
+        {info.rewards.pointsEnabled && m.points > 0 && m.points < info.rewards.minPointsRedeem && <p className="muted">Points can be used from {info.rewards.minPointsRedeem} points.</p>}
+        <h3>Last orders</h3>
         <div aria-label="Last orders">
-          {info.recent.length === 0 && <p className="t-muted">No orders yet.</p>}
-          {info.recent.map((o) => <div className="t-row2" key={o.orderId}><span>{memberWhen(o.at)} · {o.items}{o.status !== "paid" ? ` · ${o.status}` : ""}</span><span>{formatMoney(o.totalCents)}</span></div>)}
+          {info.recent.length === 0 && <p className="muted">No orders yet.</p>}
+          {info.recent.map((o) => <div className="row" key={o.orderId}><span>{memberWhen(o.at)} · {o.items}{o.status !== "paid" ? ` · ${o.status}` : ""}</span><span>{formatMoney(o.totalCents)}</span></div>)}
         </div>
-        <div className="t-dact"><button className="t-ghost" onClick={() => { onSave(""); onClose(); }}>Remove</button><button className="t-primary" onClick={onClose}>Done</button></div>
-      </Modal>
+        <div className="actions"><button onClick={() => { onSave(""); onClose(); }}>Remove</button><button className="primary" onClick={onClose}>Done</button></div>
+      </Proto>
     );
   }
   return (
-    <Modal title="Member" onClose={onClose}>
-      {current && <p className="t-muted">On this order: {current} <button className="t-ghost" onClick={() => { onSave(""); onClose(); }}>Remove</button></p>}
+    <Proto title="Member" onClose={onClose}>
+      {current && <p className="muted">On this order: {current} <button className="helddrop" onClick={() => { onSave(""); onClose(); }}>Remove</button></p>}
       {!adding ? (
         <>
-          <label className="t-field">Name or phone<input value={q} inputMode="search" autoFocus aria-label="Find a member" onChange={(e) => setQ(e.target.value)} onKeyDown={(e) => { if (e.key === "Enter") void search(); }} /></label>
-          <div className="t-dact" style={{ justifyContent: "flex-start" }}><button className="t-primary" disabled={busy} onClick={() => void search()}>Find</button><button className="t-ghost" onClick={() => { setAdding(true); setPhone(/^[+\d\s]+$/.test(q) ? q : ""); setName(/^[+\d\s]+$/.test(q) ? "" : q); setMsg(""); }}>Add a new member</button></div>
-          {found && found.length === 0 && <p className="t-muted">Nobody found. Check the spelling, or add them as a new member.</p>}
-          {found && found.length === 0 && q.trim() && <button className="t-ghost" onClick={() => { onSave(q.trim()); onClose(); }}>Use "{q.trim()}" as a credit code only</button>}
-          {found?.map((m) => <button key={m.id} className="t-radio" onClick={() => { onSave(m.id); onClose(); }}><i>○</i> {m.name || "Member"} {maskPhone(m.phone)} <span className="t-muted">· {formatMoney(m.creditCents)} credit{m.points ? ` · ${m.points} pts` : ""}</span></button>)}
+          <label className="field">Name or phone<input value={q} inputMode="search" autoFocus aria-label="Find a member" onChange={(e) => setQ(e.target.value)} onKeyDown={(e) => { if (e.key === "Enter") void search(); }} /></label>
+          <div className="actions" style={{ justifyContent: "flex-start" }}><button className="primary" disabled={busy} onClick={() => void search()}>Find</button><button onClick={() => { setAdding(true); setPhone(/^[+\d\s]+$/.test(q) ? q : ""); setName(/^[+\d\s]+$/.test(q) ? "" : q); setMsg(""); }}>Add a new member</button></div>
+          {found && found.length === 0 && <p className="muted">Nobody found. Check the spelling, or add them as a new member.</p>}
+          {found && found.length === 0 && q.trim() && <button onClick={() => { onSave(q.trim()); onClose(); }}>Use "{q.trim()}" as a credit code only</button>}
+          {found?.map((m) => <button key={m.id} className="guestrow" onClick={() => { onSave(m.id); onClose(); }}>○ {m.name || "Member"} {maskPhone(m.phone)} <span className="muted">· {formatMoney(m.creditCents)} credit{m.points ? ` · ${m.points} pts` : ""}</span></button>)}
         </>
       ) : (
         <>
-          <label className="t-field">Name<input value={name} maxLength={60} aria-label="New member name" onChange={(e) => setName(e.target.value)} /></label>
-          <label className="t-field">Phone, with country code<input value={phone} inputMode="tel" aria-label="New member phone" placeholder="+65 8111 1111" onChange={(e) => setPhone(e.target.value)} /></label>
-          <div className="t-dact"><button className="t-ghost" onClick={() => setAdding(false)}>Back</button><button className="t-primary" disabled={busy || phone.replace(/\D/g, "").length < 8} onClick={() => void add()}>Add and attach</button></div>
+          <label className="field">Name<input value={name} maxLength={60} aria-label="New member name" onChange={(e) => setName(e.target.value)} /></label>
+          <label className="field">Phone, with country code<input value={phone} inputMode="tel" aria-label="New member phone" placeholder="+65 8111 1111" onChange={(e) => setPhone(e.target.value)} /></label>
+          <div className="actions"><button onClick={() => setAdding(false)}>Back</button><button className="primary" disabled={busy || phone.replace(/\D/g, "").length < 8} onClick={() => void add()}>Add and attach</button></div>
         </>
       )}
-      {msg && <p className="t-muted" role="alert">{msg}</p>}
-      <div className="t-dact"><button className="t-ghost" onClick={onClose}>Close</button></div>
-    </Modal>
+      {msg && <p className="muted" role="alert">{msg}</p>}
+      <div className="actions"><button onClick={onClose}>Close</button></div>
+    </Proto>
   );
 }
 
 export function TillSettings({ onClose, onEditLayout }: { onClose: () => void; onEditLayout?: () => void }) {
   const prefs = usePrefs();
   return (
-    <Modal title="My till settings" onClose={onClose}>
-      <h3 className="t-h3">Menu panel</h3>
-      <p className="t-muted">Which side the menu sits on. Yours alone: it follows you to any till.</p>
-      <div className="t-seg">{(["left", "right"] as const).map((s) => <button key={s} className={prefs.menuSide === s ? "on" : ""} onClick={() => void setPref("menuSide", s)}>{s === "left" ? "Left" : "Right"}</button>)}</div>
-      <h3 className="t-h3">Text size</h3>
-      <p className="t-muted">Standard is 20% bigger than the original size.</p>
-      <div className="t-seg">{([["compact", "Compact"], ["standard", "Standard"], ["large", "Large"], ["xl", "Extra large"]] as const).map(([k, l]) => <button key={k} className={prefs.textSize === k ? "on" : ""} onClick={() => void setPref("textSize", k)}>{l}</button>)}</div>
+    <Proto title="My till settings" onClose={onClose}>
+      <h3>Menu panel</h3>
+      <p className="muted">Which side the menu sits on. Yours alone: it follows you to any till.</p>
+      <div className="choices">{(["left", "right"] as const).map((s) => <button key={s} className={prefs.menuSide === s ? "selected" : ""} onClick={() => void setPref("menuSide", s)}>{s === "left" ? "Left" : "Right"}</button>)}</div>
+      <h3>Text size</h3>
+      <p className="muted">Standard is 20% bigger than the original size.</p>
+      <div className="choices">{([["compact", "Compact"], ["standard", "Standard"], ["large", "Large"], ["xl", "Extra large"]] as const).map(([k, l]) => <button key={k} className={prefs.textSize === k ? "selected" : ""} onClick={() => void setPref("textSize", k)}>{l}</button>)}</div>
       {READY_LOOKS.length > 1 && (
         <>
-          <h3 className="t-h3">Look</h3>
-          <p className="t-muted">The interface style you work in. Yours alone.</p>
-          <div className="t-seg">{READY_LOOKS.map((l) => <button key={l.id} className={lookOf(prefs.look) === l.id ? "on" : ""} onClick={() => void setPref("look", l.id)}>{l.name}</button>)}</div>
+          <h3>Look</h3>
+          <p className="muted">The interface style you work in. Yours alone.</p>
+          <div className="choices">{READY_LOOKS.map((l) => <button key={l.id} className={lookOf(prefs.look) === l.id ? "selected" : ""} onClick={() => void setPref("look", l.id)}>{l.name}</button>)}</div>
         </>
       )}
       {onEditLayout && (
         <>
-          <h3 className="t-h3">Menu layout</h3>
-          <p className="t-muted">Arrange the tiles and pages your way. You can also press and hold any tile.</p>
-          <button className="t-ghost" onClick={onEditLayout}>Edit my menu layout</button>
+          <h3>Menu layout</h3>
+          <p className="muted">Arrange the tiles and pages your way. You can also press and hold any tile.</p>
+          <button onClick={onEditLayout}>Edit my menu layout</button>
         </>
       )}
-      <p className="t-muted" style={{ marginTop: ".8em" }}><a href="/settings">All settings</a></p>
-      <div className="t-dact"><button className="t-primary" onClick={onClose}>Done</button></div>
-    </Modal>
+      <p className="muted" style={{ marginTop: ".8em" }}><a href="/settings">All settings</a></p>
+      <div className="actions"><button className="primary" onClick={onClose}>Done</button></div>
+    </Proto>
   );
 }
 
@@ -237,26 +254,30 @@ export function DoneDialog({ orderId, queue, changeCents, totalCents, onClose }:
 }
 
 /** A fee on the whole order: a preset percentage of the items, or your own percentage or amount. Added fees are listed and can be taken off. */
-export function FeeDialog({ fees, onAdd, onRemove, onClose }: { fees: Array<{ id: string; kind: "percent" | "amount"; value: number; label: string }>; onAdd: (kind: "percent" | "amount", value: number, label: string) => void; onRemove: (id: string) => void; onClose: () => void }) {
+export function FeeDialog({ fees, subtotalCents, onAdd, onRemove, onClose }: { fees: Array<{ id: string; kind: "percent" | "amount"; value: number; label: string }>; /** What a percentage is taken of, to show each quick choice's amount. */ subtotalCents?: number; onAdd: (kind: "percent" | "amount", value: number, label: string) => void; onRemove: (id: string) => void; onClose: () => void }) {
   const [label, setLabel] = useState("Service fee");
-  const [custom, setCustom] = useState("");
-  const [mode, setMode] = useState<"percent" | "amount">("percent");
-  const n = Number(custom);
-  const ok = custom !== "" && n > 0 && (mode === "amount" ? n <= 10000 : n <= 100);
+  const [pct, setPct] = useState("");
+  const [amount, setAmount] = useState("");
+  const [err, setErr] = useState("");
+  const name = () => label.trim() || "Service fee";
+  const set = () => {
+    const a = Number(amount), p = Number(pct);
+    if (amount !== "" && a > 0 && a <= 10000) { onAdd("amount", Math.round(a * 100), name()); return onClose(); }
+    if (pct !== "" && p > 0 && p <= 100) { onAdd("percent", p, name()); return onClose(); }
+    setErr("Enter an amount, or a percentage from 0 to 100.");
+  };
   return (
-    <Modal title="Service Fee" onClose={onClose}>
-      <p className="t-muted">A fee on the whole order, on top of the items. It is recorded with who added it.</p>
-      <label className="t-field">Name on the receipt<input value={label} maxLength={40} onChange={(e) => setLabel(e.target.value)} /></label>
-      <div className="t-chiprow"><span>Quick</span>{[5, 10, 15].map((p) => <button key={p} onClick={() => { onAdd("percent", p, label.trim() || "Service fee"); onClose(); }}>{p}%</button>)}</div>
-      <div className="t-chiprow"><span>Your own</span>
-        <button className={mode === "percent" ? "on" : ""} onClick={() => setMode("percent")}>%</button>
-        <button className={mode === "amount" ? "on" : ""} onClick={() => setMode("amount")}>S$</button>
-        <input inputMode="decimal" aria-label="Fee amount" value={custom} onChange={(e) => setCustom(e.target.value.replace(/[^\d.]/g, ""))} placeholder={mode === "percent" ? "e.g. 7.5" : "e.g. 3.00"} style={{ width: "7em" }} />
-        <button className="t-primary" disabled={!ok} onClick={() => { onAdd(mode, mode === "amount" ? Math.round(n * 100) : n, label.trim() || "Service fee"); onClose(); }}>Add</button>
-      </div>
-      {fees.length > 0 && <><h3 className="t-h3">On this order</h3>{fees.map((f) => <div className="t-heldrow" key={f.id}><span style={{ flex: 1 }}>{f.label} · {f.kind === "percent" ? `${f.value}%` : formatMoney(f.value)}</span><button className="t-ghost" onClick={() => onRemove(f.id)}>Remove</button></div>)}</>}
-      <div className="t-dact"><button className="t-ghost" onClick={onClose}>Close</button></div>
-    </Modal>
+    <Proto title="Service Fee" onClose={onClose}>
+      {fees.length === 0 ? <div className="row"><span>Current fee</span><strong>{formatMoney(0)}</strong></div>
+        : fees.map((f) => <div className="row" key={f.id}><span>{f.label}</span><span><strong>{f.kind === "percent" ? `${f.value}%` : formatMoney(f.value)}</strong> <button className="helddrop" onClick={() => onRemove(f.id)}>Remove fee</button></span></div>)}
+      <h3>Add as % of subtotal</h3>
+      <div className="choices">{[5, 10, 15].map((p) => <button key={p} onClick={() => { onAdd("percent", p, name()); onClose(); }}>{p}%{subtotalCents !== undefined ? ` · ${formatMoney(Math.round((subtotalCents * p) / 100))}` : ""}</button>)}</div>
+      <label className="field">Or your own %<input type="number" min={0} max={100} step="0.1" aria-label="Fee percentage" placeholder="e.g. 7.5" value={pct} onChange={(e) => { setPct(e.target.value); setErr(""); }} /></label>
+      <label className="field">Or amount $<input type="number" min={0} step="0.01" aria-label="Fee amount" placeholder="0.00" value={amount} onChange={(e) => { setAmount(e.target.value); setErr(""); }} /></label>
+      <label className="field">Name on the receipt<input type="text" maxLength={40} aria-label="Fee name" value={label} onChange={(e) => setLabel(e.target.value)} /></label>
+      <div className="error" role="alert">{err}</div>
+      <div className="actions"><button onClick={onClose}>Cancel</button><button className="primary" onClick={set}>Set fee</button></div>
+    </Proto>
   );
 }
 
@@ -268,13 +289,13 @@ export function ExtraItemDialog({ onAdd, onClose }: { onAdd: (name: string, cent
   const cents = Math.round(Number(price) * 100);
   const ok = name.trim().length > 0 && Number.isFinite(cents) && cents > 0 && cents <= 99_999_00;
   return (
-    <Modal title="Add Extra Item" onClose={onClose}>
-      <p className="t-muted">An item that is not on the menu. It goes on the order like any other and is sent to the kitchen.</p>
-      <label className="t-field">Name<input autoFocus value={name} maxLength={40} onChange={(e) => setName(e.target.value)} /></label>
-      <label className="t-field">Price (S$)<input inputMode="decimal" value={price} onChange={(e) => setPrice(e.target.value.replace(/[^\d.]/g, ""))} placeholder="0.00" /></label>
-      <div className="t-stepper"><button onClick={() => setQty(Math.max(1, qty - 1))}>−</button><strong>{qty}</strong><button onClick={() => setQty(Math.min(99, qty + 1))}>+</button></div>
-      <div className="t-dact"><button className="t-ghost" onClick={onClose}>Cancel</button><button className="t-primary" disabled={!ok} onClick={() => { onAdd(name.trim(), cents, qty); onClose(); }}>Add to order</button></div>
-    </Modal>
+    <Proto title="Add Extra Item" onClose={onClose}>
+      <p className="muted">An item that is not on the menu. It goes on the order like any other and is sent to the kitchen.</p>
+      <label className="field">Name<input autoFocus value={name} maxLength={40} onChange={(e) => setName(e.target.value)} /></label>
+      <label className="field">Price (S$)<input inputMode="decimal" value={price} onChange={(e) => setPrice(e.target.value.replace(/[^\d.]/g, ""))} placeholder="0.00" /></label>
+      <div className="row"><span>Quantity</span><div className="stepper"><button aria-label="Fewer" onClick={() => setQty(Math.max(1, qty - 1))}>−</button><strong>{qty}</strong><button aria-label="More" onClick={() => setQty(Math.min(99, qty + 1))}>+</button></div></div>
+      <div className="actions"><button onClick={onClose}>Cancel</button><button className="primary" disabled={!ok} onClick={() => { onAdd(name.trim(), cents, qty); onClose(); }}>Add to order</button></div>
+    </Proto>
   );
 }
 
@@ -283,18 +304,18 @@ export function TaxDialog({ name, current, onSet, onClose }: { name: string; cur
   const [reason, setReason] = useState("");
   if (current) {
     return (
-      <Modal title={`Add ${name}`} onClose={onClose}>
-        <p className="t-muted">{name} was taken off this order: {current.reason}</p>
-        <div className="t-dact"><button className="t-ghost" onClick={onClose}>Cancel</button><button className="t-primary" onClick={() => { onSet(null); onClose(); }}>Put {name} back</button></div>
-      </Modal>
+      <Proto title={`Add ${name}`} onClose={onClose}>
+        <p className="muted">{name} was taken off this order: {current.reason}</p>
+        <div className="actions"><button onClick={onClose}>Cancel</button><button className="primary" onClick={() => { onSet(null); onClose(); }}>Put {name} back</button></div>
+      </Proto>
     );
   }
   return (
-    <Modal title={`Remove ${name}`} onClose={onClose}>
-      <p className="t-muted">Takes {name} off the whole order. It is recorded on the order with your name and the reason.</p>
-      <label className="t-field">Reason<input value={reason} maxLength={120} autoFocus onChange={(e) => setReason(e.target.value)} placeholder="Why is this sale not taxed?" /></label>
-      <div className="t-dact"><button className="t-ghost" onClick={onClose}>Cancel</button><button className="t-primary" disabled={reason.trim().length < 3} onClick={() => { onSet({ reason: reason.trim() }); onClose(); }}>Remove {name}</button></div>
-    </Modal>
+    <Proto title={`Remove ${name}`} onClose={onClose}>
+      <p className="muted">Takes {name} off the whole order. It is recorded on the order with your name and the reason.</p>
+      <label className="field">Reason<input value={reason} maxLength={120} autoFocus onChange={(e) => setReason(e.target.value)} placeholder="Why is this sale not taxed?" /></label>
+      <div className="actions"><button onClick={onClose}>Cancel</button><button className="primary" disabled={reason.trim().length < 3} onClick={() => { onSet({ reason: reason.trim() }); onClose(); }}>Remove {name}</button></div>
+    </Proto>
   );
 }
 
@@ -320,12 +341,12 @@ export function CouponDialog({ current, subtotalCents, memberId, onSet, onClose 
     onClose();
   };
   return (
-    <Modal title="Scan Coupon" onClose={onClose}>
-      {current && <p className="t-muted">On this order: <b>{current.code}</b> · {current.title} · {formatMoney(couponCents(current, subtotalCents))} off <button className="t-ghost" onClick={() => { onSet(null); onClose(); }}>Remove</button></p>}
-      <label className="t-field">Coupon code<input value={code} autoFocus autoCapitalize="characters" autoComplete="off" aria-label="Coupon code" onChange={(e) => setCode(e.target.value.toUpperCase())} onKeyDown={(e) => { if (e.key === "Enter") void apply(); }} /></label>
-      {msg && <p className="t-muted" role="alert">{msg}</p>}
-      <div className="t-dact"><button className="t-ghost" onClick={onClose}>Cancel</button><button className="t-primary" disabled={busy || !code.trim()} onClick={() => void apply()}>Apply</button></div>
-    </Modal>
+    <Proto title="Scan Coupon" onClose={onClose}>
+      {current && <p className="muted">On this order: <b>{current.code}</b> · {current.title} · {formatMoney(couponCents(current, subtotalCents))} off <button className="helddrop" onClick={() => { onSet(null); onClose(); }}>Remove</button></p>}
+      <label className="field">Coupon code<input value={code} autoFocus autoCapitalize="characters" autoComplete="off" aria-label="Coupon code" onChange={(e) => setCode(e.target.value.toUpperCase())} onKeyDown={(e) => { if (e.key === "Enter") void apply(); }} /></label>
+      {msg && <p className="muted" role="alert">{msg}</p>}
+      <div className="actions"><button onClick={onClose}>Cancel</button><button className="primary" disabled={busy || !code.trim()} onClick={() => void apply()}>Apply</button></div>
+    </Proto>
   );
 }
 
@@ -335,11 +356,11 @@ export function BarcodeDialog({ find, onClose }: { /** Adds the item with that c
   const [msg, setMsg] = useState("");
   const go = () => { const c = code.trim(); if (!c) return; setMsg(find(c)); setCode(""); };
   return (
-    <Modal title="Enter Barcode" onClose={onClose}>
-      <label className="t-field">Barcode or SKU<input value={code} autoFocus autoComplete="off" aria-label="Barcode" onChange={(e) => setCode(e.target.value)} onKeyDown={(e) => { if (e.key === "Enter") go(); }} /></label>
-      {msg && <p className="t-muted" role="status">{msg}</p>}
-      <div className="t-dact"><button className="t-ghost" onClick={onClose}>Done</button><button className="t-primary" disabled={!code.trim()} onClick={go}>Add</button></div>
-    </Modal>
+    <Proto title="Enter Barcode" onClose={onClose}>
+      <label className="field">Barcode or SKU<input value={code} autoFocus autoComplete="off" aria-label="Barcode" onChange={(e) => setCode(e.target.value)} onKeyDown={(e) => { if (e.key === "Enter") go(); }} /></label>
+      {msg && <p className="muted" role="status">{msg}</p>}
+      <div className="actions"><button onClick={onClose}>Done</button><button className="primary" disabled={!code.trim()} onClick={go}>Add</button></div>
+    </Proto>
   );
 }
 
@@ -347,10 +368,10 @@ export function BarcodeDialog({ find, onClose }: { /** Adds the item with that c
 export function InvoiceDialog({ title, lines, onClose }: { title: string; lines: string[]; onClose: () => void }) {
   const print = () => { document.body.classList.add("print-invoice"); const done = () => { document.body.classList.remove("print-invoice"); window.removeEventListener("afterprint", done); }; window.addEventListener("afterprint", done); window.print(); };
   return (
-    <Modal title={title} onClose={onClose}>
-      <pre className="receipt invoice-print" aria-label="Invoice" style={{ whiteSpace: "pre-wrap", margin: "0 auto .6em" }}>{lines.join("\n")}</pre>
-      <div className="t-dact"><button className="t-ghost" onClick={onClose}>Close</button><button className="t-primary" onClick={print}>Print</button></div>
-    </Modal>
+    <Proto title={title} onClose={onClose}>
+      <pre className="receipt r7 invoice-print" aria-label="Invoice" style={{ whiteSpace: "pre-wrap", margin: "0 auto .6em" }}>{lines.join("\n")}</pre>
+      <div className="actions"><button onClick={onClose}>Close</button><button className="primary" onClick={print}>Print</button></div>
+    </Proto>
   );
 }
 
@@ -377,33 +398,33 @@ export function HandoverDialog({ find, onHandOver, onClose }: { find: (code: str
     setOrder(null);
   };
   return (
-    <Modal title="Hand over an order" wide onClose={onClose}>
+    <Proto title="Hand over an order" extra="splitdialog" onClose={onClose}>
       {!order && (
         <>
-          <label className="t-field">Scan the bag, or type the order number<input value={code} autoFocus autoComplete="off" aria-label="Order code" onChange={(e) => setCode(e.target.value)} onKeyDown={(e) => { if (e.key === "Enter") look(); }} /></label>
-          {msg && <p className="t-muted" role="status">{msg}</p>}
-          <div className="t-dact"><button className="t-ghost" onClick={onClose}>Close</button><button className="t-primary" disabled={!code.trim()} onClick={look}>Find</button></div>
+          <label className="field">Scan the bag, or type the order number<input value={code} autoFocus autoComplete="off" aria-label="Order code" onChange={(e) => setCode(e.target.value)} onKeyDown={(e) => { if (e.key === "Enter") look(); }} /></label>
+          {msg && <p className="muted" role="status">{msg}</p>}
+          <div className="actions"><button onClick={onClose}>Close</button><button className="primary" disabled={!code.trim()} onClick={look}>Find</button></div>
         </>
       )}
       {order && (
         <>
-          <p style={{ margin: "0 0 .3em" }}><b style={{ fontSize: "1.5em" }}>Order {order.number}</b> <span className="t-muted">· {order.where}{order.customer ? ` · ${order.customer}` : ""} · {order.when}</span></p>
-          <div aria-label="Items in this order">{order.items.map((l, i) => <div className="t-row2" key={i}><span><b>{l.qty}×</b> {l.name}{l.detail ? <small className="t-muted"> · {l.detail}</small> : null}</span></div>)}</div>
-          <p className="t-muted">{order.itemCount} item{order.itemCount === 1 ? "" : "s"} in the bag · {order.total}</p>
-          {order.cancelled && <p className="t-flash" role="alert">This order was cancelled. Do not hand it over.</p>}
-          {order.handedTo && <p className="t-flash" role="alert">Already handed to {order.handedTo}. Do not hand it over again.</p>}
-          {!order.cancelled && !order.handedTo && !order.paid && <p className="t-flash" role="alert">This order is not paid yet ({order.owing} to collect).</p>}
-          {!order.cancelled && !order.handedTo && order.paid && !order.ready && <p className="t-flash" role="alert">The kitchen has not marked this order ready. Check the bag is complete.</p>}
+          <p style={{ margin: "0 0 .3em" }}><b style={{ fontSize: "1.5em" }}>Order {order.number}</b> <span className="muted">· {order.where}{order.customer ? ` · ${order.customer}` : ""} · {order.when}</span></p>
+          <div aria-label="Items in this order">{order.items.map((l, i) => <div className="row" key={i}><span><b>{l.qty}×</b> {l.name}{l.detail ? <small className="muted"> · {l.detail}</small> : null}</span></div>)}</div>
+          <p className="muted">{order.itemCount} item{order.itemCount === 1 ? "" : "s"} in the bag · {order.total}</p>
+          {order.cancelled && <p className="error warn" role="alert">This order was cancelled. Do not hand it over.</p>}
+          {order.handedTo && <p className="error warn" role="alert">Already handed to {order.handedTo}. Do not hand it over again.</p>}
+          {!order.cancelled && !order.handedTo && !order.paid && <p className="error warn" role="alert">This order is not paid yet ({order.owing} to collect).</p>}
+          {!order.cancelled && !order.handedTo && order.paid && !order.ready && <p className="error warn" role="alert">The kitchen has not marked this order ready. Check the bag is complete.</p>}
           {!blocked && (
             <>
-              <label className="t-field">Who is taking it (name, or hold the rider's card to the reader)<input value={to} autoFocus maxLength={60} aria-label="Taken by" onChange={(e) => setTo(e.target.value)} onKeyDown={(e) => { if (e.key === "Enter") void hand(); }} /></label>
-              <label className="t-field">Their order number or reference, if they gave one<input value={ref} maxLength={60} aria-label="Rider reference" onChange={(e) => setRef(e.target.value)} onKeyDown={(e) => { if (e.key === "Enter") void hand(); }} /></label>
+              <label className="field">Who is taking it (name, or hold the rider's card to the reader)<input value={to} autoFocus maxLength={60} aria-label="Taken by" onChange={(e) => setTo(e.target.value)} onKeyDown={(e) => { if (e.key === "Enter") void hand(); }} /></label>
+              <label className="field">Their order number or reference, if they gave one<input value={ref} maxLength={60} aria-label="Rider reference" onChange={(e) => setRef(e.target.value)} onKeyDown={(e) => { if (e.key === "Enter") void hand(); }} /></label>
             </>
           )}
-          <div className="t-dact"><button className="t-ghost" onClick={() => { setOrder(null); setMsg(""); }}>Another order</button>{!blocked && <button className="t-primary" disabled={!to.trim() || busy} onClick={() => void hand()}>Hand over</button>}</div>
+          <div className="actions"><button onClick={() => { setOrder(null); setMsg(""); }}>Another order</button>{!blocked && <button className="primary" disabled={!to.trim() || busy} onClick={() => void hand()}>Hand over</button>}</div>
         </>
       )}
-    </Modal>
+    </Proto>
   );
 }
 /** An order as the handover dialog shows it. */

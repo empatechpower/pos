@@ -6,7 +6,7 @@ const toText = (s: FloorSettings["sections"][number]) => s.tables.map((t) => (t.
 /** Editing the text keeps where a table sits and its shape, matched by name. */
 const fromText = (text: string, sid: string, old: FloorTable[] = []) => text.split("\n").map((l) => l.trim()).filter(Boolean).map((l, i) => { const [name, seats] = l.split(",").map((x) => x.trim()); const n = Number(seats); const was = old.find((t) => t.name === name); return { id: was?.id ?? `${sid}-${i}`, name: name!, ...(Number.isInteger(n) && n > 0 ? { seats: n } : {}), ...(was?.shape ? { shape: was.shape } : {}), ...(was?.x !== undefined && was?.y !== undefined ? { x: was.x, y: was.y } : {}) }; });
 
-/** For managers: the sections and tables of the floor, and the table-service switches (split bill, courses, how long before a table is flagged overdue). */
+/** For managers: the sections and tables of the floor. The table-service switches are under Merchant settings. */
 export function FloorPanel() {
   const floor = useFloor();
   const [sections, setSections] = useState(() => floor.sections.map((s) => ({ id: s.id, name: s.name, text: toText(s) })));
@@ -29,9 +29,6 @@ export function FloorPanel() {
         <button className="secondary sm" onClick={() => setSections((c) => [...c, { id: `s${Date.now().toString(36)}`, name: "New section", text: "" }])}>Add a section</button>
         <button className="primary sm" onClick={() => void save({ sections: sections.map((s) => ({ id: s.id, name: s.name, tables: fromText(s.text, s.id, floor.sections.find((x) => x.id === s.id)?.tables) })) })}>Save the floor</button>
       </div>
-      <label className="row"><input type="checkbox" checked={floor.splitBill} onChange={(e) => void save({ splitBill: e.target.checked })} /> Allow split bill</label>
-      <label className="row"><input type="checkbox" checked={floor.courses} onChange={(e) => void save({ courses: e.target.checked })} /> Serve in courses (Starter, Main, Dessert; Send fires the first, Fire Course sends the next)</label>
-      <label className="row">Flag a table as overdue after <input style={{ width: 70 }} inputMode="numeric" defaultValue={floor.overdueMinutes} key={floor.overdueMinutes} onBlur={(e) => { const n = Number(e.target.value); if (n !== floor.overdueMinutes) void save({ overdueMinutes: n }); }} /> minutes</label>
       {msg && <div className="flash" role="status">{msg}</div>}
     </section>
   );

@@ -8,7 +8,7 @@ import { NoteSheet } from "./NoteSheet";
 import { record } from "../db";
 import { go, queryParams } from "../nav";
 import { logView } from "../orderViews";
-import { Modal } from "../till/Modal";
+import { ProtoModal } from "../proto/ProtoDialog";
 
 const timeOf = (ms: number) => new Date(ms).toLocaleString("en-GB", { day: "numeric", month: "short", hour: "2-digit", minute: "2-digit", timeZone: "Asia/Singapore" });
 const DAY = 86_400_000;
@@ -93,65 +93,91 @@ export function Orders({ config }: { config: BusinessConfig }) {
   }
 
   const TABS: Array<[Tab, string]> = [["open", "Open"], ["today", "Today"], ["week", "This Week"], ["month", "This Month"], ["range", "Date Range"], ["all", "All"]];
+  const hm = (ms: number) => new Date(ms).toLocaleTimeString("en-SG", { hour: "numeric", minute: "2-digit", timeZone: "Asia/Singapore" });
+  const whereOf = (o: OrderState) => o.spot ?? o.channelName ?? (o.fulfilment === "takeaway" ? "Take away" : o.fulfilment === "delivery" ? "Delivery" : "Dine in");
+  const detail = shown ? all.find((x) => x.orderId === shown) : undefined;
+  const openDetail = (o: OrderState) => { setShown(o.orderId); setMsg(null); logView(o.orderId, "Orders"); };
+  // The markup and class names are the prototype's own (proto-reference/index.html: renderOrders, ordRowOpen, ordRowPaid), styled by its stylesheet.
   return (
-    <div className="credit prices orders-screen">
-      <h2>Orders</h2>
-      {!staff && <div className="flash">Sign in to reprint. <a href="/login">Sign in</a></div>}
-      {msg && <div className="flash">{msg}</div>}
-      <div className="row" style={{ alignItems: "center" }}>
-        <button className={mods ? "primary sm" : "secondary sm"} aria-pressed={mods} onClick={() => setMods((m) => !m)} title="Whether a receipt lists each item's choices (extras, size, spice). Off unless you turn it on.">Print modifiers: {mods ? "On" : "Off"}</button>
-        <span className="muted">Applies to the receipt you print or preview below.</span>
-      </div>
-      <input className="orders-search" aria-label="Search orders" placeholder="Search by number, table, item, customer or note" value={q} onChange={(e) => { setQ(e.target.value); setLimit(40); }} />
-      <div className="orders-tabs" role="tablist">
-        {TABS.map(([t, l]) => <button key={t} role="tab" aria-selected={tab === t} className={tab === t ? "on" : ""} onClick={() => { setTab(t); setLimit(40); }}>{l} <b>{counts[t]}</b></button>)}
-      </div>
-      {tab === "range" && <div className="row"><label>From <input type="date" value={from} max={to} onChange={(e) => setFrom(e.target.value)} /></label><label>To <input type="date" value={to} min={from} onChange={(e) => setTo(e.target.value)} /></label></div>}
-      <div className="orders-chips" aria-label="Filter by status">
-        {(["all", "paid", "cancelled", "refunded", "voided"] as Status[]).map((s) => <button key={s} className={status === s ? "on" : ""} aria-pressed={status === s} onClick={() => setStatus(s)}>{s === "all" ? "All statuses" : LABEL[s]}</button>)}
-      </div>
-      {list.length === 0 && <p className="muted">No orders here.</p>}
+    <div className="proto protohead ordscreen">
+      <main className="viewmain">
+        <div className="ordwrap">
+          {!staff && <div className="floormsg">Sign in to reprint. <a href="/login">Sign in</a></div>}
+          <div className="ordtools">
+            <input aria-label="Search orders" placeholder="Search order no., table or tab" value={q} onChange={(e) => { setQ(e.target.value); setLimit(40); }} />
+            <div className="ordtabs" role="tablist">
+              {TABS.map(([t, l]) => <button key={t} role="tab" aria-selected={tab === t} className={tab === t ? "selected" : ""} onClick={() => { setTab(t); setLimit(40); }}>{l} <span className="ordcount">{counts[t]}</span></button>)}
+            </div>
+          </div>
+          <div className="ordtabs ordstatus" aria-label="Filter by status">
+            {(["all", "paid", "cancelled", "refunded", "voided"] as Status[]).map((x) => <button key={x} className={status === x ? "selected" : ""} aria-pressed={status === x} onClick={() => setStatus(x)}>{x === "all" ? "All statuses" : LABEL[x]}</button>)}
+          </div>
+          {tab === "range" && (
+            <div className="ordrange">
+              <label>From <input type="date" value={from} max={to} onChange={(e) => setFrom(e.target.value)} /></label>
+              <label>To <input type="date" value={to} min={from} onChange={(e) => setTo(e.target.value)} /></label>
+            </div>
+          )}
+          {msg && !detail && !preview && <div className="floormsg" role="status">{msg}</div>}
+          <div id="ordlist">
+            {list.length === 0 && <p className="muted" style={{ padding: "1em" }}>No orders match.</p>}
+            {list.slice(0, limit).map((o) => {
+              const t = orderTotals(o, config);
+              const st = stat.get(o.orderId)!;
+              const items = o.lines.reduce((n, l) => n + l.qty, 0);
+              const left = st === "open" && confirmedPaid(o) > 0 ? ` · ${formatMoney(t.total - confirmedPaid(o))} left` : "";
+              return (
+                <div className="ordline" key={o.orderId}>
+                  <button className="ordrow" onClick={() => (st === "open" ? openOnTill(o) : openDetail(o))}>
+                    <span className="ordmain"><strong>Order {o.queueNumber ? `#${o.queueNumber}` : "—"}</strong><small>{whereOf(o)} · {hm(o.openedAt)} · {items} items{left}{o.note ? ` · Note: ${o.note}` : ""}</small></span>
+                    <span className="ordamt">{formatMoney(t.total)}</span>
+                    <span className={`ordchip ${st === "open" ? "" : LABEL[st].toLowerCase()}`}>{LABEL[st]}</span>
+                  </button>
+                  {st === "open" && <button className="orddetail" aria-label={`Details of order ${o.queueNumber ?? ""}`} onClick={() => openDetail(o)}>Details</button>}
+                </div>
+              );
+            })}
+          </div>
+          {list.length > limit && <button onClick={() => setLimit((n) => n + 40)}>Show more ({list.length - limit} more)</button>}
+        </div>
+      </main>
+      {detail && !preview && !noting && (() => {
+        const o = detail, st = stat.get(o.orderId)!, t = orderTotals(o, config);
+        return (
+          <ProtoModal title={`Order ${o.queueNumber ? `#${o.queueNumber}` : ""}`} wide onClose={() => setShown(null)}>
+            <p className="muted">{LABEL[st]} · {whereOf(o)} · {timeOf(o.openedAt)} · {formatMoney(t.total)}{o.note ? ` · Note: ${o.note}` : ""}</p>
+            {msg && <div className="error warn" role="status">{msg}</div>}
+            <div className="choices ordacts">
+              {st === "open" && <button className="primary" onClick={() => openOnTill(o)}>Open on till</button>}
+              <button disabled={!staff} onClick={() => void showReceipt(o.orderId)}>Preview receipt</button>
+              <button disabled={!staff} onClick={() => void reprint(o.orderId, "receipt")}>Print receipt</button>
+              <button disabled={!staff} onClick={() => void reprint(o.orderId, "kitchen")}>Kitchen ticket</button>
+              <button onClick={() => setNoting(o.orderId)}>{o.note ? "Edit note" : "Note"}</button>
+              <button aria-pressed={mods} className={mods ? "selected" : ""} title="Whether a receipt lists each item's choices (extras, size, spice). Off unless you turn it on." onClick={() => setMods((m) => !m)}>Print modifiers: {mods ? "On" : "Off"}</button>
+            </div>
+            <div className="orddetailbody">
+              <OrderDetails order={o} config={config} />
+              {staff && st !== "cancelled" && <RefundPanel order={o} />}
+            </div>
+            <div className="actions"><button onClick={() => setShown(null)}>Close</button></div>
+          </ProtoModal>
+        );
+      })()}
       {noting && (() => {
         const o = all.find((x) => x.orderId === noting);
         if (!o) return null;
         return <NoteSheet title={`Note · order ${o.queueNumber ?? ""}`} initial={o.note ?? ""} max={200} onClose={() => setNoting(null)} onSave={(t) => { void record(o.orderId, { type: "OrderNoted", note: t, ...(staff ? { byName: staff.name } : {}) }).then(() => setMsg(t ? "Note saved. If the order was already sent, the kitchen gets a short slip." : "Note removed.")); setNoting(null); }} />;
       })()}
-      {list.slice(0, limit).map((o) => {
-        const t = orderTotals(o, config);
-        const st = stat.get(o.orderId)!;
-        return (
-          <div key={o.orderId}>
-            <div className="tab">
-              <div>
-                <b>{o.queueNumber ?? o.spot ?? "—"}</b> <span className={`ord-badge ${st}`}>{LABEL[st]}</span>{" "}
-                <span className="muted">· {o.spot ? `${o.spot} · ` : ""}{o.channelName ?? o.fulfilment} · {timeOf(o.openedAt)} · {formatMoney(t.total)}{st === "open" && confirmedPaid(o) > 0 ? ` (${formatMoney(t.total - confirmedPaid(o))} left)` : ""}</span>
-              </div>
-              <div className="tabr">
-                {st === "open" && <button className="primary sm" onClick={() => openOnTill(o)}>Open on till</button>}
-                <button className="secondary sm" onClick={() => { const next = shown === o.orderId ? null : o.orderId; setShown(next); if (next) logView(o.orderId, "Orders"); }}>{shown === o.orderId ? "Hide" : "Details"}</button>
-                <button className="secondary sm" disabled={!staff} onClick={() => void showReceipt(o.orderId)}>Preview</button>
-                <button className="secondary sm" disabled={!staff} onClick={() => void reprint(o.orderId, "receipt")}>Receipt</button>
-                <button className="secondary sm" disabled={!staff} onClick={() => void reprint(o.orderId, "kitchen")}>Kitchen ticket</button>
-                <button className="secondary sm" onClick={() => { logView(o.orderId, "Orders"); setNoting(o.orderId); }}>{o.note ? "Edit note" : "Note"}</button>
-              </div>
-            </div>
-            {o.note && <div className="muted" style={{ padding: "0 12px" }}><b>Note:</b> {o.note}</div>}
-            {shown === o.orderId && <OrderDetails order={o} config={config} />}
-            {staff && st !== "cancelled" && <RefundPanel order={o} />}
-          </div>
-        );
-      })}
       {preview && (
-        <Modal title="Receipt" onClose={() => setPreview(null)}>
-          <pre className="t-receipt">{preview.text}</pre>
-          <div className="t-dact">
-            <button className="t-ghost" onClick={() => { setMods((m) => !m); void showReceipt(preview.id, !mods); }}>Print modifiers: {mods ? "On" : "Off"}</button>
-            <button className="t-ghost" onClick={() => void reprint(preview.id, "receipt").then(() => setPreview(null))}>Print</button>
-            <button className="t-primary" onClick={() => setPreview(null)}>Close</button>
+        <ProtoModal title="Receipt" onClose={() => setPreview(null)}>
+          <pre className="receipt r7" style={{ whiteSpace: "pre-wrap" }}>{preview.text}</pre>
+          <div className="actions">
+            <button onClick={() => { setMods((m) => !m); void showReceipt(preview.id, !mods); }}>Print modifiers: {mods ? "On" : "Off"}</button>
+            <button onClick={() => void reprint(preview.id, "receipt").then(() => setPreview(null))}>Print</button>
+            <button className="primary" onClick={() => setPreview(null)}>Close</button>
           </div>
-        </Modal>
+        </ProtoModal>
       )}
-      {list.length > limit && <button className="secondary" onClick={() => setLimit((n) => n + 40)}>Show more ({list.length - limit} more)</button>}
     </div>
   );
 }

@@ -1,11 +1,9 @@
 import { useEffect, useRef, useState } from "react";
 import { formatMoney, type BusinessConfig, type OrderState } from "@pos/core";
 import type { FloorSettings, FloorTable } from "../floor";
-import { Modal } from "./Modal";
-import { clearTable, courseProgress, isBarTab, isSeatedOrder, mergeProblem, minutesSince, orderBrief, tabLabel, tableInfo, type TableInfo, type TableState } from "./tableOps";
+import { ProtoModal } from "../proto/ProtoDialog";
+import { clearTable, courseProgress, isBarTab, isSeatedOrder, mergeProblem, orderBrief, tabLabel, tableInfo, type TableInfo } from "./tableOps";
 import type { HeldOrder } from "./types";
-
-const LEGEND: Array<[TableState, string]> = [["available", "Available"], ["seated", "Seated"], ["ordered", "Ordered"], ["bill", "Bill asked"], ["paid", "Paid · to clear"], ["overdue", "Overdue"]];
 
 type Pick = null | { kind: "transfer" | "merge"; from: OrderState };
 
@@ -68,23 +66,6 @@ export function TableMap(p: {
     setConfirm({ from: pick.from, into: t.order });
   }
 
-  const cell = (name: string, extra?: string, label?: string) => {
-    const t = info(name);
-    const dim = pick && (pick.kind === "transfer" ? t.state !== "available" : !t.order || t.order.orderId === pick.from.orderId);
-    const go = pick?.kind === "transfer" && t.state === "available";
-    return (
-      <button key={name} className={`t-table s-${t.state} ${t.level ? `ring${t.level}` : ""} ${dim ? "dim" : ""} ${go ? "go" : ""}`} aria-label={`${name}: ${t.state}`} {...press(t)}>
-        <strong>{label ?? name}</strong>
-        {extra && <small>{extra}</small>}
-        {t.state !== "available" && (
-          <span className="t-ttimes"><i title="Since seated">⏱ {minutesSince(t.seatedAt, now)}</i>{t.order && <i title="Since the last order was sent">▶ {minutesSince(t.lastSentAt, now)}</i>}</span>
-        )}
-        {t.totalCents !== undefined && <b>{formatMoney(t.totalCents)}</b>}
-        {t.guests ? <em>{t.guests} 👤</em> : null}
-      </button>
-    );
-  };
-
   const sec = p.floor.sections[Math.min(secIx, p.floor.sections.length - 1)]!;
   const secTables = sec.tables.filter((t) => !isBarTab(t.name));
   /** A table with no saved place gets one on a tidy grid, so a floor nobody has arranged still looks like a floor. */
@@ -94,15 +75,19 @@ export function TableMap(p: {
     return { x: 5 + (i % cols) * 23, y: 6 + Math.floor(i / cols) * rowH };
   };
   const floorTables = secTables.map((t, i) => ({ ...t, ...placed(t, i), shape: t.shape ?? "rect" }));
-  const stateLine = (t: TableInfo) => t.state === "paid" ? <small>Paid · to clear</small> : t.order || t.draft ? <><small>Seated {minutesSince(t.seatedAt, now)}m</small>{t.order && t.state !== "bill" && <small>Sent {minutesSince(t.lastSentAt, now)}m ago</small>}{t.state === "bill" && <small>Bill asked</small>}</> : <small>Available</small>;
+  /** The prototype's four table colours. A table whose bill was asked for, or that has sat too long, is one of them with a mark on top. */
+  const st = (i: TableInfo) => (i.state === "available" ? "free" : i.state === "paid" ? "paid" : i.state === "seated" ? "seated" : i.state === "overdue" && !i.order ? "seated" : "ordered");
+  const marks = (i: TableInfo) => `${i.state === "overdue" || i.level ? "overdue" : ""} ${i.state === "bill" ? "st-bill" : ""}`;
+  const picking = (i: TableInfo) => (!pick ? "" : i.order?.orderId === pick.from.orderId ? "picksrc" : (pick.kind === "transfer" ? i.state === "available" : !!i.order) ? "pickok" : "pickno");
+  const dur = (at: number | undefined) => { const m = Math.max(0, Math.floor((now - (at ?? now)) / 60000)); return m >= 60 ? `${Math.floor(m / 60)}:${String(m % 60).padStart(2, "0")}` : `${m}m`; };
+  const stateLine = (i: TableInfo) => i.state === "paid" ? <small>Paid · to clear</small> : i.order || i.draft ? <><small>Seated {dur(i.seatedAt)}</small>{i.order && i.state !== "bill" && <small>Sent {dur(i.lastSentAt)} ago</small>}{i.state === "bill" && <small>Bill asked</small>}</> : <small>Available</small>;
   const floorCell = (t: FloorTable & { x: number; y: number; shape: string }) => {
     const i = info(t.name);
-    const dim = pick && (pick.kind === "transfer" ? i.state !== "available" : !i.order || i.order.orderId === pick.from.orderId);
-    const go = pick?.kind === "transfer" && i.state === "available";
+    const h = press(i);
     return (
-      <button key={t.id} className={`t-ftable ${t.shape} s-${i.state} ${i.level ? `ring${i.level}` : ""} ${dim ? "dim" : ""} ${go ? "go" : ""}`} style={{ left: `${t.x}%`, top: `${t.y}%` }} aria-label={`${t.name}: ${i.state}`} {...press(i)}>
-        <strong>{t.name}</strong>{stateLine(i)}{i.totalCents !== undefined && <b>{formatMoney(i.totalCents)}</b>}
-      </button>
+      <div key={t.id} role="button" tabIndex={0} className={`ftable ${t.shape} st-${st(i)} ${marks(i)} ${picking(i)}`} style={{ left: `${t.x}%`, top: `${t.y}%` }} data-tname={t.name} aria-label={`${t.name}: ${i.state}`} {...h} onKeyDown={(e) => { if (e.key === "Enter") tap(i); }}>
+        <strong>{t.name}</strong>{stateLine(i)}
+      </div>
     );
   };
   const sectionsWith = (fn: (ts: FloorTable[]) => FloorTable[]) => p.floor.sections.map((x) => x.id === sec.id ? { ...x, tables: fn(x.tables) } : x);
@@ -126,11 +111,11 @@ export function TableMap(p: {
     const at = drag && drag.name === t.name ? drag : t;
     const taken = !!info(t.name).order || !!info(t.name).draft;
     return (
-      <div key={t.id} className={`t-ftable arr ${t.shape} s-available`} style={{ left: `${at.x}%`, top: `${at.y}%` }} onPointerDown={(e) => dragStart(t, e)} aria-label={`Move ${t.name}`}>
+      <div key={t.id} className={`ftable arr ${t.shape} st-free`} style={{ left: `${at.x}%`, top: `${at.y}%` }} onPointerDown={(e) => dragStart(t, e)} aria-label={`Move ${t.name}`}>
         <strong>{t.name}</strong><small>{t.seats ? `${t.seats} seats` : "Drag me"}</small>
-        <span className="t-ftools">
-          <button aria-label={`Change shape of ${t.name}`} onPointerDown={(e) => e.stopPropagation()} onClick={() => void saveTables((ts) => settle(ts).map((q) => q.id === t.id ? { ...q, shape: t.shape === "rect" ? "round" : t.shape === "round" ? "oval" : "rect" } : q))}>⟳</button>
-          <button aria-label={`Remove ${t.name}`} onPointerDown={(e) => e.stopPropagation()} onClick={() => { if (taken) return setMsg(`${t.name} has an order on it: settle it before removing the table.`); void saveTables((ts) => ts.filter((q) => q.id !== t.id)); }}>×</button>
+        <span className="ftools">
+          <button title="Change shape" aria-label={`Change shape of ${t.name}`} onPointerDown={(e) => e.stopPropagation()} onClick={() => void saveTables((ts) => settle(ts).map((q) => q.id === t.id ? { ...q, shape: t.shape === "rect" ? "round" : t.shape === "round" ? "oval" : "rect" } : q))}>⟳</button>
+          <button title="Remove table" aria-label={`Remove ${t.name}`} onPointerDown={(e) => e.stopPropagation()} onClick={() => { if (taken) return setMsg(`${t.name} has an order on it: settle it before removing the table.`); void saveTables((ts) => ts.filter((q) => q.id !== t.id)); }}>×</button>
         </span>
       </div>
     );
@@ -148,69 +133,82 @@ export function TableMap(p: {
     ]),
   ].filter((n) => !search || n.toLowerCase().includes(search.toLowerCase()));
 
+  const LABEL: Record<string, string> = { free: "Available", seated: "Seated", ordered: "Ordered", paid: "Paid · to clear" };
+  // The markup and class names are the prototype's own (proto-reference/index.html: renderFloor, renderTabs), styled by its stylesheet.
   return (
-    <section className="t-tablemap" aria-label="Table map">
-      <div className="t-tmhead">
-        <button className="t-ghost" onClick={p.onBack}>← Order screen</button>
-        <div className="t-seg" role="tablist"><button role="tab" aria-selected={seg === "floor"} className={seg === "floor" ? "on" : ""} onClick={() => setSeg("floor")}>Table Map</button><button role="tab" aria-selected={seg === "tabs"} className={seg === "tabs" ? "on" : ""} onClick={() => setSeg("tabs")}>Bar Tabs</button></div>
-        {seg === "floor" && <div className="t-seg"><button className={layout === "floor" ? "on" : ""} onClick={() => setLayout("floor")}>Floor</button><button className={layout === "list" ? "on" : ""} onClick={() => setLayout("list")}>List</button></div>}
-      </div>
-      {pick && <div className="t-banner" role="status">{pick.kind === "transfer" ? `Moving ${pick.from.spot}: tap a free table (green outline).` : `Merging ${pick.from.spot}: tap the table whose bill it joins.`} <button className="t-link" onClick={() => { setPick(null); setMsg(""); }}>Cancel</button></div>}
-      {msg && <div className="t-flash" role="status">{msg}</div>}
+    <section className="proto protohead floorwrap" aria-label="Table map">
+      <div className="tmseg" role="tablist"><button role="tab" aria-selected={seg === "floor"} className={seg === "floor" ? "selected" : ""} onClick={() => setSeg("floor")}>Table Map</button><button role="tab" aria-selected={seg === "tabs"} className={seg === "tabs" ? "selected" : ""} onClick={() => setSeg("tabs")}>Bar Tabs</button></div>
+      {pick && <div className="pickbanner" role="status"><span>{pick.kind === "transfer" ? <>Moving the order on <strong>{pick.from.spot}</strong> — tap a free table</> : <>Merging <strong>{pick.from.spot}</strong> — tap the table whose bill it joins</>}</span><button onClick={() => { setPick(null); setMsg(""); }}>Cancel</button></div>}
+      {msg && <div className="floormsg" role="status">{msg}</div>}
       {seg === "floor" ? (
         <>
-          {p.floor.sections.length > 1 && <div className="t-seg t-secs" role="tablist" aria-label="Sections">{p.floor.sections.map((x, i) => <button key={x.id} role="tab" aria-selected={sec.id === x.id} className={sec.id === x.id ? "on" : ""} onClick={() => setSecIx(i)}>{x.name}</button>)}</div>}
-          {layout === "floor" && p.canArrange && <div className="t-arrangebar"><label><input type="checkbox" checked={arrange} onChange={(e) => setArrange(e.target.checked)} /> Arrange</label>{arrange && <><button className="t-ghost" onClick={() => void addTable()}>＋ Table</button><span className="t-muted">Drag a table into place. ⟳ changes its shape, × removes it.</span></>}</div>}
+          <div className="floortools">
+            <div className="choices" role="tablist" aria-label="Sections">{p.floor.sections.map((x, i) => <button key={x.id} role="tab" aria-selected={sec.id === x.id} className={sec.id === x.id ? "selected" : ""} onClick={() => setSecIx(i)}>{x.name}</button>)}</div>
+            <div className="choices"><button className={layout === "floor" ? "selected" : ""} onClick={() => setLayout("floor")}>Floor</button><button className={layout === "list" ? "selected" : ""} onClick={() => { setLayout("list"); setArrange(false); }}>List</button></div>
+            {layout === "floor" && p.canArrange && <label className="arrangelabel"><input type="checkbox" checked={arrange} onChange={(e) => setArrange(e.target.checked)} /> Arrange</label>}
+            {layout === "floor" && arrange && <button onClick={() => void addTable()}>+ Table</button>}
+          </div>
           {layout === "floor" ? (
-            <div className={`t-canvas ${arrange ? "arranging" : ""}`} ref={canvas}>
-              {floorTables.length === 0 && <p className="t-muted t-empty">No tables in this section.</p>}
+            <main className={`floorcanvas ${arrange ? "arranging" : ""}`} ref={canvas}>
+              {floorTables.length === 0 && <p className="muted" style={{ padding: "1em" }}>No tables in this section.</p>}
               {floorTables.map((t) => arrange ? arrangeCell(t) : floorCell(t))}
-            </div>
+            </main>
           ) : (
-            <div className="t-tlist">
+            <main className="floorlist">
+              {floorTables.length === 0 && <p className="muted" style={{ padding: "1em" }}>No tables in this section.</p>}
               {floorTables.map((t) => { const i = info(t.name); return (
-                <button key={t.id} className={`t-trow s-${i.state}`} {...press(i)}>
-                  <i className={`dot s-${i.state}`} /><strong>{t.name}</strong><span>{LEGEND.find((x) => x[0] === i.state)![1]}</span>
-                  <span>{i.state === "available" ? "" : `⏱ ${minutesSince(i.seatedAt, now)}${i.order ? ` · ▶ ${minutesSince(i.lastSentAt, now)}` : ""}`}</span><b>{i.totalCents !== undefined ? formatMoney(i.totalCents) : ""}</b>
+                <button key={t.id} className={`frow ${picking(i)}`} data-tname={t.name} {...press(i)}>
+                  <strong>{t.name}</strong><span className={`fstate stxt-${st(i)}`}>{i.state === "bill" ? "Bill asked" : LABEL[st(i)]}</span>
+                  <span>{i.order || i.draft ? `Seated ${dur(i.seatedAt)}` : ""}</span><span>{i.order && i.state !== "paid" ? `Sent ${dur(i.lastSentAt)} ago` : ""}</span><span>{i.totalCents !== undefined ? formatMoney(i.totalCents) : ""}</span>
                 </button>
               ); })}
-            </div>
+            </main>
           )}
-          <div className="t-legend" aria-label="Legend">{LEGEND.map(([s, l]) => <span key={s}><i className={`dot s-${s}`} />{l}</span>)}</div>
-          <p className="t-muted t-foot">Each table shows time since seated and, once food is sent, time since the last order was sent.</p>
+          <footer className="legend" aria-label="Legend">
+            <span><i className="dot dfree" />Available</span><span><i className="dot dseated" />Seated</span><span><i className="dot dordered" />Ordered</span><span><i className="dot dbill" />Bill asked</span><span><i className="dot dpaid" />Paid · to clear</span><span><i className="dot dover" />Seated over {p.floor.overdueMinutes ?? 90} min</span>
+            <span className="legnote">Each table shows time since seated, and — once food is sent — time since the last order was sent.</span>
+          </footer>
         </>
       ) : (
-        <div className="t-tabsarea">
-          <div className="t-tabtools"><input placeholder="Search tabs" aria-label="Search tabs" value={search} onChange={(e) => setSearch(e.target.value)} /><button className="t-primary" onClick={() => setNewTab("")}>＋ New Tab</button></div>
-          {tabs.length === 0 ? <p className="t-muted">No open tabs. Start one with New Tab.</p> : <div className="t-tgrid wide">{tabs.map((n) => { const i = info(n); void i; return cell(n, "Bar tab", tabLabel(n)); })}</div>}
-        </div>
+        <>
+          <div className="tabtools"><input type="text" placeholder="Search tabs by name" aria-label="Search tabs" value={search} onChange={(e) => setSearch(e.target.value)} /><button className="primary" onClick={() => setNewTab("")}>+ New Tab</button></div>
+          <main className="tabgrid">
+            {tabs.length === 0 && <p className="muted" style={{ padding: "1.125em" }}>No open tabs yet — open one with New Tab.</p>}
+            {tabs.map((n) => { const i = info(n); const items = i.order ? i.order.lines.reduce((a, l) => a + l.qty, 0) : i.draft ? i.draft.bag.reduce((a, l) => a + l.qty, 0) : 0; const long = now - (i.seatedAt ?? now) > 60 * 60000; return (
+              <button key={n} className={`tabcard ${i.order ? "tordered" : ""} ${long ? "tlong" : ""}`} data-tabname={n} {...press(i)}>
+                <strong>{tabLabel(n)}</strong><small>{items} items · open {dur(i.seatedAt)}</small><span className="tabtotal">{formatMoney(i.totalCents ?? 0)}</span><small>{i.order ? "Ordered" : "Open"}</small>
+              </button>
+            ); })}
+          </main>
+          <footer className="legend"><span><i className="dot dseated" />Open</span><span><i className="dot dordered" />Ordered</span><span><i className="dot dover" />Open over 60 min</span></footer>
+        </>
       )}
 
       {menu?.order && (
-        <Modal title={menu.name} onClose={() => setMenu(null)}>
-          <p className="t-muted">{orderBrief(menu.order, p.config)}</p>
-          <div className="t-menulist">
-            <button onClick={() => { const n = menu.name; setMenu(null); p.onOpen(n); }}>Open order</button>
+        <ProtoModal title={menu.name} onClose={() => setMenu(null)}>
+          <p className="muted">{orderBrief(menu.order, p.config)}</p>
+          <div className="settingsgroup">
+            <button className="primary" onClick={() => { const n = menu.name; setMenu(null); p.onOpen(n); }}>Open order</button>
             {p.canTransfer && <button onClick={() => { setPick({ kind: "transfer", from: menu.order! }); setMenu(null); setMsg(""); }}>Transfer table…</button>}
             {p.canTransfer && <button onClick={() => { setPick({ kind: "merge", from: menu.order! }); setMenu(null); setMsg(""); }}>Merge tables…</button>}
             {p.courses && courseProgress(menu.order) && <button onClick={() => { const o = menu.order!; setMenu(null); void p.onFire(o); }}>Fire Course ({courseProgress(menu.order)!.index} of {courseProgress(menu.order)!.of})</button>}
             <button onClick={() => { const o = menu.order!; setMenu(null); void p.onBill(o); }}>Print guest check</button>
-            <button className="t-ghost" onClick={() => setMenu(null)}>Cancel</button>
+            <button onClick={() => setMenu(null)}>Cancel</button>
           </div>
-        </Modal>
+        </ProtoModal>
       )}
       {confirm && (
-        <Modal title="Merge tables" onClose={() => setConfirm(null)}>
-          <p><b>{confirm.from.spot}</b> ({orderBrief(confirm.from, p.config)}) joins <b>{confirm.into.spot}</b> ({orderBrief(confirm.into, p.config)}).</p>
-          <p className="t-muted">{confirm.into.spot} keeps the bill and {confirm.from.spot} is freed. This cannot be undone.</p>
-          <div className="t-dact"><button className="t-ghost" onClick={() => { setConfirm(null); setPick(null); }}>Cancel</button><button className="t-primary" onClick={() => { const c = confirm; setConfirm(null); void p.onMerge(c.from, c.into).then((e) => { setPick(null); setMsg(e ?? `${c.from.spot} merged into ${c.into.spot}.`); }); }}>Merge</button></div>
-        </Modal>
+        <ProtoModal title="Merge tables?" onClose={() => setConfirm(null)}>
+          <p>Move everything on <strong>{confirm.from.spot}</strong> ({orderBrief(confirm.from, p.config)}) into <strong>{confirm.into.spot}</strong> ({orderBrief(confirm.into, p.config)})?</p>
+          <p className="muted" style={{ marginTop: "0.5em" }}>{confirm.from.spot} becomes free. This cannot be undone.</p>
+          <div className="actions"><button onClick={() => { setConfirm(null); setPick(null); }}>Cancel</button><button className="primary" onClick={() => { const c = confirm; setConfirm(null); void p.onMerge(c.from, c.into).then((e) => { setPick(null); setMsg(e ?? `${c.from.spot} merged into ${c.into.spot}.`); }); }}>Merge tables</button></div>
+        </ProtoModal>
       )}
       {newTab !== null && (
-        <Modal title="New bar tab" onClose={() => setNewTab(null)}>
-          <label className="t-field">Guest name or tab number<input autoFocus value={newTab} onChange={(e) => setNewTab(e.target.value)} maxLength={20} /></label>
-          <div className="t-dact"><button className="t-ghost" onClick={() => setNewTab(null)}>Cancel</button><button className="t-primary" disabled={!newTab.trim()} onClick={() => { const n = `Tab ${newTab.trim()}`; setNewTab(null); p.onNewTab(n); }}>Start tab</button></div>
-        </Modal>
+        <ProtoModal title="New bar tab" onClose={() => setNewTab(null)}>
+          <label className="field">Guest name or tab number<input autoFocus value={newTab} onChange={(e) => setNewTab(e.target.value)} maxLength={20} /></label>
+          <div className="actions"><button onClick={() => setNewTab(null)}>Cancel</button><button className="primary" disabled={!newTab.trim()} onClick={() => { const n = `Tab ${newTab.trim()}`; setNewTab(null); p.onNewTab(n); }}>Open tab</button></div>
+        </ProtoModal>
       )}
     </section>
   );
