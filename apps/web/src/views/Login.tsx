@@ -97,6 +97,8 @@ export function Login({ online, problem }: { online: boolean; problem?: string |
     const digits = phone.replace(/\D/g, "");
     const who: string | { phone: string } | undefined = showPhone ? (digits ? { phone: `${cc}${digits}` } : undefined) : showCode ? code.trim() || undefined : picked?.code;
     if (!who) { setMsg(showPhone ? "Enter your phone number, then your PIN." : showCode ? "Enter your staff code, then your PIN." : "Tap your name first, then enter your PIN."); return; }
+    // Nothing is sent without a PIN: the box is emptied after a wrong attempt, and pressing Login again must say so, not look like a fault.
+    if (!pin) { setMsg("Enter your PIN, then press Login."); setTarget("pin"); return; }
     if (showPhone) localStorage.setItem("pos.cc", cc);
     setBusy(true);
     setMsg(null);
@@ -109,6 +111,7 @@ export function Login({ online, problem }: { online: boolean; problem?: string |
         : r.reason === "invalid" ? (showPhone ? "Wrong phone number or PIN." : "Wrong name or PIN.")
         : r.reason !== "unavailable" ? "Sign-in did not go through. Try again."
         : r.why === "device" ? "This device is not registered with the shop yet. Ask a manager for an enrollment code."
+        : r.why === "server" && r.status === 400 ? "The sign-in was not complete. Enter your phone number or name, then your PIN."
         : r.why === "server" ? `The server is not answering properly just now (error ${r.status}). Wait a few seconds and try again.`
         : "Could not reach the server. Check this device's Wi-Fi or data, then try again.");
     }
