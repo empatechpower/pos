@@ -101,3 +101,61 @@
 .proto .setours small.muted, .proto .setours .muted small { font-size: calc(0.75 * var(--u)); }
 .proto .setours input[type="checkbox"], .proto .setours input[type="radio"] { min-height: 0; padding: 0; width: calc(1.125 * var(--u)); height: calc(1.125 * var(--u)); flex: none; }
 .proto .setours input[type="color"] { padding: calc(0.25 * var(--u)); width: calc(3 * var(--u)); }
+
+/* ---- Phones. The prototype is drawn for a tablet; these keep each screen inside a narrow one. ---- */
+/* A receipt is 42 characters wide: on a narrow screen its type shrinks so a line still fits on one line. */
+.proto pre.receipt.r7 { font-size: min(calc(0.8125 * var(--u)), calc((100vw - 5 * var(--u)) / 25.6)); overflow-x: auto; }
+/* The checks board: a card never asks for more width than the screen has. */
+.proto .checkgrid.big { grid-template-columns: repeat(auto-fit, minmax(min(calc(21 * var(--u)), 100%), 1fr)); }
+.proto .checks-main { min-width: 0; }
+/* Split By Item: the − and + that move an item onto a check, at a size a finger can hit (the prototype's are about 21 by 17 pixels). */
+.proto .splitline .qtycontrols { flex-direction: row; gap: calc(0.5 * var(--u)); }
+.proto .splitline .qtycontrols button { min-width: calc(2.75 * var(--u)); min-height: calc(2.75 * var(--u)); font-size: calc(1.25 * var(--u)); border: calc(0.0625 * var(--u)) solid #cdd6d9; border-radius: 50%; background: #fff; color: #437084; }
+/* Orders: the tabs scroll along their own row instead of pushing the page sideways. */
+.proto .ordtools .ordtabs { max-width: 100%; overflow-x: auto; flex-wrap: nowrap; }
+.proto .ordtools .ordtabs button { flex: none; white-space: nowrap; }
+.proto .ordwrap, .proto .viewmain { min-width: 0; }
+.proto .ordrow { min-width: 0; }
+/* The Table Map's floor can be panned when the screen is narrower than the room. */
+.proto .floorscroll { flex: 1; min-height: 0; overflow: auto; display: flex; }
+.proto .floorscroll .floorcanvas { flex: 1 0 auto; min-width: calc(40 * var(--u)); }
+.proto.floorwrap .floortools .choices button { min-width: 0; }
+@media (max-width: 43.75rem) {
+  /* Settings: the sections become a row across the top, the section below takes the full width. */
+  .proto .setwrap { grid-template-columns: minmax(0, 1fr); grid-template-rows: auto minmax(0, 1fr); }
+  .proto .setrail { flex-direction: row; overflow-x: auto; border-right: 0; border-bottom: calc(0.0625 * var(--u)) solid #d5e0e6; padding: calc(0.5 * var(--u)); }
+  .proto .setrail button { flex: none; white-space: nowrap; }
+  .proto .setrail .setback { margin-top: 0; margin-left: auto; }
+  .proto .setmain { padding: calc(0.875 * var(--u)); min-width: 0; }
+  .proto .setmain .choices button { min-width: 0; flex: 1 1 calc(40% - 0.5 * var(--u)); }
+  .proto .setours .arr-row label { flex-wrap: wrap; }
+  .proto .setours .perm-table th, .proto .setours .perm-table td { padding: calc(0.375 * var(--u)) calc(0.25 * var(--u)); }
+  .proto .setours .field input:not([type="checkbox"]), .proto .setours .field select { width: 100%; }
+  /* The legend's note takes its own line. */
+  .proto .legend .legnote { margin-left: 0; flex-basis: 100%; }
+  .proto .dashtiles { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  /* A dialog's buttons wrap onto a second line when there are too many for one. */
+  .proto .dialog .actions { flex-wrap: wrap; }
+  .proto .dialog .actions button { min-width: 0; flex: 1 1 auto; }
+  .proto .dialog .choices { flex-wrap: wrap; }
+  .proto .checks-actions button, .proto .checkactions button { min-width: 0; }
+}
+@media (max-width: 43.75rem) and (orientation: portrait) {
+  /* The ticket on a phone. In the prototype the order's title sits under the collapse button and the dining chip, where it cannot be read:
+     here those keep the top row and the title takes the line below. */
+  .proto .billtitle { padding: calc(3 * var(--u)) 0 calc(0.375 * var(--u)); }
+  .proto .billtitle .newcircle { top: calc(-0.1875 * var(--u)); }
+  /* The + and − on a ticket line, and its fold arrow, at a size a finger can hit (the prototype's are about 26 by 20 pixels, the arrow 11 by 13). */
+  .proto .line .qtycontrols { gap: calc(0.25 * var(--u)); }
+  .proto .line .qtycontrols button { min-width: calc(2.25 * var(--u)); min-height: calc(1.875 * var(--u)); }
+  .proto .line .qtycontrols button span { width: calc(2 * var(--u)); height: calc(1.625 * var(--u)); border-radius: calc(0.5 * var(--u)); font-size: calc(1 * var(--u)); }
+  .proto .line .lmore { font-size: calc(0.875 * var(--u)); min-width: calc(2 * var(--u)); min-height: calc(2 * var(--u)); padding: 0; margin: calc(-0.5 * var(--u)) 0; background: transparent; border: 0; box-shadow: none; }
+}
+@media (max-width: 30rem) {
+  /* The header on a phone: a smaller logo and tighter buttons leave room for the first nav buttons, and the row fades at its right edge
+     to show there is more to swipe to (the prototype scrolls this row with no hint). */
+  .proto header { gap: calc(0.3125 * var(--u)); padding-left: calc(0.5 * var(--u)); padding-right: calc(0.5 * var(--u)); }
+  .proto header .headlogo { height: calc(1.125 * var(--u)); }
+  .proto header button { padding-left: calc(0.5 * var(--u)); padding-right: calc(0.5 * var(--u)); font-size: calc(0.8125 * var(--u)); }
+  .proto header .headnav { gap: calc(0.3125 * var(--u)); -webkit-mask-image: linear-gradient(to right, #000 calc(100% - 1.75 * var(--u)), transparent); mask-image: linear-gradient(to right, #000 calc(100% - 1.75 * var(--u)), transparent); padding-right: calc(1.25 * var(--u)); }
+}

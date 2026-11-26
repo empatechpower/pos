@@ -21,7 +21,8 @@ export function TableMap(p: {
   canArrange?: boolean; onSaveFloor?: (patch: Partial<FloorSettings>) => Promise<string | null>;
 }) {
   const [seg, setSeg] = useState<"floor" | "tabs">("floor");
-  const [layout, setLayout] = useState<"floor" | "list">("floor");
+  // On a phone the floor is too narrow to read at a glance: the map opens as a list there (Floor is one tap away, and can be panned).
+  const [layout, setLayout] = useState<"floor" | "list">(() => (window.innerWidth < 700 ? "list" : "floor"));
   const [now, setNow] = useState(Date.now());
   useEffect(() => { const t = window.setInterval(() => setNow(Date.now()), 15_000); return () => window.clearInterval(t); }, []);
   const [menu, setMenu] = useState<TableInfo | null>(null);
@@ -149,10 +150,12 @@ export function TableMap(p: {
             {layout === "floor" && arrange && <button onClick={() => void addTable()}>+ Table</button>}
           </div>
           {layout === "floor" ? (
+            <div className="floorscroll">
             <main className={`floorcanvas ${arrange ? "arranging" : ""}`} ref={canvas}>
               {floorTables.length === 0 && <p className="muted" style={{ padding: "1em" }}>No tables in this section.</p>}
               {floorTables.map((t) => arrange ? arrangeCell(t) : floorCell(t))}
             </main>
+            </div>
           ) : (
             <main className="floorlist">
               {floorTables.length === 0 && <p className="muted" style={{ padding: "1em" }}>No tables in this section.</p>}
