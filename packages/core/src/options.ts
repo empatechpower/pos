@@ -10,6 +10,8 @@ export interface OptionChoice {
   /** Added to the item's price (0 for "included"). */
   priceCents: Cents;
   soldOut?: boolean;
+  /** A variant's own barcode or SKU (14 Nov handout 1.2: each variant is its own SKU). Scanning it adds the item as this variant. */
+  barcode?: string;
   /** Pre-selected for required single-choice groups. */
   default?: boolean;
   /** Combos: the menu item this choice stands for. Its sold-out state follows that item, and a kitchen ticket prints it as its own item. */
@@ -60,6 +62,8 @@ export interface ChosenOption {
   /** How many of `qty` fell inside the group's free allowance (charged 0). */
   freeQty?: number;
   prefix?: OptionPrefix;
+  /** The item's own variation (Hot / Iced, Small / Large), not an add-on: the receipt prints it under the item's name. */
+  variant?: boolean;
 }
 
 export type OptionError = "unknown_option" | "option_sold_out" | "missing_required" | "too_many_options" | "too_few_options" | "bad_option_quantity";
@@ -122,7 +126,7 @@ export function resolveOptions(groups: readonly OptionGroup[] | undefined, input
       const q = picked?.get(c.id);
       if (!q) continue;
       const free = freeBy.get(g.id)?.get(c.id) ?? 0;
-      options.push({ group: g.name, name: c.name, qty: q, priceCents: c.priceCents, ...(c.productId ? { productId: c.productId } : {}), ...(free ? { freeQty: free } : {}), ...(c.prefix ? { prefix: c.prefix } : {}) });
+      options.push({ group: g.name, name: c.name, qty: q, priceCents: c.priceCents, ...(c.productId ? { productId: c.productId } : {}), ...(free ? { freeQty: free } : {}), ...(c.prefix ? { prefix: c.prefix } : {}), ...(g.variant ? { variant: true } : {}) });
       extra += c.priceCents * (q - free);
       keyParts.push(`${g.id}:${c.id}:${q}`);
     }

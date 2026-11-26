@@ -13,3 +13,12 @@
 /* Layout editing: our extra choices (delete page, cancel, the shop's layout) under the prototype's instructions. */
 .proto .editnote .editacts { display: flex; flex-wrap: wrap; gap: calc(0.375 * var(--u)); margin-top: calc(0.5 * var(--u)); }
 .proto .editnote .editacts button { min-height: calc(2 * var(--u)); padding: calc(0.25 * var(--u)) calc(0.75 * var(--u)); font-size: calc(0.75 * var(--u)); }
+/* Select options: a choice that can be picked several times gets a "fewer" button on its corner (the prototype's choices are once each). */
+.proto .optionchoices .optioncell { position: relative; display: flex; }
+.proto .optionchoices .optioncell > button:first-child { flex: 1; width: 100%; }
+.proto .optionchoices .optioncell > .optionless { position: absolute; top: calc(0.3125 * var(--u)); right: calc(0.3125 * var(--u)); min-height: calc(1.75 * var(--u)); width: calc(1.75 * var(--u)); padding: 0; border-radius: 999px; text-align: center; font-size: calc(1 * var(--u)); }
+/* The checks board fills the till's full-screen view (the prototype gives it the whole page under the header). */
+.proto.protohead.checksview { min-height: 100%; display: flex; flex-direction: column; }
+/* Payment complete: the change to hand back, above the receipt (the prototype only has it inside the receipt), and the queue number while the receipt is not available. */
+.proto .dialog .donechange { font-size: calc(1.25 * var(--u)); color: #a3231f; margin-bottom: calc(0.75 * var(--u)); }
+.proto .receipt.r7 .donequeue { font-size: calc(3 * var(--u)); line-height: 1.2; }

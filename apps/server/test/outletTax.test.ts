@@ -126,7 +126,7 @@ describe("taking tax off an order", () => {
     expect(text).toMatch(/Total \(SGD\)\s+S?\$10\.00/);
   });
   it("is kept, audited and shown on the receipt where the pack allows it", async () => {
-    config.pricing.taxRemovable = true; // as a country pack that allows it would set
+    expect((await call("/api/outlets/EV", { method: "PUT", body: { name: "EV", taxRemovable: true }, staff: owner })).status).toBe(200); // the outlet's own switch
     const id = "tax-order-3";
     await call("/api/sync/push", { body: { events: [
       ev(id, { type: "OrderOpened", fulfilment: "takeaway" }),
@@ -139,7 +139,7 @@ describe("taking tax off an order", () => {
     expect(text).toMatch(/Total \(SGD\)\s+S?\$9\.17/);
     const a = await db.query("SELECT detail FROM audit_log WHERE merchant_id='bp' AND action='order.tax_removed'").catch(() => null);
     if (a) expect(a.rows.length).toBe(1);
-    config.pricing.taxRemovable = false;
+    await call("/api/outlets/EV", { method: "PUT", body: { name: "EV", taxRemovable: false }, staff: owner });
   });
 });
 
@@ -234,6 +234,30 @@ describe("other things the handout fixes", () => {
     expect(set.json.serviceRate).toBe(0.09);
     expect((await call("/api/config")).json.pricing.serviceRate).toBe(0.09);
     expect((await db.query("SELECT value FROM merchant_settings WHERE merchant_id='bp' AND key='serviceRatePct'")).rows[0].value).toBe(9);
+  });
+});
+
+describe("rounding and tax removal are the outlet's own choices", () => {
+  it("off until chosen; the owner picks a step the country offers; the outlet's tills are told", async () => {
+    const mine = async () => (await call("/api/config")).json.pricing;
+    expect((await mine()).tenderRounding).toBeUndefined();
+    expect((await mine()).taxRemovable).toBe(false);
+    expect((await mine()).roundingSteps).toEqual([5, 10]);
+    expect((await call("/api/outlets/EV", { method: "PUT", body: { name: "EV", tenderRounding: { cash: 3 } }, staff: owner })).status).toBe(400);
+    expect((await call("/api/outlets/EV", { method: "PUT", body: { name: "EV", tenderRounding: { cash: 5 } }, staff: mgr })).status).toBe(403);
+    expect((await call("/api/outlets/EV", { method: "PUT", body: { name: "EV", tenderRounding: { cash: 5 }, taxRemovable: true }, staff: owner })).status).toBe(200);
+    expect(await mine()).toMatchObject({ tenderRounding: { cash: 5 }, taxRemovable: true });
+    // an outlet manager can still save the address without touching them
+    expect((await call("/api/outlets/EV", { method: "PUT", body: { name: "EV", address: "3 Lengkok Bahru" }, staff: mgr })).status).toBe(200);
+    expect(await mine()).toMatchObject({ tenderRounding: { cash: 5 }, taxRemovable: true });
+    expect((await call("/api/outlets/EV", { method: "PUT", body: { name: "EV", tenderRounding: {}, taxRemovable: false }, staff: owner })).status).toBe(200);
+    expect((await mine()).tenderRounding).toBeUndefined();
+  });
+  it("Malaysia can be chosen for an outlet: its tax is called SST", async () => {
+    expect((await call("/api/outlets/KL", { method: "PUT", body: { name: "Kuala Lumpur", country: "MY" }, staff: owner })).status).toBe(200);
+    const kl = (await enroll(db, "bp", (await createEnrollmentCode(db, { merchantId: "bp", outletId: "KL", createdBy: null })).code, "KL till"))!;
+    const cfg = (await (await fetch(base + "/api/config", { headers: { "x-device-token": kl.token } })).json()) as any;
+    expect(cfg.pricing).toMatchObject({ country: "MY", taxName: "SST", roundingSteps: [5, 10] });
   });
 });
 

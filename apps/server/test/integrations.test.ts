@@ -1,4 +1,5 @@
 import { createHmac } from "node:crypto";
+import { cleanSignin, saveSignin } from "../src/settings.js";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { PRESETS, confirmedPaid, orderTotals, reduceOrder } from "@pos/core";
 import { buildApp } from "../src/app.js";
@@ -108,6 +109,19 @@ const tillPush = (orderId: string, extra: object, root?: string) => call("/api/s
 const orderState = async (id: string) => reduceOrder(id, await store.eventsForOrder(id))!;
 
 describe("what the shop says it can do", () => {
+  it("offers Google and Microsoft sign-in only once the owner has switched them on", async () => {
+    // registered on the server, but off by default
+    expect((await call("/api/shop/info")).json.auth).toMatchObject({ google: false, microsoft: false });
+    expect((await call("/api/shop/auth/oauth/google/start", { manual: true })).status).toBe(404);
+    expect(cleanSignin({ google: "yes" })).toBeNull();
+    await saveSignin(db, "bp", { google: true, microsoft: false });
+    expect((await call("/api/shop/info")).json.auth).toMatchObject({ google: true, microsoft: false });
+    expect((await call("/api/shop/auth/oauth/microsoft/start", { manual: true })).status).toBe(404);
+    expect((await call("/api/shop/auth/oauth/microsoft/callback?code=x&state=y", { manual: true })).status).toBe(404);
+    await saveSignin(db, "bp", { google: true, microsoft: true });
+    // switched on where the server has no registration: still not offered
+    expect((await call("/api/shop/info", { root: baseBare })).json.auth).toMatchObject({ google: false, microsoft: false });
+  });
   it("lists only the features that are set up", async () => {
     const on = (await call("/api/shop/info")).json;
     expect(on.auth).toMatchObject({ google: true, microsoft: true, phone: { number: "+65 8799 6394" } });

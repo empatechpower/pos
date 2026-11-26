@@ -20,7 +20,10 @@ export interface Outlet { id: string; name: string; franchiseId: string | null; 
   gstOn: boolean | null;
   /** The closing lines of this outlet's receipt (one per line), and its customer service line. Null = the defaults. */
   receiptFooter: string | null;
-  customerService: string | null }
+  customerService: string | null;
+  /** Rounding by tender, in cents ({ cash: 5 }); empty = no rounding. And whether staff here may take tax off an order. */
+  tenderRounding: Record<string, number>;
+  taxRemovable: boolean }
 
 const ID = /^[A-Za-z0-9][A-Za-z0-9 _.-]{0,39}$/;
 export const validId = (s: unknown): s is string => typeof s === "string" && ID.test(s);
@@ -34,6 +37,7 @@ const toOutlet = (r: Record<string, unknown>): Outlet => ({
   longitude: r.longitude === null || r.longitude === undefined ? null : Number(r.longitude),
   country: typeof r.country === "string" && r.country ? r.country : "SG",
   gstRegNo: (r.gst_reg_no as string | null) ?? null, uen: (r.uen as string | null) ?? null, gstOn: typeof r.gst_on === "boolean" ? r.gst_on : null, receiptFooter: (r.receipt_footer as string | null) ?? null, customerService: (r.customer_service as string | null) ?? null,
+  tenderRounding: r.tender_rounding && typeof r.tender_rounding === "object" ? (r.tender_rounding as Record<string, number>) : {}, taxRemovable: r.tax_removable === true,
 });
 
 /** The outlet this server has always run becomes the first outlet. Safe to call at every start. */
@@ -59,11 +63,11 @@ export async function upsertFranchise(db: Db, merchantId: string, f: { id: strin
 }
 
 /** A franchise that does not exist is refused by the foreign key; callers check first for a friendly message. */
-export async function upsertOutlet(db: Db, merchantId: string, o: { id: string; name: string; franchiseId?: string | null; address?: string | null; phone?: string | null; hours?: string | null; active?: boolean; serviceMode?: "qsr" | "tsr" | "retail" | null; prepMinutes?: number | null; latitude?: number | null; longitude?: number | null; country?: string; gstRegNo?: string | null; uen?: string | null; gstOn?: boolean | null; receiptFooter?: string | null; customerService?: string | null }): Promise<void> {
+export async function upsertOutlet(db: Db, merchantId: string, o: { id: string; name: string; franchiseId?: string | null; address?: string | null; phone?: string | null; hours?: string | null; active?: boolean; serviceMode?: "qsr" | "tsr" | "retail" | null; prepMinutes?: number | null; latitude?: number | null; longitude?: number | null; country?: string; gstRegNo?: string | null; uen?: string | null; gstOn?: boolean | null; receiptFooter?: string | null; customerService?: string | null; tenderRounding?: Record<string, number>; taxRemovable?: boolean }): Promise<void> {
   await db.query(
-    `INSERT INTO outlets (merchant_id, id, name, franchise_id, address, phone, hours, active, service_mode, prep_minutes, latitude, longitude, country, gst_reg_no, uen, gst_on, receipt_footer, customer_service) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18)
-     ON CONFLICT (merchant_id, id) DO UPDATE SET name=EXCLUDED.name, franchise_id=EXCLUDED.franchise_id, address=EXCLUDED.address, phone=EXCLUDED.phone, hours=EXCLUDED.hours, active=EXCLUDED.active, service_mode=COALESCE(EXCLUDED.service_mode, outlets.service_mode), prep_minutes=EXCLUDED.prep_minutes, latitude=EXCLUDED.latitude, longitude=EXCLUDED.longitude, country=EXCLUDED.country, gst_reg_no=EXCLUDED.gst_reg_no, uen=EXCLUDED.uen, gst_on=EXCLUDED.gst_on, receipt_footer=EXCLUDED.receipt_footer, customer_service=EXCLUDED.customer_service`,
-    [merchantId, o.id, o.name, o.franchiseId ?? null, o.address ?? null, o.phone ?? null, o.hours ?? null, o.active ?? true, o.serviceMode ?? null, o.prepMinutes ?? null, o.latitude ?? null, o.longitude ?? null, o.country ?? "SG", o.gstRegNo ?? null, o.uen ?? null, o.gstOn ?? null, o.receiptFooter ?? null, o.customerService ?? null],
+    `INSERT INTO outlets (merchant_id, id, name, franchise_id, address, phone, hours, active, service_mode, prep_minutes, latitude, longitude, country, gst_reg_no, uen, gst_on, receipt_footer, customer_service, tender_rounding, tax_removable) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19::jsonb,$20)
+     ON CONFLICT (merchant_id, id) DO UPDATE SET name=EXCLUDED.name, franchise_id=EXCLUDED.franchise_id, address=EXCLUDED.address, phone=EXCLUDED.phone, hours=EXCLUDED.hours, active=EXCLUDED.active, service_mode=COALESCE(EXCLUDED.service_mode, outlets.service_mode), prep_minutes=EXCLUDED.prep_minutes, latitude=EXCLUDED.latitude, longitude=EXCLUDED.longitude, country=EXCLUDED.country, gst_reg_no=EXCLUDED.gst_reg_no, uen=EXCLUDED.uen, gst_on=EXCLUDED.gst_on, receipt_footer=EXCLUDED.receipt_footer, customer_service=EXCLUDED.customer_service, tender_rounding=EXCLUDED.tender_rounding, tax_removable=EXCLUDED.tax_removable`,
+    [merchantId, o.id, o.name, o.franchiseId ?? null, o.address ?? null, o.phone ?? null, o.hours ?? null, o.active ?? true, o.serviceMode ?? null, o.prepMinutes ?? null, o.latitude ?? null, o.longitude ?? null, o.country ?? "SG", o.gstRegNo ?? null, o.uen ?? null, o.gstOn ?? null, o.receiptFooter ?? null, o.customerService ?? null, JSON.stringify(o.tenderRounding ?? {}), o.taxRemovable === true],
   );
 }
 

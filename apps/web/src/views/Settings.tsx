@@ -14,6 +14,7 @@ import { PaynowPanel } from "./PaynowPanel";
 import { isTraining } from "../training";
 import { getDeviceCode, setDeviceCode } from "../db";
 import { setLayout } from "../prefs";
+import { READY_LOOKS, lookOf } from "../looks";
 
 type Section = "station" | "selling" | "menu" | "training" | "about";
 
@@ -236,6 +237,57 @@ function TelegramLink() {
   );
 }
 
+/** How long member credit lasts, how long it can be brought back, and the smallest top-up (the owner's rules of 25 Nov 2026, as settings). */
+/** Google and Microsoft sign-in for customers of the online shop and kiosk: one switch each, off until the owner turns it on. */
+function SigninCard() {
+  const [v, setV] = useState<{ google: boolean; microsoft: boolean; ready: { google: boolean; microsoft: boolean } } | null>(null);
+  const [msg, setMsg] = useState("");
+  useEffect(() => { void staffFetch("/api/settings/signin").then(async (x) => { if ("res" in x && x.res.ok) setV(await x.res.json()); }); }, []);
+  if (!v) return null;
+  const set = async (k: "google" | "microsoft", on: boolean) => {
+    const x = await staffFetch("/api/settings/signin", { method: "PUT", body: { [k]: on } });
+    if ("res" in x && x.res.ok) { setV(await x.res.json()); setMsg("Saved."); } else setMsg("res" in x && x.res.status === 403 ? "Only the brand owner can change sign-in." : "Could not save. Try again.");
+  };
+  const row = (k: "google" | "microsoft", name: string) => (
+    <label className="row" style={{ gap: 8, alignItems: "center" }}>
+      <input type="checkbox" aria-label={`${name} sign-in`} checked={v[k]} onChange={(e) => void set(k, e.target.checked)} />
+      <span>{name}{v[k] && !v.ready[k] ? <span className="muted"> · switched on, but not showing yet: this server has no {name} app registration</span> : !v.ready[k] ? <span className="muted"> · needs a {name} app registration on the server first</span> : null}</span>
+    </label>
+  );
+  return (
+    <section className="e2e-card" style={{ marginTop: 16 }}>
+      <h3>Customer sign-in</h3>
+      <p className="muted">Customers sign in with their phone number. These add a "Continue with" button to the online shop. Both are off unless switched on here.</p>
+      {msg && <p className="flash" role="status">{msg}</p>}
+      {row("google", "Google")}
+      {row("microsoft", "Microsoft")}
+    </section>
+  );
+}
+function CreditRulesCard() {
+  const [r, setR] = useState<{ validityDays: string; reinstateDays: string; min: string } | null>(null);
+  const [msg, setMsg] = useState("");
+  useEffect(() => { void staffFetch("/api/settings/credit").then(async (x) => { if ("res" in x && x.res.ok) { const j = (await x.res.json()) as { validityDays: number; reinstateDays: number; minTopupCents: number }; setR({ validityDays: String(j.validityDays), reinstateDays: String(j.reinstateDays), min: (j.minTopupCents / 100).toFixed(2) }); } }); }, []);
+  if (!r) return null;
+  const save = async () => {
+    const x = await staffFetch("/api/settings/credit", { method: "PUT", body: { validityDays: Math.round(Number(r.validityDays)), reinstateDays: Math.round(Number(r.reinstateDays)), minTopupCents: Math.round(Number(r.min) * 100) } });
+    setMsg("res" in x && x.res.ok ? "Saved." : "res" in x && x.res.status === 403 ? "Only the brand owner can change the credit rules." : "Check the numbers: days are whole numbers, and the top-up is an amount.");
+  };
+  return (
+    <section className="e2e-card" style={{ marginTop: 16 }}>
+      <h3>Member credit</h3>
+      <p className="muted">Credit is valid for a time counted from the member's last top-up. After that it cannot be spent, but a top-up within the reinstatement time brings the whole balance back. Past that, it is written off at their next top-up.</p>
+      {msg && <p className="flash" role="status">{msg}</p>}
+      <div className="row" style={{ flexWrap: "wrap", gap: 12 }}>
+        <label className="field">Valid for (days after the last top-up; 0 = never expires)<input aria-label="Credit valid for days" inputMode="numeric" value={r.validityDays} onChange={(e) => setR({ ...r, validityDays: e.target.value.replace(/\D/g, "") })} /></label>
+        <label className="field">Can be brought back for (days after expiry)<input aria-label="Credit reinstatement days" inputMode="numeric" value={r.reinstateDays} onChange={(e) => setR({ ...r, reinstateDays: e.target.value.replace(/\D/g, "") })} /></label>
+        <label className="field">Smallest top-up (S$)<input aria-label="Smallest top-up" inputMode="decimal" value={r.min} onChange={(e) => setR({ ...r, min: e.target.value.replace(/[^\d.]/g, "") })} /></label>
+      </div>
+      <div className="row"><button className="primary sm" onClick={() => void save()}>Save</button></div>
+    </section>
+  );
+}
+
 /** Kitchen stations: a name and the menu categories it makes. The kitchen display can then show one station's work. */
 function StationsEditor({ stations, categories, onSave }: { stations: KitchenStation[]; categories: string[]; onSave: (s: KitchenStation[]) => void }) {
   const [name, setName] = useState("");
@@ -300,6 +352,13 @@ export function Settings({ catalog }: { catalog?: Catalog | null } = {}) {
             <div className="row">{(["compact", "standard", "large", "xl"] as const).map((k) => <button key={k} className={prefs.textSize === k ? "primary sm" : "secondary sm"} aria-pressed={prefs.textSize === k} onClick={() => void setPref("textSize", k)}>{k === "xl" ? "Extra large" : k[0]!.toUpperCase() + k.slice(1)} · {Math.round(TEXT_SCALE[k] * 100)}%</button>)}</div>
             <h3>Menu panel</h3>
             <div className="row">{(["left", "right"] as const).map((s) => <button key={s} className={prefs.menuSide === s ? "primary sm" : "secondary sm"} aria-pressed={prefs.menuSide === s} onClick={() => void setPref("menuSide", s)}>{s === "left" ? "Left" : "Right"}</button>)}</div>
+            {READY_LOOKS.length > 1 && (
+              <>
+                <h3>Look</h3>
+                <p className="muted">The interface style you work in. It changes your screens only.</p>
+                <div className="row">{READY_LOOKS.map((l) => <button key={l.id} className={lookOf(prefs.look) === l.id ? "primary sm" : "secondary sm"} aria-pressed={lookOf(prefs.look) === l.id} title={l.note} onClick={() => void setPref("look", l.id)}>{l.name}</button>)}</div>
+              </>
+            )}
             <TelegramLink />
             <h3>This device</h3>
             <p className="muted">A kitchen display is this same app on a screen in the kitchen: it opens on the kitchen's orders after sign-in.</p>
@@ -340,6 +399,8 @@ export function Settings({ catalog }: { catalog?: Catalog | null } = {}) {
             <Arrange title={scope === "till" ? "Order actions · this till" : "Order actions · every till"} help="Which buttons show on the till's action strip, and in what order. Pay is always there." pool={[...ACTION_POOL, ...(till.customActions ?? []).filter((a) => a.where !== "dashboard").map((a) => ({ id: a.id, label: a.label, note: "Your own button" }))]} pref={scope === "till" ? actionsPref(till) : till.actions} onChange={(p) => void save(scope === "till" ? { thisTill: { ...(till.thisTill ?? {}), actions: p } } : { actions: p })} />
             <CustomTendersEditor tenders={till.customTenders ?? []} onSave={(t) => void save({ customTenders: t })} />
             {staff.role === "owner" && <PermissionsCard />}
+            {staff.role === "owner" && <CreditRulesCard />}
+            {staff.role === "owner" && <SigninCard />}
             <StationsEditor stations={till.stations ?? []} categories={categories} onSave={(s) => void save({ stations: s })} />
             <Arrange title={scope === "till" ? "Payment options · this till" : "Payment options · every till"} help="Which ways to pay show on the payment panel, and in what order." pool={[...TENDER_POOL, ...(till.customTenders ?? []).map((t) => ({ id: t.id, label: t.name, note: "Your own payment type" }))]} pref={scope === "till" ? tendersPref(till) : till.tenders} onChange={(p) => void save(scope === "till" ? { thisTill: { ...(till.thisTill ?? {}), tenders: p } } : { tenders: p })} />
             <FloorPanel />

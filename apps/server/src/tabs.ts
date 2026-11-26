@@ -9,7 +9,7 @@ import type { Db } from "./db/pool.js";
 import type { Permission } from "./auth.js";
 import { audit } from "./auth.js";
 import type { Member, MemberStore } from "./members.js";
-import { creditBlockedFor, refund as refundCreditLedger, spend as spendCredit } from "./ledger.js";
+import { creditBlockedFor, creditSpendable, refund as refundCreditLedger, spend as spendCredit } from "./ledger.js";
 import { FailureLimiter } from "./rateLimit.js";
 
 /**
@@ -485,6 +485,7 @@ export class TabService {
       if (!o.member) { await this.release(paymentId, "rejected", "a member must be signed in to pay with credit"); return fail(401, "sign_in_to_use_credit"); }
       // Frozen credit cannot be spent on a tab either.
       if (await creditBlockedFor(this.d.db, this.m, o.member.id)) { await this.release(paymentId, "rejected", "credit is frozen"); return fail(403, "credit_frozen"); }
+      if (!(await creditSpendable(this.d.db, this.m, o.member.id))) { await this.release(paymentId, "rejected", "credit has expired"); return fail(403, "credit_expired"); }
       const spent = await spendCredit(this.d.db, { merchantId: this.m, customerId: o.member.id, amountCents: result.amountCents as number, idempotencyKey: `tab-pay:${paymentId}`, orderId: o.tabId, deviceId: "shop", outletId: (await this.tabOpen(o.tabId)).outletId, note: "Tab payment" });
       if (!spent.ok) { await this.release(paymentId, "rejected", "not enough credit"); return fail(409, "not_enough_credit", { balanceCents: spent.balanceCents, neededCents: result.amountCents }); }
       await this.complete(paymentId);

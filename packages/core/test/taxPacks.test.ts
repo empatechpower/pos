@@ -137,3 +137,39 @@ describe("service charge: by each line's own channel, at the rate the order open
     expect(orderTotals(old, config).service).toBe(100); // an order from before this follows the shop's rate
   });
 });
+
+describe("rounding by tender, chosen by the outlet from what its country offers", () => {
+  it("Singapore and Malaysia both offer 5 and 10 cents; anything else is refused", async () => {
+    const { cleanTenderRounding } = await import("../src/taxPacks.js");
+    expect(TAX_PACKS.SG!.roundingSteps).toEqual([5, 10]);
+    expect(TAX_PACKS.MY).toMatchObject({ taxName: "SST", roundingSteps: [5, 10] });
+    expect(cleanTenderRounding({ cash: 5 }, "SG")).toEqual({ cash: 5 });
+    expect(cleanTenderRounding({ cash: 10, card: 0 }, "MY")).toEqual({ cash: 10 });
+    expect(cleanTenderRounding({ cash: 100 }, "SG")).toBeNull();
+    expect(cleanTenderRounding({ "Cash!": 5 }, "SG")).toBeNull();
+    expect(cleanTenderRounding(undefined, "SG")).toEqual({});
+  });
+  it("a cash payment rounded at the till keeps the difference on the order, and the lines still add up", () => {
+    const config = PRESETS.fastServe("m", "Shop", "Outlet");
+    const base = { orderId: "r1", deviceId: "d" };
+    const evs = [
+      { ...base, id: "a1", seq: 1, ts: 1, type: "OrderOpened", fulfilment: "takeaway" },
+      { ...base, id: "a2", seq: 2, ts: 2, type: "ItemAdded", lineId: "l1", productId: "p", name: "Tea", unitCents: 1232, qty: 1 },
+      { ...base, id: "a3", seq: 3, ts: 3, type: "RoundingApplied", cents: -2, tender: "cash" },
+      { ...base, id: "a4", seq: 4, ts: 4, type: "PaymentRecorded", paymentId: "p1", method: "cash", amountCents: 1230, confirmed: true },
+    ] as unknown as OrderEvent[];
+    const o = reduceOrder("r1", evs)!;
+    const t = orderTotals(o, config);
+    expect(t.total).toBe(1230);
+    expect(t.rounding).toBe(-2);
+    expect(totalsLines(t).find((l) => l.key === "rounding")).toMatchObject({ cents: 2, negative: true });
+    // before it was paid (no rounding yet) the order shows the exact amount, as a card payment would be charged
+    expect(orderTotals(reduceOrder("r1", evs.slice(0, 2))!, config).total).toBe(1232);
+    // nonsense is ignored
+    expect(orderTotals(reduceOrder("r1", [...evs.slice(0, 2), { ...base, id: "a9", seq: 3, ts: 3, type: "RoundingApplied", cents: 500 } as unknown as OrderEvent])!, config).total).toBe(1232);
+  });
+  it("whether tax may be taken off is the outlet's switch, within what the country allows", () => {
+    expect(withTaxPack({ ...on, taxRemovable: true }, "SG").taxRemovable).toBe(true);
+    expect(withTaxPack({ ...on }, "SG").taxRemovable).toBe(false);
+  });
+});

@@ -182,3 +182,65 @@ export async function creditBlockedFor(db: Db, merchantId: string, memberId: str
   const r = await db.query("SELECT 1 FROM credit_freeze_exempt WHERE merchant_id=$1 AND member_id=$2", [merchantId, memberId]);
   return !r.rowCount;
 }
+
+// ---- how long credit lasts (owner's rules, 25 Nov 2026) ---------------------------------------------------------------------------------
+
+/**
+ * Credit is valid for a time counted from the LAST top-up (a year unless the shop says otherwise). After that it is expired: it cannot be
+ * spent, but a top-up within the reinstatement time (three months) brings the whole balance back with a fresh validity. Past that, it has
+ * lapsed: it is written off the next time the wallet is topped up. A top-up must be at least the shop's minimum (S$10). All three are the
+ * shop's settings; 0 days of validity means credit never expires.
+ */
+export interface CreditRules { validityDays: number; reinstateDays: number; minTopupCents: number }
+export const DEFAULT_CREDIT_RULES: CreditRules = { validityDays: 365, reinstateDays: 90, minTopupCents: 1000 };
+const DAY = 86_400_000;
+
+export function cleanCreditRules(v: unknown, base: CreditRules = DEFAULT_CREDIT_RULES): CreditRules | null {
+  const o = (v ?? {}) as Partial<Record<keyof CreditRules, unknown>>;
+  const int = (x: unknown, d: number, max: number): number | null => (x === undefined ? d : Number.isInteger(x) && (x as number) >= 0 && (x as number) <= max ? (x as number) : null);
+  const validityDays = int(o.validityDays, base.validityDays, 3660), reinstateDays = int(o.reinstateDays, base.reinstateDays, 730), minTopupCents = int(o.minTopupCents, base.minTopupCents, 1_000_000);
+  return validityDays === null || reinstateDays === null || minTopupCents === null ? null : { validityDays, reinstateDays, minTopupCents };
+}
+export async function loadCreditRules(db: Db, merchantId: string): Promise<CreditRules> {
+  const r = await db.query("SELECT value FROM merchant_settings WHERE merchant_id=$1 AND key='credit'", [merchantId]);
+  return cleanCreditRules(r.rows[0]?.value) ?? DEFAULT_CREDIT_RULES;
+}
+export async function saveCreditRules(db: Db, merchantId: string, rules: CreditRules): Promise<void> {
+  await db.query("INSERT INTO merchant_settings (merchant_id, key, value) VALUES ($1,'credit',$2::jsonb) ON CONFLICT (merchant_id, key) DO UPDATE SET value=EXCLUDED.value, updated_at=now()", [merchantId, JSON.stringify(rules)]);
+}
+
+export type CreditStatus = "none" | "active" | "expired" | "lapsed";
+export interface CreditState { state: CreditStatus; balanceCents: number; lastTopupAt: number | null; /** The last day the credit can be spent. */ expiresAt: number | null; /** The last day a top-up brings expired credit back. */ reinstateBy: number | null }
+
+/** Where one wallet stands under the shop's rules. The clock starts at its last top-up (or, for credit only ever given by hand, the last time credit was added). */
+export async function creditState(db: Db, merchantId: string, customerId: string, now = Date.now(), rules?: CreditRules): Promise<CreditState> {
+  const r = rules ?? (await loadCreditRules(db, merchantId));
+  const w = await db.query(
+    `SELECT w.balance_cents, (SELECT max(e.created_at) FROM ledger_entries e WHERE e.wallet_id=w.id AND e.kind='topup') AS last_topup,
+            (SELECT max(e.created_at) FROM ledger_entries e WHERE e.wallet_id=w.id AND e.amount_cents > 0 AND e.kind <> 'refund') AS last_added
+       FROM wallets w WHERE w.merchant_id=$1 AND w.customer_id=$2`, [merchantId, customerId]);
+  const row = w.rows[0];
+  const balanceCents = row ? Number(row.balance_cents) : 0;
+  const from = row?.last_topup ?? row?.last_added ?? null;
+  if (!row || !from) return { state: balanceCents > 0 ? "active" : "none", balanceCents, lastTopupAt: null, expiresAt: null, reinstateBy: null };
+  const lastTopupAt = new Date(from).getTime();
+  if (r.validityDays === 0) return { state: "active", balanceCents, lastTopupAt, expiresAt: null, reinstateBy: null };
+  const expiresAt = lastTopupAt + r.validityDays * DAY, reinstateBy = expiresAt + r.reinstateDays * DAY;
+  return { state: now <= expiresAt ? "active" : now <= reinstateBy ? "expired" : "lapsed", balanceCents, lastTopupAt, expiresAt, reinstateBy };
+}
+/** May this wallet's credit be spent right now under the validity rules? (The freeze is a separate check.) */
+export async function creditSpendable(db: Db, merchantId: string, customerId: string, now = Date.now()): Promise<boolean> {
+  const s = await creditState(db, merchantId, customerId, now);
+  return s.state === "active" || s.state === "none";
+}
+/**
+ * Before a top-up: credit that lapsed (expired and not reinstated in time) is written off, so the new money starts a clean balance.
+ * Credit that is only expired is left alone: the top-up itself reinstates it. Returns the cents written off.
+ */
+export async function writeOffLapsed(db: Db, i: { merchantId: string; customerId: string; staffId: string; deviceId?: string; outletId?: string }, now = Date.now()): Promise<number> {
+  const s = await creditState(db, i.merchantId, i.customerId, now);
+  if (s.state !== "lapsed" || s.balanceCents <= 0 || !s.expiresAt) return 0;
+  const day = new Date(s.expiresAt).toLocaleDateString("en-GB", { day: "2-digit", month: "short", year: "numeric", timeZone: "Asia/Singapore" });
+  const r = await adjustTo(db, { merchantId: i.merchantId, customerId: i.customerId, targetCents: 0, idempotencyKey: `lapse:${s.expiresAt}`, staffId: i.staffId, deviceId: i.deviceId, outletId: i.outletId, note: `Credit expired on ${day} and was not reinstated in time` });
+  return r.changed ? -r.deltaCents : 0;
+}

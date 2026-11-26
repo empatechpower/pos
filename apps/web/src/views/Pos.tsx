@@ -1,4 +1,6 @@
 import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import { ProtoDialog } from "../proto/ProtoDialog";
+import { lookOf } from "../looks";
 import QRCode from "qrcode";
 import {
   confirmedPaid,
@@ -16,6 +18,8 @@ import {
   COURSE_NAMES,
   menuFor,
   optionLines,
+  findByBarcode,
+  roundTotal,
   findOrderByCode,
   totalsLines,
   basePriceFor,
@@ -39,7 +43,7 @@ import {
 import { hasPerm, staffFetch, useStaff } from "../auth";
 import { allEvents, deviceId, getDeviceCode, record } from "../db";
 import { useOrders } from "../hooks";
-import { OptionSheet } from "./OptionSheet";
+import { TillOptions } from "../till/TillOptions";
 import { getBalance, spend } from "../wallet";
 import { syncNow } from "../sync";
 import { useShift, useShiftRequired } from "../shift";
@@ -95,6 +99,7 @@ export function Pos({ config, catalog, online, customerId, setCustomerId, header
   const [view, setView] = useState<"order" | "tables" | "checks">(() => (queryParams().get("view") === "tables" ? "tables" : "order"));
   const [payCheckId, setPayCheckId] = useState<string | null>(null);
   const [splitOpen, setSplitOpen] = useState(false);
+  const [clearAsk, setClearAsk] = useState(false);
   const [refundOpen, setRefundOpen] = useState(false);
   const [noteFor, setNoteFor] = useState<null | { scope: "line"; key: string } | { scope: "order" }>(null);
   useEffect(() => { try { localStorage.setItem(isTraining() ? "pos.bag.practice" : "pos.bag", JSON.stringify({ bag, billDiscounts, orderNote, orderId, fees, taxOff })); } catch { /* storage full: the order simply is not kept */ } }, [bag, billDiscounts, orderNote, orderId, fees, taxOff]);
@@ -117,7 +122,7 @@ export function Pos({ config, catalog, online, customerId, setCustomerId, header
   const [lineKey, setLineKey] = useState<string | null>(null);
   const [pendingQty, setPendingQty] = useState(1);
   const [sheetOpen, setSheetOpen] = useState(false);
-  const [done, setDone] = useState<null | { queue?: string; change: number; total: number }>(null);
+  const [done, setDone] = useState<null | { orderId?: string; queue?: string; change: number; total: number }>(null);
   const heldKey = isTraining() ? "pos.held.practice" : "pos.held";
   const [held, setHeld] = useState<HeldOrder[]>(() => { try { return JSON.parse(localStorage.getItem(heldKey) ?? "[]") as HeldOrder[]; } catch { return []; } });
   useEffect(() => { try { localStorage.setItem(heldKey, JSON.stringify(held)); } catch { /* not kept */ } }, [held]);
@@ -330,9 +335,15 @@ export function Pos({ config, catalog, online, customerId, setCustomerId, header
   };
   /** Enter Barcode: the item with this barcode or SKU goes onto the order (its options are asked for when it has any). */
   const addByBarcode = (code: string): string => {
-    const hit = menu.find((m) => m.barcode && m.barcode.toLowerCase() === code.toLowerCase());
-    if (!hit) return catalog.products.some((p) => p.barcode?.toLowerCase() === code.toLowerCase()) ? `That item is not sold in ${channel.name}.` : `No item has the code ${code}.`;
+    const found = findByBarcode(menu, code);
+    if (!found) return findByBarcode(catalog.products, code) ? `That item is not sold in ${channel.name}.` : `No item has the code ${code}.`;
+    const hit = found.item;
     if (hit.soldOut) return `${hit.name} is sold out.`;
+    // A variant's own code says exactly which one: it goes straight in when nothing else has to be chosen.
+    if (found.variant) {
+      const r = resolveOptions(hit.options, found.variant);
+      if (r.ok) { addWith(hit, found.variant); return `Added ${hit.name} (${r.options.filter((o) => o.variant).map((o) => o.name).join(" ")}).`; }
+    }
     if (hit.options?.length) { setDialog(null); setPicking(hit); return ""; }
     addWith(hit, []);
     return `Added ${hit.name}.`;
@@ -433,7 +444,7 @@ export function Pos({ config, catalog, online, customerId, setCustomerId, header
    * Put what is on screen into the local log. A new order is opened; a table's open order gets only the lines not yet sent (the sent ones are
    * already there), plus any change to guests, the note, or discounts. Nothing here needs the network.
    */
-  async function place(payment: { method: PaymentMethod; tender?: string; tenderName?: string; confirmed: boolean; amountCents?: number; checkId?: string; tenderedCents?: number } | null, existingOrderId?: string): Promise<{ queue?: string; orderId: string } | undefined> {
+  async function place(payment: { method: PaymentMethod; tender?: string; tenderName?: string; reference?: string; confirmed: boolean; amountCents?: number; roundingCents?: number; checkId?: string; tenderedCents?: number } | null, existingOrderId?: string): Promise<{ queue?: string; orderId: string; /** Ticket line key to the id it was placed under. */ lineIds: Map<string, string> } | undefined> {
     if (!bag.length) return undefined;
     const id = orderId ?? existingOrderId ?? newId();
     let queueNumber = linked?.queueNumber;
@@ -464,7 +475,7 @@ export function Pos({ config, catalog, online, customerId, setCustomerId, header
         lineId: lineIds.get(l.key)!,
         productId: l.item.id,
         name: l.item.name,
-        ...(l.item.barcode ? { sku: l.item.barcode } : {}),
+        ...(skuOf(l) ? { sku: skuOf(l)! } : {}),
         unitCents: l.unitCents,
         qty: l.qty,
         pointsExempt: l.item.pointsExempt,
@@ -508,9 +519,10 @@ export function Pos({ config, catalog, online, customerId, setCustomerId, header
     if (payment && pointsToTake > 0) await record(id, { type: "PointsRedeemed", points: pointsToTake });
     // The coupon (already counted as used by payDone) is written onto the order with what it took off.
     if (payment && coupon && !linked?.coupon && priced.couponDiscount > 0) await record(id, { type: "CouponApplied", title: `${coupon.code} · ${coupon.title}`.slice(0, 80), amountCents: priced.couponDiscount, minSpendCents: coupon.minSpendCents });
+    if (payment?.roundingCents) await record(id, { type: "RoundingApplied", cents: payment.roundingCents, tender: payment.tender ?? payment.method, ...(staff ? { byName: staff.name } : {}) });
     if (payment) {
       const paymentId = newId();
-      await record(id, { type: "PaymentRecorded", paymentId, method: payment.method, ...(payment.tender ? { tender: payment.tender } : {}), ...(payment.tenderName ? { tenderName: payment.tenderName } : {}), amountCents: payment.amountCents ?? due, confirmed: payment.confirmed, ...(payment.checkId ? { checkId: payment.checkId } : {}), ...(payment.tenderedCents ? { tenderedCents: payment.tenderedCents } : {}) });
+      await record(id, { type: "PaymentRecorded", paymentId, method: payment.method, ...(payment.tender ? { tender: payment.tender } : {}), ...(payment.tenderName ? { tenderName: payment.tenderName } : {}), ...(payment.reference ? { reference: payment.reference } : {}), amountCents: payment.amountCents ?? due, confirmed: payment.confirmed, ...(payment.checkId ? { checkId: payment.checkId } : {}), ...(payment.tenderedCents ? { tenderedCents: payment.tenderedCents } : {}) });
       if (!payment.confirmed) {
         // MOCK gateway: stands in for the YeahPay callback until real credentials exist.
         window.setTimeout(() => void record(id, { type: "PaymentConfirmed", paymentId }), 1500);
@@ -524,7 +536,7 @@ export function Pos({ config, catalog, online, customerId, setCustomerId, header
     // The member belongs to the order that just went, not to whoever is served next.
     if (memberInfo) { setCustomerId(""); setUsePoints(false); }
     if (payment) { setCoupon(null); pendingId.current = newId(); }
-    return { queue: queueNumber, orderId: id };
+    return { queue: queueNumber, orderId: id, lineIds };
   }
 
   /**
@@ -545,7 +557,7 @@ export function Pos({ config, catalog, online, customerId, setCustomerId, header
       setBalance(r.balanceCents);
       const placed = await place({ method: "credit", confirmed: true }, oid);
       setPayView(false);
-      setDone({ queue: placed?.queue, change: 0, total: owed });
+      setDone({ orderId: placed?.orderId, queue: placed?.queue, change: 0, total: owed });
     } else if (r.reason === "insufficient_funds") {
       setBalance(r.balanceCents);
       notify(`Not enough credit: ${formatMoney(r.balanceCents)} available, ${formatMoney(owed)} needed.`);
@@ -732,6 +744,9 @@ export function Pos({ config, catalog, online, customerId, setCustomerId, header
       const placed = await place(null, id ?? undefined);
       if (!placed) return;
       id = placed.orderId;
+      // The split was drawn up against the ticket's lines; placing the order gave the unsent ones their real ids. Each check must name those, or its card and its guest check carry no items.
+      const real = placed.lineIds;
+      plan = plan.map((c) => (c.shares ? { ...c, shares: c.shares.map((sh) => ({ ...sh, lineId: real.get(sh.lineId) ?? sh.lineId })) } : c));
     }
     await record(id, { type: "SplitCreated", method, checks: plan.map((c) => ({ id: newId(), totalCents: c.totalCents, ...(c.seat ? { seat: c.seat } : {}), ...(c.shares ? { shares: c.shares } : {}) })), ...(staff ? { byName: staff.name } : {}) });
     const st = reduceOrder(id, await allEvents());
@@ -739,7 +754,7 @@ export function Pos({ config, catalog, online, customerId, setCustomerId, header
     setView("checks");
   }
   /** Record a payment against one check. Cash may part-pay it; the order closes when every check is paid. */
-  async function payCheck(t: Tender, received: number) {
+  async function payCheck(t: Tender, received: number, reference?: string) {
     if (!linked || !payCheckId || !checkDue) return;
     if (mustOpenShift) return notify("Open your shift first.");
     if (payLock.current) return;
@@ -755,7 +770,7 @@ export function Pos({ config, catalog, online, customerId, setCustomerId, header
         setBalance(r.balanceCents);
         await record(linked.orderId, { type: "PaymentRecorded", paymentId, method: "credit", amountCents: owed, confirmed: true, checkId: payCheckId });
       } else if (recordedAs(t)) {
-        await record(linked.orderId, { type: "PaymentRecorded", paymentId, ...recordedAs(t)!, amountCents: owed, confirmed: true, checkId: payCheckId });
+        await record(linked.orderId, { type: "PaymentRecorded", paymentId, ...recordedAs(t)!, ...(reference ? { reference } : {}), amountCents: owed, confirmed: true, checkId: payCheckId });
       } else {
         const method: PaymentMethod = t === "cash" ? "cash" : "paynow";
         await record(linked.orderId, { type: "PaymentRecorded", paymentId, method, amountCents: applied, confirmed: t === "cash", checkId: payCheckId, ...(t === "cash" && received > applied ? { tenderedCents: received } : {}) });
@@ -765,16 +780,22 @@ export function Pos({ config, catalog, online, customerId, setCustomerId, header
       const settled = paidSoFar + applied >= total;
       const change = t === "cash" ? Math.max(0, received - owed) : 0;
       setPayView(false); setPayCheckId(null);
-      if (settled) { resetOrder(); setView("order"); setDone({ queue: linked.queueNumber, change, total }); }
+      if (settled) { resetOrder(); setView("order"); setDone({ orderId: linked.orderId, queue: linked.queueNumber, change, total }); }
       else { setView("checks"); notify(applied < owed ? `Part payment of ${formatMoney(applied)} taken. ${formatMoney(owed - applied)} still due on this check.` : "Check paid."); }
     } finally { payLock.current = false; }
   }
   const clearSplit = async () => {
     if (!linked?.split) return;
     if (paidSoFar > 0) return notify("Payments have been taken. Use Refund Payments first, then clear the split.");
-    if (!window.confirm("Clear the split? The bill goes back to one check.")) return;
+    setClearAsk(true);
+  };
+  /** "Clear split" in that dialog: everything goes back on one bill. */
+  const doClearSplit = async () => {
+    setClearAsk(false);
+    if (!linked?.split) return;
     await record(linked.orderId, { type: "SplitCleared", ...(staff ? { byName: staff.name } : {}) });
     setView("order");
+    notify("Split cleared — one bill again.");
   };
 
   const allTenders: TenderOption[] = [
@@ -798,10 +819,13 @@ export function Pos({ config, catalog, online, customerId, setCustomerId, header
   const tenders = arrangedTenders.length ? arrangedTenders : allTenders;
   /** The id a new order will get, fixed while it is being paid so a coupon, points and the order itself all name the same order. */
   const pendingId = useRef(newId());
-  async function payDone(t: Tender, received: number) {
-    if (payCheckId) return void payCheck(t, received);
+  async function payDone(t: Tender, received: number, reference?: string) {
+    if (payCheckId) return void payCheck(t, received, reference);
     if (mustOpenShift) return notify("Open your shift first.");
-    const owed = due;
+    // Rounding by tender (the outlet's choice, cash first): what is asked for is the rounded amount, and the difference is kept on the order.
+    const step = config.pricing.tenderRounding?.[t] ?? 0;
+    const owed = step >= 2 ? roundTotal(due, { stepCents: step, mode: "nearest" }) : due;
+    const rounding = owed - due;
     if (coupon && !openedOrder?.coupon && priced.couponDiscount > 0 && (t === "credit" || t === "qr")) return notify("With a coupon, take the payment in cash or by card.");
     // A coupon is counted as used for this order first. If the code is no longer good, nothing is recorded.
     if (coupon && !openedOrder?.coupon && priced.couponDiscount > 0) {
@@ -819,11 +843,11 @@ export function Pos({ config, catalog, online, customerId, setCustomerId, header
       if (!("res" in r)) return notify(r.problem);
       if (!r.res.ok) { void loadMember(customerId).then(setMemberInfo); return notify(r.res.status === 409 ? "The member does not have enough points any more. Their balance has been refreshed." : "The points could not be used. Check the connection and try again."); }
     }
-    if (t === "cash") { const p = await place({ method: "cash", confirmed: true, tenderedCents: received }, oid); setPayView(false); setDone({ queue: p?.queue, change: Math.max(0, received - owed), total: owed }); }
+    if (t === "cash") { const p = await place({ method: "cash", confirmed: true, tenderedCents: received, ...(rounding ? { amountCents: owed, roundingCents: rounding } : {}) }, oid); setPayView(false); setDone({ orderId: p?.orderId, queue: p?.queue, change: Math.max(0, received - owed), total: owed }); }
     else if (t === "credit") await payWithCredit();
     else if (t === "qr") await payWithQr();
-    else if (recordedAs(t)) { const p = await place({ ...recordedAs(t)!, confirmed: true }, oid); setPayView(false); setDone({ queue: p?.queue, change: 0, total: owed }); }
-    else { const p = await place({ method: "paynow", confirmed: false }); setPayView(false); setDone({ queue: p?.queue, change: 0, total: owed }); }
+    else if (recordedAs(t)) { const p = await place({ ...recordedAs(t)!, ...(reference ? { reference } : {}), confirmed: true }, oid); setPayView(false); setDone({ orderId: p?.orderId, queue: p?.queue, change: 0, total: owed }); }
+    else { const p = await place({ method: "paynow", confirmed: false }); setPayView(false); setDone({ orderId: p?.orderId, queue: p?.queue, change: 0, total: owed }); }
   }
   const sendOrder = async () => {
     const dineIn = channel.kind === "dine_in";
@@ -911,7 +935,7 @@ export function Pos({ config, catalog, online, customerId, setCustomerId, header
   return (
     <>
     {view !== "order" && header && <div className="proto protohead">{header}</div>}
-    <div className={`till ${prefs.menuSide === "left" ? "menu-left" : ""}`} style={{ "--t-scale": TEXT_SCALE[prefs.textSize] } as React.CSSProperties}>
+    <div className={`till ${prefs.menuSide === "left" ? "menu-left" : ""}`} data-look={lookOf(prefs.look)} style={{ "--t-scale": TEXT_SCALE[prefs.textSize] } as React.CSSProperties}>
       {view === "tables" ? (
         <div className="t-fullview">
           <TableMap
@@ -958,9 +982,9 @@ export function Pos({ config, catalog, online, customerId, setCustomerId, header
             totalCents={payCheckId && checkDue ? checkDue.dueCents : due}
             title={payCheckId && linked?.split ? `Check #${String(linked.split.checks.find((c) => c.id === payCheckId)?.no ?? 0).padStart(2, "0")}` : linked?.queueNumber ? `Order ${linked.queueNumber}` : nextQueue ? `Order ${nextQueue}` : channel.name}
             venue={`${config.name}${dineIn && spot ? ` · ${spot}` : ""}`}
-            tenders={tenders} busy={paying || qrBusy} partial={!!payCheckId}
+            tenders={tenders} busy={paying || qrBusy} partial={!!payCheckId} rounding={config.pricing.tenderRounding}
             onBack={() => { setPayView(false); if (payCheckId) { setPayCheckId(null); setView("checks"); } }}
-            onDone={(t, r) => void payDone(t, r)}
+            onDone={(t, r, ref) => void payDone(t, r, ref)}
             onSplit={!payCheckId && floor.splitBill && config.modules.splitBill && dineIn && !linked?.split ? () => setSplitOpen(true) : undefined}
           />
         ) : (
@@ -1141,11 +1165,20 @@ export function Pos({ config, catalog, online, customerId, setCustomerId, header
         <SplitDialog
           totalCents={linked ? orderTotals(linked, config).total : priced.total}
           lines={(linked && !bag.some((l) => !l.sent) ? linked.lines.filter((l) => l.qty > 0).map((l) => ({ lineId: l.lineId, name: l.name, qty: l.qty, unitCents: l.unitCents, seat: l.seat })) : bag.map((l) => ({ lineId: l.sent?.lineId ?? l.key, name: l.item.name, qty: l.qty, unitCents: effUnit(l), seat: l.seat })))}
+          guests={pax}
           onCreate={(m, plan) => void createSplit(m, plan)} onClose={() => setSplitOpen(false)}
         />
       )}
+      {clearAsk && (
+        <div className="proto protohead">
+          <ProtoDialog title="Clear Split Bills" onClose={() => setClearAsk(false)}>
+            <p>Put everything back on one bill? No payments have been taken yet.</p>
+            <div className="actions"><button onClick={() => setClearAsk(false)}>Keep split</button><button className="primary" onClick={() => void doClearSplit()}>Clear split</button></div>
+          </ProtoDialog>
+        </div>
+      )}
       {refundOpen && linked && <Modal title="Refund payments" wide onClose={() => setRefundOpen(false)}><RefundPanel order={linked} onDone={() => setRefundOpen(false)} /></Modal>}
-      {done && <DoneDialog queue={done.queue} changeCents={done.change} totalCents={done.total} onClose={() => setDone(null)} />}
+      {done && <DoneDialog orderId={done.orderId} queue={done.queue} changeCents={done.change} totalCents={done.total} onClose={() => setDone(null)} />}
       {noteFor && (() => {
         const line = noteFor.scope === "line" ? bag.find((b) => b.key === noteFor.key) : undefined;
         if (noteFor.scope === "line" && !line) return null;
@@ -1188,13 +1221,12 @@ export function Pos({ config, catalog, online, customerId, setCustomerId, header
         );
       })()}
       {editing && (
-        <OptionSheet
+        <TillOptions
           name={editing.item.name}
           description={editing.item.description}
           baseCents={editing.item.priceCents}
           groups={editing.item.options!}
           initial={editing.selection}
-          cta="Save changes" till
           onClose={() => setEditing(null)}
           onAdd={(sel) => {
             changeChoices(editing, sel);
@@ -1203,13 +1235,11 @@ export function Pos({ config, catalog, online, customerId, setCustomerId, header
         />
       )}
       {picking && (
-        <OptionSheet
+        <TillOptions
           name={picking.name}
           description={picking.description}
-          photoUrl={picking.imageVersion ? `/api/products/${picking.id}/image?v=${picking.imageVersion}` : null}
           baseCents={picking.priceCents}
           groups={picking.options!}
-          cta="Add to order" till
           onClose={() => setPicking(null)}
           onAdd={(sel) => {
             addWith(picking, sel);
@@ -1222,11 +1252,16 @@ export function Pos({ config, catalog, online, customerId, setCustomerId, header
   );
 }
 
+/** The code printed on the receipt for a line: the chosen variant's own when it has one, else the item's. */
+const skuOf = (l: BagLine): string | undefined => (l.item.options ?? []).flatMap((g) => (g.variant ? g.choices.filter((c) => c.barcode && l.selection.some((x) => x.groupId === g.id && x.choiceId === c.id)) : []))[0]?.barcode ?? l.item.barcode;
+
 const failText = (r: { reason: string }) =>
   r.reason === "signin_required"
     ? "Your session has ended. Sign in again. The customer was not charged."
     : r.reason === "credit_frozen"
       ? "Member credit is frozen, so it can't be spent. Take cash instead. The customer was not charged."
+    : r.reason === "credit_expired"
+      ? "This member's credit has expired, so it can't be spent. A top-up brings it back if it is within the reinstatement time. The customer was not charged."
     : r.reason === "not_allowed"
       ? "This account isn't allowed to take credit payments."
       : "Could not reach the server. The customer was not charged.";

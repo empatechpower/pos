@@ -5,7 +5,7 @@ import type { BrandStore } from "./brand.js";
 import type { CatalogStore, PgCatalogStore } from "./catalog.js";
 import { liveSmsNumber } from "./devices.js";
 import type { Db } from "./db/pool.js";
-import { balanceOf, creditBlockedFor, creditFrozen, refund as refundCredit, spend as spendCredit } from "./ledger.js";
+import { balanceOf, creditBlockedFor, creditFrozen, creditSpendable, creditState, refund as refundCredit, spend as spendCredit } from "./ledger.js";
 import { FailureLimiter } from "./rateLimit.js";
 import { itemNames, onHandAt, stockVersion } from "./stock.js";
 import { TabError, type TabService } from "./tabs.js";
@@ -19,7 +19,7 @@ import { referenceLooksRight } from "./paynowQr.js";
 import { authorizeUrl, createStripeCheckout, createStripeRefund, createYeahpayPayment, refundYeahpay, verifyYeahpayCallback, orderIdFromRef, fetchProfile, sendMail, newState, newVerifier, sameSecret, verifyStripeSignature, type Integrations, type OAuthProvider } from "./integrations.js";
 import type { EventStore } from "./store.js";
 import { loadOutletMenu, loadOutletScheduling, loadOutletWindows } from "./outletMenu.js";
-import { loadKiosk } from "./settings.js";
+import { loadKiosk, loadSignin } from "./settings.js";
 import { listOutlets } from "./tenant.js";
 import { createHash, randomBytes } from "node:crypto";
 
@@ -239,6 +239,7 @@ export function registerShop(app: FastifyInstance, d: ShopDeps) {
     const hours = outlet.hours || process.env.OUTLET_HOURS?.trim() || undefined;
     const phone = outlet.phone || process.env.OUTLET_PHONE?.trim() || undefined;
     const addr = outlet.address || process.env.OUTLET_ADDRESS?.trim() || undefined;
+    const signin = await loadSignin(d.db, merchantId);
     return {
       name: d.config.name,
       outletId: outlet.id,
@@ -259,7 +260,7 @@ export function registerShop(app: FastifyInstance, d: ShopDeps) {
       brand: await brandPayload(),
       // What this deployment can do beyond email sign-in and paying at the counter. The page enables only these.
       // Email sign-in is off: phone SMS is the identity channel (kiosk handover 4.3 and open decision 3). EMAIL_SIGNIN=on brings the email option back, for a demo.
-      auth: { email: /^(1|true|yes|on)$/i.test(process.env.EMAIL_SIGNIN ?? ""), google: !!integ.google && !!d.members, microsoft: !!integ.microsoft && !!d.members, phone: !!d.members && (openSignin ? { number: "", open: true } : smsTo ? { number: smsTo } : membersOnly ? { number: "", manual: true } : showCodes ? { number: "+65 8000 0000", simulated: true } : null) },
+      auth: { email: /^(1|true|yes|on)$/i.test(process.env.EMAIL_SIGNIN ?? ""), google: !!integ.google && !!d.members && signin.google, microsoft: !!integ.microsoft && !!d.members && signin.microsoft, phone: !!d.members && (openSignin ? { number: "", open: true } : smsTo ? { number: smsTo } : membersOnly ? { number: "", manual: true } : showCodes ? { number: "+65 8000 0000", simulated: true } : null) },
       payments: { online: !!(integ.yeahpay || integ.stripe), methods: integ.yeahpay || integ.stripe ? ["card", "paynow"] : [], paynowQr: !!(await loadPaynow(d.db, merchantId)) },
       // The kiosk's operator settings, as the owner set them in Manager.
       kiosk: await loadKiosk(d.db, merchantId),
@@ -402,7 +403,7 @@ export function registerShop(app: FastifyInstance, d: ShopDeps) {
     app.get("/api/shop/me", async (req, reply) => {
       const m = await members.fromToken(bearer(req));
       if (!m) return reply.code(401).send({ error: "not_signed_in" });
-      return { member: m, creditCents: await balanceOf(d.db, merchantId, m.id), creditBlocked: await creditBlockedFor(d.db, merchantId, m.id), history: await members.history(m.id, 20), coupons: await members.coupons(m.id), stamps: d.config.rewards.stampCard.enabled ? { ...(await members.stamps(m.id)), target: d.config.rewards.stampCard.target, rewardTitle: d.config.rewards.stampCard.rewardTitle, minPaidCents: d.config.rewards.stampCard.minPaidCents } : null, pointsEnabled: d.config.rewards.pointsEnabled };
+      return { member: m, creditCents: await balanceOf(d.db, merchantId, m.id), creditBlocked: await creditBlockedFor(d.db, merchantId, m.id), credit: await creditState(d.db, merchantId, m.id), history: await members.history(m.id, 20), coupons: await members.coupons(m.id), stamps: d.config.rewards.stampCard.enabled ? { ...(await members.stamps(m.id)), target: d.config.rewards.stampCard.target, rewardTitle: d.config.rewards.stampCard.rewardTitle, minPaidCents: d.config.rewards.stampCard.minPaidCents } : null, pointsEnabled: d.config.rewards.pointsEnabled };
     });
 
     app.post("/api/shop/auth/logout", async (req) => {
@@ -428,7 +429,7 @@ export function registerShop(app: FastifyInstance, d: ShopDeps) {
     app.get<{ Params: { provider: string } }>("/api/shop/auth/oauth/:provider/start", async (req, reply) => {
       if (limited(oauthLimit, req, reply)) return;
       const p = req.params.provider as OAuthProvider;
-      if ((p !== "google" && p !== "microsoft") || !integ[p]) return reply.code(404).send({ error: "provider_not_available" });
+      if ((p !== "google" && p !== "microsoft") || !integ[p] || !(await loadSignin(d.db, merchantId))[p]) return reply.code(404).send({ error: "provider_not_available" });
       const state = newState();
       const verifier = newVerifier();
       await members.saveOAuthState(state, p, verifier);
@@ -438,7 +439,7 @@ export function registerShop(app: FastifyInstance, d: ShopDeps) {
     /** The provider sends the person back here. We trade the code, then hand the browser a one-time ticket. */
     app.get<{ Params: { provider: string }; Querystring: { code?: string; state?: string; error?: string } }>("/api/shop/auth/oauth/:provider/callback", async (req, reply) => {
       const p = req.params.provider as OAuthProvider;
-      if ((p !== "google" && p !== "microsoft") || !integ[p]) return reply.code(404).send({ error: "provider_not_available" });
+      if ((p !== "google" && p !== "microsoft") || !integ[p] || !(await loadSignin(d.db, merchantId))[p]) return reply.code(404).send({ error: "provider_not_available" });
       const { code, state, error } = req.query;
       if (error || !code || !state) return reply.redirect(back("login_error=cancelled"));
       const verifier = await members.takeOAuthState(state, p);
@@ -734,6 +735,7 @@ export function registerShop(app: FastifyInstance, d: ShopDeps) {
     if (b.payWithCredit && !member) return reply.code(401).send({ error: "sign_in_to_use_credit" });
     // The shop has frozen member credit (for example, the event is over): no order can be paid with it.
     if (b.payWithCredit && member && (await creditBlockedFor(d.db, merchantId, member.id))) return reply.code(403).send({ error: "credit_frozen" });
+    if (b.payWithCredit && member && !(await creditSpendable(d.db, merchantId, member.id))) return reply.code(403).send({ error: "credit_expired" });
     let orderId = newId();
 
     // A credit purchase carries an idempotency key made by the customer's phone for this attempt. A retry (double tap,

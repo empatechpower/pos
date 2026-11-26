@@ -118,7 +118,10 @@ describe("receipt and kitchen ticket", () => {
 
   it("prints the frozen prices, a correct total, and the date in Singapore time", () => {
     const text = plainText(receipt(order({ pay: "all" }), config, ctx), 42).join("\n");
-    expect(text).toContain("2 x KAYA TOAST");
+    // decision Q44: the name on its own line, then what it is, the quantity and the amount
+    expect(text).toMatch(/KAYA TOAST\n\s+2\s+S\$4\.00/);
+    expect(text).not.toContain("2 x KAYA TOAST");
+    expect(plainText(receipt(order({ pay: "all" }), config, { ...ctx, categoryOf: Object.fromEntries(order({ pay: "all" }).lines.map((l) => [l.productId, "Toast"])) }), 42).join("\n")).toMatch(/KAYA TOAST\n\s*Toast\s+2\s+S\$4\.00/);
     expect(text).toContain("S$4.00");
     expect(text).toMatch(/Total \(SGD\)\s+S\$10\.90/);
     expect(text).toContain("Printed at: 07/11/2026, 12:05:00 PM");
@@ -350,5 +353,20 @@ describe("the guest check", () => {
     expect(t).toMatch(/1 x KAYA TOAST/);
     expect(t).toMatch(/Check total\s+S\$5\.45/);
     expect(t).toMatch(/Balance due\s+S\$3\.45/);
+  });
+});
+
+describe("extras inside a free allowance", () => {
+  it("prints what the extra was charged: nothing for a free one, only the paid units otherwise", () => {
+    const base = { orderId: "fo", deviceId: "A" };
+    const o = reduceOrder("fo", [
+      { ...base, id: "f1", ts: 1, seq: 1, type: "OrderOpened", fulfilment: "takeaway", channelId: "take", channelName: "Take away", serviceCharge: false, queueNumber: "A008" },
+      { ...base, id: "f2", ts: 2, seq: 2, type: "ItemAdded", lineId: "l1", productId: "teh", name: "Teh C", unitCents: 350, qty: 1, options: [{ group: "Extras", name: "Extra shot", qty: 2, priceCents: 80, freeQty: 1 }, { group: "Extras", name: "Pearls", qty: 1, priceCents: 50, freeQty: 1 }] },
+    ] as OrderEvent[])!;
+    const text = plainText(receipt(o, config, { merchantName: "B", outletName: "O", now: NOW }, { printModifiers: true }), 42);
+    const line = (name: string) => text.find((l) => l.includes(name)) ?? "";
+    expect(line("Extra shot")).toMatch(/\+S?\$0\.80/);
+    expect(line("Extra shot")).not.toContain("1.60");
+    expect(line("Pearls")).not.toContain("0.50");
   });
 });

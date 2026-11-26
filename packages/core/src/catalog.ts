@@ -1,7 +1,7 @@
 import { validateProductStock, type ProductStock } from "./stock.js";
 import type { Cents } from "./money.js";
 import { hasBuilder, validateBuilderSpec, type BuilderSpec } from "./builder.js";
-import { OPTION_PREFIXES, type OptionGroup } from "./options.js";
+import { OPTION_PREFIXES, defaultSelection, type ChosenOptionInput, type OptionGroup } from "./options.js";
 import type { Availability } from "./windows.js";
 
 /**
@@ -229,6 +229,23 @@ export function menuFor(catalog: Catalog, ctx: PriceContext): MenuEntry[] {
 /** What one unit of a menu item costs before options: the member price for a member when there is one, else the price everyone pays. */
 export const basePriceFor = (m: { priceCents: Cents; memberPriceCents?: Cents }, member: boolean): Cents => (member && m.memberPriceCents !== undefined ? m.memberPriceCents : m.priceCents);
 
+/**
+ * What a scanned or typed code means on this menu: an item, or an item as one of its variants. For a variant, the choices that makes
+ * (that variant, plus the usual defaults for the rest) are returned too. Null when no item here carries the code.
+ */
+export function findByBarcode<M extends Product>(menu: readonly M[], code: string): { item: M; variant?: ChosenOptionInput[] } | null {
+  const want = code.trim().toLowerCase();
+  if (!want) return null;
+  for (const m of menu) {
+    if (m.barcode?.toLowerCase() === want) return { item: m };
+    for (const g of m.options ?? []) {
+      const c = g.variant ? g.choices.find((x) => x.barcode?.toLowerCase() === want) : undefined;
+      if (c) return { item: m, variant: [...defaultSelection(m.options).filter((s) => s.groupId !== g.id), { groupId: g.id, choiceId: c.id }] };
+    }
+  }
+  return null;
+}
+
 export const channelById = (catalog: Catalog, id: string): Channel | undefined => catalog.channels.find((c) => c.id === id);
 
 /** Problems that would make a catalog misbehave. Empty means fine. Used before accepting any change. */
@@ -239,6 +256,12 @@ export function validateCatalog(c: Catalog): string[] {
   const products = new Set(c.products.map((p) => p.id));
   const byId = new Map(c.products.map((p) => [p.id, p]));
   if (!books.has(c.defaultPricebookId)) problems.push("default pricebook does not exist");
+  // One code means one thing: an item's barcode and every variant's barcode are all different from each other.
+  const codes = new Map<string, string>();
+  for (const p of c.products) {
+    const mine: Array<[string, string]> = [...(p.barcode ? [[p.barcode, p.name] as [string, string]] : []), ...(p.options ?? []).flatMap((g) => g.choices.filter((x) => x.barcode).map((x): [string, string] => [x.barcode!, `${p.name} (${x.name})`]))];
+    for (const [code, what] of mine) { const k = code.toLowerCase(); if (codes.has(k)) problems.push(`the barcode ${code} is on both ${codes.get(k)} and ${what}`); else codes.set(k, what); }
+  }
   for (const o of c.overrides ?? []) {
     if (!products.has(o.productId)) problems.push(`promotion ${o.id} prices unknown product ${o.productId}`);
     if (o.pricebookId && !books.has(o.pricebookId)) problems.push(`promotion ${o.id} points at missing pricebook ${o.pricebookId}`);
@@ -344,6 +367,7 @@ export function validateOptions(productId: string, groups: readonly OptionGroup[
       if (!c.name?.trim() || c.name.length > 60) at(`a choice in "${g.name}" needs a name of up to 60 characters`);
       if (!Number.isSafeInteger(c.priceCents) || c.priceCents < 0) at(`choice "${c.name}" has an invalid price`);
       if (c.prefix !== undefined && !OPTION_PREFIXES.includes(c.prefix)) at(`choice "${c.name}" has an unknown prefix`);
+      if (c.barcode !== undefined && (!g.variant || !/^[A-Za-z0-9._-]{3,40}$/.test(c.barcode))) at(`choice "${c.name}": a barcode is 3 to 40 letters, digits, dots or dashes, and only a variant has one`);
       if (c.default) defaults++;
     }
     if (defaults > 1 || (defaults && g.kind !== "single")) at(`option group "${g.name}": only a choose-one group can have one default`);

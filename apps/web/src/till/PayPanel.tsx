@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { formatMoney, recordedTender } from "@pos/core";
+import { formatMoney, recordedTender, roundTotal } from "@pos/core";
 
 /** Cash, member credit, a PayNow QR, practice, or a recorded tender (card, debit, manualcard, check, giftcard: taken outside the till). */
 export type Tender = "cash" | "credit" | "qr" | "mock" | "card" | "debit" | "manualcard" | "check" | "giftcard" | `ct-${string}`;
@@ -9,9 +9,16 @@ export interface TenderOption { id: Tender; label: string; disabled?: boolean; w
  * Payment replaces the menu area while the ticket stays in view. Cash has a keypad and shows the change; the other ways of paying ask for
  * their own steps when Done is pressed.
  */
-export function PayPanel({ totalCents, title, venue, tenders, busy, onBack, onDone, onSplit, partial }: { totalCents: number; title: string; /** The shop and table, shown at the right of the heading. */ venue?: string; tenders: TenderOption[]; busy: boolean; onBack: () => void; onDone: (tender: Tender, receivedCents: number) => void; /** Shows Split Bill beside Back. */ onSplit?: () => void; /** Cash may pay part of what is due (a check of a split bill). */ partial?: boolean }) {
+export function PayPanel({ totalCents, title, venue, tenders, busy, onBack, onDone, onSplit, partial, rounding }: { totalCents: number; title: string; /** The shop and table, shown at the right of the heading. */ venue?: string; tenders: TenderOption[]; busy: boolean; onBack: () => void; onDone: (tender: Tender, receivedCents: number, reference?: string) => void; /** Shows Split Bill beside Back. */ onSplit?: () => void; /** Cash may pay part of what is due (a check of a split bill). */ partial?: boolean; /** The outlet's rounding by tender, in cents ({ cash: 5 }). Not applied to a part payment. */ rounding?: Record<string, number> }) {
   const [tender, setTender] = useState<Tender>("cash");
   const [value, setValue] = useState("");
+  /** The trace or reference number from the card terminal or the customer's payment screen, for a payment the till only records. */
+  const [reference, setReference] = useState("");
+  const recorded = !!recordedTender(tender) || tender.startsWith("ct-");
+  // What is asked for with this tender: rounded by the outlet's rule for it (cash to five cents, say), never for a part payment.
+  const step = !partial ? rounding?.[tender] ?? 0 : 0;
+  const exactCents = totalCents;
+  totalCents = step >= 2 ? roundTotal(exactCents, { stepCents: step, mode: "nearest" }) : exactCents;
   const received = Math.round(Number(value || 0) * 100);
   const valid = /^(?:\d+(?:\.\d{0,2})?|\.\d{1,2})?$/.test(value);
   const cashOk = valid && (partial ? received > 0 : received >= totalCents);
@@ -44,12 +51,14 @@ export function PayPanel({ totalCents, title, venue, tenders, busy, onBack, onDo
         ) : (
           <>
             <div className="tender-card">{tender === "credit" ? "Member credit" : tender === "qr" ? "PayNow QR" : recordedTender(tender)?.label ?? (tender.startsWith("ct-") ? cur?.label : undefined) ?? "Card / PayNow (practice)"} payment</div>
+            {recorded && <label className="cash-entry">Reference<input type="text" autoComplete="off" maxLength={40} placeholder="Trace or reference number" aria-label="Payment reference" value={reference} onChange={(e) => setReference(e.target.value)} /></label>}
             <p className="connectionnote">{cur?.why ?? (tender === "qr" ? "A QR for the exact amount is shown next." : tender === "credit" ? "The member's credit is charged when you press Done." : recordedTender(tender) ? `Take the ${recordedTender(tender)!.label.toLowerCase()} payment for the full amount first. Press Done only once it has gone through: the till records it and does not charge anything itself.` : tender.startsWith("ct-") ? `Recorded as ${cur?.label ?? "this payment type"} for the full amount. The till does not charge anything itself.` : "Practice only: no money moves.")}</p>
           </>
         )}
+        {totalCents !== exactCents && <p className="connectionnote" role="status">Rounded to the nearest {step} cents: {formatMoney(exactCents)} becomes {formatMoney(totalCents)}.</p>}
         <div className="payment-bottom">
           <div className="choices">{tenders.map((t) => <button key={t.id} className={t.id === tender ? "selected" : ""} disabled={t.disabled} title={t.why} onClick={() => setTender(t.id)}>{t.label}</button>)}</div>
-          <button className="primary donepay" disabled={busy || (tender === "cash" ? !cashOk : !!cur?.disabled)} onClick={() => onDone(tender, tender === "cash" ? received : totalCents)} aria-label="Complete payment">Done</button>
+          <button className="primary donepay" disabled={busy || (tender === "cash" ? !cashOk : !!cur?.disabled)} onClick={() => onDone(tender, tender === "cash" ? received : totalCents, recorded && reference.trim() ? reference.trim() : undefined)} aria-label="Complete payment">Done</button>
         </div>
         <div className="actions"><button onClick={onBack}>← Back / Cancel</button>{onSplit && <button onClick={onSplit}>Split Bill</button>}</div>
       </div>

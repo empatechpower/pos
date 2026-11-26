@@ -1,8 +1,10 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { formatMoney } from "@pos/core";
 import { Modal } from "./Modal";
+import { ProtoDialog } from "../proto/ProtoDialog";
 import { staffFetch } from "../auth";
 import { setPref, usePrefs } from "../prefs";
+import { READY_LOOKS, lookOf } from "../looks";
 import type { HeldOrder } from "./types";
 
 export function DiningDialog({ channels, current, onPick, onClose }: { channels: Array<{ id: string; name: string }>; current: string; onPick: (id: string) => void; onClose: () => void }) {
@@ -59,6 +61,8 @@ export function HeldDialog({ held, onRecall, onDrop, onClose, formatTotal }: { h
 export interface MemberSummary {
   member: { id: string; name: string | null; phone: string | null; email: string | null; points: number; creditCents: number };
   rewards: { pointsEnabled: boolean; minPointsRedeem: number };
+  /** Where their credit stands under the shop's validity rules. */
+  credit?: { state: "none" | "active" | "expired" | "lapsed"; expiresAt: number | null; reinstateBy: number | null };
   recent: Array<{ orderId: string; at: number; totalCents: number; status: string; items: string; where: string }>;
 }
 const isMemberId = (s: string) => /^[0-9a-f-]{36}$/i.test(s);
@@ -68,6 +72,7 @@ export async function loadMember(id: string): Promise<MemberSummary | null> {
   return "res" in r && r.res.ok ? ((await r.res.json()) as MemberSummary) : null;
 }
 const maskPhone = (p: string | null) => (p ? `···· ${p.replace(/\D/g, "").slice(-4)}` : "");
+const creditDay = (ms: number) => new Date(ms).toLocaleDateString("en-GB", { day: "2-digit", month: "short", year: "numeric", timeZone: "Asia/Singapore" });
 const memberWhen = (ms: number) => new Date(ms).toLocaleDateString("en-GB", { day: "2-digit", month: "short", timeZone: "Asia/Singapore" });
 
 /**
@@ -106,6 +111,9 @@ export function CustomerDialog({ current, info, usePoints, pointsWorthCents, onU
       <Modal title="Member" onClose={onClose}>
         <p style={{ margin: "0 0 .3em" }}><b>{m.name || "Member"}</b> <span className="t-muted">{maskPhone(m.phone)}</span></p>
         <div className="t-row2"><span>Credit</span><b>{formatMoney(m.creditCents)}</b></div>
+        {m.creditCents > 0 && info.credit?.state === "active" && info.credit.expiresAt && <p className="t-muted">Valid until {creditDay(info.credit.expiresAt)}. Each top-up starts the time again.</p>}
+        {m.creditCents > 0 && info.credit?.state === "expired" && <p className="t-flash" role="alert">This credit expired on {creditDay(info.credit.expiresAt!)}. A top-up by {creditDay(info.credit.reinstateBy!)} brings it back.</p>}
+        {m.creditCents > 0 && info.credit?.state === "lapsed" && <p className="t-flash" role="alert">This credit expired on {creditDay(info.credit.expiresAt!)} and was not topped up in time. It can no longer be used.</p>}
         {info.rewards.pointsEnabled && <div className="t-row2"><span>Points</span><b>{m.points.toLocaleString()}</b></div>}
         {info.rewards.pointsEnabled && m.points > 0 && (
           <label className="t-row2" style={{ cursor: "pointer" }}><span>Use points on this order{pointsWorthCents > 0 ? ` (${formatMoney(pointsWorthCents)} off)` : ""}</span><input type="checkbox" aria-label="Use points on this order" checked={usePoints} disabled={m.points < info.rewards.minPointsRedeem} onChange={(e) => onUsePoints(e.target.checked)} /></label>
@@ -154,6 +162,13 @@ export function TillSettings({ onClose, onEditLayout }: { onClose: () => void; o
       <h3 className="t-h3">Text size</h3>
       <p className="t-muted">Standard is 20% bigger than the original size.</p>
       <div className="t-seg">{([["compact", "Compact"], ["standard", "Standard"], ["large", "Large"], ["xl", "Extra large"]] as const).map(([k, l]) => <button key={k} className={prefs.textSize === k ? "on" : ""} onClick={() => void setPref("textSize", k)}>{l}</button>)}</div>
+      {READY_LOOKS.length > 1 && (
+        <>
+          <h3 className="t-h3">Look</h3>
+          <p className="t-muted">The interface style you work in. Yours alone.</p>
+          <div className="t-seg">{READY_LOOKS.map((l) => <button key={l.id} className={lookOf(prefs.look) === l.id ? "on" : ""} onClick={() => void setPref("look", l.id)}>{l.name}</button>)}</div>
+        </>
+      )}
       {onEditLayout && (
         <>
           <h3 className="t-h3">Menu layout</h3>
@@ -167,16 +182,57 @@ export function TillSettings({ onClose, onEditLayout }: { onClose: () => void; o
   );
 }
 
-export function DoneDialog({ queue, changeCents, totalCents, onClose }: { queue?: string; changeCents: number; totalCents: number; onClose: () => void }) {
+/**
+ * Payment complete, in the prototype's own markup (proto-reference/index.html, showReceipt): the receipt as it prints, with "Print modifiers",
+ * Print and New Order under it. The receipt is the server's own (the same text the printer gets); until the order has reached the server, or
+ * with no connection, the queue number and the figures stand in for it. Change due stays above the receipt so it is never below the fold.
+ */
+export function DoneDialog({ orderId, queue, changeCents, totalCents, onClose }: { orderId?: string; queue?: string; changeCents: number; totalCents: number; onClose: () => void }) {
+  const [mods, setMods] = useState(false);
+  const [text, setText] = useState<string | null>(null);
+  const [msg, setMsg] = useState("");
+  useEffect(() => {
+    if (!orderId) return;
+    let live = true, tries = 0;
+    // The order is pushed to the server in the background: ask a few times before giving up.
+    const ask = async () => {
+      const r = await staffFetch(`/api/orders/${orderId}/receipt${mods ? "?modifiers=1" : ""}`);
+      if (!live) return;
+      if ("res" in r && r.res.ok) return setText(((await r.res.json()) as { text: string }).text);
+      if (++tries < 5) setTimeout(() => void ask(), 1200);
+    };
+    void ask();
+    return () => { live = false; };
+  }, [orderId, mods]);
+  const print = async () => {
+    if (!orderId) return;
+    const r = await staffFetch("/api/print/reprint", { body: { orderId, docType: "receipt", ...(mods ? { modifiers: true } : {}) } });
+    if ("problem" in r) return setMsg(r.problem);
+    if (r.res.ok) return setMsg("Receipt sent to the printer.");
+    const code = ((await r.res.json().catch(() => ({}))) as { error?: string }).error;
+    setMsg(code === "order_not_found" ? "The server doesn't have this order yet. Wait a moment, then try again." : code === "no_printer_for_this" ? "No printer is set up for receipts. Ask a manager." : r.res.status === 403 ? "This account is not allowed to print receipts again." : "Could not print.");
+  };
   return (
-    <Modal title="Payment complete" onClose={onClose}>
-      <div className="t-donebox">
-        {queue && <><small>QUEUE NUMBER</small><div className="t-queue">{queue}</div></>}
-        <p>Paid <b>{formatMoney(totalCents)}</b></p>
-        {changeCents > 0 && <p className="t-change">Change due <b>{formatMoney(changeCents)}</b></p>}
-      </div>
-      <div className="t-dact"><button className="t-primary" autoFocus onClick={onClose}>New order</button></div>
-    </Modal>
+    <div className="proto protohead">
+      <ProtoDialog title="Payment complete" onClose={onClose}>
+        {changeCents > 0 && <div className="row donechange"><span>Change due</span><strong>{formatMoney(changeCents)}</strong></div>}
+        <div id="rcptbox">
+          {text ? <pre className="receipt r7" style={{ whiteSpace: "pre-wrap" }}>{text}</pre> : (
+            <div className="receipt r7">
+              {queue && <><div className="rcent">QUEUE NUMBER</div><div className="rcent rstore donequeue">{queue}</div></>}
+              <div className="rrow rtotal"><span>Paid</span><span>{formatMoney(totalCents)}</span></div>
+              {changeCents > 0 && <div className="rrow"><span>Change</span><span>{formatMoney(changeCents)}</span></div>}
+            </div>
+          )}
+        </div>
+        {msg && <div className="error" role="status">{msg}</div>}
+        <div className="actions">
+          <button disabled={!orderId} onClick={() => setMods((m) => !m)}>Print modifiers: {mods ? "On" : "Off"}</button>
+          <button disabled={!orderId} onClick={() => void print()}>Print</button>
+          <button className="primary" autoFocus onClick={onClose}>New Order</button>
+        </div>
+      </ProtoDialog>
+    </div>
   );
 }
 

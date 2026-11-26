@@ -91,7 +91,8 @@ export function ReportsDialog({ orders, config, categoryOf, manager, onShift, on
       <div className="settingsgroup">
         <button onClick={onShift}>X report · My shift</button>
         <button onClick={onShift}>Close shift · Z report</button>
-        <button onClick={() => setView("today")}>Today's sales · All shifts</button>
+        {/* Decision Q6: a cashier sees their own shift's reports; whoever may read the back-office reports sees every shift. */}
+        {manager && <button onClick={() => setView("today")}>Today's sales · All shifts</button>}
         <button onClick={() => setView("history")}>Transaction history</button>
         {manager && <button onClick={() => { onClose(); go("/manager?tab=reports"); }}>Full reports · Back office</button>}
       </div>

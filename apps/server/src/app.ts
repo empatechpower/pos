@@ -2,11 +2,11 @@ import cors from "@fastify/cors";
 import Fastify, { type FastifyReply, type FastifyRequest } from "fastify";
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
-import { withTaxPack, isTaxCountry, TAX_PACKS, DEFAULT_COUNTRY, type BuilderSpec, guestCheck, plainText, receipt, type OrderState, type PrintContext, commissionOf, tabPaymentReceipt, type ProductStock, validateProductStock, isTimeZone, validCoordinates, validateOutletOverride, validateWindows, type MenuWindows, confirmedPaid, hourly, isFullyPaid, productMix, summarize, menuFor, newId, orderTotals, reduceAll, reduceOrder, shopStatus, type BusinessConfig, type ChannelKind, type OptionGroup, type OrderEvent } from "@pos/core";
+import { withTaxPack, isTaxCountry, TAX_PACKS, DEFAULT_COUNTRY, cleanTenderRounding, taxPackFor, type BuilderSpec, guestCheck, plainText, receipt, type OrderState, type PrintContext, commissionOf, tabPaymentReceipt, type ProductStock, validateProductStock, isTimeZone, validCoordinates, validateOutletOverride, validateWindows, type MenuWindows, confirmedPaid, hourly, isFullyPaid, productMix, summarize, menuFor, newId, orderTotals, reduceAll, reduceOrder, shopStatus, type BusinessConfig, type ChannelKind, type OptionGroup, type OrderEvent } from "@pos/core";
 import { canDo, permissionsOf, PERMISSION_OPTIONS, loadRolePermissions, rolePermissions, saveRolePermissions, setRolePermissions, CASHIER_TOPUP_LIMIT_CENTS, audit, checkStaffPin, authenticate, authenticateAgent, can, createAgent, createConnectCode, redeemConnectCode, createStaff, listAgents, login, loginByPhone, logout, normalisePhone, setStaffPhone, recentAudit, revokeAgent, type Permission, type Role, type Staff } from "./auth.js";
 import type { CatalogStore, ChangeResult, PgCatalogStore } from "./catalog.js";
 import type { Db } from "./db/pool.js";
-import { adjustTo, balanceOf, creditBlockedFor, creditExemptIds, creditFrozen, refund, setCreditExempt, setCreditFrozen, spend, topUp } from "./ledger.js";
+import { adjustTo, balanceOf, cleanCreditRules, creditBlockedFor, creditExemptIds, creditFrozen, creditSpendable, creditState, loadCreditRules, refund, saveCreditRules, setCreditExempt, setCreditFrozen, spend, topUp, writeOffLapsed } from "./ledger.js";
 import { authenticateDevice, createEnrollmentCode, enroll, markPrintPoll, setSmsNumber, issueStreamTicket, listDevices, redeemStreamTicket, revokeDevice, type Device } from "./devices.js";
 import { BrandStore } from "./brand.js";
 import { PrintStore, validatePrinter, type Printer } from "./print.js";
@@ -18,7 +18,7 @@ import { reconcileOrderStock, registerStock } from "./stock.js";
 import { TabError, TabService } from "./tabs.js";
 import { registerTabRoutes } from "./tabRoutes.js";
 import { AmountNotAllowed, issueQr, loadPaynow, loadPaynowOverrides, savePaynow, savePaynowOverride } from "./paynow.js";
-import { applyOption, loadKiosk, OPTION_KEYS, optionsOf, saveKiosk, saveSetting , validServiceRatePct } from "./settings.js";
+import { applyOption, cleanSignin, loadKiosk, loadSignin, saveSignin, OPTION_KEYS, optionsOf, saveKiosk, saveSetting , validServiceRatePct } from "./settings.js";
 import { openShiftOf, registerShifts } from "./shifts.js";
 import { registerFloor } from "./floor.js";
 import { cleanLayout, registerTill } from "./tillSettings.js";
@@ -90,11 +90,11 @@ export async function buildApp({ config, store, db, catalog, catalogAdmin, print
   if (db) await ensureDefaultOutlet(db, merchantId, config.outletName, config.outletName);
 
   /** Tax follows the country of the outlet (standing rule 1): the country's pack is written into the pricing rules at start and whenever the outlet is saved. */
-  const outletTax = new Map<string, { country: string; gstOn: boolean | null; serviceMode: "qsr" | "tsr" | "retail" | null }>();
+  const outletTax = new Map<string, { country: string; gstOn: boolean | null; serviceMode: "qsr" | "tsr" | "retail" | null; tenderRounding: Record<string, number>; taxRemovable: boolean }>();
   async function applyOutletTax(): Promise<void> {
     const all = db ? await listOutlets(db, merchantId) : [];
     outletTax.clear();
-    for (const o of all) outletTax.set(o.id, { country: o.country, gstOn: o.gstOn, serviceMode: o.serviceMode });
+    for (const o of all) outletTax.set(o.id, { country: o.country, gstOn: o.gstOn, serviceMode: o.serviceMode, tenderRounding: o.tenderRounding, taxRemovable: o.taxRemovable });
     const p = withTaxPack(config.pricing, outletTax.get(config.outletName)?.country);
     delete config.pricing.rounding;
     Object.assign(config.pricing, p);
@@ -107,8 +107,10 @@ export async function buildApp({ config, store, db, catalog, catalogAdmin, print
   function configFor(outletId: string | null | undefined): BusinessConfig {
     const o = outletId ? outletTax.get(outletId) : undefined;
     if (!o) return config;
-    const pricing = withTaxPack(config.pricing, o.country);
-    return { ...config, ...(o.serviceMode ? { serviceMode: o.serviceMode } : {}), pricing: { ...pricing, gstOn: o.gstOn ?? config.pricing.gstOn } };
+    // The outlet's own switches: tax removal (within what its country allows) and rounding by tender (to a step its country offers).
+    const pricing = withTaxPack({ ...config.pricing, taxRemovable: o.taxRemovable }, o.country);
+    const rounding = cleanTenderRounding(o.tenderRounding, o.country) ?? {};
+    return { ...config, ...(o.serviceMode ? { serviceMode: o.serviceMode } : {}), pricing: { ...pricing, gstOn: o.gstOn ?? config.pricing.gstOn, ...(Object.keys(rounding).length ? { tenderRounding: rounding } : {}) } };
   }
 
   const streams = new Set<(s: StoredEvent[]) => void>();
@@ -184,6 +186,8 @@ export async function buildApp({ config, store, db, catalog, catalogAdmin, print
     // With no line of its own, the outlet's phone number is the customer service line (as the reference receipt does).
     const service = profile?.customerService ?? process.env.CUSTOMER_SERVICE?.trim() ?? profile?.phone ?? undefined;
     if (service) ctx.customerService = service;
+    // What each item is, for the line under its name: its category.
+    try { ctx.categoryOf = Object.fromEntries((await catalog.load()).products.map((p) => [p.id, p.category])); } catch { /* the receipt prints without it */ }
     const footer = (profile?.receiptFooter ?? "").split("\n").map((x) => x.trim()).filter(Boolean).slice(0, 4);
     if (footer.length) ctx.footer = footer;
     if (!db) return ctx;
@@ -259,7 +263,8 @@ export async function buildApp({ config, store, db, catalog, catalogAdmin, print
   /** Store events, tell live screens, queue whatever now needs printing. Used for tills and for customers' orders alike. */
   async function ingest(events: OrderEvent[], outletId?: string): Promise<StoredEvent[]> {
     // Tax can only be taken off an order where the country's tax pack allows it; anything else is dropped here, whatever the till sent.
-    events = events.filter((e) => !(e.type === "TaxRemovalSet" && e.removed && !(config.pricing.taxRemovable && config.pricing.gstOn)));
+    const rules = configFor(outletId ?? config.outletName).pricing;
+    events = events.filter((e) => !(e.type === "TaxRemovalSet" && e.removed && !(rules.taxRemovable && rules.gstOn)));
     // A member attached at the till must be a real member of this shop; otherwise the event is dropped. The order is then theirs: it shows
     // in their history, earns points when paid, and gives points back if it is cancelled.
     if (events.some((e) => e.type === "MemberAttached")) {
@@ -403,7 +408,7 @@ export async function buildApp({ config, store, db, catalog, catalogAdmin, print
   });
 
   // Screen choices that belong to the person, not the till: which side the menu sits on, and how big the text is.
-  const PREF_VALUES: Record<string, string[]> = { menuSide: ["left", "right"], textSize: ["compact", "standard", "large", "xl"] };
+  const PREF_VALUES: Record<string, string[]> = { menuSide: ["left", "right"], textSize: ["compact", "standard", "large", "xl"], look: ["standard", "orange-waffle"] };
   // A person's own menu layout rides along with their other choices (null clears it, so they see the shop's again).
   const cleanPrefs = (v: unknown) => {
     const o = (v ?? {}) as Record<string, unknown>;
@@ -770,7 +775,7 @@ export async function buildApp({ config, store, db, catalog, catalogAdmin, print
    * Create or change an outlet. Adding an outlet, moving it between franchises and switching it off are for the brand owner;
    * a manager of an outlet (or of its franchise) can update its name, address, phone and opening hours.
    */
-  app.put<{ Params: { id: string }; Body: { name?: string; franchiseId?: string | null; address?: string | null; phone?: string | null; hours?: string | null; active?: boolean; serviceMode?: string | null; prepMinutes?: number | null; latitude?: number | null; longitude?: number | null; country?: string; gstRegNo?: string | null; uen?: string | null; gstOn?: boolean | null; receiptFooter?: string | null; customerService?: string | null } }>("/api/outlets/:id", { preHandler: needs("device.manage") }, async (req, reply) => {
+  app.put<{ Params: { id: string }; Body: { name?: string; franchiseId?: string | null; address?: string | null; phone?: string | null; hours?: string | null; active?: boolean; serviceMode?: string | null; prepMinutes?: number | null; latitude?: number | null; longitude?: number | null; country?: string; gstRegNo?: string | null; uen?: string | null; gstOn?: boolean | null; receiptFooter?: string | null; customerService?: string | null; tenderRounding?: Record<string, number> | null; taxRemovable?: boolean } }>("/api/outlets/:id", { preHandler: needs("device.manage") }, async (req, reply) => {
     const visible = await visibleOutletIds(db, merchantId, req.staff!);
     const id = req.params.id;
     const b = req.body ?? {};
@@ -805,11 +810,17 @@ export async function buildApp({ config, store, db, catalog, catalogAdmin, print
     const gstRegNo = b.gstRegNo === undefined ? existing?.gstRegNo ?? null : reg(b.gstRegNo);
     const uen = b.uen === undefined ? existing?.uen ?? null : reg(b.uen);
     if (gstRegNo === undefined || uen === undefined) return reply.code(400).send({ error: "bad_registration", message: "A registration number is letters, digits and dashes only." });
-    if (visible !== null && existing && (country !== existing.country || gstRegNo !== existing.gstRegNo || uen !== existing.uen || gstOn !== existing.gstOn)) return reply.code(403).send({ error: "brand_only", message: "Only the brand owner can change an outlet's country, its tax, or its registration numbers." });
+    // Rounding by tender (a step the outlet's country offers, or none) and whether staff may take tax off an order: both the brand owner's.
+    const tenderRounding = b.tenderRounding === undefined ? cleanTenderRounding(existing?.tenderRounding ?? {}, country) ?? {} : cleanTenderRounding(b.tenderRounding, country);
+    if (!tenderRounding) return reply.code(400).send({ error: "bad_rounding", message: `Rounding is by tender, to one of: ${taxPackFor(country).roundingSteps.join(", ")} cents, or none.` });
+    if (b.taxRemovable !== undefined && typeof b.taxRemovable !== "boolean") return reply.code(400).send({ error: "taxRemovable is true or false" });
+    const taxRemovable = b.taxRemovable === undefined ? existing?.taxRemovable ?? false : b.taxRemovable;
+    const same = (x: Record<string, number>, y: Record<string, number>) => JSON.stringify(Object.entries(x).sort()) === JSON.stringify(Object.entries(y).sort());
+    if (visible !== null && existing && (country !== existing.country || gstRegNo !== existing.gstRegNo || uen !== existing.uen || gstOn !== existing.gstOn || taxRemovable !== existing.taxRemovable || !same(tenderRounding, cleanTenderRounding(existing.tenderRounding, existing.country) ?? {}))) return reply.code(403).send({ error: "brand_only", message: "Only the brand owner can change an outlet's country, its tax, its rounding, or its registration numbers." });
     // The receipt's closing lines (up to four, 42 letters each, as wide as the paper) and the customer service line: the outlet's manager may set these.
     const receiptFooter = b.receiptFooter === undefined ? existing?.receiptFooter ?? null : (String(b.receiptFooter ?? "").split("\n").map((x) => x.replace(/[\u0000-\u001f\u007f]+/g, " ").trim().slice(0, 42)).filter(Boolean).slice(0, 4).join("\n") || null);
     const customerService = b.customerService === undefined ? existing?.customerService ?? null : text(b.customerService, 60);
-    await upsertOutlet(db, merchantId, { id, name, franchiseId, receiptFooter, customerService, address: text(b.address, 200), phone: text(b.phone, 40), hours: text(b.hours, 120), active, serviceMode, prepMinutes, latitude, longitude, country, gstRegNo, uen, gstOn });
+    await upsertOutlet(db, merchantId, { id, name, franchiseId, receiptFooter, customerService, tenderRounding, taxRemovable, address: text(b.address, 200), phone: text(b.phone, 40), hours: text(b.hours, 120), active, serviceMode, prepMinutes, latitude, longitude, country, gstRegNo, uen, gstOn });
     await audit(db, merchantId, req.staff!.id, "outlet.save", { id, name, franchiseId, serviceMode, prepMinutes, country, gstRegNo, uen, gstOn, created: !existing });
     await applyOutletTax();
     return { ok: true };
@@ -1580,6 +1591,30 @@ export async function buildApp({ config, store, db, catalog, catalogAdmin, print
   });
 
   /** Freeze or unfreeze all member credit. Frozen: it cannot be spent (online orders and staff credit payments are refused). Balances stay. */
+  /** How long credit lasts, how long it can be brought back, and the smallest top-up: the shop's own settings. */
+  app.get("/api/settings/credit", { preHandler: needs("wallet.read") }, async () => loadCreditRules(db, merchantId));
+  app.put<{ Body: Record<string, unknown> }>("/api/settings/credit", { preHandler: needs("staff.manage") }, async (req, reply) => {
+    if ((await visibleOutletIds(db, merchantId, req.staff!)) !== null) return reply.code(403).send({ error: "brand_only" });
+    const rules = cleanCreditRules(req.body, await loadCreditRules(db, merchantId));
+    if (!rules) return reply.code(400).send({ error: "validityDays (0 to 3660, 0 = never expires), reinstateDays (0 to 730) and minTopupCents are whole numbers" });
+    await saveCreditRules(db, merchantId, rules);
+    await audit(db, merchantId, req.staff!.id, "settings.credit", rules);
+    return rules;
+  });
+  /** Google and Microsoft sign-in for customers: each a switch, off until the owner turns it on. `ready` says whether the server holds that provider's app registration. */
+  const signinPayload = async () => ({ ...(await loadSignin(db, merchantId)), ready: { google: !!integrations?.google, microsoft: !!integrations?.microsoft } });
+  app.get("/api/settings/signin", { preHandler: needs("staff.manage") }, signinPayload);
+  app.put<{ Body: Record<string, unknown> }>("/api/settings/signin", { preHandler: needs("staff.manage") }, async (req, reply) => {
+    if ((await visibleOutletIds(db, merchantId, req.staff!)) !== null) return reply.code(403).send({ error: "brand_only" });
+    const v = cleanSignin(req.body, await loadSignin(db, merchantId));
+    if (!v) return reply.code(400).send({ error: "google and microsoft are true or false" });
+    await saveSignin(db, merchantId, v);
+    await audit(db, merchantId, req.staff!.id, "settings.signin", v);
+    return signinPayload();
+  });
+  /** One wallet under those rules: valid, expired (a top-up brings it back) or lapsed. */
+  app.get<{ Params: { customerId: string } }>("/api/wallet/:customerId/state", { preHandler: needs("wallet.read") }, async (req) => creditState(db, merchantId, req.params.customerId));
+
   app.get("/api/credit/freeze", { preHandler: needs("wallet.read") }, async () => ({ frozen: await creditFrozen(db, merchantId), allowed: await creditExemptIds(db, merchantId) }));
   /** Let one member keep spending their credit while the freeze is on (or take that away again). */
   app.put<{ Params: { id: string }; Body: { allowed?: boolean } }>("/api/credit/freeze/members/:id", { preHandler: needs("wallet.refund") }, async (req, reply) => {
@@ -1606,8 +1641,20 @@ export async function buildApp({ config, store, db, catalog, catalogAdmin, print
       if (!valid(b)) return reply.code(400).send({ error: "customerId, idempotencyKey and a positive integer amountCents are required" });
       if (path === "spend" && (await creditBlockedFor(db, merchantId, b!.customerId!))) return reply.code(403).send({ ok: false, error: "credit_frozen", message: "Member credit is frozen. It cannot be spent until it is switched back on." });
       const staff = req.staff!;
+      // Credit past its validity cannot be spent until a top-up reinstates it (or, once lapsed, at all).
+      if (path === "spend" && !(await creditSpendable(db, merchantId, b!.customerId!))) { const s = await creditState(db, merchantId, b!.customerId!); return reply.code(403).send({ ok: false, error: "credit_expired", state: s.state, expiresAt: s.expiresAt, reinstateBy: s.reinstateBy, message: s.state === "expired" ? "This credit has expired. A top-up brings it back." : "This credit expired and was not reinstated in time." }); }
       if (path === "topup" && staff.role === "cashier" && b!.amountCents! > CASHIER_TOPUP_LIMIT_CENTS) {
         return reply.code(403).send({ error: "over_limit", limitCents: CASHIER_TOPUP_LIMIT_CENTS });
+      }
+      if (path === "topup") {
+        // The shop's smallest top-up; and credit that lapsed is written off first, so the new money starts a clean balance.
+        const rules = await loadCreditRules(db, merchantId);
+        const already = await db.query("SELECT 1 FROM ledger_entries e JOIN wallets w ON w.id=e.wallet_id WHERE w.merchant_id=$1 AND w.customer_id=$2 AND e.idempotency_key=$3", [merchantId, b!.customerId, b!.idempotencyKey]);
+        if (!already.rowCount) {
+          if (b!.amountCents! < rules.minTopupCents) return reply.code(400).send({ error: "below_minimum", minCents: rules.minTopupCents, message: `The smallest top-up is ${(rules.minTopupCents / 100).toFixed(2)}.` });
+          const lost = await writeOffLapsed(db, { merchantId, customerId: b!.customerId!, staffId: staff.id, deviceId: req.device!.id, outletId: config.outletName });
+          if (lost > 0) await audit(db, merchantId, staff.id, "wallet.lapsed", { customerId: b!.customerId, writtenOffCents: lost });
+        }
       }
       // A refund is a linked reversal: it must name the order it reverses, and cannot exceed what that order took from this wallet.
       if (path === "refund") {
@@ -1695,6 +1742,7 @@ export async function buildApp({ config, store, db, catalog, catalogAdmin, print
       }
       return {
         member: { id: m.id, name: m.name, phone: m.phone, email: m.email, points: m.pointsBalance, creditCents: await balanceOf(db, merchantId, m.id) },
+        credit: await creditState(db, merchantId, m.id),
         rewards: { pointsEnabled: config.rewards.pointsEnabled, minPointsRedeem: config.pricing.minPointsRedeem },
         recent,
       };

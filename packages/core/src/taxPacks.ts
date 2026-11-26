@@ -25,18 +25,38 @@ export interface TaxPack {
   pricesIncludeTax: boolean;
   /** The total is rounded this way and the difference is shown as its own line. Missing = totals are never rounded. */
   rounding?: RoundingRule;
-  /** Staff may take the tax off an order (the Add/Remove Tax action). */
+  /** The steps (in cents) an outlet here may round a payment to, by tender: 5 = to the nearest five cents. An outlet chooses one, or none. */
+  roundingSteps: number[];
+  /** An outlet here may let staff take the tax off an order (the Add/Remove Tax action). It stays off until the outlet switches it on. */
   removable: boolean;
 }
 
 /**
  * Singapore: GST 9% (since 1 Jan 2024), inside the prices: the reference receipt reads "Total (SGD) INCL. GST" with the GST amount taken
- * out of the total (decision Q44, handout section 6). No rounding rule and no tax removal are set: neither is stated in the handout, and both are the
- * owner's call. Each is one value here once decided.
+ * out of the total (decision Q44, handout section 6).
+ *
+ * Malaysia: the tax is called SST. Its rate has not been given yet, so it is 0 here and charges nothing until the owner supplies it.
+ *
+ * Rounding and tax removal (owner, 25 Nov 2026): rounding is by tender, off by default, and an outlet may choose 5 or 10 cents in both
+ * countries; taking tax off an order is an outlet setting, off by default.
  */
 export const TAX_PACKS: Readonly<Record<string, TaxPack>> = {
-  SG: { country: "SG", countryName: "Singapore", taxName: "GST", rate: 0.09, pricesIncludeTax: true, removable: false },
+  SG: { country: "SG", countryName: "Singapore", taxName: "GST", rate: 0.09, pricesIncludeTax: true, roundingSteps: [5, 10], removable: true },
+  MY: { country: "MY", countryName: "Malaysia", taxName: "SST", rate: 0, pricesIncludeTax: false, roundingSteps: [5, 10], removable: true },
 };
+/** An outlet's rounding choices, kept to the tenders and steps its country allows: { cash: 5 } rounds cash payments to five cents. */
+export function cleanTenderRounding(v: unknown, country: string | null | undefined): Record<string, number> | null {
+  if (v == null) return {};
+  if (typeof v !== "object" || Array.isArray(v)) return null;
+  const steps = taxPackFor(country).roundingSteps, out: Record<string, number> = {};
+  for (const [k, n] of Object.entries(v as Record<string, unknown>)) {
+    if (!/^[a-z0-9-]{1,30}$/.test(k)) return null;
+    if (n === 0 || n === null) continue;
+    if (typeof n !== "number" || !steps.includes(n)) return null;
+    out[k] = n;
+  }
+  return out;
+}
 
 export const DEFAULT_COUNTRY = "SG";
 export const isTaxCountry = (c: unknown): c is string => typeof c === "string" && Object.prototype.hasOwnProperty.call(TAX_PACKS, c);
@@ -46,7 +66,8 @@ export const taxPackFor = (country: string | null | undefined): TaxPack => TAX_P
 export function withTaxPack(pricing: PricingConfig, country: string | null | undefined): PricingConfig {
   const p = taxPackFor(country);
   const { rounding: _r, ...rest } = pricing;
-  return { ...rest, country: p.country, gstRate: p.rate, taxInclusive: p.pricesIncludeTax, taxName: p.taxName, taxRemovable: p.removable, ...(p.rounding ? { rounding: p.rounding } : {}) };
+  // Whether tax may be taken off is the outlet's own switch, within what the country allows: it stays as it was unless the country forbids it.
+  return { ...rest, country: p.country, gstRate: p.rate, taxInclusive: p.pricesIncludeTax, taxName: p.taxName, roundingSteps: p.roundingSteps, taxRemovable: p.removable && !!pricing.taxRemovable, ...(p.rounding ? { rounding: p.rounding } : {}) };
 }
 
 /** A total rounded by the rule. A step under two cents rounds nothing. */

@@ -45,6 +45,8 @@ const list = (q = "", staff = mgr) => call(`/api/members${q ? `?q=${encodeURICom
 
 beforeAll(async () => {
   ({ db, stop } = await startTestDb());
+  // These tests are about other things and use small sums: the shop's minimum top-up (S$10 by default) is switched off here.
+  await db.query("INSERT INTO merchant_settings (merchant_id, key, value) VALUES ($1,'credit',$2::jsonb) ON CONFLICT (merchant_id, key) DO UPDATE SET value=EXCLUDED.value", ["bp", JSON.stringify({ minTopupCents: 0 })]);
   const cat = new PgCatalogStore(db, "bp");
   await cat.ensureSeeded(seedCatalog());
   app = await buildApp({ config: PRESETS.fastServe("bp", "Bailey & Patch", "EV"), db, logger: false, store: new PgEventStore(db, "bp", "EV"), catalog: cat, catalogAdmin: cat, trustProxy: true });

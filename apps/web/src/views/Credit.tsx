@@ -34,6 +34,8 @@ export function Credit({ customerId, setCustomerId, online }: { customerId: stri
       setMsg(`Added ${formatMoney(cents)}. New balance ${formatMoney(r.balanceCents)}.`);
     } else if (r.reason === "over_limit") {
       setMsg(`Cashiers can add up to ${formatMoney(r.limitCents)} at a time. Ask a manager for more.`);
+    } else if (r.reason === "below_minimum") {
+      setMsg(`The smallest top-up is ${formatMoney(r.minCents)}. Nothing was added.`);
     } else if (r.reason === "signin_required") {
       setMsg("Your session has ended. Sign in again. Nothing was added.");
     } else if (r.reason === "not_allowed") {

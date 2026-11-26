@@ -150,7 +150,7 @@ describe("options on tickets, receipts and labels", () => {
   it("the receipt lists the options under the item and the line price includes them", () => {
     // Modifiers are off by default on a receipt (the price already includes them) and print on request.
     const off = plainText(receipt(order, config, ctx), 42).join("\n");
-    expect(off).toMatch(/1 x KARAAGE RICE\s+S\$14\.80/);
+    expect(off).toMatch(/KARAAGE RICE\n[^\n]*\b1\s+S\$14\.80/); // the name, then quantity and amount on the next line
     expect(off).not.toContain("Sunny Side Egg");
     expect(plainText(receipt(order, config, ctx, { printModifiers: true }), 42).join("\n")).toContain("- Sunny Side Egg x2");
   });

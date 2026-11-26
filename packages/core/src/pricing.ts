@@ -36,6 +36,9 @@ export interface PricingConfig {
   taxName?: string;
   rounding?: RoundingRule;
   taxRemovable?: boolean;
+  /** From the country's pack: the steps an outlet may round a payment to. And the outlet's own choice by tender: { cash: 5 }. */
+  roundingSteps?: number[];
+  tenderRounding?: Record<string, number>;
 }
 
 export const DEFAULT_PRICING: PricingConfig = {
@@ -92,6 +95,8 @@ export interface PriceInput {
   points?: PointsInput | null;
   /** Staff took the tax off this order (Add/Remove Tax): none is added, and the tax inside tax-inclusive prices comes off the total. */
   taxRemoved?: boolean;
+  /** Rounding already applied when the order was paid (by the tender's rule): added to the total and shown as its own line. */
+  roundingCents?: Cents;
   config?: PricingConfig;
 }
 
@@ -268,7 +273,7 @@ export function priceOrder(input: PriceInput): PriceResult {
   }
 
   const exact = Math.max(0, subtotal + service + fee + gst + bcrs - allDiscount - pointsDiscount - taxOffTotal);
-  const total = roundTotal(exact, cfg.rounding);
+  const total = Math.max(0, roundTotal(exact, cfg.rounding) + Math.round(input.roundingCents ?? 0));
   return {
     subtotal,
     service,

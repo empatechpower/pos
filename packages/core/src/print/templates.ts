@@ -20,6 +20,8 @@ export interface PrintContext {
   gstRegNo?: string;
   uen?: string;
   customerService?: string;
+  /** Each item's category, by product id: printed under an item that has no variant (decision Q44). */
+  categoryOf?: Record<string, string>;
   /** Which till, who took the payment, and the member's last four digits, for the POSID line and the Member ID line. */
   posId?: string;
   cashier?: string;
@@ -65,20 +67,26 @@ export function receipt(order: OrderState, config: BusinessConfig, ctx: PrintCon
   b.push({ t: "rule" }, { t: "cols", left: order.queueNumber && opts.showQueue !== false ? `Order ${order.queueNumber}` : "Order", right: where(order) }, { t: "rule" });
   let depositUnits = 0;
   for (const l of liveLines(order)) {
-    // An item sold with a barcode or SKU prints it before its name, as on the reference receipt ("10237 CORIANDER SEED").
-    b.push({ t: "cols", left: `${l.qty} x ${l.sku ? `${l.sku} ` : ""}${l.name.toUpperCase()}`, right: money(l.unitCents * l.qty) });
+    // Two lines an item, as on the reference receipt (decision Q44): its SKU and NAME, then what it is (its variant, else its category),
+    // the quantity and the amount.
+    b.push({ t: "text", text: `${l.sku ? `${l.sku} ` : ""}${l.name.toUpperCase()}` });
+    const what = (l.options ?? []).filter((o) => o.variant).map((o) => o.name).join(" ") || ctx.categoryOf?.[l.productId] || "";
+    b.push({ t: "cols", left: `  ${what}`.trimEnd() || " ", right: `${String(l.qty).padStart(3)}  ${money(l.unitCents * l.qty).padStart(9)}` });
     if (opts.printModifiers) {
       // Options sit under the item, marked with a dash (leading spaces would be collapsed when wrapping). Free ones print by name, never as S$0.00.
       if (l.build) {
         for (const o of buildTicketLines(l.build, true, formatMoney)) b.push({ t: "text", text: o.startsWith("  ") ? `- ${o.trim()}` : o });
-      } else for (const o of l.options ?? []) b.push(o.priceCents ? { t: "cols", left: `- ${optionLines([o])[0]}`, right: `+${money(o.priceCents * (o.qty || 1))}` } : { t: "text", text: `- ${optionLines([o])[0]}` });
+      } else for (const o of l.options ?? []) { const paid = o.priceCents * ((o.qty || 1) - (o.freeQty ?? 0)); b.push(paid > 0 ? { t: "cols", left: `- ${optionLines([o])[0]}`, right: `+${money(paid)}` } : { t: "text", text: `- ${optionLines([o])[0]}` }); } // units inside the free allowance cost nothing
     } else if (l.build) {
       for (const o of optionLines(l.options).filter((x) => x.startsWith("Note: "))) b.push({ t: "text", text: `- ${o}` });
     } else for (const o of optionLines(l.options).filter((x) => x.startsWith("Note: "))) b.push({ t: "text", text: `- ${o}` });
     if (l.bcrs) { depositUnits += l.qty; b.push({ t: "cols", left: `  BCRS Deposit Charge x${l.qty}`, right: `${money(l.qty * config.pricing.bcrsDepositCents)} Z` }); }
   }
   if (order.note) b.push({ t: "text", text: `Note: ${order.note}` });
-  b.push({ t: "rule" }, { t: "cols", left: "Subtotal", right: money(t.subtotal) });
+  // The subtotal is printed only when something is added to or taken off it; otherwise it would just repeat the total.
+  const adjusted = !!(t.couponDiscount || t.discountCents || t.pointsDiscount || t.service || t.fee || t.gst || t.taxRemoved || t.rounding);
+  b.push({ t: "rule" });
+  if (adjusted) b.push({ t: "cols", left: "Subtotal", right: money(t.subtotal) });
   // Money taken off reads as a trailing minus, as on the 7-Eleven receipt.
   if (t.couponDiscount) b.push({ t: "cols", left: "Coupon", right: `${money(t.couponDiscount)}-` });
   if (t.discountCents) b.push({ t: "cols", left: "Discount", right: `${money(t.discountCents)}-` });
@@ -103,6 +111,7 @@ export function receipt(order: OrderState, config: BusinessConfig, ctx: PrintCon
   for (const p of paid) {
     const label = recordedTender(p.tender)?.label ?? customTenderName(p) ?? METHOD[p.method] ?? p.method;
     b.push({ t: "cols", left: p.checkId && checkNo.has(p.checkId) ? `Check ${String(checkNo.get(p.checkId)).padStart(2, "0")} ${label}` : label, right: money(p.amountCents) });
+    if (p.reference) b.push({ t: "text", text: `  Ref ${p.reference}` });
     if (p.tenderedCents) b.push({ t: "cols", left: "  Cash tendered", right: money(p.tenderedCents) }, { t: "cols", left: "  Change", right: money(p.tenderedCents - p.amountCents) });
   }
   for (const r of order.refunds ?? []) b.push({ t: "cols", left: `Refund ${METHOD[r.method] ?? r.method}`, right: `${money(r.amountCents)}-` });

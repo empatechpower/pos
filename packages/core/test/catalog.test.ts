@@ -205,3 +205,39 @@ describe("member prices", () => {
     expect(basePriceFor(kaya, true)).toBe(150);
   });
 });
+
+describe("a barcode on each variant", () => {
+  const cat = (): import("../src/catalog.js").Catalog => ({
+    version: 1, defaultPricebookId: "std",
+    products: [
+      { id: "coffee", name: "Coffee", category: "Drinks", barcode: "9000000000001", options: [
+        { id: "size", name: "Size", kind: "single", required: true, variant: true, choices: [{ id: "s", name: "Small", priceCents: 0, default: true, barcode: "9000000000011" }, { id: "l", name: "Large", priceCents: 100, barcode: "9000000000012" }] },
+        { id: "extra", name: "Extras", kind: "multi", required: false, choices: [{ id: "shot", name: "Extra shot", priceCents: 80 }] },
+      ] },
+      { id: "tea", name: "Tea", category: "Drinks" },
+    ],
+    pricebooks: [{ id: "std", name: "Standard", missing: "hide", prices: { coffee: 300, tea: 200 } }],
+    channels: [{ id: "dine", name: "Dine in", kind: "dine_in", serviceCharge: false, active: true }],
+    assignments: [],
+  } as import("../src/catalog.js").Catalog);
+  it("a variant's code finds the item as that variant, with the usual defaults for the rest; the item's own code finds the item", async () => {
+    const { findByBarcode, menuFor } = await import("../src/catalog.js");
+    const menu = menuFor(cat(), { outletId: "o", channelId: "dine" });
+    const large = findByBarcode(menu, "9000000000012")!;
+    expect(large.item.id).toBe("coffee");
+    expect(large.variant).toEqual([{ groupId: "size", choiceId: "l" }]);
+    expect(findByBarcode(menu, "9000000000001")).toMatchObject({ item: { id: "coffee" } });
+    expect(findByBarcode(menu, "9000000000001")!.variant).toBeUndefined();
+    expect(findByBarcode(menu, "nope")).toBeNull();
+  });
+  it("one code means one thing across the whole menu, and only a variant carries one", async () => {
+    const { validateCatalog } = await import("../src/catalog.js");
+    expect(validateCatalog(cat())).toEqual([]);
+    const clash = cat();
+    clash.products[1]!.barcode = "9000000000012";
+    expect(validateCatalog(clash).join(" ")).toContain("is on both");
+    const wrong = cat();
+    wrong.products[0]!.options![1]!.choices[0]!.barcode = "9000000000099";
+    expect(validateCatalog(wrong).join(" ")).toContain("only a variant has one");
+  });
+});

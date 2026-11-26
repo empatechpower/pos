@@ -48,6 +48,8 @@ let tillA = { token: "", id: "" };
 
 beforeAll(async () => {
   ({ db, stop } = await startTestDb());
+  // These tests are about other things and use small sums: the shop's minimum top-up (S$10 by default) is switched off here.
+  await db.query("INSERT INTO merchant_settings (merchant_id, key, value) VALUES ($1,'credit',$2::jsonb) ON CONFLICT (merchant_id, key) DO UPDATE SET value=EXCLUDED.value", ["bp", JSON.stringify({ minTopupCents: 0 })]);
   app = await buildApp({ config, db, catalog: new StaticCatalogStore(seedCatalog()), logger: false, store: new PgEventStore(db, "bp", "EV") });
   await app.listen({ port: 0, host: "127.0.0.1" });
   base = `http://127.0.0.1:${(app.server.address() as { port: number }).port}`;

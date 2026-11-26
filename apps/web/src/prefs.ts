@@ -1,10 +1,11 @@
 import { useSyncExternalStore } from "react";
 import { currentStaff, staffFetch } from "./auth";
 import type { MenuLayout } from "./till/layout";
+import type { LookId } from "./looks";
 
 /** A person's own screen choices. They live on the server so they follow the person to any till; a copy is kept here for offline starts. */
-export interface Prefs { menuSide: "left" | "right"; textSize: "compact" | "standard" | "large" | "xl"; /** Their own menu layout, when they made one. */ layout?: MenuLayout }
-export const DEFAULT_PREFS: Prefs = { menuSide: "right", textSize: "standard" };
+export interface Prefs { menuSide: "left" | "right"; textSize: "compact" | "standard" | "large" | "xl"; /** The look they work in (see looks.ts). */ look: LookId; /** Their own menu layout, when they made one. */ layout?: MenuLayout }
+export const DEFAULT_PREFS: Prefs = { menuSide: "right", textSize: "standard", look: "standard" };
 /** How much bigger than the original the interface is at each size (Standard is 20% up, as decided). */
 export const TEXT_SCALE: Record<Prefs["textSize"], number> = { compact: 1, standard: 1.2, large: 1.35, xl: 1.5 };
 

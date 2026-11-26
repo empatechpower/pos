@@ -130,6 +130,7 @@ export function OptionsEditor({ product, catalog, onSave, onClose }: Props) {
                   )}
                   <span className="oe-plus">+<input inputMode="decimal" placeholder="0.00" aria-label="Top-up price" value={prices[`${g.id}/${c.id}`] ?? (c.priceCents ? (c.priceCents / 100).toFixed(2) : "")}
                     onChange={(e) => { setPrices((p) => ({ ...p, [`${g.id}/${c.id}`]: e.target.value })); const v = toCents(e.target.value); if (v !== null) patchChoice(gi, ci, (x) => ({ ...x, priceCents: v })); }} /></span>
+                  {g.variant && <input className="oe-code" style={{ width: 130 }} placeholder="Barcode / SKU" maxLength={40} aria-label={`Barcode for ${c.name || "this choice"}`} title="This variant's own barcode: scanning it adds the item as this variant." value={c.barcode ?? ""} onChange={(e) => patchChoice(gi, ci, (x) => { const v = e.target.value.trim(); const { barcode: _b, ...rest } = x; return v ? { ...rest, barcode: v } : rest; })} />}
                   {!slot && g.kind !== "single" && (
                     <select aria-label="Kitchen instruction" title="An instruction about the item's usual ingredients: No onion, Side sauce, Only, Lite. It changes the ticket, not the price or stock." value={c.prefix ?? ""} onChange={(e) => patchChoice(gi, ci, (x) => ({ ...x, prefix: (e.target.value || undefined) as OptionChoice["prefix"] }))}>
                       <option value="">No instruction</option>

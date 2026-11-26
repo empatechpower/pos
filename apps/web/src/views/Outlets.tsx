@@ -3,7 +3,7 @@ import { DEFAULT_COUNTRY, TAX_PACKS, formatMoney } from "@pos/core";
 import { staffFetch } from "../auth";
 
 interface Franchise { id: string; name: string; active: boolean }
-interface Outlet { id: string; name: string; franchiseId: string | null; address: string | null; phone: string | null; hours: string | null; active: boolean; serviceMode: "qsr" | "tsr" | "retail" | null; prepMinutes?: number | null; latitude?: number | null; longitude?: number | null; country?: string; gstRegNo?: string | null; uen?: string | null; gstOn?: boolean | null; receiptFooter?: string | null; customerService?: string | null }
+interface Outlet { id: string; name: string; franchiseId: string | null; address: string | null; phone: string | null; hours: string | null; active: boolean; serviceMode: "qsr" | "tsr" | "retail" | null; prepMinutes?: number | null; latitude?: number | null; longitude?: number | null; country?: string; gstRegNo?: string | null; uen?: string | null; gstOn?: boolean | null; receiptFooter?: string | null; customerService?: string | null; tenderRounding?: Record<string, number>; taxRemovable?: boolean }
 interface Summary { orders: number; netCents: number; netToAccountForCents: number; discountsCents: number; voided: { orders: number } }
 interface Row { outletId: string; name: string; franchiseId: string | null; summary: Summary }
 interface Info { brand: { id: string; name: string }; scope: { franchiseId: string | null; outletId: string | null; brandWide: boolean }; franchises: Franchise[]; outlets: Outlet[] }
@@ -141,6 +141,14 @@ export function Outlets() {
                 </select>
               </label>
               <p className="muted">Applies to orders opened from now on. Orders already open keep what they were opened with.</p>
+              <label className="cust"><span>Cash rounding</span>
+                <select aria-label="Cash rounding" value={String(editing.tenderRounding?.cash ?? 0)} onChange={(e) => { const n = Number(e.target.value); const next = { ...(editing.tenderRounding ?? {}) }; if (n) next.cash = n; else delete next.cash; setEditing({ ...editing, tenderRounding: next }); }}>
+                  <option value="0">No rounding</option>
+                  {(TAX_PACKS[editing.country ?? DEFAULT_COUNTRY]?.roundingSteps ?? []).map((s) => <option key={s} value={s}>To the nearest {s} cents</option>)}
+                </select>
+              </label>
+              <p className="muted">Only cash payments are rounded; cards and PayNow are charged to the cent. The difference shows as "Rounding" on the till and the receipt.</p>
+              <label className="inline"><input type="checkbox" aria-label="Staff may take tax off an order" checked={!!editing.taxRemovable} onChange={(e) => setEditing({ ...editing, taxRemovable: e.target.checked })} /> Staff may take tax off an order (a manager, with a reason; it is recorded)</label>
             </>
           )}
           <label className="cust"><span>Receipt closing lines</span><textarea aria-label="Receipt closing lines" rows={3} value={editing.receiptFooter ?? ""} placeholder={"Thank you\nFollow us @yourshop"} onChange={(e) => setEditing({ ...editing, receiptFooter: e.target.value })} /></label>
@@ -175,7 +183,7 @@ export function Outlets() {
           <p className="muted">Customers see the address, phone and hours under Help &amp; support.</p>
           <div style={{ display: "flex", gap: 8 }}>
             <button className="primary" disabled={!editing.name.trim() || (isNew && !editing.id)} onClick={async () => {
-              const body = brandWide ? { name: editing.name, receiptFooter: editing.receiptFooter ?? null, customerService: editing.customerService ?? null, address: editing.address, phone: editing.phone, hours: editing.hours, franchiseId: editing.franchiseId, active: editing.active, country: editing.country ?? DEFAULT_COUNTRY, gstRegNo: editing.gstRegNo?.trim() || null, uen: editing.uen?.trim() || null, gstOn: editing.gstOn ?? null, serviceMode: editing.serviceMode, prepMinutes: editing.prepMinutes ?? null, latitude: editing.latitude ?? null, longitude: editing.longitude ?? null } : { name: editing.name, receiptFooter: editing.receiptFooter ?? null, customerService: editing.customerService ?? null, address: editing.address, phone: editing.phone, hours: editing.hours, serviceMode: editing.serviceMode, prepMinutes: editing.prepMinutes ?? null, latitude: editing.latitude ?? null, longitude: editing.longitude ?? null };
+              const body = brandWide ? { name: editing.name, receiptFooter: editing.receiptFooter ?? null, customerService: editing.customerService ?? null, address: editing.address, phone: editing.phone, hours: editing.hours, franchiseId: editing.franchiseId, active: editing.active, country: editing.country ?? DEFAULT_COUNTRY, gstRegNo: editing.gstRegNo?.trim() || null, uen: editing.uen?.trim() || null, gstOn: editing.gstOn ?? null, tenderRounding: editing.tenderRounding ?? {}, taxRemovable: !!editing.taxRemovable, serviceMode: editing.serviceMode, prepMinutes: editing.prepMinutes ?? null, latitude: editing.latitude ?? null, longitude: editing.longitude ?? null } : { name: editing.name, receiptFooter: editing.receiptFooter ?? null, customerService: editing.customerService ?? null, address: editing.address, phone: editing.phone, hours: editing.hours, serviceMode: editing.serviceMode, prepMinutes: editing.prepMinutes ?? null, latitude: editing.latitude ?? null, longitude: editing.longitude ?? null };
               if (await save(`/api/outlets/${encodeURIComponent(editing.id)}`, body, "Saved.")) setEditing(null);
             }}>Save</button>
             <button className="secondary" onClick={() => setEditing(null)}>Cancel</button>

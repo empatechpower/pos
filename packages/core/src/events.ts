@@ -71,7 +71,7 @@ export type OrderEventBody =
   /** The bill was split into checks. Each check has a fixed total (they add up to the order total) and, by item or seat, the units it carries. */
   | { type: "SplitCreated"; method: "even" | "manual" | "item" | "seat"; checks: Array<{ id: string; totalCents: Cents; seat?: number; shares?: Array<{ lineId: string; qty: number }> }>; byName?: string }
   | { type: "SplitCleared"; byName?: string }
-  | { type: "PaymentRecorded"; paymentId: string; method: PaymentMethod; /** The named tender it was taken as (tenders.ts: card, debit, check, gift card...), when the till only recorded it. */ tender?: string; /** The shop's own name for it, when it is one of its custom tenders (a delivery platform, a gift certificate). */ tenderName?: string; amountCents: Cents; /** false = awaiting gateway confirmation */ confirmed: boolean; /** The cashier's shift this was taken in (the drawer it belongs to). */ shiftId?: string; /** The check of a split bill this payment settles. */ checkId?: string; /** Who took it (the signed-in person at the till, or "PayNow (automatic)"). Reports by staff read this. */ byName?: string; /** A short note on how it was taken (for a PayNow payment: whether the bank's alert was matched by the order's reference or only by the amount). */ note?: string; /** Cash handed over, when it was more than the payment (so the receipt can show the change). */ tenderedCents?: Cents }
+  | { type: "PaymentRecorded"; paymentId: string; method: PaymentMethod; /** The named tender it was taken as (tenders.ts: card, debit, check, gift card...), when the till only recorded it. */ tender?: string; /** The shop's own name for it, when it is one of its custom tenders (a delivery platform, a gift certificate). */ tenderName?: string; /** The trace or reference number the cashier copied from the card terminal or the customer's payment screen, for a payment the till only recorded. */ reference?: string; amountCents: Cents; /** false = awaiting gateway confirmation */ confirmed: boolean; /** The cashier's shift this was taken in (the drawer it belongs to). */ shiftId?: string; /** The check of a split bill this payment settles. */ checkId?: string; /** Who took it (the signed-in person at the till, or "PayNow (automatic)"). Reports by staff read this. */ byName?: string; /** A short note on how it was taken (for a PayNow payment: whether the bank's alert was matched by the order's reference or only by the amount). */ note?: string; /** Cash handed over, when it was more than the payment (so the receipt can show the change). */ tenderedCents?: Cents }
   | { type: "PaymentConfirmed"; paymentId: string }
   | { type: "StageSet"; stage: Exclude<OrderStage, "open"> }
   /** The customer moved to another table after ordering: the same order, same status, now at `to`. The old table and the time are kept. */
@@ -90,6 +90,8 @@ export type OrderEventBody =
   | { type: "DiscountRemoved"; discountId: string; byName?: string }
   /** A note on the whole order for the kitchen and the guest check ("allergy: nuts", "birthday"). The latest one wins; empty clears it. */
   | { type: "OrderNoted"; note: string; byName?: string }
+  /** The payment was rounded by the tender's rule (cash to five cents): what that added to the total (negative when it took off). The latest one stands. */
+  | { type: "RoundingApplied"; cents: number; tender?: string; byName?: string }
   /** Someone signed in at a till that held another person's order and carried it on. For the order's trail only; it changes nothing on the order. */
   | { type: "OrderTakenOver"; from: string; byName?: string }
   /** The order was handed to whoever came for it (a delivery rider, the customer): who took it, and any reference they gave (a rider's card or id, the platform's order number). */
@@ -176,6 +178,8 @@ export interface OrderState {
   discounts?: StaffDiscount[];
   /** Set when the whole order was voided. */
   voided?: { reason: string; approvedBy: string; approvedByName: string; at: number };
+  /** What rounding at payment added to the total (negative when it took off). */
+  roundingCents?: number;
   /** Who collected the order, when it was handed over at the counter (the first handover stands; a second is ignored). */
   handover?: { to: string; ref?: string; byName?: string; at: number };
   /** Set while the tax is taken off this order (Add/Remove Tax). */
@@ -199,7 +203,7 @@ export interface OrderState {
   queueNumber?: string;
   openedAt: number;
   lines: OrderLine[];
-  payments: Array<{ paymentId: string; method: PaymentMethod; tender?: string; tenderName?: string; amountCents: Cents; confirmed: boolean; shiftId?: string; checkId?: string; tenderedCents?: Cents; byName?: string }>;
+  payments: Array<{ paymentId: string; method: PaymentMethod; tender?: string; tenderName?: string; reference?: string; amountCents: Cents; confirmed: boolean; shiftId?: string; checkId?: string; tenderedCents?: Cents; byName?: string }>;
   stage: OrderStage;
   /** Time the order was first fully paid (confirmed). */
   paidAt?: number;
@@ -249,7 +253,7 @@ export function reduceOrder(orderId: string, events: readonly OrderEvent[]): Ord
       }
       case "PaymentRecorded": {
         if (state.payments.some((p) => p.paymentId === e.paymentId)) break;
-        state.payments.push({ paymentId: e.paymentId, method: e.method, ...(recordedTender(e.tender) ? { tender: e.tender } : e.tender && CUSTOM_TENDER_ID.test(e.tender) && cleanTenderName(e.tenderName) ? { tender: e.tender, tenderName: cleanTenderName(e.tenderName) } : {}), amountCents: e.amountCents, confirmed: e.confirmed, ...(e.shiftId ? { shiftId: e.shiftId } : {}), ...(e.checkId ? { checkId: e.checkId } : {}), ...(e.byName ? { byName: String(e.byName).slice(0, 60) } : {}), ...(e.tenderedCents && e.tenderedCents > e.amountCents ? { tenderedCents: Math.round(e.tenderedCents) } : {}) });
+        state.payments.push({ paymentId: e.paymentId, method: e.method, ...(recordedTender(e.tender) ? { tender: e.tender } : e.tender && CUSTOM_TENDER_ID.test(e.tender) && cleanTenderName(e.tenderName) ? { tender: e.tender, tenderName: cleanTenderName(e.tenderName) } : {}), ...(typeof e.reference === "string" && e.reference.trim() ? { reference: e.reference.replace(/[\u0000-\u001f\u007f]+/g, " ").trim().slice(0, 40) } : {}), amountCents: e.amountCents, confirmed: e.confirmed, ...(e.shiftId ? { shiftId: e.shiftId } : {}), ...(e.checkId ? { checkId: e.checkId } : {}), ...(e.byName ? { byName: String(e.byName).slice(0, 60) } : {}), ...(e.tenderedCents && e.tenderedCents > e.amountCents ? { tenderedCents: Math.round(e.tenderedCents) } : {}) });
         break;
       }
       case "PaymentConfirmed": {
@@ -356,6 +360,9 @@ export function reduceOrder(orderId: string, events: readonly OrderEvent[]): Ord
         if (to && !state.handover) state.handover = { to, ...(typeof e.ref === "string" && e.ref.trim() ? { ref: e.ref.trim().slice(0, 60) } : {}), ...(e.byName ? { byName: String(e.byName).slice(0, 60) } : {}), at: e.ts };
         break;
       }
+      case "RoundingApplied":
+        if (Number.isInteger(e.cents) && Math.abs(e.cents) < 100) { if (e.cents) state.roundingCents = e.cents; else delete state.roundingCents; }
+        break;
       case "MemberAttached":
         if (typeof e.memberId === "string" && e.memberId) state.memberId = e.memberId.slice(0, 64); else delete state.memberId;
         break;
@@ -395,7 +402,7 @@ function frozenPricing(state: Pick<OrderState, "taxOn" | "serviceRate">, p: Busi
 
 export function orderTotals(state: OrderState, config: BusinessConfig): PriceResult {
   const points = state.pointsRedeemed ? { balance: state.pointsRedeemed, requested: state.pointsRedeemed } : null;
-  const input = { lines: state.lines, fulfilment: state.fulfilment, serviceCharge: state.serviceCharge, points, coupon: state.coupon ?? null, discountCents: staffDiscountCents(state.lines, state.discounts ?? []).totalCents, ...(state.taxRemoved ? { taxRemoved: true } : {}), config: frozenPricing(state, config.pricing) };
+  const input = { lines: state.lines, fulfilment: state.fulfilment, serviceCharge: state.serviceCharge, points, coupon: state.coupon ?? null, discountCents: staffDiscountCents(state.lines, state.discounts ?? []).totalCents, ...(state.taxRemoved ? { taxRemoved: true } : {}), ...(state.roundingCents ? { roundingCents: state.roundingCents } : {}), config: frozenPricing(state, config.pricing) };
   const plain = priceOrder(input);
   // A fee on the whole order: a percentage is of the items left after discounts.
   const fee = state.fees?.length ? feeCentsOf(state.fees, plain.subtotal - plain.couponDiscount - plain.discountCents) : 0;

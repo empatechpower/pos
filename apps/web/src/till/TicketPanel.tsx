@@ -5,7 +5,7 @@ import { effUnit, type BagLine } from "./types";
 /** The details under a line: its choices, a price set by hand, discounts, and the kitchen note. */
 function details(l: BagLine): Array<{ text: string; amount?: string; strong?: boolean }> {
   const out: Array<{ text: string; amount?: string; strong?: boolean }> = [];
-  for (const o of l.options) out.push({ text: optionLines([o])[0]!, amount: o.priceCents ? `+${formatMoney(o.priceCents * (o.qty || 1))}` : undefined });
+  for (const o of l.options) out.push({ text: optionLines([o])[0]!, amount: o.priceCents * ((o.qty || 1) - (o.freeQty ?? 0)) > 0 ? `+${formatMoney(o.priceCents * ((o.qty || 1) - (o.freeQty ?? 0)))}` : undefined }); // units inside the free allowance cost nothing
   if (l.override) out.push({ text: `Price ${formatMoney(l.unitCents)} → ${formatMoney(l.override.unitCents)} · ${l.override.reason}` });
   for (const d of l.discounts ?? []) out.push({ text: `${d.kind === "percent" ? `${d.value}% off` : `${formatMoney(d.value)} off`} · ${d.reason}` });
   if (l.memberPriced && !l.override) out.push({ text: `Member price (usual ${formatMoney(l.unitCents + (l.item.priceCents - (l.item.memberPriceCents ?? l.item.priceCents)))})` });

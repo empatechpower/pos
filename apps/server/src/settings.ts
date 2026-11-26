@@ -97,3 +97,20 @@ export async function saveKiosk(db: Db, merchantId: string, patch: unknown): Pro
   await saveSetting(db, merchantId, "kiosk", next);
   return next;
 }
+
+/** Which outside sign-in providers the shop offers its customers. Both are off until the owner switches them on; a provider also needs its app registration on the server. */
+export interface SigninProviders { google: boolean; microsoft: boolean }
+export const DEFAULT_SIGNIN: SigninProviders = { google: false, microsoft: false };
+export function cleanSignin(v: unknown, base: SigninProviders = DEFAULT_SIGNIN): SigninProviders | null {
+  const o = (v ?? {}) as Record<string, unknown>;
+  const one = (x: unknown, d: boolean): boolean | null => (x === undefined ? d : typeof x === "boolean" ? x : null);
+  const google = one(o.google, base.google), microsoft = one(o.microsoft, base.microsoft);
+  return google === null || microsoft === null ? null : { google, microsoft };
+}
+export async function loadSignin(db: Db, merchantId: string): Promise<SigninProviders> {
+  const r = await db.query("SELECT value FROM merchant_settings WHERE merchant_id=$1 AND key='signin'", [merchantId]);
+  return cleanSignin(r.rows[0]?.value) ?? DEFAULT_SIGNIN;
+}
+export async function saveSignin(db: Db, merchantId: string, v: SigninProviders): Promise<void> {
+  await db.query("INSERT INTO merchant_settings (merchant_id, key, value) VALUES ($1,'signin',$2::jsonb) ON CONFLICT (merchant_id, key) DO UPDATE SET value=EXCLUDED.value, updated_at=now()", [merchantId, JSON.stringify(v)]);
+}

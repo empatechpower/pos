@@ -8,7 +8,8 @@ import { markDeviceRejected } from "./device";
 export type WalletResult =
   | { ok: true; balanceCents: number; replayed: boolean }
   | { ok: false; reason: "insufficient_funds"; balanceCents: number }
-  | { ok: false; reason: "signin_required" | "not_allowed" | "unavailable" | "credit_frozen" }
+  | { ok: false; reason: "signin_required" | "not_allowed" | "unavailable" | "credit_frozen" | "credit_expired" }
+  | { ok: false; reason: "below_minimum"; minCents: number }
   | { ok: false; reason: "over_limit"; limitCents: number };
 
 async function call(path: string, body: object): Promise<WalletResult> {
@@ -22,7 +23,12 @@ async function call(path: string, body: object): Promise<WalletResult> {
     if (res.status === 403) {
       const j = (await res.json().catch(() => ({}))) as { error?: string; limitCents?: number };
       if (j.error === "credit_frozen") return { ok: false, reason: "credit_frozen" };
+      if (j.error === "credit_expired") return { ok: false, reason: "credit_expired" };
       return j.error === "over_limit" ? { ok: false, reason: "over_limit", limitCents: j.limitCents ?? 0 } : { ok: false, reason: "not_allowed" };
+    }
+    if (res.status === 400) {
+      const j = (await res.json().catch(() => ({}))) as { error?: string; minCents?: number };
+      if (j.error === "below_minimum") return { ok: false, reason: "below_minimum", minCents: j.minCents ?? 0 };
     }
     if (res.status === 409) {
       const j = (await res.json()) as { balanceCents: number };
