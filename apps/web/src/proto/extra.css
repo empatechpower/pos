@@ -182,3 +182,5 @@
 .proto .order-details .row, .proto .refundbody .row { gap: calc(0.625 * var(--u)); }
 .proto .refundbody .od-card { border: 0; padding: 0; background: none; margin-top: 0; }
 .proto .setours .flash.warn { background: #fdecea; color: #8f2323; text-align: center; }
+/* A gift card's code, shown large so it can be copied onto the card or read to the customer. */
+.proto .receipt.r7 .giftcode { font-size: calc(1.5 * var(--u)); letter-spacing: calc(0.0625 * var(--u)); margin: calc(0.375 * var(--u)) 0 calc(0.5 * var(--u)); }

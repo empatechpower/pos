@@ -403,3 +403,130 @@ export function HandoverDialog({ find, onHandOver, onClose }: { find: (code: str
 }
 /** An order as the handover dialog shows it. */
 export interface HandoverOrder { orderId: string; number: string; where: string; customer: string; when: string; items: Array<{ qty: number; name: string; detail: string }>; itemCount: number; total: string; owing: string; paid: boolean; ready: boolean; cancelled: boolean; handedTo: string }
+
+/** A gift card as the server keeps it. */
+interface GiftCardView { card: { code: string; balanceCents: number; active: boolean; createdAt: number }; entries: Array<{ id: string; kind: string; amountCents: number; balanceAfter: number; orderId: string | null; tender: string | null; at: number }> }
+const giftCode = (c: string) => c.replace(/(.{4})(?=.)/g, "$1 ");
+const GIFT_KIND: Record<string, string> = { load: "Loaded", redeem: "Spent", refund: "Refund returned", adjust: "Adjusted" };
+const GIFT_ERR: Record<string, string> = {
+  unknown_card: "No gift card has that code. Check it and try again.",
+  bad_code: "A code is 4 to 24 letters and digits.",
+  code_taken: "That code is already a card. To add money to it, use Check a card, then Load more.",
+  card_inactive: "This gift card has been switched off. Ask a manager.",
+  over_cashier_limit: "A cashier can load up to S$200 at a time. Ask a manager for more.",
+};
+
+/**
+ * Gift cards at the till (developer handout 4.11): sell a new card for an amount, check what a card holds and what happened to it, and load
+ * more onto it. The balance lives on the server, so this needs a connection. Cash taken for a card is counted in the cashier's drawer.
+ */
+export function GiftCardDialog({ canSwitch, onClose }: { /** Managers may switch a card off (lost or cancelled) and back on. */ canSwitch: boolean; onClose: () => void }) {
+  const [step, setStep] = useState<"menu" | "sell" | "sold" | "check" | "card" | "load">("menu");
+  const [amount, setAmount] = useState("");
+  const [tender, setTender] = useState<"cash" | "card" | "paynow">("cash");
+  const [code, setCode] = useState("");
+  const [view, setView] = useState<GiftCardView | null>(null);
+  const [sold, setSold] = useState<null | { code: string; balanceCents: number; loadedCents: number; inDrawer: boolean; tender: string }>(null);
+  const [msg, setMsg] = useState("");
+  const [busy, setBusy] = useState(false);
+  // One key for one press of Sell or Load: pressing it again (a slow connection, a double tap) finds the first and loads once.
+  const [key, setKey] = useState(() => `gc-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`);
+  const freshKey = () => setKey(`gc-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`);
+  const cents = Math.round(Number(amount || 0) * 100);
+  const go = (to: typeof step) => { setMsg(""); setStep(to); };
+  const fail = async (res: Response) => { const j = (await res.json().catch(() => ({}))) as { error?: string }; setMsg(GIFT_ERR[j.error ?? ""] ?? "That did not go through. Check the connection and try again."); };
+
+  async function load(existing: boolean) {
+    if (!(cents > 0)) return setMsg("Enter an amount above zero.");
+    setBusy(true); setMsg("");
+    const r = await staffFetch("/api/giftcards/load", { body: { amountCents: cents, tender, idempotencyKey: key, ...(existing ? { code: view!.card.code, existing: true } : code.trim() ? { code: code.trim() } : {}) } });
+    setBusy(false);
+    if (!("res" in r)) return setMsg(r.problem);
+    if (!r.res.ok) return void fail(r.res);
+    const j = (await r.res.json()) as { card: GiftCardView["card"]; inDrawer: boolean };
+    setSold({ code: j.card.code, balanceCents: j.card.balanceCents, loadedCents: cents, inDrawer: j.inDrawer, tender });
+    setAmount(""); setCode(""); freshKey(); go("sold");
+  }
+  async function check(c = code) {
+    if (!c.trim()) return setMsg("Scan or type the card's code.");
+    setBusy(true); setMsg("");
+    const r = await staffFetch(`/api/giftcards/${encodeURIComponent(c.trim())}`);
+    setBusy(false);
+    if (!("res" in r)) return setMsg(r.problem);
+    if (!r.res.ok) return void fail(r.res);
+    setView((await r.res.json()) as GiftCardView); go("card");
+  }
+  async function switchCard(active: boolean) {
+    const r = await staffFetch(`/api/giftcards/${encodeURIComponent(view!.card.code)}`, { method: "PUT", body: { active } });
+    if (!("res" in r)) return setMsg(r.problem);
+    if (!r.res.ok) return setMsg(r.res.status === 403 ? "Only a manager can switch a card off or on." : "That did not go through.");
+    void check(view!.card.code);
+  }
+  const amountField = <label className="field">Amount $<input type="number" step="0.01" min={0} autoFocus aria-label="Gift card amount" placeholder="0.00" value={amount} onChange={(e) => setAmount(e.target.value)} /></label>;
+  const paidBy = <><h3>Paid by</h3><div className="choices">{([["cash", "Cash"], ["card", "Card"], ["paynow", "PayNow"]] as const).map(([k, l]) => <button type="button" key={k} className={tender === k ? "selected" : ""} aria-pressed={tender === k} onClick={() => setTender(k)}>{l}</button>)}</div></>;
+  const error = <div className="error" role="alert">{msg}</div>;
+
+  if (step === "sell") return (
+    <Proto title="Sell a gift card" onClose={onClose}>
+      {amountField}
+      {paidBy}
+      <label className="field">Card code (leave empty to make one)<input type="text" autoComplete="off" autoCapitalize="characters" maxLength={30} aria-label="Gift card code" placeholder="For a pre-printed card: scan or type its code" value={code} onChange={(e) => setCode(e.target.value)} /></label>
+      {error}
+      <div className="actions"><button onClick={() => go("menu")}>Back</button><button className="primary" disabled={busy || !(cents > 0)} onClick={() => void load(false)}>Sell card{cents > 0 ? ` · ${formatMoney(cents)}` : ""}</button></div>
+    </Proto>
+  );
+  if (step === "sold" && sold) return (
+    <Proto title="Gift card" onClose={onClose}>
+      <div className="receipt r7" style={{ textAlign: "center" }}>
+        <div className="rcent">GIFT CARD</div>
+        <div className="rcent rstore giftcode" aria-label="Gift card code">{giftCode(sold.code)}</div>
+        <div className="rrow rtotal"><span>Balance</span><span>{formatMoney(sold.balanceCents)}</span></div>
+        <div className="rrow"><span>Loaded now</span><span>{formatMoney(sold.loadedCents)}</span></div>
+      </div>
+      <p className="muted">{sold.tender === "cash" ? (sold.inDrawer ? `Take ${formatMoney(sold.loadedCents)} in cash. It is counted in your drawer.` : `Take ${formatMoney(sold.loadedCents)} in cash. You have no shift open, so it is not counted in a drawer.`) : `Take ${formatMoney(sold.loadedCents)} by ${sold.tender === "card" ? "card" : "PayNow"} before handing the card over.`} Write the code on the card, or give it to the customer: the code is the card.</p>
+      <div className="actions"><button onClick={() => go("sell")}>Sell another</button><button className="primary" autoFocus onClick={onClose}>Done</button></div>
+    </Proto>
+  );
+  if (step === "check") return (
+    <Proto title="Check a gift card" onClose={onClose}>
+      <label className="field">Card code<input type="text" autoFocus autoComplete="off" autoCapitalize="characters" maxLength={30} aria-label="Gift card code" placeholder="Scan or type the card's code" value={code} onChange={(e) => setCode(e.target.value)} onKeyDown={(e) => { if (e.key === "Enter") void check(); }} /></label>
+      {error}
+      <div className="actions"><button onClick={() => go("menu")}>Back</button><button className="primary" disabled={busy || !code.trim()} onClick={() => void check()}>Check</button></div>
+    </Proto>
+  );
+  if (step === "card" && view) return (
+    <Proto title={`Gift card · ${giftCode(view.card.code)}`} extra="splitdialog" onClose={onClose}>
+      <div className="row"><span>Balance</span><strong style={{ fontSize: "1.25em" }}>{formatMoney(view.card.balanceCents)}</strong></div>
+      {!view.card.active && <div className="error warn" role="alert">This card is switched off. It cannot be spent or loaded.</div>}
+      <h3>What happened to it</h3>
+      <table className="rep" aria-label="Gift card history"><tbody>
+        {view.entries.map((e) => <tr key={e.id}><td>{new Date(e.at).toLocaleString("en-SG", { day: "numeric", month: "short", hour: "numeric", minute: "2-digit", timeZone: "Asia/Singapore" })} · {GIFT_KIND[e.kind] ?? e.kind}{e.kind === "load" && e.tender ? ` (${e.tender})` : ""}</td><td>{e.amountCents < 0 ? "−" : "+"}{formatMoney(Math.abs(e.amountCents))}</td><td>{formatMoney(e.balanceAfter)}</td></tr>)}
+      </tbody></table>
+      {error}
+      <div className="actions">
+        {canSwitch && <button onClick={() => void switchCard(!view.card.active)}>{view.card.active ? "Switch card off" : "Switch card on"}</button>}
+        <button onClick={() => { setCode(""); go("check"); }}>Another card</button>
+        <button className="primary" disabled={!view.card.active} onClick={() => go("load")}>Load more</button>
+      </div>
+    </Proto>
+  );
+  if (step === "load" && view) return (
+    <Proto title={`Load · ${giftCode(view.card.code)}`} onClose={onClose}>
+      <div className="row"><span>On the card now</span><strong>{formatMoney(view.card.balanceCents)}</strong></div>
+      {amountField}
+      {paidBy}
+      {error}
+      <div className="actions"><button onClick={() => go("card")}>Back</button><button className="primary" disabled={busy || !(cents > 0)} onClick={() => void load(true)}>Load{cents > 0 ? ` · ${formatMoney(cents)}` : ""}</button></div>
+    </Proto>
+  );
+  return (
+    <Proto title="Gift Cards" onClose={onClose}>
+      <p className="muted">A gift card is a code with a balance. Sell one here; take it as payment by choosing Gift Card on the payment screen and entering its code.</p>
+      <div className="settingsgroup">
+        <button className="primary" onClick={() => { freshKey(); go("sell"); }}>Sell a new card</button>
+        <button onClick={() => go("check")}>Check a card · balance and history</button>
+      </div>
+      <div className="actions"><button onClick={onClose}>Close</button></div>
+    </Proto>
+  );
+}

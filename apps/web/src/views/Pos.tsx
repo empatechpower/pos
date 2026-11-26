@@ -59,7 +59,7 @@ import { TillMenu } from "../till/TillMenu";
 import { ActionStrip, type Action } from "../till/ActionStrip";
 import { PayPanel, type Tender, type TenderOption } from "../till/PayPanel";
 import { ManageItem } from "../till/ManageItem";
-import { CancelOrderDialog, CustomerDialog, DiningDialog, DoneDialog, ExtraItemDialog, FeeDialog, GuestsDialog, HeldDialog, QuantityDialog, TaxDialog, loadMember, BarcodeDialog, CouponDialog, HandoverDialog, InvoiceDialog, couponCents, type HandoverOrder, type MemberSummary, type TillCoupon } from "../till/Dialogs";
+import { CancelOrderDialog, CustomerDialog, GiftCardDialog, DiningDialog, DoneDialog, ExtraItemDialog, FeeDialog, GuestsDialog, HeldDialog, QuantityDialog, TaxDialog, loadMember, BarcodeDialog, CouponDialog, HandoverDialog, InvoiceDialog, couponCents, type HandoverOrder, type MemberSummary, type TillCoupon } from "../till/Dialogs";
 import { TEXT_SCALE, loadPrefs, setLayout, usePrefs } from "../prefs";
 import { arrange, arrangeAll, loadTillSettings, openCustomAction, saveTill, useTillSettings, actionsPref, tendersPref, ACTION_POOL } from "../till/tillSettings";
 import { onRouteChange, queryParams } from "../nav";
@@ -119,7 +119,7 @@ export function Pos({ config, catalog, online, customerId, setCustomerId, header
   const [managing, setManaging] = useState<MenuEntry | null>(null);
   const [pax, setPax] = useState(1);
   const [payView, setPayView] = useState(false);
-  const [dialog, setDialog] = useState<null | "dining" | "guests" | "qty" | "held" | "customer" | "tabs" | "shift" | "table" | "line" | "seat" | "fee" | "extra" | "reports" | "tax" | "coupon" | "barcode" | "invoice" | "handover">(null);
+  const [dialog, setDialog] = useState<null | "dining" | "guests" | "qty" | "held" | "customer" | "tabs" | "shift" | "table" | "line" | "seat" | "fee" | "extra" | "reports" | "tax" | "coupon" | "barcode" | "invoice" | "handover" | "giftcards">(null);
   const [lineKey, setLineKey] = useState<string | null>(null);
   const [pendingQty, setPendingQty] = useState(1);
   const [sheetOpen, setSheetOpen] = useState(false);
@@ -780,6 +780,7 @@ export function Pos({ config, catalog, online, customerId, setCustomerId, header
         setBalance(r.balanceCents);
         await record(linked.orderId, { type: "PaymentRecorded", paymentId, method: "credit", amountCents: owed, confirmed: true, checkId: payCheckId });
       } else if (recordedAs(t)) {
+        if (t === "giftcard") { const bad = await spendGiftCard(reference, owed, `${linked.orderId}:${payCheckId}`); if (bad) return notify(bad); }
         await record(linked.orderId, { type: "PaymentRecorded", paymentId, ...recordedAs(t)!, ...(reference ? { reference } : {}), amountCents: owed, confirmed: true, checkId: payCheckId });
       } else {
         const method: PaymentMethod = t === "cash" ? "cash" : "paynow";
@@ -830,7 +831,25 @@ export function Pos({ config, catalog, online, customerId, setCustomerId, header
   const tenders = arrangedTenders.length ? arrangedTenders : allTenders;
   /** The id a new order will get, fixed while it is being paid so a coupon, points and the order itself all name the same order. */
   const pendingId = useRef(newId());
+  /**
+   * Take an amount from a gift card. Gives null when it went through, else what to tell the cashier. The key is the order (or check) and the
+   * amount, so pressing Done again for the same payment finds the first spend and never takes the money twice.
+   */
+  async function spendGiftCard(code: string | undefined, cents: number, forWhat: string): Promise<string | null> {
+    if (!code?.trim()) return "Scan or type the gift card's code first.";
+    if (!online) return "A gift card needs a connection: its balance is kept on the server.";
+    const r = await staffFetch(`/api/giftcards/${encodeURIComponent(code.trim())}/redeem`, { body: { amountCents: cents, orderId: forWhat.split(":")[0], idempotencyKey: `pay-${forWhat}-${cents}`.replace(/[^A-Za-z0-9:_-]/g, "").slice(0, 80) } });
+    if (!("res" in r)) return r.problem;
+    if (r.res.ok) return null;
+    const j = (await r.res.json().catch(() => ({}))) as { error?: string; balanceCents?: number };
+    return j.error === "insufficient_funds" ? `This card holds ${formatMoney(j.balanceCents ?? 0)}: not enough for ${formatMoney(cents)}. Split the bill to use the card for part of it.`
+      : j.error === "unknown_card" || j.error === "bad_code" ? "No gift card has that code. Check it and try again."
+      : j.error === "card_inactive" ? "This gift card has been switched off. Ask a manager."
+      : "The gift card could not be used. Check the connection and try again.";
+  }
   async function payDone(t: Tender, received: number, reference?: string) {
+    // A gift card's code is kept the way the server keeps it (capitals, no spaces), however it was typed or scanned.
+    if (t === "giftcard" && reference) reference = reference.toUpperCase().replace(/[\s-]/g, "");
     if (payCheckId) return void payCheck(t, received, reference);
     if (mustOpenShift) return notify("Open your shift first.");
     // Rounding by tender (the outlet's choice, cash first): what is asked for is the rounded amount, and the difference is kept on the order.
@@ -854,6 +873,8 @@ export function Pos({ config, catalog, online, customerId, setCustomerId, header
       if (!("res" in r)) return notify(r.problem);
       if (!r.res.ok) { void loadMember(customerId).then(setMemberInfo); return notify(r.res.status === 409 ? "The member does not have enough points any more. Their balance has been refreshed." : "The points could not be used. Check the connection and try again."); }
     }
+    // A gift card is spent on the server before the payment is recorded: the whole amount or nothing.
+    if (t === "giftcard") { const bad = await spendGiftCard(reference, owed, oid); if (bad) return notify(bad); }
     if (t === "cash") { const p = await place({ method: "cash", confirmed: true, tenderedCents: received, ...(rounding ? { amountCents: owed, roundingCents: rounding } : {}) }, oid); setPayView(false); setDone({ orderId: p?.orderId, queue: p?.queue, change: Math.max(0, received - owed), total: owed }); }
     else if (t === "credit") await payWithCredit();
     else if (t === "qr") await payWithQr();
@@ -894,6 +915,7 @@ export function Pos({ config, catalog, online, customerId, setCustomerId, header
     { id: "coupon", label: "Scan Coupon", icon: "⌗", onClick: () => setDialog("coupon"), disabled: !staff || !bag.length || !online || !!linked?.split || !!linked?.coupon, title: !online ? "A coupon needs a connection" : linked?.coupon ? "This order already has a coupon" : undefined },
     { id: "invoice", label: "Print Invoice", icon: "⎙", onClick: () => setDialog("invoice"), disabled: !bag.length },
     { id: "handover", label: "Hand Over", icon: "⇪", onClick: () => setDialog("handover"), disabled: !staff, title: !staff ? "Sign in first" : undefined },
+    { id: "giftcards", label: "Gift Cards", icon: "🎁", onClick: () => setDialog("giftcards"), disabled: !staff || !online, title: !staff ? "Sign in first" : !online ? "Gift cards need a connection" : undefined },
     { id: "drawer", label: "Open Cash Drawer", icon: "▭", onClick: () => void openDrawer(), disabled: !staff || !online || training },
     // The shop's own buttons: each opens its web address in a new tab.
     ...(till.customActions ?? []).filter((a) => a.where !== "dashboard").map((a) => ({ id: a.id, label: a.label, icon: a.icon, onClick: () => openCustomAction(a) })),
@@ -1027,6 +1049,7 @@ export function Pos({ config, catalog, online, customerId, setCustomerId, header
       {dialog === "coupon" && <CouponDialog current={coupon} subtotalCents={priced.subtotal} memberId={isMember ? memberInfo!.member.id : null} onSet={setCoupon} onClose={() => setDialog(null)} />}
       {dialog === "barcode" && <BarcodeDialog find={addByBarcode} onClose={() => setDialog(null)} />}
       {dialog === "invoice" && <InvoiceDialog title={`Invoice · ${linked?.queueNumber ? `Order ${linked.queueNumber}` : spot && channel.kind === "dine_in" ? spot : "New order"}`} lines={invoiceLines()} onClose={() => setDialog(null)} />}
+      {dialog === "giftcards" && <GiftCardDialog canSwitch={hasPerm(staff, "wallet.refund")} onClose={() => setDialog(null)} />}
       {dialog === "handover" && <HandoverDialog find={findForHandover} onHandOver={handOver} onClose={() => setDialog(null)} />}
       {dialog === "tax" && <TaxDialog name={config.pricing.taxName ?? "GST"} current={taxOff} onSet={setTaxOff} onClose={() => setDialog(null)} />}
       {dialog === "fee" && <FeeDialog fees={fees} subtotalCents={unfeed.subtotal - unfeed.couponDiscount - unfeed.discountCents} onAdd={(kind, value, label) => setFees((cur) => [...cur, { id: newId(), kind, value, label }])} onRemove={(id) => setFees((cur) => cur.filter((f) => f.id !== id))} onClose={() => setDialog(null)} />}

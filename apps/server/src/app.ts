@@ -21,6 +21,7 @@ import { AmountNotAllowed, issueQr, loadPaynow, loadPaynowOverrides, savePaynow,
 import { applyOption, cleanSignin, loadKiosk, loadSignin, saveSignin, OPTION_KEYS, optionsOf, saveKiosk, saveSetting , validServiceRatePct } from "./settings.js";
 import { openShiftOf, registerShifts } from "./shifts.js";
 import { registerFloor } from "./floor.js";
+import { moveGift, registerGiftCards } from "./giftcards.js";
 import { cleanLayout, registerTill } from "./tillSettings.js";
 import { registerMailboxes } from "./mailboxes.js";
 import type { ImapFactory } from "./imapMailbox.js";
@@ -623,7 +624,12 @@ export async function buildApp({ config, store, db, catalog, catalogAdmin, print
    * Gives one payment's money back where the system can: member credit goes back to the wallet, a YeahPay payment is reversed with YeahPay.
    * Cash, a card machine, a direct PayNow transfer and Stripe cannot be pushed from here, so `manual` tells staff to hand it back themselves.
    */
-  async function giveBack(o: NonNullable<ReturnType<typeof reduceOrder>>, p: { paymentId: string; method: string; amountCents: number }, cents: number, refundId: string, viaCancel: boolean): Promise<{ ok: true; manual: boolean } | { ok: false; error: string }> {
+  async function giveBack(o: NonNullable<ReturnType<typeof reduceOrder>>, p: { paymentId: string; method: string; amountCents: number; tender?: string; reference?: string }, cents: number, refundId: string, viaCancel: boolean): Promise<{ ok: true; manual: boolean } | { ok: false; error: string }> {
+    // A gift card payment goes back onto the card it came from (its code is the payment's reference), never out of the drawer.
+    if (p.tender === "giftcard" && p.reference && db) {
+      const r = await moveGift(db, { merchantId, code: p.reference, kind: "refund", amountCents: cents, idempotencyKey: `order-refund:${refundId}:${p.paymentId}`, orderId: o.orderId, deviceId: "server", note: viaCancel ? "Order voided" : "Order refund" });
+      return r.ok ? { ok: true, manual: false } : { ok: false, error: "gift_card_could_not_be_returned" };
+    }
     if (p.method === "credit") {
       // The shop's own credit payment is returned by the cancel handling when the whole order is voided; anything else, or a part-refund, is returned here.
       if (viaCancel && p.paymentId === `credit:${o.orderId}`) return { ok: true, manual: false };
@@ -669,7 +675,7 @@ export async function buildApp({ config, store, db, catalog, catalogAdmin, print
     const shiftId = (db ? (await openShiftOf(db, merchantId, req.staff!.id))?.id : undefined) ?? pay.shiftId;
     await ingest([{ id: `refund-${refundId}`, orderId: order.orderId, deviceId: "server", ts: Date.now(), seq: Date.now(), type: "RefundRecorded", refundId, paymentId: pay.paymentId, method: pay.method, amountCents: cents, reason, approvedBy: ap.id, approvedByName: ap.name, ...(shiftId ? { shiftId } : {}) } as unknown as OrderEvent], outlet);
     await audit(db, merchantId, req.staff!.id, "order.refund", { orderId: order.orderId, paymentId: pay.paymentId, method: pay.method, amountCents: cents, reason, approvedBy: ap.id });
-    return { ok: true, refundId, method: pay.method, amountCents: cents, manual: back.manual };
+    return { ok: true, refundId, method: pay.method, ...(pay.tender ? { tender: pay.tender } : {}), amountCents: cents, manual: back.manual };
   });
 
   app.post<{ Params: { id: string }; Body: { reason?: string; voidId?: string; approverCode?: string; approverPin?: string } }>("/api/orders/:id/void", { preHandler: needs("wallet.spend") }, async (req, reply) => {
@@ -1016,6 +1022,7 @@ export async function buildApp({ config, store, db, catalog, catalogAdmin, print
   registerShifts(app, { db, merchantId, store, config, needs });
   registerTimeclock(app, { db, merchantId, defaultOutletId: config.outletName, needs, needsDevice });
   registerFloor(app, { db, merchantId, needs });
+  registerGiftCards(app, { db, merchantId, needs, outletOf: (req) => req.device?.outletId });
   registerTill(app, { db, merchantId, needs });
   registerMailboxes(app, { db, merchantId, needs, imapFactory, now });
   registerDiscountPolicy(app, { db, merchantId, needs });

@@ -18,6 +18,7 @@ const ERRORS: Record<string, string> = {
   card_payments_are_refunded_in_full_only: "A card payment can only be refunded in full.",
   payment_provider_refused_the_refund: "The card provider refused the refund. Try again, or refund it in their console.",
   credit_could_not_be_returned: "The member's credit could not be returned.",
+  gift_card_could_not_be_returned: "The amount could not be put back on the gift card. Check the connection and try again.",
   order_not_found: "The server does not have that order yet. Wait for it to sync, then try again.",
   outside_your_scope: "That order belongs to another outlet.",
 };
@@ -53,11 +54,12 @@ export function RefundPanel({ order: o, onDone, startOpen }: { order: OrderState
     const r = await staffFetch(`/api/orders/${o.orderId}/${path}`, { method: "POST", body });
     setBusy(false);
     if (!("res" in r)) return setMsg(r.problem);
-    const j = (await r.res.json().catch(() => ({}))) as { error?: string; manual?: boolean | Array<{ method: string; amountCents: number }>; amountCents?: number; method?: string };
+    const j = (await r.res.json().catch(() => ({}))) as { error?: string; manual?: boolean | Array<{ method: string; amountCents: number }>; amountCents?: number; method?: string; tender?: string };
     if (!r.res.ok) return setMsg(ERRORS[j.error ?? ""] ?? "Could not do that. Try again.");
     setPin("");
     const by = Array.isArray(j.manual) ? j.manual.map((m) => `${formatMoney(m.amountCents)} ${METHOD[m.method]?.toLowerCase() ?? m.method}`).join(" and ") : j.manual ? `${formatMoney(j.amountCents ?? 0)} ${METHOD[j.method ?? ""]?.toLowerCase() ?? j.method}` : "";
-    setMsg(path === "void" ? `Order voided.${by ? ` Give back ${by} by hand.` : ""}` : `Refunded.${by ? ` Give back ${by} by hand.` : ""}`);
+    const toCard = !Array.isArray(j.manual) && !j.manual && j.tender === "giftcard" ? ` ${formatMoney(j.amountCents ?? 0)} went back onto the gift card.` : "";
+    setMsg(path === "void" ? `Order voided.${by ? ` Give back ${by} by hand.` : ""}` : `Refunded.${by ? ` Give back ${by} by hand.` : toCard}`);
     setOpen(false);
     onDone?.();
   }

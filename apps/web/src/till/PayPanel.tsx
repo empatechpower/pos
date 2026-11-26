@@ -52,14 +52,14 @@ export function PayPanel({ totalCents, title, venue, tenders, busy, onBack, onDo
         ) : (
           <>
             <div className="tender-card">{tender === "credit" ? "Member credit" : tender === "qr" ? "PayNow QR" : recordedTender(tender)?.label ?? (tender.startsWith("ct-") ? cur?.label : undefined) ?? "Card / PayNow (practice)"} payment</div>
-            {recorded && <label className="cash-entry">Reference<input type="text" autoComplete="off" maxLength={40} placeholder="Trace or reference number" aria-label="Payment reference" value={reference} onChange={(e) => setReference(e.target.value)} /></label>}
+            {recorded && <label className="cash-entry">{tender === "giftcard" ? "Gift card code" : "Reference"}<input type="text" autoComplete="off" autoCapitalize="characters" maxLength={40} placeholder={tender === "giftcard" ? "Scan or type the card's code" : "Trace or reference number"} aria-label="Payment reference" value={reference} onChange={(e) => setReference(e.target.value)} /></label>}
             <p className="connectionnote">{cur?.why ?? (tender === "qr" ? "A QR for the exact amount is shown next." : tender === "credit" ? "The member's credit is charged when you press Done." : recordedTender(tender) ? `Take the ${recordedTender(tender)!.label.toLowerCase()} payment for the full amount first. Press Done only once it has gone through: the till records it and does not charge anything itself.` : tender.startsWith("ct-") ? `Recorded as ${cur?.label ?? "this payment type"} for the full amount. The till does not charge anything itself.` : "Practice only: no money moves.")}</p>
           </>
         )}
         {totalCents !== exactCents && <p className="connectionnote" role="status">Rounded to the nearest {step} cents: {formatMoney(exactCents)} becomes {formatMoney(totalCents)}.</p>}
         <div className="payment-bottom">
           <div className="choices">{tenders.map((t) => <button key={t.id} className={t.id === tender ? "selected" : ""} disabled={t.disabled} title={t.why} onClick={() => setTender(t.id)}>{t.label}</button>)}</div>
-          <button className="primary donepay" disabled={busy || (tender === "cash" ? !cashOk : !!cur?.disabled)} onClick={() => onDone(tender, tender === "cash" ? received : totalCents, recorded && reference.trim() ? reference.trim() : undefined)} aria-label="Complete payment">Done</button>
+          <button className="primary donepay" disabled={busy || (tender === "cash" ? !cashOk : !!cur?.disabled) || (tender === "giftcard" && !reference.trim())} onClick={() => onDone(tender, tender === "cash" ? received : totalCents, recorded && reference.trim() ? reference.trim() : undefined)} aria-label="Complete payment">Done</button>
         </div>
         <div className="actions"><button onClick={onBack}>← Back / Cancel</button>{onSplit && <button onClick={onSplit}>Split Bill</button>}</div>
       </div>
