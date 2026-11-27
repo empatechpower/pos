@@ -22,7 +22,7 @@ const newKey = () => (globalThis.crypto?.randomUUID ? globalThis.crypto.randomUU
 /** Staff page for the shop: every order and payment, and the members' points and prepaid credit. No till. */
 export function Manager({ config, catalog }: { config: BusinessConfig; catalog?: Catalog | null }) {
   const staff = useStaff();
-  const [tab, setTab] = useState<"orders" | "members" | "telegram" | "books" | "reports" | "agents" | "outlets" | "time">(() => { const t = queryParams().get("tab"); return t === "reports" || t === "members" || t === "outlets" || t === "time" ? t : "orders"; });
+  const [tab, setTab] = useState<"orders" | "members" | "telegram" | "books" | "reports" | "agents" | "outlets" | "time" | "giftcards">(() => { const t = queryParams().get("tab"); return t === "reports" || t === "members" || t === "outlets" || t === "time" || t === "giftcards" ? t : "orders"; });
   return (
     <div className="credit prices">
       <h2>Manager</h2>
@@ -37,11 +37,12 @@ export function Manager({ config, catalog }: { config: BusinessConfig; catalog?:
             {hasPerm(staff, "device.manage") && <button className={tab === "outlets" ? "on" : ""} aria-pressed={tab === "outlets"} onClick={() => setTab("outlets")}>Outlets</button>}
             {hasPerm(staff, "audit.read") && <button className={tab === "time" ? "on" : ""} aria-pressed={tab === "time"} onClick={() => setTab("time")}>Timesheet</button>}
             {hasPerm(staff, "audit.read") && <button className={tab === "books" ? "on" : ""} aria-pressed={tab === "books"} onClick={() => setTab("books")}>Books</button>}
+            {hasPerm(staff, "audit.read") && <button className={tab === "giftcards" ? "on" : ""} aria-pressed={tab === "giftcards"} onClick={() => setTab("giftcards")}>Gift cards</button>}
             {staff.role === "owner" && <button className={tab === "agents" ? "on" : ""} aria-pressed={tab === "agents"} onClick={() => setTab("agents")}>Agents</button>}
             {hasPerm(staff, "catalog.manage") && <button className={tab === "telegram" ? "on" : ""} aria-pressed={tab === "telegram"} onClick={() => setTab("telegram")}>Telegram</button>}
           </div>
           <PendingSignIns signedIn />
-          {tab === "orders" ? <Transactions config={config} /> : tab === "reports" ? <Reports config={config} catalog={catalog} /> : tab === "outlets" ? <Outlets /> : tab === "time" ? <Timesheet config={config} /> : tab === "agents" ? <AgentsPanel /> : tab === "books" ? <Books /> : tab === "telegram" ? <TelegramPanel /> : <Members canAdjustPoints={hasPerm(staff, "wallet.refund")} canImport={hasPerm(staff, "wallet.refund")} rewardsOn={config.rewards.pointsEnabled} />}
+          {tab === "orders" ? <Transactions config={config} /> : tab === "reports" ? <Reports config={config} catalog={catalog} /> : tab === "outlets" ? <Outlets /> : tab === "time" ? <Timesheet config={config} /> : tab === "agents" ? <AgentsPanel /> : tab === "books" ? <Books /> : tab === "giftcards" ? <GiftCards canSwitch={hasPerm(staff, "wallet.refund")} /> : tab === "telegram" ? <TelegramPanel /> : <Members canAdjustPoints={hasPerm(staff, "wallet.refund")} canImport={hasPerm(staff, "wallet.refund")} rewardsOn={config.rewards.pointsEnabled} />}
         </>
       )}
     </div>
@@ -558,6 +559,81 @@ function Books() {
       <p className="muted" style={{ fontSize: 13 }}>{r.wallets} wallets · {r.entries} entries. Opening + credits + debits + reversals = closing. Debits are shown as negative amounts.</p>
       {r.mismatchedWallets.length > 0 && <div className="flash warn">{r.mismatchedWallets.length} wallet(s) do not match their own entries.</div>}
       <button className="secondary sm" onClick={() => void load()}>Check again</button>
+    </div>
+  );
+}
+
+interface GiftCardRow { code: string; balanceCents: number; active: boolean; createdAt: number }
+interface GiftCardList { cards: GiftCardRow[]; outstandingCents: number; withBalance: number; books: { loadedCents: number; redeemedCents: number; refundedCents: number; adjustedCents: number; mismatched: string[] } }
+const showCode = (c: string) => c.replace(/(.{4})(?=.)/g, "$1 ");
+const GIFT_KIND: Record<string, string> = { load: "Loaded", redeem: "Spent", refund: "Refund returned", adjust: "Adjusted" };
+
+/** Gift cards: every card and what is on it, what the shop owes on them all, and the books that prove it. A card's history opens under it. */
+function GiftCards({ canSwitch }: { canSwitch: boolean }) {
+  const [list, setList] = useState<GiftCardList | null>(null);
+  const [q, setQ] = useState("");
+  const [only, setOnly] = useState<"balance" | "all">("balance");
+  const [open, setOpen] = useState<string | null>(null);
+  const [hist, setHist] = useState<Array<{ id: string; kind: string; amountCents: number; balanceAfter: number; orderId: string | null; tender: string | null; at: number }> | null>(null);
+  const [msg, setMsg] = useState<string | null>(null);
+  const load = useCallback(async () => {
+    setMsg(null);
+    const x = await staffFetch("/api/giftcards");
+    if ("problem" in x) return setMsg(x.problem);
+    if (!x.res.ok) return setMsg("Could not load the gift cards.");
+    setList((await x.res.json()) as GiftCardList);
+  }, []);
+  useEffect(() => void load(), [load]);
+  const show = async (code: string) => {
+    if (open === code) { setOpen(null); return; }
+    setOpen(code); setHist(null);
+    const x = await staffFetch(`/api/giftcards/${encodeURIComponent(code)}`);
+    if ("res" in x && x.res.ok) setHist(((await x.res.json()) as { entries: NonNullable<typeof hist> }).entries);
+  };
+  const toggle = async (c: GiftCardRow) => {
+    const x = await staffFetch(`/api/giftcards/${encodeURIComponent(c.code)}`, { method: "PUT", body: { active: !c.active } });
+    setMsg("res" in x && x.res.ok ? `${showCode(c.code)} switched ${c.active ? "off" : "on"}.` : "Only a manager can switch a card off or on.");
+    void load();
+  };
+  if (!list) return <p className="muted">{msg ?? "Loading…"}</p>;
+  const b = list.books;
+  const needle = q.toUpperCase().replace(/[\s-]/g, "");
+  const rows = list.cards.filter((c) => (only === "all" || c.balanceCents > 0) && (!needle || c.code.includes(needle)));
+  const row = (label: string, cents: number, note?: string) => <div className="sum-row"><span className="k">{label}{note && <span className="muted"> {note}</span>}</span><span className="v">{formatMoney(cents)}</span></div>;
+  return (
+    <div className="tab" style={{ display: "block" }}>
+      {msg && <div className="flash">{msg}</div>}
+      <div className={`flash ${b.mismatched.length ? "warn" : ""}`}>{b.mismatched.length ? `${b.mismatched.length} card(s) do not match their own entries. Do not correct anything by hand; send this screen to the developer.` : "The gift card books balance."}</div>
+      {row("Loaded onto cards", b.loadedCents)}
+      {row("Spent", b.redeemedCents, "(shown negative)")}
+      {row("Refunds put back", b.refundedCents)}
+      {b.adjustedCents !== 0 && row("Adjustments", b.adjustedCents)}
+      <div className="sum-row grand"><span className="k">Owed on gift cards now</span><span className="v">{formatMoney(list.outstandingCents)}</span></div>
+      <p className="muted" style={{ fontSize: 13 }}>{list.withBalance} card{list.withBalance === 1 ? "" : "s"} with money on them. Cards are sold and checked on the till: Gift Cards on the action strip.</p>
+      <div className="row" style={{ marginTop: 12 }}>
+        <input aria-label="Find a card" placeholder="Find a card by its code" value={q} onChange={(e) => setQ(e.target.value)} />
+        <div className="seg">
+          <button className={only === "balance" ? "on" : ""} aria-pressed={only === "balance"} onClick={() => setOnly("balance")}>With a balance</button>
+          <button className={only === "all" ? "on" : ""} aria-pressed={only === "all"} onClick={() => setOnly("all")}>All cards</button>
+        </div>
+      </div>
+      {rows.length === 0 && <p className="muted">No cards match.</p>}
+      {rows.slice(0, 200).map((c) => (
+        <div key={c.code} style={{ borderBottom: "1px solid var(--line)", padding: "8px 0" }}>
+          <div className="row" style={{ alignItems: "center" }}>
+            <span style={{ flex: 1 }}><b style={{ fontFamily: "ui-monospace, Menlo, monospace" }}>{showCode(c.code)}</b>{!c.active && <span className="muted"> · switched off</span>}<small className="muted" style={{ display: "block" }}>Sold {new Date(c.createdAt).toLocaleDateString("en-SG", { day: "numeric", month: "short", year: "numeric", timeZone: "Asia/Singapore" })}</small></span>
+            <b>{formatMoney(c.balanceCents)}</b>
+            <button className="secondary sm" onClick={() => void show(c.code)}>{open === c.code ? "Hide" : "History"}</button>
+            {canSwitch && <button className="secondary sm" onClick={() => void toggle(c)}>{c.active ? "Switch off" : "Switch on"}</button>}
+          </div>
+          {open === c.code && (!hist ? <p className="muted">Loading…</p> : (
+            <table className="rep" style={{ width: "100%", marginTop: 6 }}><tbody>
+              {hist.map((e) => <tr key={e.id}><td>{new Date(e.at).toLocaleString("en-SG", { day: "numeric", month: "short", hour: "numeric", minute: "2-digit", timeZone: "Asia/Singapore" })} · {GIFT_KIND[e.kind] ?? e.kind}{e.kind === "load" && e.tender ? ` (${e.tender})` : ""}{e.orderId ? <span className="muted"> · order {e.orderId.slice(0, 8)}</span> : null}</td><td style={{ textAlign: "right" }}>{e.amountCents < 0 ? "−" : "+"}{formatMoney(Math.abs(e.amountCents))}</td><td style={{ textAlign: "right" }}>{formatMoney(e.balanceAfter)}</td></tr>)}
+            </tbody></table>
+          ))}
+        </div>
+      ))}
+      <button className="secondary sm" onClick={() => void load()}>Refresh</button>
     </div>
   );
 }

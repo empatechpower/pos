@@ -148,6 +148,12 @@ export function registerShifts(app: FastifyInstance, d: { db: Db; merchantId: st
 
   /** The signed-in person's open shift, if any (wherever they opened it). */
   app.get("/api/shifts/mine", { preHandler: needs("wallet.spend") }, async (req) => ({ shift: await openShiftOf(db, merchantId, req.staff!.id) }));
+  /** Other people's shifts open on this till (its two drawers): the Log out dialog says they stay open. Names and drawers only. */
+  app.get("/api/shifts/this-till", { preHandler: needs("wallet.spend") }, async (req) => {
+    if (!req.device) return { others: [] };
+    const r = await db.query("SELECT drawer, staff_name FROM shifts WHERE merchant_id=$1 AND device_id=$2 AND closed_at IS NULL AND staff_id <> $3 ORDER BY drawer", [merchantId, req.device.id, req.staff!.id]);
+    return { others: r.rows.map((x) => ({ drawer: Number(x.drawer), staffName: x.staff_name as string })) };
+  });
 
   app.post<{ Body: { openingFloatCents?: number; denominations?: Record<string, number> } }>("/api/shifts/open", { preHandler: needs("wallet.spend") }, async (req, reply) => {
     const staff = req.staff!;

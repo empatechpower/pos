@@ -14,6 +14,8 @@ import {
   priceOrder,
   fulfilmentOf,
   checkStanding,
+  paymentKey,
+  paymentLabel,
   nextCourse,
   reduceOrder,
   COURSE_NAMES,
@@ -100,6 +102,10 @@ export function Pos({ config, catalog, online, customerId, setCustomerId, header
   const [payCheckId, setPayCheckId] = useState<string | null>(null);
   const [splitOpen, setSplitOpen] = useState(false);
   const [clearAsk, setClearAsk] = useState(false);
+  const [clearMsg, setClearMsg] = useState("");
+  const [clearCode, setClearCode] = useState("");
+  const [clearPin, setClearPin] = useState("");
+  const [clearBusy, setClearBusy] = useState(false);
   const [cancelAsk, setCancelAsk] = useState(false);
   const [refundOpen, setRefundOpen] = useState(false);
   const [noteFor, setNoteFor] = useState<null | { scope: "line"; key: string } | { scope: "order" }>(null);
@@ -808,8 +814,36 @@ export function Pos({ config, catalog, online, customerId, setCustomerId, header
   }
   const clearSplit = async () => {
     if (!linked?.split) return;
-    if (paidSoFar > 0) return notify("Payments have been taken. Use Refund Payments first, then clear the split.");
+    setClearMsg(""); setClearCode(""); setClearPin("");
     setClearAsk(true);
+  };
+  /** What each check payment still holds after any refunds: what clearing the split has to give back. */
+  const checkPaymentsLeft = () => !linked ? [] : linked.payments.filter((p) => p.checkId && p.confirmed && p.amountCents > 0 && !p.paymentId.startsWith("refund:"))
+    .map((p) => ({ p, left: p.amountCents - (linked.refunds ?? []).filter((r) => r.paymentId === p.paymentId).reduce((n, r) => n + r.amountCents, 0) }))
+    .filter((x) => x.left > 0);
+  /**
+   * Payments were taken on the checks (decision Q41, prototype clearSplitAsk): clearing refunds every one of them and puts everything back on
+   * one bill, in one step, approved by a manager. Each refund goes back the way it was paid (credit and gift cards straight back; cash, card
+   * and the rest by hand, which the message lists). If any refund fails, the split stays and nothing else changes.
+   */
+  const refundAndClear = async () => {
+    if (!linked?.split) return;
+    setClearBusy(true); setClearMsg("");
+    const approval = hasPerm(staff, "order.refund") ? {} : { approverCode: clearCode.trim(), approverPin: clearPin };
+    const byHand: string[] = [];
+    for (const { p, left } of checkPaymentsLeft()) {
+      const r = await staffFetch(`/api/orders/${linked.orderId}/refund`, { body: { paymentId: p.paymentId, amountCents: left, reason: "Split bill cleared", refundId: newId(), ...approval } });
+      if (!("res" in r)) { setClearBusy(false); return setClearMsg(r.problem); }
+      const j = (await r.res.json().catch(() => ({}))) as { error?: string; manual?: boolean; method?: string; tender?: string; amountCents?: number };
+      if (!r.res.ok) {
+        setClearBusy(false);
+        return setClearMsg(j.error === "manager_approval_needed" ? "A manager has to approve this. Enter their code and PIN." : j.error === "approval_refused" ? "That manager code or PIN is not right." : j.error === "payment_not_found" ? "The server does not have one of the payments yet. Wait a few seconds and try again." : "A payment could not be refunded. The split is unchanged; try again.");
+      }
+      if (j.manual) byHand.push(`${formatMoney(j.amountCents ?? left)} ${paymentLabel(paymentKey(p)).toLowerCase()}`);
+    }
+    await record(linked.orderId, { type: "SplitCleared", ...(staff ? { byName: staff.name } : {}) });
+    setClearBusy(false); setClearAsk(false); setView("order");
+    notify(`Split cleared — one bill again.${byHand.length ? ` Give back ${byHand.join(" and ")} by hand.` : ""}`);
   };
   /** "Clear split" in that dialog: everything goes back on one bill. */
   const doClearSplit = async () => {
@@ -1221,8 +1255,24 @@ export function Pos({ config, catalog, online, customerId, setCustomerId, header
       {clearAsk && (
         <div className="proto protohead">
           <ProtoDialog title="Clear Split Bills" onClose={() => setClearAsk(false)}>
-            <p>Put everything back on one bill? No payments have been taken yet.</p>
-            <div className="actions"><button onClick={() => setClearAsk(false)}>Keep split</button><button className="primary" onClick={() => void doClearSplit()}>Clear split</button></div>
+            {paidSoFar > 0 ? (
+              <>
+                <p>Payments of <strong>{formatMoney(checkPaymentsLeft().reduce((n, x) => n + x.left, 0))}</strong> have already been taken on these checks. Clearing the split refunds them and puts everything back on one bill.</p>
+                {!hasPerm(staff, "order.refund") && (
+                  <>
+                    <label className="field">Manager code<input type="text" autoComplete="off" aria-label="Manager code" value={clearCode} onChange={(e) => setClearCode(e.target.value)} /></label>
+                    <label className="field">Manager PIN<input type="password" inputMode="numeric" autoComplete="off" maxLength={8} aria-label="Manager PIN" value={clearPin} onChange={(e) => setClearPin(e.target.value)} /></label>
+                  </>
+                )}
+                <div className="error" role="alert">{clearMsg}</div>
+                <div className="actions"><button onClick={() => setClearAsk(false)}>Keep split</button><button className="primary" disabled={clearBusy || (!hasPerm(staff, "order.refund") && (!clearCode.trim() || !clearPin))} onClick={() => void refundAndClear()}>Refund &amp; clear split</button></div>
+              </>
+            ) : (
+              <>
+                <p>Put everything back on one bill? No payments have been taken yet.</p>
+                <div className="actions"><button onClick={() => setClearAsk(false)}>Keep split</button><button className="primary" onClick={() => void doClearSplit()}>Clear split</button></div>
+              </>
+            )}
           </ProtoDialog>
         </div>
       )}

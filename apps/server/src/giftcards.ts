@@ -104,7 +104,14 @@ export function registerGiftCards(app: FastifyInstance, d: { db: Db; merchantId:
   app.get("/api/giftcards", { preHandler: needs("audit.read") }, async () => {
     const r = await db.query("SELECT * FROM gift_cards WHERE merchant_id=$1 ORDER BY created_at DESC LIMIT 300", [merchantId]);
     const t = await db.query("SELECT COALESCE(SUM(balance_cents),0) AS owed, COUNT(*) AS n FROM gift_cards WHERE merchant_id=$1 AND balance_cents > 0", [merchantId]);
-    return { cards: r.rows.map(toCard), outstandingCents: Number(t.rows[0].owed), withBalance: Number(t.rows[0].n) };
+    // The books: what was loaded, spent and given back, and whether every card's balance is the sum of its own entries.
+    const k = await db.query(`SELECT e.kind, COALESCE(SUM(e.amount_cents),0) AS s FROM gift_card_entries e JOIN gift_cards c ON c.id=e.card_id WHERE c.merchant_id=$1 GROUP BY e.kind`, [merchantId]);
+    const by = Object.fromEntries(k.rows.map((x) => [x.kind as string, Number(x.s)]));
+    const off = await db.query(`SELECT c.code FROM gift_cards c LEFT JOIN gift_card_entries e ON e.card_id=c.id WHERE c.merchant_id=$1 GROUP BY c.id HAVING c.balance_cents <> COALESCE(SUM(e.amount_cents),0)`, [merchantId]);
+    return {
+      cards: r.rows.map(toCard), outstandingCents: Number(t.rows[0].owed), withBalance: Number(t.rows[0].n),
+      books: { loadedCents: by.load ?? 0, redeemedCents: by.redeem ?? 0, refundedCents: by.refund ?? 0, adjustedCents: by.adjust ?? 0, mismatched: off.rows.map((x) => x.code as string) },
+    };
   });
 
   /** One card: what is on it and what happened to it. */

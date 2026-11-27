@@ -1,7 +1,7 @@
 import { deviceRole } from "../device";
 import { go } from "../nav";
 import { useState } from "react";
-import { signOut, useStaff } from "../auth";
+import { signOut, staffFetch, useStaff } from "../auth";
 import { ProtoModal } from "../proto/ProtoDialog";
 import { useOrders } from "../hooks";
 import { useShift } from "../shift";
@@ -23,6 +23,7 @@ import "../proto/extra.css";
 export function TillHeader({ route, config, connected, pending, newOnline, hasTables, onSync, syncError, bare, showOrder }: { /** On the till itself: it is showing the Table Map or the checks, so "Order" leads back to the ticket. */ showOrder?: boolean; route: string; config: BusinessConfig | null; connected: boolean; pending: number; newOnline: number; hasTables: boolean; onSync: () => void; syncError?: string | null; bare?: boolean }) {
   const staff = useStaff();
   const [logoutAsk, setLogoutAsk] = useState(false);
+  const [others, setOthers] = useState<Array<{ drawer: number; staffName: string }>>([]);
   const orders = useOrders();
   const shift = useShift();
   const till = useTillSettings();
@@ -50,7 +51,7 @@ export function TillHeader({ route, config, connected, pending, newOnline, hasTa
       {staff && <span className="staffname">{staff.name}</span>}
       <span className="shiftchip">{staff && shift ? <>Drawer {shift.drawer}<span className="shiftopen"> · Shift open</span></> : null}</span>
       {(isTraining() || !connected || pending > 0) && <button className="syncpill" onClick={onSync} title={syncError ? `Last sync problem: ${syncError}. Tap to try again.` : "Tap to sync now"}>{isTraining() ? "Practice" : connected ? "Syncing" : "Offline"}{pending > 0 ? ` · ${pending}` : ""}</button>}
-      {staff && <button onClick={() => setLogoutAsk(true)}>Log out</button>}
+      {staff && <button onClick={() => { setLogoutAsk(true); setOthers([]); void staffFetch("/api/shifts/this-till").then(async (r) => { if ("res" in r && r.res.ok) setOthers(((await r.res.json()) as { others: Array<{ drawer: number; staffName: string }> }).others); }); }}>Log out</button>}
       {staff && <button onClick={() => void lockNow(false)}>Lock</button>}
     </header>
   );
@@ -68,6 +69,7 @@ export function TillHeader({ route, config, connected, pending, newOnline, hasTa
     ) : (
       <ProtoModal title="Log out" onClose={() => setLogoutAsk(false)}>
         <p>Log out of Rezein as <b>{staff.name}</b>?</p>
+        {others.map((o) => <p className="muted" key={o.drawer}>Drawer {o.drawer}'s shift (opened by {o.staffName}) is not yours — it stays open.</p>)}
         <div className="settingsgroup">
           <button className="primary" onClick={() => { setLogoutAsk(false); void signOut().then(() => go("/login")); }}>Log out</button>
           <button onClick={() => setLogoutAsk(false)}>Cancel</button>

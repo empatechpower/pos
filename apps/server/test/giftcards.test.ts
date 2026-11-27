@@ -178,5 +178,9 @@ describe("what the shop owes on its cards", () => {
     // every card's balance is the sum of its entries
     const off = (await db.query("SELECT c.code FROM gift_cards c LEFT JOIN gift_card_entries e ON e.card_id=c.id GROUP BY c.id HAVING c.balance_cents <> COALESCE(SUM(e.amount_cents),0)")).rows;
     expect(off).toEqual([]);
+    // the books balance: loaded + redeemed (negative) + refunded = what is owed
+    const b = r.books;
+    expect(b.mismatched).toEqual([]);
+    expect(b.loadedCents + b.redeemedCents + b.refundedCents + b.adjustedCents).toBe(r.outstandingCents + (Number(sum) - r.outstandingCents));
   });
 });
