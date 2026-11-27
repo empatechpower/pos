@@ -43,3 +43,5 @@
   .shell.backoffice > main { padding: 12px; min-width: 0; }
   .shell.backoffice table { display: block; max-width: 100%; overflow-x: auto; }
 }
+/* The back office's header stays at the top while the page scrolls, like the till's. */
+.shell.backoffice .top { position: sticky; top: 0; z-index: 40; }

@@ -202,3 +202,6 @@
   .proto header button { padding-left: calc(0.375 * var(--u)); padding-right: calc(0.375 * var(--u)); }
   .proto header .syncpill { min-width: calc(1.5 * var(--u)); }
 }
+/* The header stays at the top of the screen while the page under it scrolls, on every staff screen (in the prototype the page is a fixed
+   frame and only its body scrolls). Dialogs still open above it. */
+.shell > .proto.protohead:has(> header) { position: sticky; top: 0; z-index: 40; }
