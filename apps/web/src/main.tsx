@@ -37,6 +37,9 @@ function safeToUpdateNow(): boolean {
   const nobodySignedIn = !localStorage.getItem("pos.token");
   return justOpened || nobodySignedIn;
 }
+// A new version asks whether this page handles updates itself (public/sw-takeover.js). Saying yes keeps the rule above; an old copy of the
+// app cannot answer, and the new version then takes over from it.
+navigator.serviceWorker?.addEventListener("message", (e) => { if ((e.data as { type?: string } | null)?.type === "rezein-handles-updates?") e.ports[0]?.postMessage(true); });
 const updateSW = registerSW({
   immediate: true,
   onNeedRefresh() {

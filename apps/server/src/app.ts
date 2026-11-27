@@ -6,7 +6,7 @@ import { withTaxPack, isTaxCountry, TAX_PACKS, DEFAULT_COUNTRY, cleanTenderRound
 import { canDo, permissionsOf, PERMISSION_OPTIONS, loadRolePermissions, rolePermissions, saveRolePermissions, setRolePermissions, CASHIER_TOPUP_LIMIT_CENTS, audit, checkStaffPin, authenticate, authenticateAgent, can, createAgent, createConnectCode, redeemConnectCode, createStaff, listAgents, login, loginByPhone, logout, normalisePhone, setStaffPhone, recentAudit, revokeAgent, type Permission, type Role, type Staff } from "./auth.js";
 import type { CatalogStore, ChangeResult, PgCatalogStore } from "./catalog.js";
 import type { Db } from "./db/pool.js";
-import { adjustTo, balanceOf, cleanCreditRules, creditBlockedFor, creditExemptIds, creditFrozen, creditSpendable, creditState, loadCreditRules, refund, saveCreditRules, setCreditExempt, setCreditFrozen, spend, topUp, writeOffLapsed } from "./ledger.js";
+import { adjustTo, sweepLapsed, balanceOf, cleanCreditRules, creditBlockedFor, creditExemptIds, creditFrozen, creditSpendable, creditState, loadCreditRules, refund, saveCreditRules, setCreditExempt, setCreditFrozen, spend, topUp, writeOffLapsed } from "./ledger.js";
 import { authenticateDevice, createEnrollmentCode, enroll, markPrintPoll, setSmsNumber, issueStreamTicket, listDevices, redeemStreamTicket, revokeDevice, type Device } from "./devices.js";
 import { BrandStore } from "./brand.js";
 import { PrintStore, validatePrinter, type Printer } from "./print.js";
@@ -1033,6 +1033,13 @@ export async function buildApp({ config, store, db, catalog, catalogAdmin, print
 
   (app as unknown as { escalateTabPages?: (m: number) => Promise<number> }).escalateTabPages = (m) => tabs.escalateUnacknowledged(m);
   // A page for the waiter that nobody answers is sent again after TAB_PAGE_ESCALATE_MIN minutes (default 2).
+  // Lapsed member credit is written off on the day it lapses (checked every hour), not left until the member's next top-up.
+  if (db && process.env.NODE_ENV !== "test") {
+    const sweep = () => void sweepLapsed(db, merchantId).then((r) => { if (r.wallets) app.log.info({ wallets: r.wallets, cents: r.cents }, "lapsed credit written off"); }).catch(() => undefined);
+    const first = setTimeout(sweep, 60_000); first.unref();
+    const hourly = setInterval(sweep, 3_600_000); hourly.unref();
+    app.addHook("onClose", async () => { clearTimeout(first); clearInterval(hourly); });
+  }
   if (db && process.env.NODE_ENV !== "test") {
     const mins = Number(process.env.TAB_PAGE_ESCALATE_MIN) > 0 ? Number(process.env.TAB_PAGE_ESCALATE_MIN) : 2;
     const timer = setInterval(() => { void tabs.escalateUnacknowledged(mins).catch(() => undefined); }, 30_000);

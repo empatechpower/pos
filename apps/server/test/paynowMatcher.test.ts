@@ -156,6 +156,8 @@ describe("matching alerts to QRs", () => {
     mailbox.messages.push(alert({ ref: ref(++n), cents: o.json.totalCents, payer: "NG SOO LIN" }));
     for (let i = 0; i < 60 && (await status(q.json.paymentId)) !== "PAID"; i++) await new Promise((r) => setTimeout(r, 100));
     expect(await status(q.json.paymentId)).toBe("PAID");
+    // The QR turns PAID a moment before the payment is written onto the order.
+    for (let i = 0; i < 30 && !(await orderPaid(o.json.orderId)); i++) await new Promise((r) => setTimeout(r, 100));
     expect(await orderPaid(o.json.orderId)).toBe(true);
     const st = (await call(`/api/payments/paynow/status/${q.json.paymentId}`)).json;
     expect(st.paidAt).toBeGreaterThan(0);

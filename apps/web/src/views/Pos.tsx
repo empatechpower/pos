@@ -178,12 +178,12 @@ export function Pos({ config, catalog, online, customerId, setCustomerId, header
     setQrPay({ orderId, keep, paymentId: j.paymentId, img: await QRCode.toDataURL(j.payload, { margin: 4, width: 520 }), expiresAt: j.expiresAt, amountCents: j.amountCents, name: j.displayName, paid: false });
     return true;
   }
-  async function payWithQr() {
+  /** oid: the order the points and coupon were already spent against (cancelling it gives them back). */
+  async function payWithQr(oid = orderId ?? newId()) {
     if (!bag.length || qrBusy || payLock.current) return;
     payLock.current = true; setQrBusy(true);
-    const oid = orderId ?? newId();
     const keep = !!orderId; // a table's bill stays open if the QR is abandoned
-    await place(null, oid);
+    await place(null, oid, true);
     await syncNow();
     await askQr(oid, keep);
     setPayView(false);
@@ -458,7 +458,7 @@ export function Pos({ config, catalog, online, customerId, setCustomerId, header
    * Put what is on screen into the local log. A new order is opened; a table's open order gets only the lines not yet sent (the sent ones are
    * already there), plus any change to guests, the note, or discounts. Nothing here needs the network.
    */
-  async function place(payment: { method: PaymentMethod; tender?: string; tenderName?: string; reference?: string; confirmed: boolean; amountCents?: number; roundingCents?: number; checkId?: string; tenderedCents?: number } | null, existingOrderId?: string): Promise<{ queue?: string; orderId: string; /** Ticket line key to the id it was placed under. */ lineIds: Map<string, string> } | undefined> {
+  async function place(payment: { method: PaymentMethod; tender?: string; tenderName?: string; reference?: string; confirmed: boolean; amountCents?: number; roundingCents?: number; checkId?: string; tenderedCents?: number } | null, existingOrderId?: string, /** Paying by QR: no payment yet, but the points and coupon are spent on this order. */ settling = false): Promise<{ queue?: string; orderId: string; /** Ticket line key to the id it was placed under. */ lineIds: Map<string, string> } | undefined> {
     if (!bag.length) return undefined;
     const id = orderId ?? existingOrderId ?? newId();
     let queueNumber = linked?.queueNumber;
@@ -530,9 +530,10 @@ export function Pos({ config, catalog, online, customerId, setCustomerId, header
     const memberNow = memberInfo && customerId === memberInfo.member.id ? memberInfo.member.id : "";
     if (memberNow !== (linked?.memberId ?? "")) await record(id, { type: "MemberAttached", memberId: memberNow, ...(staff ? { byName: staff.name } : {}) });
     // Points already taken from the member (payDone did that first) are written onto the order, so its total says the same as the till.
-    if (payment && pointsToTake > 0) await record(id, { type: "PointsRedeemed", points: pointsToTake });
+    const paying = !!payment || settling;
+    if (paying && pointsToTake > 0) await record(id, { type: "PointsRedeemed", points: pointsToTake });
     // The coupon (already counted as used by payDone) is written onto the order with what it took off.
-    if (payment && coupon && !linked?.coupon && priced.couponDiscount > 0) await record(id, { type: "CouponApplied", title: `${coupon.code} · ${coupon.title}`.slice(0, 80), amountCents: priced.couponDiscount, minSpendCents: coupon.minSpendCents });
+    if (paying && coupon && !linked?.coupon && priced.couponDiscount > 0) await record(id, { type: "CouponApplied", title: `${coupon.code} · ${coupon.title}`.slice(0, 80), amountCents: priced.couponDiscount, minSpendCents: coupon.minSpendCents });
     if (payment?.roundingCents) await record(id, { type: "RoundingApplied", cents: payment.roundingCents, tender: payment.tender ?? payment.method, ...(staff ? { byName: staff.name } : {}) });
     if (payment) {
       const paymentId = newId();
@@ -549,7 +550,7 @@ export function Pos({ config, catalog, online, customerId, setCustomerId, header
     setOrderId(null);
     // The member belongs to the order that just went, not to whoever is served next.
     if (memberInfo) { setCustomerId(""); setUsePoints(false); }
-    if (payment) { setCoupon(null); pendingId.current = newId(); }
+    if (paying) { setCoupon(null); pendingId.current = newId(); }
     return { queue: queueNumber, orderId: id, lineIds };
   }
 
@@ -557,12 +558,11 @@ export function Pos({ config, catalog, online, customerId, setCustomerId, header
    * Charge prepaid credit first, then record the order. The order id doubles as the idempotency
    * key, so a retry after a dropped connection never charges the customer twice.
    */
-  async function payWithCredit() {
+  async function payWithCredit(oid = orderId ?? newId()) {
     if (!bag.length || !customerId || payLock.current) return;
     if (training) return notify("Member credit is not charged in training mode.");
     payLock.current = true;
     setPaying(true);
-    const oid = orderId ?? newId();
     const owed = due;
     const r = await spend(customerId, owed, `order:${oid}:${paidSoFar}`, oid, deviceId());
     payLock.current = false;
@@ -900,7 +900,10 @@ export function Pos({ config, catalog, online, customerId, setCustomerId, header
     const step = config.pricing.tenderRounding?.[t] ?? 0;
     const owed = step >= 2 ? roundTotal(due, { stepCents: step, mode: "nearest" }) : due;
     const rounding = owed - due;
-    if (coupon && !openedOrder?.coupon && priced.couponDiscount > 0 && (t === "credit" || t === "qr")) return notify("With a coupon, take the payment in cash or by card.");
+    // Member credit is checked before the coupon or points are used, so a short balance takes nothing. (A failed spend is retried
+    // against the same order id; points and the coupon are never taken twice. An abandoned QR cancels the order, which gives them back.)
+    if (t === "credit" && training) return notify("Member credit is not charged in training mode.");
+    if (t === "credit" && balance !== null && balance < due) return notify(`Not enough credit: ${formatMoney(balance)} available, ${formatMoney(due)} needed.`);
     // A coupon is counted as used for this order first. If the code is no longer good, nothing is recorded.
     if (coupon && !openedOrder?.coupon && priced.couponDiscount > 0) {
       const r = await staffFetch("/api/promos/claim", { body: { code: coupon.code, orderId: orderId ?? pendingId.current, subtotalCents: priced.subtotal, memberId: isMember ? memberInfo!.member.id : null } });
@@ -912,7 +915,6 @@ export function Pos({ config, catalog, online, customerId, setCustomerId, header
     // Points are taken from the member first. If that fails, nothing is recorded and the order stays as it is.
     const oid = orderId ?? pendingId.current;
     if (pointsToTake > 0) {
-      if (t === "credit" || t === "qr") return notify("With points, take the rest in cash or by card.");
       const r = await staffFetch(`/api/members/${memberInfo!.member.id}/redeem`, { body: { points: pointsToTake, orderId: oid } });
       if (!("res" in r)) return notify(r.problem);
       if (!r.res.ok) { void loadMember(customerId).then(setMemberInfo); return notify(r.res.status === 409 ? "The member does not have enough points any more. Their balance has been refreshed." : "The points could not be used. Check the connection and try again."); }
@@ -920,8 +922,8 @@ export function Pos({ config, catalog, online, customerId, setCustomerId, header
     // A gift card is spent on the server before the payment is recorded: the whole amount or nothing.
     if (t === "giftcard") { const bad = await spendGiftCard(reference, owed, oid); if (bad) return notify(bad); }
     if (t === "cash") { const p = await place({ method: "cash", confirmed: true, tenderedCents: received, ...(rounding ? { amountCents: owed, roundingCents: rounding } : {}) }, oid); setPayView(false); setDone({ orderId: p?.orderId, queue: p?.queue, change: Math.max(0, received - owed), total: owed }); }
-    else if (t === "credit") await payWithCredit();
-    else if (t === "qr") await payWithQr();
+    else if (t === "credit") await payWithCredit(oid);
+    else if (t === "qr") await payWithQr(oid);
     else if (recordedAs(t)) { const p = await place({ ...recordedAs(t)!, ...(reference ? { reference } : {}), confirmed: true }, oid); setPayView(false); setDone({ orderId: p?.orderId, queue: p?.queue, change: 0, total: owed }); }
     else { const p = await place({ method: "paynow", confirmed: false }); setPayView(false); setDone({ orderId: p?.orderId, queue: p?.queue, change: 0, total: owed }); }
   }

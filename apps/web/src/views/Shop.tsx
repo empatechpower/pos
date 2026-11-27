@@ -1900,10 +1900,9 @@ function Menu({ info, catalog, config, loginError, recheck }: { info: Info; cata
       {body ?? (
         <div className="shop-msg"><p>{t("bagEmptyShort", "Your bag is empty.")}</p><button className="shop-primary" onClick={() => setScreen("order")}>{t("backToOrder", "Back to Order")}</button></div>
       )}
-      {tabMode && !tab.session && <JoinTabSheet spot={spot} memberName={member?.name} busy={joining} failed={joinFailed} onJoin={(n) => {
-          // One active tab per phone: a second table asks whether to leave the first, or stay.
+      {tabMode && !tab.session && <JoinTabSheet spot={spot} memberName={member?.name} busy={joining} failed={joinFailed} leaving={otherTabSessions(info.outletId, spot)[0]?.spot} onJoin={(n) => {
+          // One active tab per phone: the sheet says that joining here leaves the other table's tab, and its button says so too.
           const others = otherTabSessions(info.outletId, spot);
-          if (others.length && !window.confirm(tx("You are already on {t}'s tab. Leave it and join {n}?", { t: others[0]!.spot, n: spot }))) return;
           setJoining(true); setJoinFailed(false);
           void (others.length ? leaveOtherTabs(info.outletId, spot) : Promise.resolve()).then(() => tab.join(n)).then((ok) => { setJoining(false); setJoinFailed(!ok); });
         }} />}

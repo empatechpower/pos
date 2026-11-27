@@ -7,6 +7,7 @@ import { seedCatalog } from "../src/catalogSeed.js";
 import { createEnrollmentCode, enroll } from "../src/devices.js";
 import { PgEventStore } from "../src/pgStore.js";
 import { startTestDb } from "./pg.js";
+import { sweepLapsed } from "../src/ledger.js";
 import type { Db } from "../src/db/pool.js";
 
 // The owner's credit rules (25 Nov 2026): valid one year from the last top-up; a top-up within three months of expiry brings it back;
@@ -122,5 +123,29 @@ describe("how long credit lasts", () => {
     await age("dan", 5000);
     expect(await state("dan")).toMatchObject({ state: "active", expiresAt: null });
     expect((await spendIt("dan", 100)).status).toBe(200);
+  });
+});
+
+describe("lapsed credit is written off on the day", () => {
+  it("the hourly sweep writes off only lapsed wallets, once, and a later top-up does not write it off again", async () => {
+    await call("/api/settings/credit", { method: "PUT", body: { validityDays: 365, reinstateDays: 90, minTopupCents: 1000 }, staff: owner });
+    await topup("sweep-lapsed", 5000); await age("sweep-lapsed", 365 + 91);
+    await topup("sweep-expired", 4000); await age("sweep-expired", 365 + 10);
+    await topup("sweep-active", 3000);
+    const before = (await call("/api/wallet/sweep-lapsed", { staff: cashier })).json.balanceCents;
+    expect(before).toBe(5000);
+    const r = await sweepLapsed(db, "bp");
+    expect(r.wallets).toBeGreaterThanOrEqual(1);
+    expect((await state("sweep-lapsed")).balanceCents).toBe(0);
+    expect((await state("sweep-expired")).balanceCents).toBe(4000); // only expired: a top-up can still bring it back
+    expect((await state("sweep-active")).balanceCents).toBe(3000);
+    // running again changes nothing
+    const again = await sweepLapsed(db, "bp");
+    expect((await db.query("SELECT count(*)::int AS n FROM ledger_entries e JOIN wallets w ON w.id=e.wallet_id WHERE w.customer_id='sweep-lapsed' AND e.kind='adjust'")).rows[0].n).toBe(1);
+    expect(again.cents).toBe(0);
+    // a top-up afterwards starts a clean balance, with no second write-off
+    await topup("sweep-lapsed", 2000);
+    expect((await state("sweep-lapsed")).balanceCents).toBe(2000);
+    expect((await db.query("SELECT count(*)::int AS n FROM ledger_entries e JOIN wallets w ON w.id=e.wallet_id WHERE w.customer_id='sweep-lapsed' AND e.kind='adjust'")).rows[0].n).toBe(1);
   });
 });

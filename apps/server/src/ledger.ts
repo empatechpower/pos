@@ -117,7 +117,7 @@ export async function rebuildBalance(db: Db, merchantId: string, customerId: str
  */
 export async function adjustTo(
   db: Db,
-  i: { merchantId: string; customerId: string; targetCents: number; idempotencyKey: string; staffId: string; deviceId?: string; outletId?: string; note: string },
+  i: { merchantId: string; customerId: string; targetCents: number; idempotencyKey: string; /** Null when the system does it (lapsed credit written off on the day). */ staffId: string | null; deviceId?: string; outletId?: string; note: string },
 ): Promise<{ ok: true; deltaCents: number; balanceCents: number; replayed: boolean; changed: boolean }> {
   if (!Number.isSafeInteger(i.targetCents) || i.targetCents < 0) throw new Error("targetCents must be a whole number of cents, zero or more");
   const client = await db.connect();
@@ -237,6 +237,25 @@ export async function creditSpendable(db: Db, merchantId: string, customerId: st
  * Before a top-up: credit that lapsed (expired and not reinstated in time) is written off, so the new money starts a clean balance.
  * Credit that is only expired is left alone: the top-up itself reinstates it. Returns the cents written off.
  */
+/**
+ * Every wallet whose credit lapsed (expired, and the reinstatement time passed without a top-up) is written off, on the day it lapses rather
+ * than at the member's next top-up. Run by the server every hour. The write-off is the same entry a top-up would make (same key), so it is
+ * never made twice. Returns how many wallets were written off and how much.
+ */
+export async function sweepLapsed(db: Db, merchantId: string, now = Date.now()): Promise<{ wallets: number; cents: number }> {
+  const rules = await loadCreditRules(db, merchantId);
+  if (rules.validityDays === 0) return { wallets: 0, cents: 0 };
+  const w = await db.query("SELECT customer_id FROM wallets WHERE merchant_id=$1 AND balance_cents > 0", [merchantId]);
+  let wallets = 0, cents = 0;
+  for (const row of w.rows) {
+    const s = await creditState(db, merchantId, row.customer_id as string, now, rules);
+    if (s.state !== "lapsed" || s.balanceCents <= 0 || !s.expiresAt) continue;
+    const day = new Date(s.expiresAt).toLocaleDateString("en-GB", { day: "2-digit", month: "short", year: "numeric", timeZone: "Asia/Singapore" });
+    const r = await adjustTo(db, { merchantId, customerId: row.customer_id as string, targetCents: 0, idempotencyKey: `lapse:${s.expiresAt}`, staffId: null, note: `Credit expired on ${day} and was not reinstated in time (written off automatically)` });
+    if (r.changed && !r.replayed) { wallets++; cents += -r.deltaCents; }
+  }
+  return { wallets, cents };
+}
 export async function writeOffLapsed(db: Db, i: { merchantId: string; customerId: string; staffId: string; deviceId?: string; outletId?: string }, now = Date.now()): Promise<number> {
   const s = await creditState(db, i.merchantId, i.customerId, now);
   if (s.state !== "lapsed" || s.balanceCents <= 0 || !s.expiresAt) return 0;

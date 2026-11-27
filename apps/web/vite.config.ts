@@ -31,7 +31,7 @@ export default defineConfig({
           { src: "/icons/icon-maskable-512.png", sizes: "512x512", type: "image/png", purpose: "maskable" },
         ],
       },
-      workbox: { clientsClaim: true, navigateFallback: "/index.html", navigateFallbackDenylist: [/^\/hub\.mjs$/, /\.apk$/, /^\/api\//, /^\/about(\/|$)/], globPatterns: ["**/*.{js,css,html,svg,png,woff2}"] },
+      workbox: { clientsClaim: true, importScripts: ["/sw-takeover.js"], navigateFallback: "/index.html", navigateFallbackDenylist: [/^\/hub\.mjs$/, /\.apk$/, /^\/api\//, /^\/about(\/|$)/], globPatterns: ["**/*.{js,css,html,svg,png,woff2}"] },
     }),
   ],
   server: { port: 5173, proxy: { "/api": "http://localhost:8787" } },

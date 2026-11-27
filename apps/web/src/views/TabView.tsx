@@ -109,7 +109,7 @@ export function useTab(outletId: string | undefined, spot: string, enabled: bool
 // ---- joining -----------------------------------------------------------------------------------
 
 /** Joining asks only a display name (a signed-in member's is already filled in). No login. */
-export function JoinTabSheet({ spot, memberName, onJoin, busy, failed }: { spot: string; memberName?: string | null; onJoin: (name: string) => void; busy: boolean; failed: boolean }) {
+export function JoinTabSheet({ spot, memberName, onJoin, busy, failed, leaving }: { spot: string; memberName?: string | null; onJoin: (name: string) => void; busy: boolean; failed: boolean; /** This phone is already on another table's tab: joining here leaves it (one tab per phone). */ leaving?: string }) {
   const [name, setName] = useState(memberName ?? "");
   return (
     <div className="tbl-back" role="dialog" aria-label={tx("Join the table")}>
@@ -117,8 +117,9 @@ export function JoinTabSheet({ spot, memberName, onJoin, busy, failed }: { spot:
         <h3>{tx("Join {t}", { t: spotLabel(spot) })}</h3>
         <p className="muted">{tx("Everyone at the table shares one bill. What is your name? Leave it empty to join as a guest.")}</p>
         <input className="e2e-input" value={name} maxLength={30} placeholder={tx("Your name")} aria-label={tx("Your name")} onChange={(e) => setName(e.target.value)} onKeyDown={(e) => { if (e.key === "Enter" && !busy) onJoin(name); }} />
+        {leaving && <p className="e2e-note" role="status">{tx("You are already on {t}'s tab. Joining here leaves it.", { t: spotLabel(leaving) })}</p>}
         {failed && <p className="e2e-note" role="alert">{tx("Could not join the table. Please try again.")}</p>}
-        <button className="shop-primary" disabled={busy} onClick={() => onJoin(name)}>{busy ? tx("Joining…") : tx("Join the table")}</button>
+        <button className="shop-primary" disabled={busy} onClick={() => onJoin(name)}>{busy ? tx("Joining…") : leaving ? tx("Leave {t} and join", { t: spotLabel(leaving) }) : tx("Join the table")}</button>
       </div>
     </div>
   );
