@@ -5,7 +5,7 @@ import { audit, can, createStaff, permissionsOf, startSessionFor, type Permissio
 import { punch } from "./timeclock.js";
 import type { PgCatalogStore } from "./catalog.js";
 import type { Db } from "./db/pool.js";
-import { createLinkedDevice } from "./devices.js";
+import { createLinkedDevice, DeviceLimitReached } from "./devices.js";
 import { sameSecret, type Integrations } from "./integrations.js";
 import { FailureLimiter } from "./rateLimit.js";
 
@@ -862,7 +862,9 @@ export function registerTelegram(app: FastifyInstance, d: TelegramDeps): void {
     }
     const staff = await d.db.query("SELECT id, name, role FROM staff WHERE id=$1 AND active", [used.rows[0].staff_id]);
     if (!staff.rows[0] || !can(staff.rows[0].role, "catalog.manage")) return reply.code(403).send({ error: "not_allowed" });
-    const device = await createLinkedDevice(d.db, d.merchantId, d.outletId, `Telegram (${staff.rows[0].name})`, staff.rows[0].id);
+    let device: Awaited<ReturnType<typeof createLinkedDevice>>;
+    try { device = await createLinkedDevice(d.db, d.merchantId, d.outletId, `Telegram (${staff.rows[0].name})`, staff.rows[0].id); }
+    catch (e) { if (e instanceof DeviceLimitReached) return reply.code(409).send({ error: "device_limit", limit: e.limit }); throw e; }
     const session = await startSessionFor(d.db, d.merchantId, staff.rows[0].id, "telegram");
     if (!session) return reply.code(403).send({ error: "not_allowed" });
     await audit(d.db, d.merchantId, staff.rows[0].id, "telegram.web", { deviceId: device.device.id });

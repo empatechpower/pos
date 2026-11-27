@@ -149,6 +149,19 @@ export async function loginByPhone(db: Db, merchantId: string, phone: string, pi
   return login(db, merchantId, r.rows[0].code as string, pin);
 }
 
+/** The right PIN for this staff code or sign-in phone number? Same rules as signing in, but no session is opened. Gives the person. */
+export async function checkStaffBy(db: Db, merchantId: string, who: { code?: string; phone?: string }, pin: string): Promise<{ ok: true; staff: Staff } | { ok: false; reason: "invalid" | "locked" }> {
+  let code = who.code?.trim();
+  if (!code) {
+    const n = normalisePhone(who.phone);
+    const r = n ? await db.query("SELECT code FROM staff WHERE merchant_id=$1 AND phone=$2 AND active", [merchantId, n]) : { rows: [] as Array<{ code: string }> };
+    if (!r.rows[0]) { await hashPin(pin).catch(() => {}); return { ok: false, reason: "invalid" }; }
+    code = r.rows[0].code as string;
+  }
+  const v = await checkStaffPin(db, merchantId, code, pin);
+  return v.ok ? { ok: true, staff: toStaff(v.row) } : v;
+}
+
 /** Set or clear a staff member's sign-in phone number. False when the number is taken by someone else or not a number. */
 export async function setStaffPhone(db: Db, merchantId: string, code: string, phone: string | null): Promise<"ok" | "invalid" | "taken" | "unknown"> {
   const n = phone === null ? null : normalisePhone(phone);

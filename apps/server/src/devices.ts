@@ -49,6 +49,31 @@ export async function createEnrollmentCode(
   return { code, expiresAt, maxUses };
 }
 
+// ---- the licence: how many devices a shop may have connected ------------------------------------
+// Set by Rezein, never by the shop (cli.ts set-device-limit); kept with the shop's settings under this key. No limit when unset.
+export const LICENCE_KEY = "licence.devices";
+
+export async function deviceLimit(db: Db, merchantId: string): Promise<number | null> {
+  const r = await db.query("SELECT value FROM merchant_settings WHERE merchant_id=$1 AND key=$2", [merchantId, LICENCE_KEY]);
+  const n = Number(r.rows[0]?.value);
+  return Number.isInteger(n) && n > 0 ? n : null;
+}
+export async function setDeviceLimit(db: Db, merchantId: string, n: number | null): Promise<void> {
+  if (n === null) await db.query("DELETE FROM merchant_settings WHERE merchant_id=$1 AND key=$2", [merchantId, LICENCE_KEY]);
+  else await db.query("INSERT INTO merchant_settings (merchant_id, key, value) VALUES ($1,$2,$3) ON CONFLICT (merchant_id, key) DO UPDATE SET value=EXCLUDED.value", [merchantId, LICENCE_KEY, JSON.stringify(n)]);
+}
+export async function activeDevices(db: Db, merchantId: string): Promise<number> {
+  return Number((await db.query("SELECT count(*) FROM devices WHERE merchant_id=$1 AND active", [merchantId])).rows[0].count);
+}
+/** The licence's limit when one more device would go over it; null when there is room. */
+async function full(db: Db, merchantId: string): Promise<number | null> {
+  const limit = await deviceLimit(db, merchantId);
+  return limit !== null && (await activeDevices(db, merchantId)) >= limit ? limit : null;
+}
+export class DeviceLimitReached extends Error {
+  constructor(readonly limit: number) { super(`device limit ${limit} reached`); }
+}
+
 /**
  * Trade a valid code for a device token. The code is consumed in the same statement that checks it,
  * so two devices racing with one code cannot both succeed.
@@ -62,10 +87,17 @@ export async function enroll(db: Db, merchantId: string, code: string, name: str
   );
   const c = used.rows[0];
   if (!c) return null;
+  // A device that would go over the licence is refused, and the code is given back so it can be used once a device is disconnected.
+  const wasActive = c.device_id ? (await db.query("SELECT active FROM devices WHERE id=$1", [c.device_id])).rows[0]?.active === true : false;
+  const limit = wasActive ? null : await full(db, merchantId);
+  if (limit !== null) {
+    await db.query("UPDATE enrollment_codes SET uses = uses - 1, used_at = NULL WHERE code_hash=$1", [sha256(code.toUpperCase().trim())]);
+    throw new DeviceLimitReached(limit);
+  }
   const token = randomBytes(32).toString("base64url");
   if (c.device_id) {
     // Re-issue for an existing device: same id (so its queued events still match), new token, old one dead.
-    const r = await db.query("UPDATE devices SET token_hash=$2, active=true, name=$3 WHERE id=$1 RETURNING *", [c.device_id, sha256(token), name]);
+    const r = await db.query("UPDATE devices SET token_hash=$2, active=true, name=$3, wipe_requested=false WHERE id=$1 RETURNING *", [c.device_id, sha256(token), name]);
     return r.rows[0] ? { token, device: toDevice(r.rows[0]), enrolledBy: c.created_by } : null;
   }
   const r = await db.query(
@@ -73,6 +105,15 @@ export async function enroll(db: Db, merchantId: string, code: string, name: str
     [merchantId, c.outlet_id, name, sha256(token), c.created_by],
   );
   return { token, device: toDevice(r.rows[0]), enrolledBy: c.created_by };
+}
+
+/** An owner or manager signed in on the new device itself and approved it: the same as enrolling with a code they made. */
+export async function approveDevice(db: Db, merchantId: string, outletId: string, name: string, approvedBy: string): Promise<{ token: string; device: Device }> {
+  const limit = await full(db, merchantId);
+  if (limit !== null) throw new DeviceLimitReached(limit);
+  const token = randomBytes(32).toString("base64url");
+  const r = await db.query("INSERT INTO devices (merchant_id, outlet_id, name, token_hash, enrolled_by) VALUES ($1,$2,$3,$4,$5) RETURNING *", [merchantId, outletId, name, sha256(token), approvedBy]);
+  return { token, device: toDevice(r.rows[0]) };
 }
 
 /** How many browsers one person can have signed in through Telegram at once. */
@@ -90,6 +131,8 @@ export async function createLinkedDevice(db: Db, merchantId: string, outletId: s
        SELECT id FROM devices WHERE merchant_id=$1 AND name=$2 AND enrolled_by=$3 AND active ORDER BY created_at DESC, id DESC OFFSET $4)`,
     [merchantId, name, enrolledBy, LINKED_DEVICES_PER_PERSON - 1],
   );
+  const limit = await full(db, merchantId);
+  if (limit !== null) throw new DeviceLimitReached(limit);
   const token = randomBytes(32).toString("base64url");
   const r = await db.query("INSERT INTO devices (merchant_id, outlet_id, name, token_hash, enrolled_by) VALUES ($1,$2,$3,$4,$5) RETURNING *", [merchantId, outletId, name, sha256(token), enrolledBy]);
   return { token, device: toDevice(r.rows[0]) };
@@ -106,7 +149,7 @@ export async function authenticateDevice(db: Db, token: string | undefined): Pro
 
 export async function listDevices(db: Db, merchantId: string) {
   const r = await db.query(
-    "SELECT id, name, outlet_id, active, created_at, last_seen_at, last_print_poll_at FROM devices WHERE merchant_id=$1 ORDER BY created_at",
+    "SELECT id, name, outlet_id, active, wipe_requested, created_at, last_seen_at, last_print_poll_at FROM devices WHERE merchant_id=$1 ORDER BY created_at",
     [merchantId],
   );
   return r.rows;
@@ -129,10 +172,26 @@ export async function liveSmsNumber(db: Db, merchantId: string): Promise<string 
   return (r.rows[0]?.sms_number as string | undefined) ?? null;
 }
 
-export async function revokeDevice(db: Db, merchantId: string, deviceId: string): Promise<boolean> {
-  const r = await db.query("UPDATE devices SET active=false WHERE id=$1 AND merchant_id=$2 AND active", [deviceId, merchantId]);
+/**
+ * Disconnect a device. With reset, its browser is also told, the next time it calls, to clear this app's copy and everything the app
+ * stored there (orders not yet sent from it are lost), so it opens fresh on the latest version. A device already disconnected can
+ * still be reset.
+ */
+export async function revokeDevice(db: Db, merchantId: string, deviceId: string, reset = false): Promise<boolean> {
+  const r = reset
+    ? await db.query("UPDATE devices SET active=false, wipe_requested=true WHERE id=$1 AND merchant_id=$2", [deviceId, merchantId])
+    : await db.query("UPDATE devices SET active=false WHERE id=$1 AND merchant_id=$2 AND active", [deviceId, merchantId]);
   return (r.rowCount ?? 0) > 0;
 }
+
+/** Is this the token of a device an owner disconnected and reset? */
+export async function resetPending(db: Db, token: string | undefined): Promise<boolean> {
+  if (!token) return false;
+  const r = await db.query("SELECT 1 FROM devices WHERE token_hash=$1 AND NOT active AND wipe_requested", [sha256(token)]);
+  return r.rows.length > 0;
+}
+/** What the server sends a reset device: its browser clears this site's cached app and stored data (and the app's service worker). */
+export const CLEAR_SITE = '"cache", "storage"';
 
 // ---- short-lived stream tickets ---------------------------------------------------------------
 // EventSource cannot send headers, and tokens in URLs end up in logs. So a device first asks for a

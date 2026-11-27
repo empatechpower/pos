@@ -3,11 +3,11 @@ import Fastify, { type FastifyReply, type FastifyRequest } from "fastify";
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { withTaxPack, isTaxCountry, TAX_PACKS, DEFAULT_COUNTRY, cleanTenderRounding, taxPackFor, type BuilderSpec, guestCheck, plainText, receipt, type OrderState, type PrintContext, commissionOf, tabPaymentReceipt, type ProductStock, validateProductStock, isTimeZone, validCoordinates, validateOutletOverride, validateWindows, type MenuWindows, confirmedPaid, hourly, isFullyPaid, productMix, summarize, menuFor, newId, orderTotals, reduceAll, reduceOrder, shopStatus, type BusinessConfig, type ChannelKind, type OptionGroup, type OrderEvent } from "@pos/core";
-import { canDo, permissionsOf, PERMISSION_OPTIONS, loadRolePermissions, rolePermissions, saveRolePermissions, setRolePermissions, CASHIER_TOPUP_LIMIT_CENTS, audit, checkStaffPin, authenticate, authenticateAgent, can, createAgent, createConnectCode, redeemConnectCode, createStaff, listAgents, login, loginByPhone, logout, normalisePhone, setStaffPhone, recentAudit, revokeAgent, type Permission, type Role, type Staff } from "./auth.js";
+import { canDo, permissionsOf, PERMISSION_OPTIONS, loadRolePermissions, rolePermissions, saveRolePermissions, setRolePermissions, CASHIER_TOPUP_LIMIT_CENTS, audit, checkStaffPin, authenticate, authenticateAgent, can, createAgent, createConnectCode, redeemConnectCode, createStaff, listAgents, login, loginByPhone, logout, normalisePhone, setStaffPhone, recentAudit, revokeAgent, type Permission, type Role, type Staff, checkStaffBy } from "./auth.js";
 import type { CatalogStore, ChangeResult, PgCatalogStore } from "./catalog.js";
 import type { Db } from "./db/pool.js";
 import { adjustTo, sweepLapsed, balanceOf, cleanCreditRules, creditBlockedFor, creditExemptIds, creditFrozen, creditSpendable, creditState, loadCreditRules, refund, saveCreditRules, setCreditExempt, setCreditFrozen, spend, topUp, writeOffLapsed } from "./ledger.js";
-import { authenticateDevice, createEnrollmentCode, enroll, markPrintPoll, setSmsNumber, issueStreamTicket, listDevices, redeemStreamTicket, revokeDevice, type Device } from "./devices.js";
+import { authenticateDevice, createEnrollmentCode, enroll, markPrintPoll, setSmsNumber, issueStreamTicket, listDevices, redeemStreamTicket, revokeDevice, type Device, approveDevice, activeDevices, deviceLimit, resetPending, CLEAR_SITE, DeviceLimitReached } from "./devices.js";
 import { BrandStore } from "./brand.js";
 import { PrintStore, validatePrinter, type Printer } from "./print.js";
 import { registerShop } from "./shop.js";
@@ -123,7 +123,11 @@ export async function buildApp({ config, store, db, catalog, catalogAdmin, print
   const needsDevice = async (req: FastifyRequest, reply: FastifyReply) => {
     if (!db) return;
     const device = await authenticateDevice(db, deviceToken(req));
-    if (!device || device.merchantId !== merchantId) return reply.code(401).send({ error: "device_not_enrolled" });
+    if (!device || device.merchantId !== merchantId) {
+      // A device an owner disconnected and reset: its browser clears this app's copy and data, and opens fresh on the latest version.
+      if (await resetPending(db, deviceToken(req)).catch(() => false)) reply.header("Clear-Site-Data", CLEAR_SITE);
+      return reply.code(401).send({ error: "device_not_enrolled" });
+    }
     req.device = device;
   };
 
@@ -1094,13 +1098,42 @@ export async function buildApp({ config, store, db, catalog, catalogAdmin, print
     const { code, name } = req.body ?? {};
     if (!code || !name) return reply.code(400).send({ error: "code and name required" });
     if (enrollFailures.blocked(req.ip)) return reply.code(429).send({ error: "too_many_attempts" });
-    const r = await enroll(db, merchantId, code, name.slice(0, 60));
+    let r: Awaited<ReturnType<typeof enroll>>;
+    try { r = await enroll(db, merchantId, code, name.slice(0, 60)); }
+    catch (e) { if (e instanceof DeviceLimitReached) return reply.code(409).send({ error: "device_limit", limit: e.limit }); throw e; }
     if (!r) {
       enrollFailures.fail(req.ip);
       return reply.code(401).send({ error: "invalid_or_expired_code" });
     }
     await audit(db, merchantId, r.enrolledBy, "device.enroll", { deviceId: r.device.id, name: r.device.name });
     return { token: r.token, deviceId: r.device.id, outletId: r.device.outletId };
+  });
+
+  /**
+   * An owner or manager approves a new device by signing in on it (phone number or staff code, and PIN), instead of making a code on
+   * another device. Open route like enrolling: wrong tries are limited per address, and the person's own lockout applies.
+   */
+  app.post<{ Body: { phone?: string; code?: string; pin?: string; name?: string } }>("/api/devices/approve", async (req, reply) => {
+    const { phone, code, pin } = req.body ?? {};
+    const name = String(req.body?.name ?? "").trim().slice(0, 60);
+    if ((!phone && !code) || !pin || !name) return reply.code(400).send({ error: "a phone number or staff code, a PIN and a device name are required" });
+    if (enrollFailures.blocked(req.ip)) return reply.code(429).send({ error: "too_many_attempts" });
+    const v = await checkStaffBy(db, merchantId, { phone, code }, String(pin));
+    if (!v.ok) {
+      if (v.reason === "invalid") enrollFailures.fail(req.ip);
+      return reply.code(v.reason === "locked" ? 429 : 401).send({ error: v.reason === "locked" ? "locked" : "invalid" });
+    }
+    if (!canDo(v.staff, "device.manage")) return reply.code(403).send({ error: "not_allowed" });
+    const visible = await visibleOutletIds(db, merchantId, v.staff);
+    const outletId = visible && visible.length >= 1 ? visible[0]! : config.outletName;
+    try {
+      const r = await approveDevice(db, merchantId, outletId, name, v.staff.id);
+      await audit(db, merchantId, v.staff.id, "device.approve", { deviceId: r.device.id, name: r.device.name });
+      return { token: r.token, deviceId: r.device.id, outletId: r.device.outletId };
+    } catch (e) {
+      if (e instanceof DeviceLimitReached) return reply.code(409).send({ error: "device_limit", limit: e.limit });
+      throw e;
+    }
   });
 
   app.post<{ Body: { deviceId?: string; testing?: boolean; outletId?: string } }>("/api/devices/enrollment", { preHandler: needs("device.manage") }, async (req, reply) => {
@@ -1116,16 +1149,17 @@ export async function buildApp({ config, store, db, catalog, catalogAdmin, print
 
   app.get("/api/devices", { preHandler: needs("device.manage") }, async (req) => {
     const visible = await visibleOutletIds(db, merchantId, req.staff!);
-    return { devices: (await listDevices(db, merchantId)).filter((d) => outletAllowed(visible, d.outlet_id as string)) };
+    return { devices: (await listDevices(db, merchantId)).filter((d) => outletAllowed(visible, d.outlet_id as string)), limit: await deviceLimit(db, merchantId), active: await activeDevices(db, merchantId) };
   });
 
-  app.post<{ Params: { id: string } }>("/api/devices/:id/revoke", { preHandler: needs("device.manage") }, async (req, reply) => {
+  app.post<{ Params: { id: string }; Body: { reset?: boolean } | undefined }>("/api/devices/:id/revoke", { preHandler: needs("device.manage") }, async (req, reply) => {
     if (req.params.id === req.device!.id) return reply.code(400).send({ error: "cannot_revoke_this_device" });
     const target = (await listDevices(db, merchantId)).find((d) => d.id === req.params.id);
     if (target && !outletAllowed(await visibleOutletIds(db, merchantId, req.staff!), target.outlet_id as string)) return reply.code(403).send({ error: "outside_your_scope" });
-    const ok = await revokeDevice(db, merchantId, req.params.id);
+    const reset = req.body?.reset === true;
+    const ok = await revokeDevice(db, merchantId, req.params.id, reset);
     if (!ok) return reply.code(404).send({ error: "not_found_or_already_revoked" });
-    await audit(db, merchantId, req.staff!.id, "device.revoke", { deviceId: req.params.id });
+    await audit(db, merchantId, req.staff!.id, "device.revoke", { deviceId: req.params.id, reset });
     return { ok: true };
   });
 

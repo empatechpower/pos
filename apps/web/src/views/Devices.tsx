@@ -16,6 +16,7 @@ interface Row {
   created_at: string;
   last_seen_at: string | null;
   outlet_id?: string;
+  wipe_requested?: boolean;
 }
 interface OutletRow { id: string; name: string }
 
@@ -29,6 +30,7 @@ const ago = (iso: string | null) => {
 export function Devices() {
   const staff = useStaff();
   const [rows, setRows] = useState<Row[]>([]);
+  const [licence, setLicence] = useState<{ limit: number | null; active: number } | null>(null);
   const [code, setCode] = useState<{ code: string; reissueFor?: string; testing?: boolean; outlet?: string } | null>(null);
   const [msg, setMsg] = useState<string | null>(null);
   const [outlets, setOutlets] = useState<OutletRow[]>([]);
@@ -36,7 +38,7 @@ export function Devices() {
 
   const load = async () => {
     const res = await fetch("/api/devices", { headers: authHeader() }).catch(() => null);
-    if (res?.ok) setRows(((await res.json()) as { devices: Row[] }).devices);
+    if (res?.ok) { const j = (await res.json()) as { devices: Row[]; limit?: number | null; active?: number }; setRows(j.devices); setLicence({ limit: j.limit ?? null, active: j.active ?? j.devices.filter((d) => d.active).length }); }
   };
   useEffect(() => {
     if (!staff) return;
@@ -66,10 +68,13 @@ export function Devices() {
     else setMsg("Could not create a code. Check the connection and your sign-in.");
   }
 
-  async function revoke(r: Row) {
-    if (!(await askConfirm({ title: "Remove this device?", message: `Remove "${r.name}"? It will stop syncing straight away.`, ok: "Remove", cancel: "Keep" }))) return;
-    const res = await fetch(`/api/devices/${r.id}/revoke`, { method: "POST", headers: authHeader() }).catch(() => null);
-    setMsg(res?.ok ? `${r.name} removed.` : "Could not remove that device (you can't remove the one you're using).");
+  async function revoke(r: Row, reset = false) {
+    const ask = reset
+      ? { title: "Disconnect and reset?", message: `"${r.name}" stops working straight away. The next time it reaches the server, its browser clears this app's copy and everything the app kept there, then opens fresh on the latest version, ready to be set up again. Orders on it that were not sent yet are lost. Use this for a device stuck on an old version, or one that is lost.`, ok: "Disconnect and reset", cancel: "Keep" }
+      : { title: "Disconnect this device?", message: `"${r.name}" stops working straight away. What is on it stays on it, and is sent once it is set up again.`, ok: "Disconnect", cancel: "Keep" };
+    if (!(await askConfirm(ask))) return;
+    const res = await fetch(`/api/devices/${r.id}/revoke`, { method: "POST", headers: { "content-type": "application/json", ...authHeader() }, body: JSON.stringify({ reset }) }).catch(() => null);
+    setMsg(res?.ok ? (reset ? `${r.name} disconnected. It resets the next time it is opened with a connection.` : `${r.name} disconnected.`) : "Could not disconnect that device (you can't disconnect the one you're using).");
     void load();
   }
 
@@ -85,6 +90,7 @@ export function Devices() {
           </select>
         </label>
       )}
+      {licence && <p className="muted" role="status">{licence.limit !== null ? `${licence.active} of ${licence.limit} devices connected (your licence).` : `${licence.active} devices connected.`} A new device can also be approved by an owner or manager signing in on it.</p>}
       <button className="primary" onClick={() => void makeCode()}>Add a device</button>{" "}
       <button className="secondary" onClick={() => void makeCode(undefined, true)}>Code for testing many devices</button>
       {code && (
@@ -98,12 +104,13 @@ export function Devices() {
       {rows.map((r) => (
         <div className="tab" key={r.id}>
           <div>
-            <b>{r.name}</b> {!r.active && <span className="muted">· removed</span>}
+            <b>{r.name}</b> {!r.active && <span className="muted">· {r.wipe_requested ? "disconnected, resets when next opened" : "disconnected"}</span>}
             <div className="muted">{outlets.length > 1 && r.outlet_id ? `${outletName(r.outlet_id)} · ` : ""}last seen {ago(r.last_seen_at)}</div>
           </div>
           <div className="tabr">
             {!r.active && <button className="secondary sm" onClick={() => void makeCode(r.id, false, r.outlet_id)}>Re-enrol</button>}
-            {r.active && <button className="secondary sm" onClick={() => void revoke(r)}>Remove</button>}
+            {r.active && <button className="secondary sm" onClick={() => void revoke(r)}>Disconnect</button>}
+            {!r.wipe_requested && <button className="secondary sm" onClick={() => void revoke(r, true)}>Disconnect and reset</button>}
           </div>
         </div>
       ))}
