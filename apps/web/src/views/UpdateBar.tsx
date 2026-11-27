@@ -14,7 +14,7 @@ export function UpdateBar() {
   if (!show) return null;
   const now = async () => {
     let items = 0;
-    try { items = (JSON.parse(localStorage.getItem("pos.bag") ?? "null") as { bag?: unknown[] } | null)?.bag?.length ?? 0; } catch { /* nothing on screen */ }
+    try { items = ["pos.bag", "pos.bag.practice"].reduce((n, k) => n + ((JSON.parse(localStorage.getItem(k) ?? "null") as { bag?: unknown[] } | null)?.bag?.length ?? 0), 0); } catch { /* nothing on screen */ }
     const why = `${items ? "The current order has items on it. " : ""}${mine() ? "A shift is open. " : ""}`;
     // Nothing is lost: orders and the open shift are kept on the device. The question is so no one is surprised by a restart.
     if (why && !(await askConfirm({ title: "Update Rezein", message: `Updating restarts the app. ${why}Your data is saved on this device and will still be here after the update.`, ok: "Update now", cancel: "Not now" }))) return;

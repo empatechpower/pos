@@ -22,9 +22,27 @@ installLinkHandler();
 const onKiosk = location.pathname === "/kiosk" || location.pathname.startsWith("/kiosk/");
 // The customer's own pages (shop, pair, display, queue) take a new version at once; the till's staff screens and the kiosk wait to be told.
 const staffScreen = !/^\/(shop|pair|display|queue|kiosk)(\/|$)/.test(location.pathname);
+/**
+ * When a new version may be taken without asking. The owner's rule (decision Q17) is that a till is never restarted under someone in the
+ * middle of their work: that still holds, and then the notice waits for "Update now". But a reload, or opening the app, with nothing on the
+ * order on screen, or a till nobody is signed in to, takes the new version at once: there is nothing to interrupt, and a reload that kept
+ * showing the old version looked to everyone like a caching fault.
+ */
+const loadedAt = Date.now();
+function safeToUpdateNow(): boolean {
+  let items = 0;
+  try { items = ["pos.bag", "pos.bag.practice"].reduce((n, k) => n + ((JSON.parse(localStorage.getItem(k) ?? "null") as { bag?: unknown[] } | null)?.bag?.length ?? 0), 0); } catch { items = 0; }
+  if (items > 0) return false;
+  const justOpened = Date.now() - loadedAt < 20_000;
+  const nobodySignedIn = !localStorage.getItem("pos.token");
+  return justOpened || nobodySignedIn;
+}
 const updateSW = registerSW({
   immediate: true,
-  onNeedRefresh() { if (onKiosk || staffScreen) markUpdateReady(); else void updateSW(true); },
+  onNeedRefresh() {
+    if (!onKiosk && staffScreen && safeToUpdateNow()) return void updateSW(true);
+    if (onKiosk || staffScreen) markUpdateReady(); else void updateSW(true);
+  },
   onRegisteredSW(_url, reg) {
     if (!reg) return;
     setRegistration(reg);
