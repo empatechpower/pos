@@ -30,6 +30,7 @@ import { Kiosk } from "./views/Kiosk";
 import { onRouteChange, routeParts } from "./nav";
 import "./orderViews";
 import { isTraining } from "./training";
+import { loadShiftRequired, syncShift } from "./shift";
 import { lockNow, useIdleLock } from "./lock";
 import { Kitchen } from "./views/Kitchen";
 import { Clock } from "./views/Clock";
@@ -82,6 +83,9 @@ export function App() {
   const pending = usePending();
   const prefs = usePrefs();
   useIdleLock();
+  // Whoever signs in, the till asks the server which shift they have open (it may have been opened or closed on another device) and the shop's
+  // shift rules, straight away: "Open your shift first", the drawer and the update warning all depend on them.
+  useEffect(() => { if (staff && !isTraining()) { void syncShift(); void loadShiftRequired(); } }, [staff?.code]); // eslint-disable-line react-hooks/exhaustive-deps
 
   useEffect(() => {
     const onHash = () => setRoute(routeFromHash());

@@ -55,7 +55,7 @@ export function ActionStrip({ actions, everything, pref, canArrange, onArrange, 
             ))}
           </div>
         </div>
-        <div className="action payaction"><button className="pay" disabled aria-label={payLabel}>$</button><span>Pay</span></div>
+        {/* Pay is not shown while arranging (prototype v2.52): it cannot be moved, and its place is given to the actions. */}
       </div>
     );
   }

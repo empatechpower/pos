@@ -34,6 +34,8 @@ const updateSW = registerSW({
   },
 });
 setUpdater(updateSW);
+// To see the update notice on a device without waiting for a real update: open any staff page with ?preview=update on its address.
+if (staffScreen && new URLSearchParams(location.search).get("preview") === "update") markUpdateReady();
 createRoot(document.getElementById("root")!).render(
   <StrictMode>
     <App />

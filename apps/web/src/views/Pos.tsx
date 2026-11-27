@@ -401,7 +401,14 @@ export function Pos({ config, catalog, online, customerId, setCustomerId, header
     ];
   };
   /** Put an item in the bag with its chosen options (none for a plain item). */
+  /**
+   * A bill split into checks is locked (decision Q41): the checks' amounts were fixed when it was split, so nothing on the ticket may change
+   * until the split is cleared. Otherwise the checks would stop adding up to the order, and the order could never close.
+   */
+  const SPLIT_LOCKED = "This bill is split into checks. Clear the split to change items.";
+  const splitLocked = () => !!(orderId && orders.find((o) => o.orderId === orderId)?.split);
   const addWith = (item: MenuEntry, selection: ChosenOptionInput[]) => {
+    if (splitLocked()) return notify(SPLIT_LOCKED);
     const r = resolveOptions(item.options, selection);
     if (!r.ok) return;
     const key = `${item.id}#${r.key}`;
@@ -430,8 +437,8 @@ export function Pos({ config, catalog, online, customerId, setCustomerId, header
     if (dropped) notify("The price you set no longer fits the new choices, so it was taken off.");
   };
   // An item with options (hot or cold, extras...) asks first; a plain one goes straight in.
-  const add = (item: MenuEntry) => (item.options?.length ? setPicking(item) : addWith(item, []));
-  const change = (key: string, d: number) => setBag((cur) => cur.map((l) => (l.key === key ? { ...l, qty: l.qty + d } : l)).filter((l) => l.qty > 0));
+  const add = (item: MenuEntry) => (splitLocked() ? notify(SPLIT_LOCKED) : item.options?.length ? setPicking(item) : addWith(item, []));
+  const change = (key: string, d: number) => splitLocked() ? notify(SPLIT_LOCKED) : setBag((cur) => cur.map((l) => (l.key === key ? { ...l, qty: l.qty + d } : l)).filter((l) => l.qty > 0));
 
   /** The open order on screen, as the log knows it, and what is still owed on it (nothing has been paid on a new order). */
   const linked = orderId ? orders.find((o) => o.orderId === orderId) ?? null : null;
@@ -636,6 +643,7 @@ export function Pos({ config, catalog, online, customerId, setCustomerId, header
   };
   const heldTotal = (h: HeldOrder) => priceOrder({ lines: h.bag.map((b) => ({ name: b.item.name, unitCents: effUnit(b), qty: b.qty, pointsExempt: b.item.pointsExempt, bcrs: !!b.item.bcrs, taxInclusive: b.item.taxInclusive, taxGroup: b.item.taxGroup })), fulfilment: fulfilmentOf((channels.find((c) => c.id === h.channelId) ?? channel).kind), serviceCharge: (channels.find((c) => c.id === h.channelId) ?? channel).serviceCharge, config: config.pricing }).total;
   const cancelOrder = () => {
+    if (splitLocked()) return notify("This bill is split into checks. Refund any payments and clear the split before cancelling.");
     if (orderId) {
       if (bag.some((l) => !l.sent)) setCancelAsk(true);
       else notify("This order was already sent. To cancel it, a manager voids it from Orders.");
@@ -902,9 +910,9 @@ export function Pos({ config, catalog, online, customerId, setCustomerId, header
     { id: "qty", label: "Quantity", icon: "#", onClick: () => setDialog("qty"), badge: pendingQty > 1 ? pendingQty : undefined },
     ...(tableService ? [{ id: "tables", label: "Table Map", icon: "▦", onClick: goTables }] : []),
     ...(tableService && floor.courses && fire ? [{ id: "fire", label: `Fire Course (${fire.index} of ${fire.of})`, icon: "🔥", onClick: () => void fireNextCourse(linked!, staff?.name).then(() => notify(`${COURSE_NAMES[fire.course] ?? "Course"} fired.`)) }] : []),
-    { id: "fee", label: "Service Fee", icon: "＋", onClick: () => setDialog("fee"), disabled: !staff || !bag.length, title: !staff ? "Sign in to add a fee" : undefined },
+    { id: "fee", label: "Service Fee", icon: "＋", onClick: () => setDialog("fee"), disabled: !staff || !bag.length || !!linked?.split, title: !staff ? "Sign in to add a fee" : undefined },
     { id: "extra", label: "Add Extra Item", icon: "＋", onClick: () => setDialog("extra"), disabled: !staff || !mayApprove || !!linked?.split, title: !staff ? "Sign in first" : !mayApprove ? "A manager adds extra items" : undefined },
-    { id: "discount", label: "Discount Order", icon: "%", onClick: () => setSheet({ scope: "bill" }), disabled: !staff || !bag.length, title: !staff ? "Sign in to give a discount" : undefined },
+    { id: "discount", label: "Discount Order", icon: "%", onClick: () => setSheet({ scope: "bill" }), disabled: !staff || !bag.length || !!linked?.split, title: !staff ? "Sign in to give a discount" : undefined },
     // Add/Remove Tax shows only where the country's tax pack lets staff take the tax off, and the shop charges tax at all.
     ...(config.pricing.taxRemovable && config.pricing.gstOn ? [{ id: "tax", label: taxOff ? "Add Tax" : "Remove Tax", icon: "§", onClick: () => setDialog("tax" as const), disabled: !staff || !mayApprove || !bag.length || !!linked?.split, title: !staff ? "Sign in first" : !mayApprove ? "A manager takes the tax off" : undefined }] : []),
     { id: "dining", label: "Dining Option", icon: "⑂", onClick: () => (orderId ? notify("This order was already sent. The dining option can no longer change.") : setDialog("dining")) },
@@ -1008,9 +1016,14 @@ export function Pos({ config, catalog, online, customerId, setCustomerId, header
         subline={[dineIn ? spot : "", staff?.name ?? ""].filter(Boolean).join(" · ")}
         shiftChip={chips} bag={bag} flash={flash}
         onDining={() => (orderId ? notify("This order was already sent. The dining option can no longer change.") : setDialog("dining"))} onNew={newOrder}
-        onQty={(k, d) => change(k, d)} onEdit={(k) => { setLineKey(k); setDialog("line"); }} onRemove={(k) => { if (bag.find((l) => l.key === k)?.sent) return notify("Already sent to the kitchen. A manager voids it from Orders."); setBag((cur) => cur.filter((l) => l.key !== k)); }}
+        onQty={(k, d) => change(k, d)} onEdit={(k) => { if (splitLocked()) return notify(SPLIT_LOCKED); setLineKey(k); setDialog("line"); }} onRemove={(k) => { if (splitLocked()) return notify(SPLIT_LOCKED); if (bag.find((l) => l.key === k)?.sent) return notify("Already sent to the kitchen. A manager voids it from Orders."); setBag((cur) => cur.filter((l) => l.key !== k)); }}
         totals={totals} strip={strip}
-        extra={orderNote ? <p className="ordernote"><b>Order note:</b> {orderNote}</p> : undefined}
+        extra={<>
+          {linked?.split && (() => { const stillDue = linked.split.checks.reduce((n, c) => n + (checkStanding(linked, c.id)?.dueCents ?? 0), 0); return (
+            <div className="splitbanner" role="status">Split into {linked.split.checks.length} checks · {({ even: "Evenly", manual: "Manually", item: "By Item", seat: "By Seat" } as Record<string, string>)[linked.split.method] ?? linked.split.method} · {formatMoney(stillDue)} still due <button onClick={() => { setPayView(false); setView("checks"); }}>View checks</button></div>
+          ); })()}
+          {orderNote ? <p className="ordernote"><b>Order note:</b> {orderNote}</p> : null}
+        </>}
       />
         {payView && bag.length ? (
           <PayPanel

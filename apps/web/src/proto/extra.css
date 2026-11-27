@@ -205,3 +205,11 @@
 /* The header stays at the top of the screen while the page under it scrolls, on every staff screen (in the prototype the page is a fixed
    frame and only its body scrolls). Dialogs still open above it. */
 .shell > .proto.protohead:has(> header) { position: sticky; top: 0; z-index: 40; }
+/* The update pill sits just under the header, in the middle. The prototype puts it at the bottom centre, but on the till that is over the Pay
+   button and the balance due; under the header it covers nothing a cashier needs in the middle of a sale. On a phone it wraps onto two lines. */
+.proto .updbar { top: calc(4.5 * var(--u)); bottom: auto; max-width: calc(100vw - 1.5 * var(--u)); }
+.proto .updbar span { min-width: 0; }
+@media (max-width: 43.75rem) {
+  .proto .updbar { flex-wrap: wrap; justify-content: center; border-radius: calc(1.25 * var(--u)); padding: calc(0.5 * var(--u)) calc(0.75 * var(--u)); width: max-content; }
+  .proto .updbar span { flex: 1 1 100%; text-align: center; }
+}
