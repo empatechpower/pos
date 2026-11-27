@@ -107,6 +107,19 @@ export function TillMenu({ menu, qtyOf, onAdd, onDiscount, onFn, editing }: { me
 
   // The markup and class names are the prototype's own (proto-reference/index.html: render, tabsHTML, tileHTML), styled by its stylesheet.
   const tab = (label: string, on: boolean, click: () => void, key: string) => <button key={key} className={on ? "selected" : ""} onClick={click}>{label}</button>;
+  const editPanel = editMode ? (
+    <>
+          <div><strong>Item layout setup</strong><br />{sel === null ? "Tap a tile, then the cell to move it to · Tap the × to remove a tile · Tap an empty cell to add one" : "Now tap the cell to move it to (a tile there swaps)."}<br />{editing?.canEditShop ? "Done saves your personal layout · Save for everyone sets the shop's standard" : "Editing your personal layout"}{msg && <><br /><span role="alert">{msg}</span></>}
+            <div className="editacts">
+              <button onClick={dropPage}>Delete page</button>
+              <button onClick={() => { setDraft(null); setSel(null); setPicker(null); }}>Cancel</button>
+              {editing?.hasOwn && <button onClick={async () => { const e = await editing.onResetMine(); if (e) setMsg(e); else { setDraft(null); } }}>Use the shop's layout</button>}
+              {editing?.canEditShop && <button onClick={() => void save(true)}>Save for everyone</button>}
+            </div>
+          </div>
+          <button className="primary" onClick={() => void save(false)}>Done</button>
+    </>
+  ) : null;
   return (
     <section className="catalog" id="catalog" aria-label="Menu">
       <div className="menuheading pagetabs">
@@ -129,18 +142,10 @@ export function TillMenu({ menu, qtyOf, onAdd, onDiscount, onFn, editing }: { me
           </div>
         )}
       </div>
-      {editMode && bill && createPortal(
-        <div className="editnote editnote-ticket" role="toolbar" aria-label="Edit layout">
-          <div><strong>Item layout setup</strong><br />{sel === null ? "Tap a tile, then the cell to move it to · Tap the × to remove a tile · Tap an empty cell to add one" : "Now tap the cell to move it to (a tile there swaps)."}<br />{editing?.canEditShop ? "Done saves your personal layout · Save for everyone sets the shop's standard" : "Editing your personal layout"}{msg && <><br /><span role="alert">{msg}</span></>}
-            <div className="editacts">
-              <button onClick={dropPage}>Delete page</button>
-              <button onClick={() => { setDraft(null); setSel(null); setPicker(null); }}>Cancel</button>
-              {editing?.hasOwn && <button onClick={async () => { const e = await editing.onResetMine(); if (e) setMsg(e); else { setDraft(null); } }}>Use the shop's layout</button>}
-              {editing?.canEditShop && <button onClick={() => void save(true)}>Save for everyone</button>}
-            </div>
-          </div>
-          <button className="primary" onClick={() => void save(false)}>Done</button>
-        </div>, bill)}
+      {/* The edit panel, as the prototype has it twice: over the ticket on a wide screen, and inside the menu on a phone, where the ticket is
+          folded away (its stylesheet shows one or the other). Without the second, a phone has no Done, Cancel or Save. */}
+      {editMode && bill && createPortal(<div className="editnote editnote-ticket" role="toolbar" aria-label="Edit layout">{editPanel}</div>, bill)}
+      {editMode && <div className="editnote editnote-catalog" role="toolbar" aria-label="Edit layout">{editPanel}</div>}
       <div
         className={`grid ${editMode ? "editing" : ""}`}
         id="grid"
@@ -153,6 +158,7 @@ export function TillMenu({ menu, qtyOf, onAdd, onDiscount, onFn, editing }: { me
             else if (!category && !query) press.current = window.setTimeout(() => { press.current = null; swipe.current = null; held.current = Date.now() + 900; startEdit(); }, 700);
           }
         }}
+        onContextMenu={(e) => { if (editing && (e.target as HTMLElement).closest(".tile")) e.preventDefault(); }}
         onPointerMove={(e) => { if (press.current && Math.abs(e.clientX - (swipe.current ?? e.clientX)) > 12) { window.clearTimeout(press.current); press.current = null; } }}
         onPointerUp={(e) => { if (press.current) { window.clearTimeout(press.current); press.current = null; } const s = swipe.current; swipe.current = null; if (s !== null && Math.abs(e.clientX - s) > 70) goto(at + (e.clientX < s ? 1 : -1)); }}
       >
@@ -170,7 +176,7 @@ export function TillMenu({ menu, qtyOf, onAdd, onDiscount, onFn, editing }: { me
           const badge = q > 0 ? <span className="qtybadge">{q}</span> : null;
           if (photo) return (
             <button key={i} data-i={i} className={`tile photo${q ? " inorder" : ""}${m.soldOut ? " soldout" : ""}`} style={outline} onClick={onTile(() => onAdd(m))}>
-              <img src={photo} alt="" loading="lazy" onError={(e) => e.currentTarget.remove()} />
+              <img src={photo} alt="" loading="lazy" draggable={false} onError={(e) => e.currentTarget.remove()} />
               <span className="tilefoot"><strong>{m.name}</strong></span>
               {m.soldOut && <span className="soldribbon">Sold out</span>}{badge}{x}
             </button>

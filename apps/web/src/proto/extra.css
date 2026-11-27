@@ -184,3 +184,21 @@
 .proto .setours .flash.warn { background: #fdecea; color: #8f2323; text-align: center; }
 /* A gift card's code, shown large so it can be copied onto the card or read to the customer. */
 .proto .receipt.r7 .giftcode { font-size: calc(1.5 * var(--u)); letter-spacing: calc(0.0625 * var(--u)); margin: calc(0.375 * var(--u)) 0 calc(0.5 * var(--u)); }
+/* A finger held on a menu tile opens layout editing (or the item's menu): the browser's own long-press menu, text selection and image drag stay out of it. */
+.proto .grid .tile { -webkit-touch-callout: none; -webkit-user-select: none; user-select: none; }
+.proto .grid .tile img { -webkit-user-drag: none; pointer-events: none; }
+/* The edit panel inside the menu (phones): its extra actions wrap under the instructions, and Done stays in reach. */
+.proto .editnote-catalog { flex-wrap: wrap; }
+.proto .editnote-catalog > div { flex: 1 1 calc(12 * var(--u)); min-width: 0; }
+/* Log out and Lock must always be on screen. On a narrow header the logo gives way first, then the sync pill shortens; the buttons themselves never shrink. */
+.proto header > button { flex: none; }
+.proto header h1 { flex: 0 10 auto; min-width: 0; overflow: hidden; }
+.proto header .syncpill { flex: 0 1 auto; min-width: calc(2.25 * var(--u)); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+@media (max-width: 30rem) {
+  .proto header .headnav { flex: 1 1 0; min-width: 0; }
+}
+@media (max-width: 22.5rem) {
+  .proto header { gap: calc(0.25 * var(--u)); padding-left: calc(0.375 * var(--u)); padding-right: calc(0.375 * var(--u)); }
+  .proto header button { padding-left: calc(0.375 * var(--u)); padding-right: calc(0.375 * var(--u)); }
+  .proto header .syncpill { min-width: calc(1.5 * var(--u)); }
+}

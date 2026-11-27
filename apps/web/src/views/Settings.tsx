@@ -417,9 +417,9 @@ export function Settings({ catalog }: { catalog?: Catalog | null } = {}) {
               </>
             )}
             <h3>Menu layout</h3>
-            <p className="muted">{prefs.layout ? "You are using your own layout." : till.layout ? "You are using the shop's layout." : "The menu is laid out automatically."} Edit it on the till: press and hold a tile.</p>
+            <p className="muted">{prefs.layout ? "You are using your own layout." : till.layout ? "You are using the shop's layout." : "The menu is laid out automatically."} Arrange the tiles and pages, and put a shortcut in any empty cell. On the till you can also press and hold a tile.</p>
             <div className="settingsgroup">
-              <button onClick={() => go("/pos")}>Go to the till</button>
+              <button className="primary" onClick={() => go("/pos?edit=layout")}>Edit my menu layout</button>
               {prefs.layout && <button onClick={() => void setLayout(null).then((e) => setMsg(e ?? "Back to the shop's layout."))}>Reset my layout</button>}
             </div>
             <h3>This device</h3>

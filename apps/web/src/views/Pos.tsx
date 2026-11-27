@@ -705,6 +705,8 @@ export function Pos({ config, catalog, online, customerId, setCustomerId, header
       if (d === "shift" || d === "reports") setDialog(d);
       if (!first && q.get("view") === "tables") navTables.current();
       if (!first && q.get("view") === "order") setView("order");
+      // Settings → Station → "Edit my menu layout" lands here: the till opens with its layout ready to arrange.
+      if (q.get("edit") === "layout") { setView("order"); setEditLayoutAt((n) => n + 1); }
     };
     act(true);
     return onRouteChange(() => act(false));
