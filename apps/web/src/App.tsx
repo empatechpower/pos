@@ -27,7 +27,7 @@ import { Prices } from "./views/Prices";
 import { PricebookEditor } from "./views/PricebookEditor";
 import { TelegramSignIn } from "./views/TelegramSignIn";
 import { Kiosk } from "./views/Kiosk";
-import { onRouteChange, routeParts } from "./nav";
+import { go, onRouteChange, routeParts } from "./nav";
 import "./orderViews";
 import { isTraining } from "./training";
 import { loadShiftRequired, syncShift } from "./shift";
@@ -63,6 +63,7 @@ function useStaffTheme(signedIn: boolean) {
   return { own, shop, setOwn, style };
 }
 
+const SIGNED_IN_ONLY = new Set<string>(["pos", "dashboard", "orders", "settings", "tabs"]);
 type Route = "dashboard" | "settings" | "tabs" | "display" | "pos" | "kitchen" | "queue" | "credit" | "login" | "devices" | "prices" | "printers" | "orders" | "online" | "shop" | "kiosk" | "manager" | "tg" | "pricebook" | "pair" | "clock";
 const routeFromHash = (): Route => {
   const h = routeParts()[0] ?? "";
@@ -86,6 +87,11 @@ export function App() {
   // Whoever signs in, the till asks the server which shift they have open (it may have been opened or closed on another device) and the shop's
   // shift rules, straight away: "Open your shift first", the drawer and the update warning all depend on them.
   useEffect(() => { if (staff && !isTraining()) { void syncShift(); void loadShiftRequired(); } }, [staff?.code]); // eslint-disable-line react-hooks/exhaustive-deps
+  // The till and the staff screens need someone signed in. A device just set up (or one whose sign-in ended) that opens /pos goes to the sign-in
+  // page; before, it showed the till with nobody signed in, so the header had no Orders, Drawer, Log out or Lock.
+  const signInFirst = device.required && !staff && !needsEnrollment(device) && SIGNED_IN_ONLY.has(route);
+  // (The route is set here as well: on the first load this runs before the app starts listening for page changes.)
+  useEffect(() => { if (signInFirst) { go("/login", { replace: true }); setRoute("login"); } }, [signInFirst]);
 
   useEffect(() => {
     const onHash = () => setRoute(routeFromHash());
@@ -112,6 +118,8 @@ export function App() {
 
   // Nothing talks to the server until this device is enrolled (queue displays included).
   if (needsEnrollment(device)) return <Enroll online={status.online} />;
+
+  if (signInFirst) return null;
 
   // Clocking in and out needs an enrolled till but nobody signed in: full screen, no navigation.
   if (route === "clock") return <ErrorBoundary><Clock /></ErrorBoundary>;
